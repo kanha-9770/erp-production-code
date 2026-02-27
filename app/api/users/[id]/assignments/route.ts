@@ -1,0 +1,177 @@
+import { type NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
+import { validateSession } from "@/lib/auth"
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const userId = params.id;
+
+    // 1. Authenticate & get current user's org
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const session = await validateSession(token);
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    const currentOrgId =
+      session.user?.organizationId ||
+      session.user?.organization?.id ||
+      session.user?.orgId;
+
+    if (!currentOrgId) {
+      return NextResponse.json({ error: "No organization context" }, { status: 403 });
+    }
+
+    // 2. Fetch target user & check same organization
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+
+    if (!targetUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (targetUser.organizationId !== currentOrgId) {
+      return NextResponse.json(
+        { error: "You can only view assignments within your organization" },
+        { status: 403 }
+      );
+    }
+
+    // 3. Safe to fetch assignments
+    const assignments = await prisma.userUnitAssignment.findMany({
+      where: { userId },
+      include: {
+        unit: true,
+        role: true,
+      },
+    });
+
+    return NextResponse.json(assignments);
+  } catch (error) {
+    console.error("Error fetching user assignments:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch user assignments" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const userId = params.id;
+
+    // Same auth + org check as GET
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) return unauthorized();
+
+    const session = await validateSession(token);
+    if (!session || !session.user) return unauthorized();
+
+    const currentOrgId =
+      session.user?.organizationId ||
+      session.user?.organization?.id ||
+      session.user?.orgId;
+
+    if (!currentOrgId) return forbidden();
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+
+    if (!targetUser) return notFound();
+    if (targetUser.organizationId !== currentOrgId) return forbidden("Cross-organization assignment denied");
+
+    const { unitId, roleId, notes } = await request.json();
+
+    const assignment = await prisma.userUnitAssignment.upsert({
+      where: {
+        userId_unitId: { userId, unitId },
+      },
+      update: { roleId, notes },
+      create: { userId, unitId, roleId, notes },
+      include: {
+        unit: true,
+        role: true,
+      },
+    });
+
+    return NextResponse.json(assignment);
+  } catch (error) {
+    console.error("Error creating/updating user assignment:", error);
+    return NextResponse.json(
+      { error: "Failed to create/update user assignment" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const userId = params.id;
+
+    // Same auth + org check
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) return unauthorized();
+
+    const session = await validateSession(token);
+    if (!session || !session.user) return unauthorized();
+
+    const currentOrgId =
+      session.user?.organizationId ||
+      session.user?.organization?.id ||
+      session.user?.orgId;
+
+    if (!currentOrgId) return forbidden();
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+
+    if (!targetUser) return notFound();
+    if (targetUser.organizationId !== currentOrgId) return forbidden("Cross-organization delete denied");
+
+    const { searchParams } = new URL(request.url);
+    const unitId = searchParams.get("unitId");
+
+    if (!unitId) {
+      return NextResponse.json({ error: "Unit ID is required" }, { status: 400 });
+    }
+
+    await prisma.userUnitAssignment.delete({
+      where: {
+        userId_unitId: { userId, unitId },
+      },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting user assignment:", error);
+    return NextResponse.json(
+      { error: "Failed to delete user assignment" },
+      { status: 500 }
+    );
+  }
+}
+
+// Helper functions (cleaner than repeating code)
+function unauthorized() {
+  return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+}
+
+function forbidden(msg = "Forbidden") {
+  return NextResponse.json({ error: msg }, { status: 403 });
+}
+
+function notFound() {
+  return NextResponse.json({ error: "User not found" }, { status: 404 });
+}
