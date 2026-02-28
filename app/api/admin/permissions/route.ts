@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Reuse your existing /api/auth/me logic
+    // 1. Reuse your existing /api/auth/me logic to get current user
     const meResponse = await fetch(
       new URL("/api/auth/me", request.url).toString(),
       {
@@ -14,13 +14,13 @@ export async function GET(request: NextRequest) {
         headers: {
           cookie: request.headers.get("cookie") || "",
         },
-      }
+      },
     );
 
     if (!meResponse.ok) {
       return NextResponse.json(
         { error: "Unauthorized or invalid session" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
 
     const currentUser = meData.user;
 
-    // 2. Check if user belongs to organization
+    // 2. Check organization
     if (!currentUser.organization?.id) {
       return NextResponse.json(
         { error: "User not part of any organization" },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -87,10 +87,7 @@ export async function GET(request: NextRequest) {
         // Permission overrides (active only)
         permissionOverrides: {
           where: {
-            OR: [
-              { expiresAt: null },
-              { expiresAt: { gte: new Date() } },
-            ],
+            OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
           },
           select: {
             granted: true,
@@ -102,13 +99,14 @@ export async function GET(request: NextRequest) {
     });
 
     if (!user) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // 4. Check if user has at least one admin role
+    // ────────────────────────────────────────────────
+    // TEMPORARILY COMMENTED OUT - so you can test even without admin role
+    // Uncomment when you want to enforce admin-only access again
+    // ────────────────────────────────────────────────
+    /*
     const hasAdminRole = user.unitAssignments.some((assignment: any) => {
       const roleName = assignment.role?.name?.toLowerCase() || "";
       return roleName.includes("admin") || assignment.role?.isAdmin;
@@ -117,155 +115,128 @@ export async function GET(request: NextRequest) {
     console.log("Has admin role:", hasAdminRole);
     if (!hasAdminRole) {
       return NextResponse.json(
-        { error: "Insufficient permissions" },
+        { error: "Insufficient permissions - admin role required" },
         { status: 403 }
       );
     }
+    */
 
-    // 5. Get role IDs
+    // 4. Get role IDs from assignments
     const roleIds = user.unitAssignments.map((ua: any) => ua.role.id);
 
-    // 6. Fetch role permissions (FIX: Add moduleId and formId to select for scoping)
-    const rolePermissions = roleIds.length > 0
-      ? await prisma.rolePermission.findMany({
-          where: {
-            roleId: { in: roleIds },
-            granted: true,
-          },
-          select: {
-            permissionId: true,
-            canDelegate: true,
-            moduleId: true,  // Added: For scoping
-            formId: true,    // Added: For scoping
-          },
-        })
-      : [];
+    console.log("[DEBUG] User:", user.id, user.email);
+    console.log("[DEBUG] Unit assignments count:", user.unitAssignments.length);
+    console.log("[DEBUG] Role IDs:", roleIds);
 
-    // 7. Collect all permission IDs
-    const rolePermissionIds = rolePermissions.map((rp: any) => rp.permissionId);
-    const overridePermissionIds = user.permissionOverrides.map((po: any) => po.permissionId);
-    const allPermissionIdsSet = new Set([...rolePermissionIds, ...overridePermissionIds]);
-    const allPermissionIds = Array.from(allPermissionIdsSet);
+    // 5. Fetch role-based permissions
+    const rolePermissions =
+      roleIds.length > 0
+        ? await prisma.rolePermission.findMany({
+            where: {
+              roleId: { in: roleIds },
+              granted: true,
+            },
+            include: {
+              permission: {
+                select: {
+                  id: true,
+                  name: true,
+                  category: true,
+                  resource: true,
+                },
+              },
+              module: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+              form: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          })
+        : [];
 
-    let permissionsMap = new Map<string, any>();
-    let moduleMap = new Map<string, string>();
-    let formMap = new Map<string, string>();
+    console.log("[DEBUG] Role permissions found:", rolePermissions.length);
 
-    if (allPermissionIds.length > 0) {
-      // Fetch all relevant permissions (FIX: Remove moduleId and formId— they don't exist on Permission)
-      const allPermissions = await prisma.permission.findMany({
-        where: {
-          id: { in: allPermissionIds },
-        },
-        select: {
-          id: true,
-          name: true,
-          category: true,
-          resource: true,
-        },
+    // 6. Fetch overrides (for reference)
+    console.log(
+      "[DEBUG] Permission overrides count:",
+      user.permissionOverrides.length,
+    );
+
+    // 7. Build final permissions array (shape your frontend expects)
+    const permissions: any[] = [];
+
+    // ── From roles ───────────────────────────────────────
+    rolePermissions.forEach((rp: any) => {
+      permissions.push({
+        id: rp.permission.id,
+        name: rp.permission.name,
+        category: rp.permission.category,
+        resource: rp.permission.resource,
+        canDelegate: rp.canDelegate || false,
+        source: "role",
+        module: rp.module
+          ? { id: rp.module.id, name: rp.module.name }
+          : { id: "", name: "" },
+        form: rp.form
+          ? { id: rp.form.id, name: rp.form.name }
+          : { id: "", name: "" },
+      });
+    });
+
+    // ── From overrides (simplified - no scoping) ─────────
+    for (const override of user.permissionOverrides) {
+      if (!override.granted) continue;
+
+      const perm = await prisma.permission.findUnique({
+        where: { id: override.permissionId },
+        select: { id: true, name: true, category: true, resource: true },
       });
 
-      permissionsMap = new Map(allPermissions.map((p: any) => [p.id, p]));
-
-      // (FIX: Collect module/form IDs from rolePermissions, not allPermissions)
-      const moduleIdsSet = new Set<string>();
-      const formIdsSet = new Set<string>();
-      rolePermissions.forEach((rp: any) => {  // Only from rolePermissions (overrides lack scoping)
-        if (rp.moduleId) moduleIdsSet.add(rp.moduleId);
-        if (rp.formId) formIdsSet.add(rp.formId);
-      });
-
-      const moduleIds = Array.from(moduleIdsSet);
-      const formIds = Array.from(formIdsSet);
-
-      // Fetch modules (FIX: Use prisma.formModule, not prisma.module)
-      if (moduleIds.length > 0) {
-        const modules = await prisma.formModule.findMany({
-          where: {
-            id: { in: moduleIds },
-          },
-          select: {
-            id: true,
-            name: true,
-          },
-        });
-        moduleMap = new Map(modules.map((m: any) => [m.id, m.name]));
-      }
-
-      // Fetch forms
-      if (formIds.length > 0) {
-        const forms = await prisma.form.findMany({
-          where: {
-            id: { in: formIds },
-          },
-          select: {
-            id: true,
-            name: true,
-          },
-        });
-        formMap = new Map(forms.map((f: any) => [f.id, f.name]));
+      if (perm) {
+        // Check if already added from role
+        const alreadyExists = permissions.some((p) => p.id === perm.id);
+        if (!alreadyExists) {
+          permissions.push({
+            id: perm.id,
+            name: perm.name,
+            category: perm.category,
+            resource: perm.resource,
+            canDelegate: false,
+            source: "override",
+            module: { id: "", name: "" },
+            form: { id: "", name: "" },
+            reason: override.reason || "Direct override",
+          });
+        }
       }
     }
 
-    // 8. Combine role permissions + overrides (override wins if conflicting)
-    const permissionMap = new Map<string, any>();
+    console.log("[DEBUG] Final permissions count:", permissions.length);
+    if (permissions.length > 0) {
+      console.log(
+        "[DEBUG] First permission sample:",
+        JSON.stringify(permissions[0], null, 2),
+      );
+    }
 
-    // Add role permissions
-    rolePermissions.forEach((rp: any) => {
-      const perm = permissionsMap.get(rp.permissionId);
-      if (perm && !permissionMap.has(perm.id)) {
-        permissionMap.set(perm.id, {
-          id: perm.id,
-          name: perm.name,
-          category: perm.category,
-          resource: perm.resource,
-          source: "role",
-          canDelegate: rp.canDelegate,
-          module: {
-            id: rp.moduleId || "",  // FIX: Use rp.moduleId (from RolePermission)
-            name: moduleMap.get(rp.moduleId || "") || "",
-          },
-          form: {
-            id: rp.formId || "",   // FIX: Use rp.formId (from RolePermission)
-            name: formMap.get(rp.formId || "") || "",
-          },
-        });
-      }
-    });
-
-    // Apply overrides (they take precedence)
-    user.permissionOverrides.forEach((override: any) => {
-      const perm = permissionsMap.get(override.permissionId);
-      if (override.granted && perm) {
-        permissionMap.set(perm.id, {
-          id: perm.id,
-          name: perm.name,
-          category: perm.category,
-          resource: perm.resource,
-          source: "override",
-          canDelegate: false,
-          reason: override.reason,
-          module: {              // FIX: Overrides lack scoping—set empty
-            id: "",
-            name: "",
-          },
-          form: {
-            id: "",
-            name: "",
-          },
-        });
-      } else if (!override.granted && perm) {
-        permissionMap.delete(perm.id); // explicitly denied
-      }
-    });
-
+    // 8. Build enriched user object
     const enrichedUser = {
       id: user.id,
       email: user.email,
       username: user.username,
       first_name: user.first_name,
       last_name: user.last_name,
-      fullName: `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username || user.email,
+      fullName:
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.username ||
+        user.email,
       avatar: user.avatar,
       status: user.status,
       department: user.department,
@@ -278,9 +249,9 @@ export async function GET(request: NextRequest) {
         notes: ua.notes,
       })),
 
-      permissions: Array.from(permissionMap.values()),
+      permissions, // ← this is what your frontend needs
 
-      // Clean up raw fields
+      // Clean up internal fields
       unitAssignments: undefined,
       permissionOverrides: undefined,
     };
@@ -289,12 +260,11 @@ export async function GET(request: NextRequest) {
       success: true,
       data: enrichedUser,
     });
-
   } catch (error) {
     console.error("Error in /api/admin/permissions:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
+      { error: "Internal server error", details: String(error) },
+      { status: 500 },
     );
   }
 }

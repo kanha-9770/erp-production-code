@@ -725,10 +725,10 @@ export default function ModulePage({
         record.processedData = record.processedData.map((pd: any) =>
           pd.fieldId === change.fieldId
             ? {
-                ...pd,
-                value: change.value,
-                displayValue: formatFieldValue(change.fieldType, change.value),
-              }
+              ...pd,
+              value: change.value,
+              displayValue: formatFieldValue(change.fieldType, change.value),
+            }
             : pd,
         );
       }
@@ -863,10 +863,10 @@ export default function ModulePage({
 
         return needsUpdate
           ? {
-              ...record,
-              recordData: updatedRecordData,
-              processedData: updatedProcessedData,
-            }
+            ...record,
+            recordData: updatedRecordData,
+            processedData: updatedProcessedData,
+          }
           : record;
       }),
     );

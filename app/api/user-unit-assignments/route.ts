@@ -1,5 +1,6 @@
-export const dynamic = 'force-dynamic';
 // app/api/user-unit-assignments/route.ts
+export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -11,7 +12,7 @@ export async function PUT(request: NextRequest) {
     if (!user_id || !unit_id || !role_id) {
       return NextResponse.json(
         { success: false, error: "Missing required fields" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -24,7 +25,7 @@ export async function PUT(request: NextRequest) {
     if (!user || !unit || !role) {
       return NextResponse.json(
         { success: false, error: "Invalid user_id, unit_id, or role_id" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -57,7 +58,7 @@ export async function PUT(request: NextRequest) {
     console.error("[v0] Error in PUT /api/user-unit-assignments:", error);
     return NextResponse.json(
       { success: false, error: "Failed to update user unit assignment" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

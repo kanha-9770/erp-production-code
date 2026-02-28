@@ -43,14 +43,14 @@ interface Module {
 }
 
 interface FormsSidebarProps {
-  searchTerm: string;
+  // searchTerm: string;
   onFormSelect: (formId: string, moduleId: string, submoduleId?: string) => void;
   selectedForm: string | null;
   loading?: boolean;
 }
 
 export function FormsSidebar({
-  searchTerm,
+  // searchTerm,
   onFormSelect,
   selectedForm,
   loading = false,
@@ -93,7 +93,7 @@ export function FormsSidebar({
     });
   };
 
-  const effectiveSearch = (localSearch || searchTerm).trim().toLowerCase();
+  const effectiveSearch = (localSearch).trim().toLowerCase();
 
   const filterForms = (forms: Form[]) => {
     if (!effectiveSearch) return forms;

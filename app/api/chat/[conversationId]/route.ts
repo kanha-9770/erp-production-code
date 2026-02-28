@@ -1,9 +1,9 @@
 // app/api/chat/[conversationId]/route.ts
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
-import { type NextRequest, NextResponse } from 'next/server';
-import { validateSession } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { type NextRequest, NextResponse } from "next/server";
+import { validateSession } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 // Gemini configuration - using stable models that fully support parallel tool calling
 export const API_KEYS: string[] = [
@@ -12,12 +12,10 @@ export const API_KEYS: string[] = [
   // add more for rotation/failover
 ];
 
-export const MODELS: string[] = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-light",
-];
+export const MODELS: string[] = ["gemini-2.5-flash", "gemini-2.5-flash-light"];
 
-export const BASE_API_URL: string = "https://generativelanguage.googleapis.com/v1beta/models/";
+export const BASE_API_URL: string =
+  "https://generativelanguage.googleapis.com/v1beta/models/";
 
 // ===================================================================
 // Tool Handlers - these fetch REAL user data (modules, forms, records)
@@ -25,7 +23,7 @@ export const BASE_API_URL: string = "https://generativelanguage.googleapis.com/v
 async function handleFunction(
   name: string,
   args: any,
-  context: { userId: string; organizationId: string | null }
+  context: { userId: string; organizationId: string | null },
 ) {
   // ---------- Get Modules (hierarchical) ----------
   if (name === "get_modules") {
@@ -94,9 +92,15 @@ async function handleFunction(
     }
 
     // Dynamic table access (exactly like your existing /api/forms/[formId]/records route)
-    const match = (form.tableMapping as any)?.storageTable?.match(/form_records_(\d+)/);
+    const match = (form.tableMapping as any)?.storageTable?.match(
+      /form_records_(\d+)/,
+    );
     if (!match) {
-      return { records: [], formName: form.name, warning: "No storage table mapped" };
+      return {
+        records: [],
+        formName: form.name,
+        warning: "No storage table mapped",
+      };
     }
 
     const modelName = `formRecord${match[1]}`;
@@ -125,21 +129,27 @@ async function handleFunction(
 // ===================================================================
 export async function GET(
   request: NextRequest,
-  { params }: { params: { conversationId: string } }
+  { params }: { params: { conversationId: string } },
 ) {
   // ... your existing GET code (unchanged) ...
   // (I kept it exactly as you had it)
   try {
-    const token = request.cookies.get('auth-token')?.value;
+    const token = request.cookies.get("auth-token")?.value;
 
     if (!token) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Not authenticated" },
+        { status: 401 },
+      );
     }
 
     const session = await validateSession(token);
 
     if (!session || !session.user?.id) {
-      return NextResponse.json({ success: false, error: 'Invalid or expired session' }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Invalid or expired session" },
+        { status: 401 },
+      );
     }
 
     const userId = session.user.id;
@@ -148,18 +158,30 @@ export async function GET(
       where: { id: params.conversationId },
       include: {
         messages: {
-          orderBy: { timestamp: 'asc' },
-          select: { id: true, sender: true, content: true, timestamp: true, metadata: true },
+          orderBy: { timestamp: "asc" },
+          select: {
+            id: true,
+            sender: true,
+            content: true,
+            timestamp: true,
+            metadata: true,
+          },
         },
       },
     });
 
     if (!conversation) {
-      return NextResponse.json({ success: false, error: 'Conversation not found' }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: "Conversation not found" },
+        { status: 404 },
+      );
     }
 
     if (conversation.userId !== userId) {
-      return NextResponse.json({ success: false, error: 'Forbidden: not your conversation' }, { status: 403 });
+      return NextResponse.json(
+        { success: false, error: "Forbidden: not your conversation" },
+        { status: 403 },
+      );
     }
 
     return NextResponse.json({
@@ -176,14 +198,14 @@ export async function GET(
       },
     });
   } catch (err: any) {
-    console.error('[GET /api/chat/[conversationId]]', err);
+    console.error("[GET /api/chat/[conversationId]]", err);
     return NextResponse.json(
       {
         success: false,
-        error: 'Failed to load conversation',
-        ...(process.env.NODE_ENV === 'development' && { details: err.message }),
+        error: "Failed to load conversation",
+        ...(process.env.NODE_ENV === "development" && { details: err.message }),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -193,15 +215,22 @@ export async function GET(
 // ===================================================================
 export async function POST(
   request: NextRequest,
-  { params }: { params: { conversationId: string } }
+  { params }: { params: { conversationId: string } },
 ) {
   try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token)
+      return NextResponse.json(
+        { success: false, error: "Not authenticated" },
+        { status: 401 },
+      );
 
     const session = await validateSession(token);
     if (!session || !session.user?.id) {
-      return NextResponse.json({ success: false, error: 'Invalid or expired session' }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Invalid or expired session" },
+        { status: 401 },
+      );
     }
 
     const userId = session.user.id;
@@ -216,41 +245,54 @@ export async function POST(
     const body = await request.json();
     const { content } = body;
     if (!content?.trim()) {
-      return NextResponse.json({ success: false, error: 'Message content is required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Message content is required" },
+        { status: 400 },
+      );
     }
 
     // Load conversation + messages
     const conversation = await prisma.chatConversation.findUnique({
       where: { id: params.conversationId },
-      include: { messages: { orderBy: { timestamp: 'asc' } } },
+      include: { messages: { orderBy: { timestamp: "asc" } } },
     });
 
     if (!conversation || conversation.userId !== userId) {
-      return NextResponse.json({ success: false, error: 'Conversation not found or forbidden' }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: "Conversation not found or forbidden" },
+        { status: 404 },
+      );
     }
 
     // Save user message
     await prisma.chatMessage.create({
       data: {
         conversationId: conversation.id,
-        sender: 'user',
+        sender: "user",
         content: content.trim(),
-        metadata: { clientIp: request.headers.get('x-forwarded-for') || 'unknown', userAgent: request.headers.get('user-agent') || 'unknown' },
+        metadata: {
+          clientIp: request.headers.get("x-forwarded-for") || "unknown",
+          userAgent: request.headers.get("user-agent") || "unknown",
+        },
       },
     });
 
     // Build message history for Gemini
     let messages = [
       {
-        role: 'user',
-        parts: [{ text: "You are an expert assistant for this user's form builder app. You have full access to their modules, forms, and records via tools. Always use the tools to fetch real, up-to-date data when the user asks about their content. Never make up module names, form names, field values, or records. If you need data → call the tools. You can reason, summarize, analyze, and give insights based on the real data." }],
+        role: "user",
+        parts: [
+          {
+            text: "You are an expert assistant for this user's form builder app. You have full access to their modules, forms, and records via tools. Always use the tools to fetch real, up-to-date data when the user asks about their content. Never make up module names, form names, field values, or records. If you need data → call the tools. You can reason, summarize, analyze, and give insights based on the real data.",
+          },
+        ],
       },
-      ...conversation.messages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'model',
+      ...conversation.messages.map((msg) => ({
+        role: msg.sender === "user" ? "user" : "model",
         parts: [{ text: msg.content }],
       })),
-      { role: 'user', parts: [{ text: content.trim() }] },
-    };
+      { role: "user", parts: [{ text: content.trim() }] },
+    ];
 
     // Tool definitions (sent to Gemini) - fixed types to single strings
     const tools = [
@@ -258,13 +300,15 @@ export async function POST(
         functionDeclarations: [
           {
             name: "get_modules",
-            description: "Fetch form modules (folders). Use parent_id = 'root' for top-level modules. Pass empty string or omit for root.",
+            description:
+              "Fetch form modules (folders). Use parent_id = 'root' for top-level modules. Pass empty string or omit for root.",
             parameters: {
               type: "OBJECT",
               properties: {
-                parent_id: { 
-                  type: "STRING", 
-                  description: "Parent module ID or 'root' for top level. Can be omitted for root." 
+                parent_id: {
+                  type: "STRING",
+                  description:
+                    "Parent module ID or 'root' for top level. Can be omitted for root.",
                 },
               },
             },
@@ -275,9 +319,10 @@ export async function POST(
             parameters: {
               type: "OBJECT",
               properties: {
-                module_id: { 
-                  type: "STRING", 
-                  description: "Optional module ID to get forms inside it. Can be omitted for all forms." 
+                module_id: {
+                  type: "STRING",
+                  description:
+                    "Optional module ID to get forms inside it. Can be omitted for all forms.",
                 },
               },
             },
@@ -289,7 +334,10 @@ export async function POST(
               type: "OBJECT",
               properties: {
                 form_id: { type: "STRING", description: "Required form ID" },
-                limit: { type: "NUMBER", description: "Max records to return (default 15)" },
+                limit: {
+                  type: "NUMBER",
+                  description: "Max records to return (default 15)",
+                },
               },
               required: ["form_id"],
             },
@@ -333,10 +381,15 @@ export async function POST(
       if (!candidate) throw new Error("No candidate");
 
       const parts = candidate.content?.parts || [];
-      const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text).join("");
+      const textParts = parts
+        .filter((p: any) => p.text)
+        .map((p: any) => p.text)
+        .join("");
       finalReply += textParts;
 
-      const functionCalls = parts.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      const functionCalls = parts
+        .filter((p: any) => p.functionCall)
+        .map((p: any) => p.functionCall);
 
       if (functionCalls.length === 0) break; // done
 
@@ -355,12 +408,14 @@ export async function POST(
 
         loopMessages.push({
           role: "user",
-          parts: [{
-            functionResponse: {
-              name,
-              response: result,
+          parts: [
+            {
+              functionResponse: {
+                name,
+                response: result,
+              },
             },
-          }],
+          ],
         });
       }
     }
@@ -378,10 +433,17 @@ export async function POST(
     });
 
     // Auto-title conversation
-    if (conversation.title === "New conversation" && conversation.messages.length <= 1) {
+    if (
+      conversation.title === "New conversation" &&
+      conversation.messages.length <= 1
+    ) {
       await prisma.chatConversation.update({
         where: { id: conversation.id },
-        data: { title: content.trim().slice(0, 60) + (content.trim().length > 60 ? "..." : "") },
+        data: {
+          title:
+            content.trim().slice(0, 60) +
+            (content.trim().length > 60 ? "..." : ""),
+        },
       });
     }
 
@@ -392,7 +454,6 @@ export async function POST(
         aiMessage,
       },
     });
-
   } catch (err: any) {
     console.error("[POST /api/chat/[conversationId]]", err);
     return NextResponse.json(
@@ -401,7 +462,7 @@ export async function POST(
         error: "Failed to get AI response",
         ...(process.env.NODE_ENV === "development" && { details: err.message }),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

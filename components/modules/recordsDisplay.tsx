@@ -119,6 +119,7 @@ interface ProcessedFieldData {
 }
 
 interface EnhancedFormRecord {
+  title: string;
   id: string;
   formId: string;
   formName?: string;
@@ -674,7 +675,20 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   isAdmin = false,
   users = [],
 }) => {
- const [viewDetailsOpen, setViewDetailsOpen] = React.useState(false);
+  console.log("RecordsDisplay received permissions:", {
+    isAdmin,
+    permissionCount: permissions.length,
+    permissions: permissions.map(p => ({
+      id: p.id,
+      name: p.name,
+      resource: p.resource,
+      formId: p.form?.id,
+      formName: p.form?.name,
+      moduleId: p.module?.id,
+      moduleName: p.module?.name,
+    })),
+  });
+  const [viewDetailsOpen, setViewDetailsOpen] = React.useState(false);
   const [selectedRecord, setSelectedRecord] = React.useState<EnhancedFormRecord | null>(null);
   const [columnWidths, setColumnWidths] = React.useState<Map<string, number>>(
     new Map(),
@@ -704,7 +718,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   const [recordToDelete, setRecordToDelete] =
     React.useState<EnhancedFormRecord | null>(null);
   // State for Dynamic Row Preview Modal
-    console.log("formRecord",formRecords)
+  console.log("formRecord", formRecords)
 
   const [previewData, setPreviewData] = React.useState<{
     isOpen: boolean;
@@ -1004,43 +1018,43 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
     // Helper to format display value
     const formatDisplayValue = (value: any, type: string, key: string): string => {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
+      if (value === null || value === undefined || value === "") {
+        return "—";
+      }
 
-  // ── NEW: Handle address field ────────────────────────────────
-  if (type === "address" && typeof value === "object" && value !== null) {
-    const addr = value as Record<string, string>;
+      // ── NEW: Handle address field ────────────────────────────────
+      if (type === "address" && typeof value === "object" && value !== null) {
+        const addr = value as Record<string, string>;
 
-    // Build readable string – only include non-empty parts
-    const parts: string[] = [];
+        // Build readable string – only include non-empty parts
+        const parts: string[] = [];
 
-    if (addr.line1) parts.push(addr.line1.trim());
-    if (addr.line2) parts.push(addr.line2.trim());
-    if (addr.city) parts.push(addr.city.trim());
-    if (addr.state) parts.push(addr.state.trim());
-    if (addr.postal) parts.push(addr.postal.trim());
-    if (addr.country) parts.push(addr.country.trim());
+        if (addr.line1) parts.push(addr.line1.trim());
+        if (addr.line2) parts.push(addr.line2.trim());
+        if (addr.city) parts.push(addr.city.trim());
+        if (addr.state) parts.push(addr.state.trim());
+        if (addr.postal) parts.push(addr.postal.trim());
+        if (addr.country) parts.push(addr.country.trim());
 
-    // Join with commas, but avoid double commas or trailing ones
-    return parts.filter(Boolean).join(", ") || "—";
-  }
+        // Join with commas, but avoid double commas or trailing ones
+        return parts.filter(Boolean).join(", ") || "—";
+      }
 
-  // ── Existing cases ───────────────────────────────────────────
-  if (key.startsWith("_dynamicRows_")) {
-    return formatDynamicRowValue(value);
-  } else if (Array.isArray(value)) {
-    const imgCount = value.filter((v: any) => isImageUrl(v)).length;
-    return imgCount > 0 ? `${imgCount} image(s)` : value.join(", ");
-  } else if (isImageUrl(value)) {
-    return "Image";
-  } else if (type === "number" && !isNaN(Number(value))) {
-    return Number(value).toLocaleString();
-  } else {
-    return String(value);
-  }
-  
-};
+      // ── Existing cases ───────────────────────────────────────────
+      if (key.startsWith("_dynamicRows_")) {
+        return formatDynamicRowValue(value);
+      } else if (Array.isArray(value)) {
+        const imgCount = value.filter((v: any) => isImageUrl(v)).length;
+        return imgCount > 0 ? `${imgCount} image(s)` : value.join(", ");
+      } else if (isImageUrl(value)) {
+        return "Image";
+      } else if (type === "number" && !isNaN(Number(value))) {
+        return Number(value).toLocaleString();
+      } else {
+        return String(value);
+      }
+
+    };
 
     // Helper to get field definitions for subform dynamic rows
     const getFieldDefinitions = (subformId: string): { id: string; label: string; type: string }[] => {
@@ -1917,82 +1931,82 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     };
 
     if (!["lookup", "dropdown", "select"].includes(fieldDef.type)) {
-  let editValue = currentValue ?? "";
+      let editValue = currentValue ?? "";
 
-  // ── Special case: Address field ────────────────────────────────
-  if (fieldDef.type === "address" && typeof currentValue === "object" && currentValue !== null) {
-    const addr = currentValue as Record<string, string>;
-    const parts: string[] = [];
+      // ── Special case: Address field ────────────────────────────────
+      if (fieldDef.type === "address" && typeof currentValue === "object" && currentValue !== null) {
+        const addr = currentValue as Record<string, string>;
+        const parts: string[] = [];
 
-    if (addr.line1) parts.push(addr.line1.trim());
-    if (addr.line2) parts.push(addr.line2.trim());
-    if (addr.city) parts.push(addr.city.trim());
-    if (addr.state) parts.push(addr.state.trim());
-    if (addr.postal) parts.push(addr.postal.trim());
-    if (addr.country) parts.push(addr.country.trim());
+        if (addr.line1) parts.push(addr.line1.trim());
+        if (addr.line2) parts.push(addr.line2.trim());
+        if (addr.city) parts.push(addr.city.trim());
+        if (addr.state) parts.push(addr.state.trim());
+        if (addr.postal) parts.push(addr.postal.trim());
+        if (addr.country) parts.push(addr.country.trim());
 
-    editValue = parts.filter(Boolean).join(", ");
-  }
+        editValue = parts.filter(Boolean).join(", ");
+      }
 
-  return (
-    <Input
-      value={editValue}
-      onChange={(e) => {
-        const newRawValue = e.target.value;
+      return (
+        <Input
+          value={editValue}
+          onChange={(e) => {
+            const newRawValue = e.target.value;
 
-        let finalValue: any = newRawValue;
+            let finalValue: any = newRawValue;
 
-        // If it's an address field → try to parse back to object
-        if (fieldDef.type === "address") {
-          // Very simple split-based parsing (you can improve this later)
-          const parts = newRawValue.split(",").map(p => p.trim()).filter(Boolean);
-          
-          // Naive mapping - assumes order: line1, line2?, city, state, postal, country
-          finalValue = {
-            line1: parts[0] || "",
-            line2: parts[1] || "",
-            city: parts[2] || "",
-            state: parts[3] || "",
-            postal: parts[4] || "",
-            country: parts[5] || "",
-          };
+            // If it's an address field → try to parse back to object
+            if (fieldDef.type === "address") {
+              // Very simple split-based parsing (you can improve this later)
+              const parts = newRawValue.split(",").map(p => p.trim()).filter(Boolean);
 
-          // If user cleared everything → empty object or null
-          if (Object.values(finalValue).every(v => !v)) {
-            finalValue = {};
-          }
-        }
+              // Naive mapping - assumes order: line1, line2?, city, state, postal, country
+              finalValue = {
+                line1: parts[0] || "",
+                line2: parts[1] || "",
+                city: parts[2] || "",
+                state: parts[3] || "",
+                postal: parts[4] || "",
+                country: parts[5] || "",
+              };
 
-        const newPendingChanges = new Map(pendingChanges);
-        newPendingChanges.set(`${record.id}-${fieldDef.id}`, {
-          recordId: actualRecordId,
-          fieldId: fieldDef.id,
-          originalFieldId: originalFieldId,
-          value: finalValue,
-          originalValue,
-          fieldType: fieldDef.type,
-          fieldLabel: fieldDef.label,
-        });
-        setPendingChanges(newPendingChanges);
-      }}
-      onBlur={handleAutoSave}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          handleAutoSave();
-        } else if (e.key === "Escape") {
-          const newPending = new Map(pendingChanges);
-          newPending.delete(`${record.id}-${fieldDef.id}`);
-          setPendingChanges(newPending);
-          setEditingCell(null);
-        }
-      }}
-      autoFocus
-      className="h-7 text-[10px] sm:text-xs p-1"
-      placeholder={fieldDef.type === "address" ? "e.g. 123 Main St, Jaipur, Rajasthan, 302001, India" : ""}
-    />
-  );
-}
+              // If user cleared everything → empty object or null
+              if (Object.values(finalValue).every(v => !v)) {
+                finalValue = {};
+              }
+            }
+
+            const newPendingChanges = new Map(pendingChanges);
+            newPendingChanges.set(`${record.id}-${fieldDef.id}`, {
+              recordId: actualRecordId,
+              fieldId: fieldDef.id,
+              originalFieldId: originalFieldId,
+              value: finalValue,
+              originalValue,
+              fieldType: fieldDef.type,
+              fieldLabel: fieldDef.label,
+            });
+            setPendingChanges(newPendingChanges);
+          }}
+          onBlur={handleAutoSave}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleAutoSave();
+            } else if (e.key === "Escape") {
+              const newPending = new Map(pendingChanges);
+              newPending.delete(`${record.id}-${fieldDef.id}`);
+              setPendingChanges(newPending);
+              setEditingCell(null);
+            }
+          }}
+          autoFocus
+          className="h-7 text-[10px] sm:text-xs p-1"
+          placeholder={fieldDef.type === "address" ? "e.g. 123 Main St, Jaipur, Rajasthan, 302001, India" : ""}
+        />
+      );
+    }
 
     const options =
       fieldDef.type === "lookup"
@@ -2691,14 +2705,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
                         {/* Header Row 4: Field Names */}
                         <div
-  className={cn(
-    "flex bg-slate-100 border-b border-gray-300 shadow-sm",
-    "sticky z-10",
-    isMergedMode && hierarchyGroups.length > 1
-      ? "top-[70px]"   
-      : "top-[40px]"    
-  )}
->
+                          className={cn(
+                            "flex bg-slate-100 border-b border-gray-300 shadow-sm",
+                            "sticky z-10",
+                            isMergedMode && hierarchyGroups.length > 1
+                              ? "top-[70px]"
+                              : "top-[40px]"
+                          )}
+                        >
                           <div className="w-10 flex-shrink-0" />
                           <div className="w-12 flex-shrink-0" />
                           <div className="w-20 sm:w-24 flex-shrink-0" />
@@ -3319,9 +3333,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               isOpen={viewDetailsOpen}
               onClose={() => setViewDetailsOpen(false)}
               rows={[selectedRecord]}
-              title={selectedRecord.title || "Record Details"} formFieldsWithSections={[]}            />
+              title={selectedRecord.title || "Record Details"} formFieldsWithSections={[]} />
           )}
-
         </div>
       </div>
     </TooltipProvider>
