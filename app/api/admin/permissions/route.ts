@@ -187,6 +187,8 @@ export async function GET(request: NextRequest) {
         form: rp.form
           ? { id: rp.form.id, name: rp.form.name }
           : { id: "", name: "" },
+        grantedBy: "role",
+        grantedTo: "role",
       });
     });
 
@@ -211,6 +213,8 @@ export async function GET(request: NextRequest) {
             canDelegate: false,
             source: "override",
             module: { id: "", name: "" },
+            grantedBy: "user",
+            grantedTo: "user",
             form: { id: "", name: "" },
             reason: override.reason || "Direct override",
           });

@@ -93,7 +93,6 @@
     "recharts": "2.15.0",
     "sonner": "^1.7.1",
     "swr": "^2.3.6",
-    "table": "git+https://github.com/tanstack/react-table.git",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "ts-node": "^10.9.2",

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     if (!user?.organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -95,8 +95,13 @@ export async function GET(request: NextRequest) {
       ]);
 
       // Collect directly permitted module IDs
-      const allDirectModules = [...(roleBasedModules as any[]), ...(userBasedModules as any[])];
-      directlyPermittedModuleIds = new Set(allDirectModules.map((m: any) => m.module_id));
+      const allDirectModules = [
+        ...(roleBasedModules as any[]),
+        ...(userBasedModules as any[]),
+      ];
+      directlyPermittedModuleIds = new Set(
+        allDirectModules.map((m: any) => m.module_id),
+      );
 
       // Get direct IDs for parent fetching
       const directModuleIds = allDirectModules.map((m: any) => m.module_id);
@@ -122,7 +127,7 @@ export async function GET(request: NextRequest) {
             WHERE fm.id IN (
               SELECT DISTINCT parent_id 
               FROM form_modules 
-              WHERE id = ANY(${directModuleIds.map(id => id.toString())}::text[]) 
+              WHERE id = ANY(${directModuleIds.map((id) => id.toString())}::text[]) 
               AND parent_id IS NOT NULL
               AND organization_id = ${organizationId}
             )
@@ -151,13 +156,18 @@ export async function GET(request: NextRequest) {
         `;
 
         // Merge + deduplicate
-        const mergedWithParents = [...allDirectModules, ...(parentModules as any[])];
-        const mergedMap = new Map(mergedWithParents.map((m: any) => [m.module_id, m]));
+        const mergedWithParents = [
+          ...allDirectModules,
+          ...(parentModules as any[]),
+        ];
+        const mergedMap = new Map(
+          mergedWithParents.map((m: any) => [m.module_id, m]),
+        );
         allPermittedModules = Array.from(mergedMap.values());
 
         // Sort by hierarchy
         allPermittedModules.sort(
-          (a: any, b: any) => a.level - b.level || a.sort_order - b.sort_order
+          (a: any, b: any) => a.level - b.level || a.sort_order - b.sort_order,
         );
       }
 
@@ -171,7 +181,7 @@ export async function GET(request: NextRequest) {
             -- Direct children of starting modules
             SELECT fm.id
             FROM form_modules fm
-            WHERE fm.parent_id = ANY(${startingIds.map(id => id.toString())}::text[])
+            WHERE fm.parent_id = ANY(${startingIds.map((id) => id.toString())}::text[])
             AND fm.is_active = TRUE
             AND fm.organization_id = ${organizationId}
             
@@ -193,18 +203,22 @@ export async function GET(request: NextRequest) {
       // Combine all: direct + ancestors + descendants
       const allAccessibleIds = new Set([
         ...allPermittedModules.map((m: any) => m.module_id),
-        ...descendantIds
+        ...descendantIds,
       ]);
       permittedModuleIds = Array.from(allAccessibleIds);
     }
 
     console.log(
-      "[v0] GET /api/modules-permission - Starting request for permitted modules with forms"
+      "[v0] GET /api/modules-permission - Starting request for permitted modules with forms",
     );
 
-    const modules = await getModulesWithForms(organizationId, permittedModuleIds, directlyPermittedModuleIds);
+    const modules = await getModulesWithForms(
+      organizationId,
+      permittedModuleIds,
+      directlyPermittedModuleIds,
+    );
     console.log(
-      `[v0] Retrieved permitted modules with forms from database: ${modules.length}`
+      `[v0] Retrieved permitted modules with forms from database: ${modules.length}`,
     );
 
     // Log form counts for debugging
@@ -215,7 +229,7 @@ export async function GET(request: NextRequest) {
           return subTotal + (child.forms?.length || 0);
         }, 0) || 0;
       console.log(
-        `[v0] Module ${module.name}: ${moduleForms} forms, ${submoduleForms} submodule forms`
+        `[v0] Module ${module.name}: ${moduleForms} forms, ${submoduleForms} submodule forms`,
       );
       return total + moduleForms + submoduleForms;
     }, 0);
@@ -224,7 +238,7 @@ export async function GET(request: NextRequest) {
     console.log(
       "[v0] Successfully retrieved",
       modules.length,
-      "permitted modules with forms"
+      "permitted modules with forms",
     );
 
     return NextResponse.json({
@@ -234,7 +248,7 @@ export async function GET(request: NextRequest) {
         totalModules: modules.length,
         totalSubmodules: modules.reduce(
           (total, m) => total + (m.children?.length || 0),
-          0
+          0,
         ),
         totalForms: totalForms,
       },
@@ -247,7 +261,7 @@ export async function GET(request: NextRequest) {
         error: "Failed to fetch permitted modules with forms",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
