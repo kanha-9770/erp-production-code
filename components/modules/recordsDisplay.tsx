@@ -393,7 +393,7 @@ const DynamicDataPreviewModal = ({
                       <td key={header} className="px-4 py-3 text-gray-600">
                         {typeof row[header] === "object"
                           ? "Nested Data"
-                          : String(row[header] || "—")}
+                          : String(row[header] ?? "NaN")}
                       </td>
                     ))}
                   </tr>
@@ -717,8 +717,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
   const [recordToDelete, setRecordToDelete] =
     React.useState<EnhancedFormRecord | null>(null);
+  const [lastPointerDownTime, setLastPointerDownTime] = React.useState<number>(0);
+  const DOUBLE_CLICK_THRESHOLD = 300;
   // State for Dynamic Row Preview Modal
   console.log("formRecord", formRecords)
+
 
   const [previewData, setPreviewData] = React.useState<{
     isOpen: boolean;
@@ -863,7 +866,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   // ============== DATA PROCESSING HELPERS ==============
 
   const formatDynamicRowValue = (rows: any[]): string => {
-    if (!Array.isArray(rows) || rows.length === 0) return "—";
+    if (!Array.isArray(rows) || rows.length === 0) return "NaN";
     return rows
       .map((row) => {
         const values = Object.entries(row)
@@ -875,6 +878,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       .filter((v) => v !== "")
       .join(" ");
   };
+
+
 
   const getLabelForField = (
     fieldId: string,
@@ -1002,13 +1007,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     return "Unknown Field";
   };
 
-  /**
-   * Main Data Processor:
-   * Converts raw recordData into a list of objects used by the table.
-   * Supports BOTH data formats:
-   * 1. NEW FORMAT: recordData has `sections` and `subforms` as top-level keys with nested field objects
-   * 2. LEGACY FORMAT: recordData has field IDs as keys directly (like { fieldId: { value, label, type... } })
-   */
+
   const buildProcessedDataFromRecordData = (
     rec: EnhancedFormRecord,
   ): ProcessedFieldData[] => {
@@ -1019,7 +1018,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     // Helper to format display value
     const formatDisplayValue = (value: any, type: string, key: string): string => {
       if (value === null || value === undefined || value === "") {
-        return "—";
+        return "NaN";
       }
 
       // ── NEW: Handle address field ────────────────────────────────
@@ -1037,7 +1036,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         if (addr.country) parts.push(addr.country.trim());
 
         // Join with commas, but avoid double commas or trailing ones
-        return parts.filter(Boolean).join(", ") || "—";
+        return parts.filter(Boolean).join(", ") || "NaN";
       }
 
       // ── Existing cases ───────────────────────────────────────────
@@ -1528,7 +1527,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             fieldLabel: fieldDef.label,
             fieldType: "formula",
             value: null,
-            displayValue: "—",
+            displayValue: "NaN",
             lookup: null,
             options: [],
             icon: "",
@@ -1891,6 +1890,58 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     return {};
   };
 
+  const handleCellPointerDown = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, record: EnhancedFormRecord, fieldDef: FormFieldWithSection) => {
+      // Only handle left click
+      if (e.button !== 0) return;
+
+      const now = Date.now();
+
+      if (now - lastPointerDownTime < DOUBLE_CLICK_THRESHOLD) {
+        // This is a double click/tap
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (
+  editMode === "double-click" &&
+  !savingChanges &&
+  !isImageField(fieldDef.label) &&
+  hasPermissionForForm(fieldDef.formId, "EDIT")
+) {
+  const fieldData = getFieldData(record, fieldDef);
+  
+  // Allow editing ALWAYS (even if empty / null / NaN / undefined)
+  setEditingCell({
+    recordId: record.id,
+    fieldId: fieldDef.id,
+    value: fieldData?.value ?? "",           // start empty if null/undefined
+    originalValue: fieldData?.value ?? "",
+    fieldType: fieldDef.type,
+    options: fieldDef.options,
+  });
+  setSelectedCell(`${record.id}-${fieldDef.id}`);
+  setFocusedCell(`${record.id}-${fieldDef.id}`);
+}
+
+        setLastPointerDownTime(0); // reset
+      } else {
+        setLastPointerDownTime(now);
+      }
+    },
+    [
+      lastPointerDownTime,
+      editMode,
+      savingChanges,
+      setEditingCell,
+      setSelectedCell,
+      setFocusedCell,
+      getFieldData,
+      hasPermissionForForm,
+      isImageField,
+    ]
+  );
+
+
   // ============== EDITOR RENDERER ==============
 
   const renderFieldEditor = (
@@ -2061,33 +2112,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
   // ============== EVENT HANDLERS ==============
 
-  const handleDoubleClick = (
-    record: EnhancedFormRecord,
-    fieldDef: FormFieldWithSection,
-  ) => {
-    if (
-      editMode !== "double-click" ||
-      savingChanges ||
-      isImageField(fieldDef.label)
-    )
-      return;
-    const formId = fieldDef.formId;
-    if (!hasPermissionForForm(formId, "EDIT")) return;
-    const fieldData = getFieldData(record, fieldDef);
-    if (!fieldData) return;
-    const hasImages = Array.isArray(fieldData.value)
-      ? fieldData.value.some(isImageUrl)
-      : isImageUrl(fieldData.value);
-    if (hasImages) return;
-    setEditingCell({
-      recordId: record.id,
-      fieldId: fieldDef.id,
-      value: fieldData.value || "",
-      originalValue: fieldData.value || "",
-      fieldType: fieldDef.type,
-      options: fieldDef.options,
-    });
-  };
 
   const handleResizeStart = (
     e: React.MouseEvent,
@@ -2879,11 +2903,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                 setFocusedCell(cellKey);
                                               }
                                             }}
-                                            onDoubleClick={() => {
-                                              handleDoubleClick(record, fieldDef);
-                                              setSelectedCell(cellKey);
-                                              setFocusedCell(cellKey);
-                                            }}
+                                            onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
                                             onContextMenu={(e) => {
                                               if (!isImageColumn) {
                                                 e.preventDefault();
@@ -2938,7 +2958,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                     style={getConditionalStyle(fieldDef, actualValue, displayText)}
                                                     title={displayText}
                                                   >
-                                                    {displayText || "—"}
+                                                    {(displayText ?? "") === "" ? "—" : displayText}
                                                   </div>
                                                   {!isWrapTextEnabled && displayText && displayText.length > 40 && (
                                                     <button
@@ -3022,11 +3042,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                   setFocusedCell(cellKey);
                                                 }
                                               }}
-                                              onDoubleClick={() => {
-                                                handleDoubleClick(record, fieldDef);
-                                                setSelectedCell(cellKey);
-                                                setFocusedCell(cellKey);
-                                              }}
+                                              onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
                                               onContextMenu={(e) => {
                                                 if (!isImageColumn) {
                                                   e.preventDefault();
@@ -3101,7 +3117,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                       style={getConditionalStyle(fieldDef, actualValue, displayText)}
                                                       title={displayText}
                                                     >
-                                                      {displayText || "—"}
+                                                      {(displayText ?? "") === "" ? "NaN" : displayText}
                                                     </div>
                                                     {!isWrapTextEnabled && displayText && displayText.length > 40 && (
                                                       <button

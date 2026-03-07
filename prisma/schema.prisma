@@ -540,33 +540,53 @@ model FormSection {
 }
 
 model FormField {
-  id String @id @default(cuid())
-  sectionId String? @map("section_id")
-  section FormSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  subformId String? @map("subform_id")
-  subform Subform? @relation(fields: [subformId], references: [id], onDelete: Cascade)
-  type String
-  label String
-  placeholder String?
-  description String?
-  defaultValue String? @map("default_value")
-  options Json @default("[]")
-  validation Json @default("{}")
-  visible Boolean @default(true)
-  readonly Boolean @default(false)
-  width String @default("full")
-  order Int @default(0)
-  conditional Json?
-  styling Json?
-  properties Json?
-  formula FormulaField?
-  rollup Json?
-  lookup Json?
-  decimalPlaces Int? @default(2)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(cuid())
+  sectionId       String?  @map("section_id")
+  section         FormSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  subformId       String?  @map("subform_id")
+  subform         Subform? @relation(fields: [subformId], references: [id], onDelete: Cascade)
+
+  type            String
+  label           String
+  placeholder     String?
+  description     String?
+  defaultValue    String?  @map("default_value")
+
+  // ──────────────────────────────────────────────────────────────
+  // Standard static options (used when !isDependent)
+  // ──────────────────────────────────────────────────────────────
+  options         Json     @default("[]")
+
+  // ──────────────────────────────────────────────────────────────
+  // Dependent / Cascading dropdown support
+  // ──────────────────────────────────────────────────────────────
+  isDependent     Boolean  @default(false)          @map("is_dependent")
+  parentFieldId   String?                           @map("parent_field_id")
+  dependentGroups Json?    @default("[]")           @map("dependent_groups")
+  // ──────────────────────────────────────────────────────────────
+
+  validation      Json     @default("{}")
+  visible         Boolean  @default(true)
+  readonly        Boolean  @default(false)
+  width           String   @default("full")
+  order           Int      @default(0)
+
+  conditional     Json?
+  styling         Json?
+  properties      Json?
+
+  // Advanced field types
+  formula         FormulaField?
+  rollup          Json?
+  lookup          Json?
   lookupRelations LookupFieldRelation[]
-  
+
+  decimalPlaces   Int?     @default(2)
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
   @@index([sectionId])
   @@index([subformId])
   @@index([type])

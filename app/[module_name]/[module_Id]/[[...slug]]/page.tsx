@@ -1100,6 +1100,7 @@ export default function ModulePage({
         formId={selectedFormForFilling}
         isOpen={isFormDialogOpen}
         onClose={handleFormClose}
+        allowAdminPreview={isAdmin}
       />
     </div>
   );

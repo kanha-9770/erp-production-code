@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         userAgent,
       })
 
-      return NextResponse.json({ error: "Invalid email or password" }, { status: 400 })
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
     // Email not verified

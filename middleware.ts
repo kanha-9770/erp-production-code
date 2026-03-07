@@ -10,11 +10,14 @@ export function middleware(request: NextRequest) {
     "/signup",
     "/verify-otp",
     "/forgot-password",
+    "/reset-password",
+    "/auth/reset-password",
   ];
 
-  // Always allow public routes & Next internals
+  // Always allow public routes, /auth prefixed pages, & Next internals
   if (
     publicRoutes.includes(pathname) ||
+    pathname.startsWith("/auth") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.includes(".")

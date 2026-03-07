@@ -169,58 +169,62 @@ export function PublicFormDialog({
                           gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
                         }}
                       >
-                        {section.fields.map((field) => (
-                          <div key={field.id} className="space-y-2">
-                            {field.type !== "checkbox" &&
-                             field.type !== "switch" &&
-                             field.type !== "hidden" && (
-                              <Label className="text-sm font-medium flex items-center gap-2">
-                                {field.label}
-                                {field.validation?.required && <span className="text-red-500">*</span>}
-                              </Label>
-                            )}
-                            {field.description && field.type !== "hidden" && (
-                              <p className="text-xs text-muted-foreground">{field.description}</p>
-                            )}
-                            <FormRenderer
-                              field={field}
-                              value={formData[field.id]}
-                              error={errors[field.id]}
-                              submitting={submitting}
-                              submitted={submitted}
-                              handleFieldChange={handleFieldChange}
-                              formulaValues={{}}
-                              isInSubform={false}
-                            />
-                            {errors[field.id] && field.type !== "phone" && field.type !== "phone-input" && (
-                              <p className="text-sm text-red-500 flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3" />
-                                {errors[field.id]}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                        {section.fields
+                          .filter((f) => !(f.visible === false || (f.properties && f.properties.hidden === true)))
+                          .map((field) => (
+                            <div key={field.id} className="space-y-2">
+                              {field.type !== "checkbox" &&
+                               field.type !== "switch" &&
+                               field.type !== "hidden" && (
+                                <Label className="text-sm font-medium flex items-center gap-2">
+                                  {field.label}
+                                  {field.validation?.required && <span className="text-red-500">*</span>}
+                                </Label>
+                              )}
+                              {field.description && field.type !== "hidden" && (
+                                <p className="text-xs text-muted-foreground">{field.description}</p>
+                              )}
+                              <FormRenderer
+                                field={field}
+                                value={formData[field.id]}
+                                error={errors[field.id]}
+                                submitting={submitting}
+                                submitted={submitted}
+                                handleFieldChange={handleFieldChange}
+                                formulaValues={{}}
+                                isInSubform={false}
+                              />
+                              {errors[field.id] && field.type !== "phone" && field.type !== "phone-input" && (
+                                <p className="text-sm text-red-500 flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3" />
+                                  {errors[field.id]}
+                                </p>
+                              )}
+                            </div>
+                          ))}
                       </div>
 
                       {/* Subforms */}
                       {section.subforms?.length > 0 && (
                         <div className="mt-10 space-y-6">
-                          {section.subforms.map((subform: Subform) => (
-                            <RenderSubform
-                              key={subform.id}
-                              subform={subform}
-                              level={0}
-                              parentPath=""
-                              value={formData}
-                              errors={errors}
-                              submitting={submitting}
-                              submitted={submitted}
-                              handleFieldChange={handleFieldChange}
-                              formulaValues={{}}
-                              toggleSubform={toggleSubform}
-                              collapsedSubforms={collapsedSubforms}
-                            />
-                          ))}
+                          {section.subforms
+                            .filter((sf: any) => !(sf.visible === false || (sf.properties && sf.properties.hidden === true)))
+                            .map((subform: Subform) => (
+                              <RenderSubform
+                                key={subform.id}
+                                subform={subform}
+                                level={0}
+                                parentPath=""
+                                value={formData}
+                                errors={errors}
+                                submitting={submitting}
+                                submitted={submitted}
+                                handleFieldChange={handleFieldChange}
+                                formulaValues={{}}
+                                toggleSubform={toggleSubform}
+                                collapsedSubforms={collapsedSubforms}
+                              />
+                            ))}
                         </div>
                       )}
                     </div>

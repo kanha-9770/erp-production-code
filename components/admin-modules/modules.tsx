@@ -132,8 +132,8 @@ export default function ModuleDashboard() {
                 });
             }
         };
-        fetchOrg();
-    }, [toast]);
+            fetchOrg();
+        }, []);
 
     // ── Build parent options & auto-select first module ─────────────
     useEffect(() => {

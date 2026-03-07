@@ -44,7 +44,6 @@ import { FileUploadZone } from "./file-upload-zone";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
-// ── PHONE INPUT IMPORTS ───────────────────────────────────────────────────────
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
@@ -68,6 +67,32 @@ interface LookupFieldData {
   field_section_id: string | null;
   [key: string]: any;
 }
+
+const getParentValue = (
+  field: FormField,
+  formData: Record<string, any>
+): string | string[] | undefined => {
+  if (!field.parentFieldId) return undefined;
+
+  // Direct match - most common case
+  if (formData[field.parentFieldId] !== undefined) {
+    return formData[field.parentFieldId];
+  }
+
+  // Look for dynamic instance keys that contain parentFieldId
+  const possibleKeys = Object.keys(formData).filter((key) =>
+    key.includes(`__`) && key.includes(field.parentFieldId!)
+  );
+
+  if (possibleKeys.length > 0) {
+    // For simplicity we take the first match
+    // → in real app you may want more precise matching based on row context
+    return formData[possibleKeys[0]];
+  }
+
+  return undefined;
+};
+
 const fetchUserLocation = async (
   retry = false,
 ): Promise<LocationResult | null> => {
@@ -117,6 +142,7 @@ interface PublicFormDialogProps {
   formId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  allowAdminPreview?: boolean;
 }
 // Color schemes for different nesting levels (same as PublicFormPage)
 const NESTING_COLORS = [
@@ -160,6 +186,7 @@ export function PublicFormDialog({
   formId,
   isOpen,
   onClose,
+  allowAdminPreview = false,
 }: PublicFormDialogProps) {
   const { toast } = useToast();
   const [form, setForm] = useState<Form | null>(null);
@@ -640,10 +667,11 @@ export function PublicFormDialog({
     if (!formId) return;
     try {
       setLoading(true);
-      const response = await fetch(`/api/forms/${formId}`);
+      const url = `/api/forms/${formId}${allowAdminPreview ? "" : "?published=true"}`;
+      const response = await fetch(url);
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
-      if (!result.data.isPublished)
+      if (!result.data.isPublished && !allowAdminPreview)
         throw new Error("This form is not published");
       const formulaResponse = await fetch("/api/testing");
       const formulaResult = await formulaResponse.json();
@@ -820,13 +848,77 @@ export function PublicFormDialog({
     if (permId === undefined) return true;
     return permId !== "NONE";
   };
+
+  const getParentValueMemo = useCallback(
+    (field: FormField) => getParentValue(field, formData),
+    [formData]
+  );
+
+  const isFieldVisibleDependingOnParent = (field: FormField): boolean => {
+    // If not dependent → always visible (from visibility perspective)
+    if (!field.isDependent || !field.parentFieldId) {
+      return true;
+    }
+
+    const parentValueRaw = getParentValue(field, formData);
+
+    // Normalize to string or first value if array
+    const parentValue = Array.isArray(parentValueRaw)
+      ? parentValueRaw[0] // or join them, depending on your needs
+      : typeof parentValueRaw === "string"
+        ? parentValueRaw
+        : null;
+
+    // No parent value selected yet → hide dependent field
+    if (!parentValue) {
+      return false;
+    }
+
+    // Check if this parent value has a corresponding group
+    return !!field.dependentGroups?.some(
+      (group) => group.parentValue === parentValue
+    );
+  };
+
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
     const fieldPermId = fieldPermissions[field.id];
     const effectivePermId =
       fieldPermId !== undefined ? fieldPermId : sectionPermissions[sectionId];
+
+    // Permission check: hidden by permissions
     if (effectivePermId === undefined) return true;
-    return effectivePermId !== "NONE";
+    if (effectivePermId === "NONE") return false;
+
+    // Admin-level visibility: if field explicitly marked invisible/hidden, hide it
+    if (field.visible === false) return false;
+    if (field.properties?.hidden === true) return false;
+
+    // NEW: Conditional visibility based on parent value
+    if (!isFieldVisibleDependingOnParent(field)) {
+      return false;
+    }
+
+    return true;
   };
+
+  useEffect(() => {
+    if (!form) return;
+
+    const fieldsToCheck = allFields.filter(f => f.isDependent && f.parentFieldId);
+
+    fieldsToCheck.forEach(field => {
+      if (!isFieldVisible(field, /* sectionId — you'll need to find it */)) {
+        // If field is now hidden, clear its value
+        if (formData[field.id] !== undefined && formData[field.id] !== "") {
+          setFormData(prev => {
+            const next = { ...prev };
+            delete next[field.id];
+            return next;
+          });
+        }
+      }
+    });
+  }, [formData, allFields, form]);
   const trackFormView = async () => {
     if (!formId) return;
     try {
@@ -1380,12 +1472,13 @@ export function PublicFormDialog({
               placeholder={field.placeholder || "Enter phone number"}
               value={phoneValue}
               onChange={(newValue) => handleDynamicFieldChange(newValue)}
-              disabled={submitting || submitted}
+              disabled={submitting || submitted || (field.readonly ?? false)}
               numberInputProps={{
                 className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm
                 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium
                 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2
                 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50
+                ${field.readonly ? "bg-muted cursor-not-allowed" : ""}
                 ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform
                     ? "border-purple-200 focus:border-purple-400"
                     : ""
@@ -1404,14 +1497,13 @@ export function PublicFormDialog({
         return (
           <Input
             id={fieldKey}
-            disabled={submitting || submitted}
-            className={error ? "border-red-500" : ""}
+            disabled={submitting || submitted || (field.readonly ?? false)}
             type={field.type}
             placeholder={field.placeholder || ""}
             value={value || ""}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
-            className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            readOnly={field.readonly ?? false}
+            className={`${error ? "border-red-500" : ""} ${field.readonly ? "bg-muted cursor-not-allowed" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
           />
         );
       case "password":
@@ -1644,7 +1736,7 @@ export function PublicFormDialog({
                       <Select
                         value={subVal}
                         onValueChange={(v) => handleSubChange(sub.key, v)}
-                        disabled={submitting || submitted}
+                        disabled={submitting || submitted || isReadOnly}
                       >
                         <SelectTrigger className="bg-white">
                           <SelectValue placeholder={sub.placeholder || "Select country"} />
@@ -1670,7 +1762,7 @@ export function PublicFormDialog({
                       placeholder={sub.placeholder}
                       value={subVal}
                       onChange={(e) => handleSubChange(sub.key, e.target.value)}
-                      disabled={submitting || submitted}
+                      disabled={submitting || submitted || isReadOnly}
                       className="bg-white"
                     />
                   </div>
@@ -1701,7 +1793,11 @@ export function PublicFormDialog({
         );
     }
   };
+
+
   const renderField = (field: FormField, isInSubform: boolean = false) => {
+    // Respect admin-level visibility flags first
+    if (field.visible === false || field.properties?.hidden === true) return null;
     const value = formData[field.id];
     const error = errors[field.id];
     const fieldType = (field.type || "").toLowerCase();
@@ -1711,7 +1807,7 @@ export function PublicFormDialog({
     const isReadOnly = field.readonly || (autoFetch && status === "success");
     const fieldProps = {
       id: field.id,
-      disabled: submitting || submitted,
+      disabled: submitting || submitted || isReadOnly,
       className: error ? "border-red-500" : "",
     };
     const options = Array.isArray(field.options) ? field.options : [];
@@ -1759,12 +1855,13 @@ export function PublicFormDialog({
                 const err = validatePhone(newValue);
                 setErrors((prev) => ({ ...prev, [field.id]: err || "" }));
               }}
-              disabled={submitting || submitted}
+              disabled={submitting || submitted || isReadOnly}
               numberInputProps={{
                 className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm
                   ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium
                   placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2
                   focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50
+                  ${isReadOnly ? "bg-muted cursor-not-allowed" : ""}
                   ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform
                     ? "border-purple-200 focus:border-purple-400"
                     : ""
@@ -1860,8 +1957,8 @@ export function PublicFormDialog({
             placeholder={field.placeholder || ""}
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
-            className={`${fieldProps.className} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            readOnly={isReadOnly}
+            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
           />
         );
       case "password":
@@ -1872,8 +1969,8 @@ export function PublicFormDialog({
             placeholder={field.placeholder || ""}
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
-            className={`${fieldProps.className} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            readOnly={isReadOnly}
+            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
           />
         );
       case "textarea":
@@ -1884,8 +1981,8 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
             rows={3}
-            className={`${fieldProps.className} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            readOnly={isReadOnly}
+            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
           />
         );
       case "date":
@@ -1978,7 +2075,7 @@ export function PublicFormDialog({
               id={field.id}
               checked={value || false}
               onCheckedChange={(c) => handleFieldChange(field.id, c)}
-              disabled={submitting || submitted}
+              disabled={submitting || submitted || isReadOnly}
             />
             <Label htmlFor={field.id} className="text-sm">
               {field.label}
@@ -1992,7 +2089,7 @@ export function PublicFormDialog({
               id={field.id}
               checked={value || false}
               onCheckedChange={(c) => handleFieldChange(field.id, c)}
-              disabled={submitting || submitted}
+              disabled={submitting || submitted || isReadOnly}
             />
             <Label htmlFor={field.id} className="text-sm">
               {field.label}
@@ -2004,7 +2101,7 @@ export function PublicFormDialog({
           <RadioGroup
             value={value || ""}
             onValueChange={(v) => handleFieldChange(field.id, v)}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
           >
             {options.map((opt: any) => (
               <div key={opt.value} className="flex items-center space-x-2">
@@ -2019,37 +2116,96 @@ export function PublicFormDialog({
             ))}
           </RadioGroup>
         );
-      case "select":
+      case "select": {
+        let effectiveOptions: FieldOption[] = [];
+
+        if (field.isDependent && field.parentFieldId && field.dependentGroups?.length) {
+          const parentValueRaw = getParentValueMemo(field);
+          const parentValue = typeof parentValueRaw === "string" ? parentValueRaw : undefined;
+
+          if (parentValue) {
+            const matchingGroup = field.dependentGroups.find(
+              (g) => g.parentValue === parentValue
+            );
+
+            if (matchingGroup?.options?.length) {
+              effectiveOptions = matchingGroup.options;
+            } else {
+              effectiveOptions = [];
+            }
+          } else {
+            effectiveOptions = [];
+          }
+        } else {
+          effectiveOptions = options;
+        }
+
+        const isDisabledDueToParent = field.isDependent && !getParentValueMemo(field);
+
         return (
-          <Select
-            value={value || ""}
-            onValueChange={(v) => handleFieldChange(field.id, v)}
-            disabled={submitting || submitted}
-          >
-            <SelectTrigger
-              className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-                }`}
+          <div className="space-y-1">
+            <Select
+              value={value || ""}
+              onValueChange={(v) => handleFieldChange(field.id, v)}
+              disabled={submitting || submitted || isDisabledDueToParent || isReadOnly}
             >
-              <SelectValue
-                placeholder={field.placeholder || "Select an option"}
-              />
-            </SelectTrigger>
-            <SelectContent
-              className="max-h-[320px] overflow-y-auto z-50"
-              position="popper"
-              sideOffset={4}
-            >
-              {options.map((opt: any) => (
-                <SelectItem
-                  key={opt.value || opt.id}
-                  value={opt.value || opt.id}
-                >
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <SelectTrigger className={`
+                error ? "border-red-500" : "",
+                isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+             `}>
+                <SelectValue placeholder={field.placeholder || "Select an option"} />
+              </SelectTrigger>
+
+              <SelectContent>
+                {effectiveOptions.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+                    {field.isDependent
+                      ? getParentValueMemo(field)
+                        ? "No options available for this selection"
+                        : "Select parent field first"
+                      : "No options defined"}
+                  </div>
+                ) : (
+                  effectiveOptions.map((opt) => (
+                    <SelectItem
+                      key={opt.value || opt.id}
+                      value={opt.value || opt.id || ""}
+                    >
+                      {opt.label}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+
+            {field.isDependent && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Depends on: {idToLabel[field.parentFieldId!] || field.parentFieldId}
+              </p>
+            )}
+
+            {field.isDependent && !getParentValueMemo(field) && (
+              <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1">
+                <Info className="h-3.5 w-3.5" />
+                Select a value in "{idToLabel[field.parentFieldId!] || field.parentFieldId}" first
+              </p>
+            )}
+
+            {effectiveOptions.length === 0 && getParentValueMemo(field) && field.isDependent && (
+              <p className="text-xs text-amber-700 mt-1.5">
+                No matching options for "{getParentValueMemo(field)}"
+              </p>
+            )}
+
+            {error && (
+              <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
+                <AlertCircle className="h-3 w-3" />
+                {error}
+              </p>
+            )}
+          </div>
         );
+      }
       case "slider":
         return (
           <div className="space-y-2">
@@ -2059,7 +2215,7 @@ export function PublicFormDialog({
               max={field.validation?.max || 100}
               min={field.validation?.min || 0}
               step={1}
-              disabled={submitting || submitted}
+              disabled={submitting || submitted || isReadOnly}
             />
             <div className="text-center text-sm text-muted-foreground">
               Value: {value || 0}
@@ -2074,7 +2230,7 @@ export function PublicFormDialog({
                 key={r}
                 type="button"
                 onClick={() => handleFieldChange(field.id, r)}
-                disabled={submitting || submitted}
+                disabled={submitting || submitted || isReadOnly}
                 className="p-1 hover:scale-110 transition-transform"
               >
                 <Star
@@ -2107,7 +2263,7 @@ export function PublicFormDialog({
             onChange={(v, fullOption) =>
               handleFieldChange(field.id, v, fullOption)
             }
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
             error={error}
           />
         );
@@ -2121,7 +2277,7 @@ export function PublicFormDialog({
             currentValue={value}
             onUploadComplete={(url) => handleFieldChange(field.id, url)}
             onClear={() => handleClearFile(field.id)}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
             maxSize={10}
           />
         );
@@ -2852,5 +3008,3 @@ export function PublicFormDialog({
     </Dialog>
   );
 }
-
-

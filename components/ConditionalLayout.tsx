@@ -21,7 +21,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   ]
 
   // Render only children for public routes
-  if (publicRoutes.includes(pathname)) {
+  if (publicRoutes.includes(pathname) || pathname.startsWith("/auth")) {
     return <>{children}</>
   }
 

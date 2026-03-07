@@ -197,7 +197,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
   const isReadOnly = field.readonly || (autoFetch && status === "success");
   const fieldProps = {
     id: fieldKey,
-    disabled: submitting || submitted,
+    disabled: submitting || submitted || isReadOnly,
     className: error ? "border-red-500" : "",
   };
   const options = Array.isArray(field.options) ? field.options : [];
@@ -229,7 +229,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
             placeholder={field.placeholder || "Enter phone number"}
             value={phoneValue}
             onChange={(newValue) => handleChange(newValue)}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
             numberInputProps={{
               className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm
                 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium
@@ -418,7 +418,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
             id={fieldKey}
             checked={value || false}
             onCheckedChange={(c) => handleChange(c)}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
           />
           <Label htmlFor={fieldKey} className="text-sm">
             {field.label}
@@ -432,7 +432,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
             id={fieldKey}
             checked={value || false}
             onCheckedChange={(c) => handleChange(c)}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
           />
           <Label htmlFor={fieldKey} className="text-sm">
             {field.label}
@@ -444,7 +444,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
         <RadioGroup
           value={value || ""}
           onValueChange={(v) => handleChange(v)}
-          disabled={submitting || submitted}
+          disabled={submitting || submitted || isReadOnly}
         >
           {options.map((opt: any) => (
             <div key={opt.value} className="flex items-center space-x-2">
@@ -461,7 +461,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
         <Select
           value={value || ""}
           onValueChange={(v) => handleChange(v)}
-          disabled={submitting || submitted}
+          disabled={submitting || submitted || isReadOnly}
         >
           <SelectTrigger
             className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
@@ -486,7 +486,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
             max={field.validation?.max || 100}
             min={field.validation?.min || 0}
             step={1}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isReadOnly}
           />
           <div className="text-center text-sm text-muted-foreground">
             Value: {value || 0}
@@ -529,7 +529,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
           field={lookupData}
           value={value}
           onChange={(v, fullOption) => handleChange(v, fullOption)}
-          disabled={submitting || submitted}
+          disabled={submitting || submitted || isReadOnly}
           error={error}
         />
       );
@@ -543,7 +543,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
           currentValue={value}
           onUploadComplete={(url) => handleChange(url)}
           onClear={onFileClear}
-          disabled={submitting || submitted}
+          disabled={submitting || submitted || isReadOnly}
           maxSize={10}
         />
       );
@@ -553,6 +553,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
           onCapture={(img) => handleChange(img)}
           capturedImage={value || null}
           onClear={() => handleChange("")}
+          disabled={submitting || submitted || isReadOnly}
         />
       );
     case "hidden":

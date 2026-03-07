@@ -104,12 +104,12 @@ export default function ModuleSidebar({
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const offsetX = e.clientX - rect.left;
     const offsetY = e.clientY - rect.top;
-    
-    setDrag({ 
-      type, 
-      id, 
-      over: null, 
-      position: null, 
+
+    setDrag({
+      type,
+      id,
+      over: null,
+      position: null,
       isDragging: true,
       dragOffset: { x: offsetX, y: offsetY }
     });
@@ -146,10 +146,10 @@ export default function ModuleSidebar({
 
       if (type === "form") {
         // Optimistic update is handled by onMoveForm
-        await onMoveForm(id, targetId).catch(() => {});
+        await onMoveForm(id, targetId).catch(() => { });
       } else if (type === "module") {
         // Optimistic update is handled by onMoveModule
-        await onMoveModule(id, targetId).catch(() => {});
+        await onMoveModule(id, targetId).catch(() => { });
       }
 
       setDrag({ type: null, id: null, over: null, position: null, isDragging: false, dragOffset: { x: 0, y: 0 } });
@@ -175,44 +175,6 @@ export default function ModuleSidebar({
     return false;
   };
 
-  const moveModuleOptimistic = (modules: Module[], moduleId: string, newParentId: string | null): Module[] => {
-    let moving: Module | undefined;
-
-    const remove = (items: Module[]): Module[] =>
-      items.filter(item => {
-        if (item.id === moduleId) {
-          moving = { ...item, parentId: newParentId };
-          return false;
-        }
-        if (item.children) {
-          item.children = remove(item.children);
-        }
-        return true;
-      });
-
-    let tree = remove([...modules]);
-    if (!moving) return modules;
-
-    if (newParentId === null) {
-      return [...tree, moving];
-    }
-
-    const insert = (items: Module[]): Module[] =>
-      items.map(item => {
-        if (item.id === newParentId) {
-          return {
-            ...item,
-            children: [...(item.children ?? []), moving!],
-          };
-        }
-        if (item.children) {
-          return { ...item, children: insert(item.children) };
-        }
-        return item;
-      });
-
-    return insert(tree);
-  };
 
   const renderModules = (modules: Module[], level = 0) => {
     return modules.map(mod => {
@@ -224,9 +186,8 @@ export default function ModuleSidebar({
         <AccordionItem key={mod.id} value={mod.id} className="border-none">
           {/* Drop Indicator Before */}
           <div
-            className={`h-0.5 mx-4 transition-all ${
-              over && drag.position === "before" ? "bg-blue-500 my-1" : "bg-transparent"
-            }`}
+            className={`h-0.5 mx-4 transition-all ${over && drag.position === "before" ? "bg-blue-500 my-1" : "bg-transparent"
+              }`}
             onDragOver={e => handleDragOver(e, mod.parentId, "before")}
             onDrop={e => handleDrop(e, mod.parentId)}
           />
@@ -241,7 +202,7 @@ export default function ModuleSidebar({
             `}
             onDragOver={e => handleDragOver(e, mod.id, "inside")}
             onDrop={e => handleDrop(e, mod.id)}
-            onDragLeave={() => {}}
+            onDragLeave={() => { }}
           >
             <div className="flex items-center min-h-[42px]">
               <div
@@ -340,10 +301,10 @@ export default function ModuleSidebar({
           <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em]">
             System Modules
           </h2>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="h-8 w-8 text-gray-400 hover:text-blue-600" 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-gray-400 hover:text-blue-600"
             onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
           >
             <ArrowUpDown className="h-4 w-4" />
@@ -364,19 +325,17 @@ export default function ModuleSidebar({
       <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 py-4 px-2">
         {/* Top Root Drop Zone */}
         <div
-          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mb-3 border-2 border-dashed ${
-            drag.over === null && drag.position === "inside" && drag.isDragging
-              ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
-              : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
-          }`}
+          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mb-3 border-2 border-dashed ${drag.over === null && drag.position === "inside" && drag.isDragging
+            ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
+            : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
+            }`}
           onDragOver={e => handleDragOver(e, null, "inside")}
           onDrop={e => handleDrop(e, null)}
         >
-          <span className={`text-sm font-medium transition-all ${
-            drag.over === null && drag.position === "inside" && drag.isDragging
-              ? "text-blue-600 font-bold"
-              : "text-gray-500"
-          }`}>
+          <span className={`text-sm font-medium transition-all ${drag.over === null && drag.position === "inside" && drag.isDragging
+            ? "text-blue-600 font-bold"
+            : "text-gray-500"
+            }`}>
             Drop to move to root level
           </span>
         </div>
@@ -394,19 +353,17 @@ export default function ModuleSidebar({
 
         {/* Bottom Root Drop Zone */}
         <div
-          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mt-3 border-2 border-dashed ${
-            drag.over === null && drag.position === "inside" && drag.isDragging
-              ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
-              : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
-          }`}
+          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mt-3 border-2 border-dashed ${drag.over === null && drag.position === "inside" && drag.isDragging
+            ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
+            : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
+            }`}
           onDragOver={e => handleDragOver(e, null, "inside")}
           onDrop={e => handleDrop(e, null)}
         >
-          <span className={`text-sm font-medium transition-all ${
-            drag.over === null && drag.position === "inside" && drag.isDragging
-              ? "text-blue-600 font-bold"
-              : "text-gray-500"
-          }`}>
+          <span className={`text-sm font-medium transition-all ${drag.over === null && drag.position === "inside" && drag.isDragging
+            ? "text-blue-600 font-bold"
+            : "text-gray-500"
+            }`}>
             Drop to move to root level
           </span>
         </div>

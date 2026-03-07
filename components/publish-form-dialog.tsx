@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -15,7 +15,8 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-import { Copy, ExternalLink, Loader2 } from "lucide-react"
+import { Copy, ExternalLink, Loader2, Eye } from "lucide-react"
+import { PublicFormDialog } from "@/components/public-form-dialog"
 import type { Form } from "@/types/form-builder"
 
 export interface PublishFormDialogProps {
@@ -27,6 +28,7 @@ export interface PublishFormDialogProps {
 
 export default function PublishFormDialog({ form, open, onOpenChange, onFormPublished }: PublishFormDialogProps) {
   const { toast } = useToast()
+  const [showPublicPreview, setShowPublicPreview] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [settings, setSettings] = useState({
     allowAnonymous: form.allowAnonymous ?? true,
@@ -101,17 +103,129 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
     }
   }
 
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
   const copyToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === "function"
+      ) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        // try selecting the visible input first (better UX & more reliable in some browsers)
+        const valueToCopy =
+          (inputRef && inputRef.current && inputRef.current.value) || text
+
+        if (inputRef && inputRef.current) {
+          try {
+            inputRef.current.focus()
+            inputRef.current.select()
+            if (inputRef.current.setSelectionRange) {
+              inputRef.current.setSelectionRange(0, inputRef.current.value.length)
+            }
+            const ok = document.execCommand("copy")
+            if (!ok) throw new Error("Copy command failed when selecting input")
+          } catch (e) {
+            // fallback to hidden textarea
+            const el = document.createElement("textarea")
+            el.value = valueToCopy
+            el.setAttribute("readonly", "")
+            el.style.position = "absolute"
+            el.style.left = "-9999px"
+            document.body.appendChild(el)
+            el.focus()
+            el.select()
+            if (el.setSelectionRange) el.setSelectionRange(0, el.value.length)
+            const successful = document.execCommand("copy")
+            document.body.removeChild(el)
+            if (!successful) throw new Error("Copy command failed with textarea fallback")
+          }
+        } else {
+          // no input ref available, use hidden textarea
+          const el = document.createElement("textarea")
+          el.value = text
+          el.setAttribute("readonly", "")
+          el.style.position = "absolute"
+          el.style.left = "-9999px"
+          document.body.appendChild(el)
+          el.focus()
+          el.select()
+          if (el.setSelectionRange) el.setSelectionRange(0, el.value.length)
+          const successful = document.execCommand("copy")
+          document.body.removeChild(el)
+          if (!successful) throw new Error("Copy command failed with textarea fallback")
+        }
+      }
+
       toast({
-        title: "Copied",
+        title: "Copied!",
         description: "URL copied to clipboard",
+        duration: 2000,
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to copy:", error)
+      toast({
+        title: "Failed to copy",
+        description: error?.message || "Could not copy automatically — select and copy manually",
+        variant: "destructive",
+      })
+      try {
+        // final fallback: show prompt so user can copy manually
+        // eslint-disable-next-line no-alert
+        window.prompt("Copy this URL", text)
+      } catch (e) {
+        // ignore
+      }
     }
   }
+
+  // If `form.formUrl` is already a login-wrapped URL like
+  //  https://host/login?callbackUrl=%2Fform%2F..., unwrap to the direct form path.
+  const getDirectFormUrl = () => {
+    const raw = form.formUrl || `/form/${form.id}`
+    try {
+      if (/^https?:\/\//i.test(raw)) {
+        const parsed = new URL(raw)
+        // if this looks like a login page with callbackUrl param, use the decoded callback
+        const callback = parsed.searchParams.get("callbackUrl")
+        if (callback) {
+          // if callback is an absolute URL or path
+          if (/^https?:\/\//i.test(callback)) return callback
+          return `${parsed.origin}${callback}`
+        }
+        return raw
+      }
+
+      // raw is a relative path; nothing to unwrap
+      return raw
+    } catch (e) {
+      return raw
+    }
+  }
+
+  const directFormUrl = getDirectFormUrl()
+
+  const getPublicUrl = () => {
+    if (!settings.requireLogin) return directFormUrl
+
+    try {
+      // Wrap the direct form URL with the current origin's login route
+      if (/^https?:\/\//i.test(directFormUrl)) {
+        const parsed = new URL(directFormUrl)
+        const path = parsed.pathname + parsed.search + parsed.hash
+        return `${parsed.origin}/login?callbackUrl=${encodeURIComponent(path)}`
+      }
+
+      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      return `${origin}/login?callbackUrl=${encodeURIComponent(directFormUrl)}`
+    } catch (e) {
+      return directFormUrl
+    }
+  }
+
+  const publicUrl = getPublicUrl()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -126,15 +240,18 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
         </DialogHeader>
 
         <div className="space-y-2">
-          {form.isPublished && form.formUrl && (
+              {form.isPublished && form.formUrl && (
             <div className="space-y-2">
               <Label>Public URL</Label>
               <div className="flex items-center space-x-2">
-                <Input value={form.formUrl} readOnly className="flex-1" />
-                <Button variant="outline" size="icon" onClick={() => copyToClipboard(form.formUrl!)}>
+                <Input ref={inputRef} value={publicUrl} readOnly className="flex-1" />
+                <Button variant="outline" size="icon" onClick={() => copyToClipboard(publicUrl)} aria-label="Copy public URL">
                   <Copy className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="icon" onClick={() => window.open(form.formUrl!, "_blank")}>
+                <Button variant="outline" size="icon" onClick={() => window.open(form.formUrl!, "_blank", "noopener,noreferrer")}>
+                  <Eye className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" onClick={() => window.open(publicUrl, "_blank", "noopener,noreferrer")}>
                   <ExternalLink className="h-4 w-4" />
                 </Button>
               </div>
@@ -217,6 +334,8 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
           )}
         </DialogFooter>
       </DialogContent>
+      {/* Inline preview of the published form (opens the public form dialog) */}
+      <PublicFormDialog formId={form.id} isOpen={showPublicPreview} onClose={() => setShowPublicPreview(false)} />
     </Dialog>
   )
 }

@@ -1,9 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { 
+import {
   X, Table2, LayoutList, Clock, Search, Download, Layers,
-  User, Mail, Briefcase, Calendar, Info, Globe,
-  MoreHorizontal, ArrowUpDown, CalendarDays, ArrowRight,
-  FileText, Layout, ChevronRight, Filter, ChevronDown
+  MoreHorizontal, FileText, Layout, Filter, ChevronDown
 } from 'lucide-react';
 
 // --- Interfaces ---
@@ -128,13 +126,12 @@ const TableView: React.FC<{ rows: any[]; headers: string[] }> = ({ rows, headers
                 return (
                   <td key={header} className="px-4 py-3.5">
                     {isStatus ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
-                        String(val).toLowerCase().includes('approved') || String(val).toLowerCase().includes('active')
-                          ? 'bg-green-50 text-green-700 border-green-100'
-                          : String(val).toLowerCase().includes('rejected')
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${String(val).toLowerCase().includes('approved') || String(val).toLowerCase().includes('active')
+                        ? 'bg-green-50 text-green-700 border-green-100'
+                        : String(val).toLowerCase().includes('rejected')
                           ? 'bg-rose-50 text-rose-700 border-rose-100'
                           : 'bg-amber-50 text-amber-700 border-amber-100'
-                      }`}>
+                        }`}>
                         {renderValue(val)}
                       </span>
                     ) : (
@@ -166,9 +163,8 @@ const PageView: React.FC<{ rows: Record[]; hierarchyGroups?: HierarchyGroup[] }>
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-bold text-slate-800">{getRecordTitle(record)}</h3>
-            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-widest border ${
-              record.status === 'approved' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-100 text-slate-500 border-slate-200'
-            }`}>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-widest border ${record.status === 'approved' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}>
               {record.status}
             </span>
           </div>
@@ -176,14 +172,14 @@ const PageView: React.FC<{ rows: Record[]; hierarchyGroups?: HierarchyGroup[] }>
             <Clock size={12} /> {new Date(record.submittedAt).toLocaleDateString()}
           </div>
         </div>
-        
+
         <div className="p-6 space-y-8">
           {hierarchyGroups ? hierarchyGroups.map(group => (
             <div key={group.id} className="space-y-6">
               <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-[0.2em] border-l-2 border-indigo-500 pl-3">
                 {group.name}
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
                 {group.directSections.map(sec => (
                   <div key={sec.id} className="space-y-3">
@@ -218,7 +214,7 @@ const PageView: React.FC<{ rows: Record[]; hierarchyGroups?: HierarchyGroup[] }>
             </div>
           )) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Object.keys(record).filter(k => !['_','id','submittedAt','status','formName','processedData'].includes(k)).map(key => (
+              {Object.keys(record).filter(k => !['_', 'id', 'submittedAt', 'status', 'formName', 'processedData'].includes(k)).map(key => (
                 <div key={key} className="space-y-1">
                   <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{key.replace(/_/g, ' ')}</div>
                   <div className="text-[13px] font-semibold text-slate-700">{renderValue(record[key])}</div>
@@ -282,9 +278,9 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
       const uniqueLabels = Array.from(new Set(rows.flatMap(r => r.processedData.map((pd: any) => pd.fieldLabel))));
       return uniqueLabels.slice(0, 6);
     }
-    return Object.keys(firstRow).filter(k => !['_','id','submittedAt','status','formName','processedData'].includes(k)).slice(0, 6);
+    return Object.keys(firstRow).filter(k => !['_', 'id', 'submittedAt', 'status', 'formName', 'processedData'].includes(k)).slice(0, 6);
   }, [rows]);
-  
+
   const filteredRows = useMemo(() => {
     if (!searchQuery) return rows;
     const q = searchQuery.toLowerCase();
@@ -299,9 +295,9 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-12 animate-fade-in overflow-hidden">
       <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-sm transition-opacity" onClick={onClose} />
-      
+
       <div className="relative w-full max-w-5xl h-[85vh] bg-white rounded-lg shadow-xl flex flex-col overflow-hidden border border-slate-200 animate-zoom-in">
-        
+
         <header className="px-8 py-4 flex items-center justify-between border-b border-slate-100 bg-white z-10">
           <div className="flex items-center gap-4">
             <div className="w-9 h-9 rounded-md bg-slate-900 flex items-center justify-center text-white">
@@ -310,7 +306,7 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-slate-900 tracking-tight leading-none mb-1">{title}</h2>
               <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                <Layers size={12}/> {filteredRows.length} Records
+                <Layers size={12} /> {filteredRows.length} Records
               </div>
             </div>
           </div>
@@ -320,14 +316,13 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
               const Icon = v === 'table' ? Table2 : v === 'page' ? LayoutList : Clock;
               const isActive = activeView === v;
               return (
-                <button 
-                  key={v} 
-                  onClick={() => setActiveView(v)} 
-                  className={`flex items-center gap-2 px-4 py-1 rounded transition-all font-bold text-[9px] uppercase tracking-widest ${
-                    isActive 
-                    ? 'bg-white text-slate-900 shadow-sm border border-slate-200/50' 
+                <button
+                  key={v}
+                  onClick={() => setActiveView(v)}
+                  className={`flex items-center gap-2 px-4 py-1 rounded transition-all font-bold text-[9px] uppercase tracking-widest ${isActive
+                    ? 'bg-white text-slate-900 shadow-sm border border-slate-200/50'
                     : 'text-slate-400 hover:text-slate-600'
-                  }`}
+                    }`}
                 >
                   <Icon size={12} />
                   <span>{v}</span>
@@ -344,12 +339,12 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
         <div className="px-8 py-3 border-b border-slate-100 bg-slate-50/20 flex items-center justify-between">
           <div className="relative w-full max-w-xs group">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-            <input 
-              type="text" 
-              placeholder="Filter current view..." 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-              className="w-full pl-9 pr-4 py-1.5 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-slate-100 focus:border-slate-400 text-[12px] font-medium transition-all outline-none" 
+            <input
+              type="text"
+              placeholder="Filter current view..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-slate-100 focus:border-slate-400 text-[12px] font-medium transition-all outline-none"
             />
           </div>
           <button className="flex items-center gap-1.5 px-4 py-1.5 bg-white text-slate-600 hover:text-slate-900 border border-slate-200 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all">
@@ -367,8 +362,8 @@ export const DynamicDataPreviewModal2: React.FC<DataPreviewModalProps> = ({
           <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
             Data Preview Mode Active
           </div>
-          <button 
-            onClick={onClose} 
+          <button
+            onClick={onClose}
             className="px-6 py-1.5 bg-slate-900 text-white font-bold text-[10px] uppercase tracking-widest rounded transition-all hover:bg-slate-800"
           >
             Close

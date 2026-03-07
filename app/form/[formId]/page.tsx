@@ -114,7 +114,8 @@ export default function PublicFormPage() {
   const fetchForm = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/forms/${formId}`);
+      // Always request the published snapshot for public page
+      const response = await fetch(`/api/forms/${formId}?published=true`);
       const result = await response.json();
 
       if (!result.success) {

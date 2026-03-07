@@ -68,8 +68,12 @@ export default function ForgotPasswordPage() {
         description: 'A password reset code has been sent to your inbox.',
       })
 
-      // Adjust this route based on your actual reset flow
-      router.push(`/reset-password?email=${encodeURIComponent(data.email)}`)
+      // Navigate to reset page using the returned userId when available
+      const target = result?.userId
+        ? `/auth/reset-password?userId=${encodeURIComponent(result.userId)}`
+        : `/auth/reset-password?email=${encodeURIComponent(data.email)}`
+
+      router.push(target)
     } catch (error) {
       toast({
         title: 'Network Error',

@@ -93,9 +93,20 @@ export function FormRenderer({
 }: FormRendererProps) {
   const fieldType = (field.type || "").toLowerCase();
 
-  const fieldProps = {
+  const isFieldVisible = () => {
+    if (field.visible === false) return false
+    if (field.properties && field.properties.hidden === true) return false
+    return true
+  }
+
+  const isFieldReadOnly = () => {
+    return !!field.readonly
+  }
+
+  const fieldProps: any = {
     id: field.id,
-    disabled: submitting || submitted,
+    disabled: submitting || submitted || isFieldReadOnly(),
+    readOnly: isFieldReadOnly(),
     className: error ? "border-red-500" : isInSubform ? "border-purple-200 focus:border-purple-400" : "",
   };
 
@@ -107,6 +118,8 @@ export function FormRenderer({
       const phoneValue = value || "";
       const isInvalid = phoneValue && !isValidPhoneNumber(phoneValue);
 
+      if (!isFieldVisible()) return null
+
       return (
         <div className="space-y-1">
           <PhoneInput
@@ -116,8 +129,8 @@ export function FormRenderer({
             preferredCountries={["IN", "US", "GB", "AE", "CA", "AU", "DE", "FR", "SA"]}
             placeholder={field.placeholder || "Enter phone number"}
             value={phoneValue}
-            onChange={(newValue) => handleFieldChange(field.id, newValue)}
-            disabled={submitting || submitted}
+            onChange={(newValue) => !isFieldReadOnly() && handleFieldChange(field.id, newValue)}
+            disabled={submitting || submitted || isFieldReadOnly()}
             numberInputProps={{
               className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${isInvalid ? "border-red-500" : "border-input"}`,
             }}
@@ -136,6 +149,7 @@ export function FormRenderer({
     }
 
     case "formula": {
+      if (!isFieldVisible()) return null
       const calculatedValue = formulaValues[field.id];
       const displayValue = calculatedValue !== undefined && calculatedValue !== "" ? String(calculatedValue) : "—";
 
@@ -154,6 +168,7 @@ export function FormRenderer({
     }
 
     case "unique-id": {
+      if (!isFieldVisible()) return null
       return (
         <Input
           type="text"
@@ -169,76 +184,83 @@ export function FormRenderer({
     case "number":
     case "tel":
     case "url":
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           type={fieldType}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
 
     case "password":
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           type="password"
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
 
     case "textarea":
+      if (!isFieldVisible()) return null
       return (
         <Textarea
           {...fieldProps}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
           rows={3}
         />
       );
 
     case "date":
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           type="date"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
 
     case "time":
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           type="time"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
 
     case "datetime":
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           type="datetime-local"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
 
     case "checkbox":
+      if (!isFieldVisible()) return null
       return (
         <div className="flex items-center space-x-2">
           <Checkbox
             id={field.id}
             checked={value || false}
-            onCheckedChange={(checked: any) => handleFieldChange(field.id, checked)}
-            disabled={submitting || submitted}
+            onCheckedChange={(checked: any) => !isFieldReadOnly() && handleFieldChange(field.id, checked)}
+            disabled={submitting || submitted || isFieldReadOnly()}
           />
           <Label htmlFor={field.id} className="text-sm">
             {field.label}
@@ -247,13 +269,14 @@ export function FormRenderer({
       );
 
     case "switch":
+      if (!isFieldVisible()) return null
       return (
         <div className="flex items-center space-x-2">
           <Switch
             id={field.id}
             checked={value || false}
-            onCheckedChange={(checked: any) => handleFieldChange(field.id, checked)}
-            disabled={submitting || submitted}
+            onCheckedChange={(checked: any) => !isFieldReadOnly() && handleFieldChange(field.id, checked)}
+            disabled={submitting || submitted || isFieldReadOnly()}
           />
           <Label htmlFor={field.id} className="text-sm">
             {field.label}
@@ -262,11 +285,12 @@ export function FormRenderer({
       );
 
     case "radio":
+      if (!isFieldVisible()) return null
       return (
         <RadioGroup
           value={value || ""}
-          onValueChange={(v: any) => handleFieldChange(field.id, v)}
-          disabled={submitting || submitted}
+          onValueChange={(v: any) => !isFieldReadOnly() && handleFieldChange(field.id, v)}
+          disabled={submitting || submitted || isFieldReadOnly()}
         >
           {options.map((opt: any) => (
             <div key={opt.value} className="flex items-center space-x-2">
@@ -280,11 +304,12 @@ export function FormRenderer({
       );
 
     case "select":
+      if (!isFieldVisible()) return null
       return (
         <Select
           value={value || ""}
-          onValueChange={(v: any) => handleFieldChange(field.id, v)}
-          disabled={submitting || submitted}
+          onValueChange={(v: any) => !isFieldReadOnly() && handleFieldChange(field.id, v)}
+          disabled={submitting || submitted || isFieldReadOnly()}
         >
           <SelectTrigger className={error ? "border-red-500" : ""}>
             <SelectValue placeholder={field.placeholder || "Select an option"} />
@@ -300,15 +325,16 @@ export function FormRenderer({
       );
 
     case "slider":
+      if (!isFieldVisible()) return null
       return (
         <div className="space-y-2">
           <Slider
             value={[value || 0]}
-            onValueChange={(vals: any[]) => handleFieldChange(field.id, vals[0])}
+            onValueChange={(vals: any[]) => !isFieldReadOnly() && handleFieldChange(field.id, vals[0])}
             max={field.validation?.max || 100}
             min={field.validation?.min || 0}
             step={1}
-            disabled={submitting || submitted}
+            disabled={submitting || submitted || isFieldReadOnly()}
           />
           <div className="text-center text-sm text-muted-foreground">
             Value: {value || 0}
@@ -317,6 +343,7 @@ export function FormRenderer({
       );
 
     case "lookup":
+      if (!isFieldVisible()) return null
       return (
         <LookupField
           field={{
@@ -329,8 +356,8 @@ export function FormRenderer({
             lookup: field.lookup,
           }}
           value={value}
-          onChange={(v, full) => handleFieldChange(field.id, v, full)}
-          disabled={submitting || submitted}
+          onChange={(v, full) => !isFieldReadOnly() && handleFieldChange(field.id, v, full)}
+          disabled={submitting || submitted || isFieldReadOnly()}
           error={error}
         />
       );
@@ -339,23 +366,25 @@ export function FormRenderer({
     case "image":
     case "video":
     case "signature":
+      if (!isFieldVisible()) return null
       return (
         <FileUploadZone
           fieldType={fieldType as any}
           currentValue={value}
-          onUploadComplete={(url: any) => handleFieldChange(field.id, url)}
-          onClear={() => handleFieldChange(field.id, "")}
-          disabled={submitting || submitted}
+          onUploadComplete={(url: any) => !isFieldReadOnly() && handleFieldChange(field.id, url)}
+          onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
+          disabled={submitting || submitted || isFieldReadOnly()}
           maxSize={10}
         />
       );
 
     case "camera":
+      if (!isFieldVisible()) return null
       return (
         <CameraCapture
-          onCapture={(img) => handleFieldChange(field.id, img)}
+          onCapture={(img) => !isFieldReadOnly() && handleFieldChange(field.id, img)}
           capturedImage={value || null}
-          onClear={() => handleFieldChange(field.id, "")}
+          onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
         />
       );
 
@@ -363,12 +392,13 @@ export function FormRenderer({
       return <input type="hidden" value={value || ""} />;
 
     default:
+      if (!isFieldVisible()) return null
       return (
         <Input
           {...fieldProps}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
         />
       );
   }
@@ -475,54 +505,73 @@ export function RenderSubform({
       {!isCollapsed && (
         <div className="p-5 space-y-6">
           {allItems.length > 0 ? (
-            allItems.map((item) =>
-              item.type === "field" ? (
-                <div key={item.id} className="space-y-2">
-                  {(item.item as FormField).type !== "checkbox" &&
-                   (item.item as FormField).type !== "switch" &&
-                   (item.item as FormField).type !== "hidden" && (
-                    <Label className="text-sm font-medium flex items-center gap-2">
-                      {(item.item as FormField).label}
-                      {(item.item as FormField).validation?.required && <span className="text-red-500">*</span>}
-                    </Label>
-                  )}
-                  {(item.item as FormField).description && (item.item as FormField).type !== "hidden" && (
-                    <p className="text-xs text-muted-foreground">{(item.item as FormField).description}</p>
-                  )}
-                  <FormRenderer
-                    field={item.item as FormField}
-                    value={value?.[item.id]}
-                    error={errors[item.id]}
-                    submitting={submitting}
-                    submitted={submitted}
-                    handleFieldChange={handleFieldChange}
-                    formulaValues={formulaValues}
-                    isInSubform={true}
-                  />
-                  {errors[item.id] && (
-                    <p className="text-sm text-red-500 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      {errors[item.id]}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div key={item.id} className="ml-6 mt-4">
-                  <RenderSubform
-                    subform={item.item as Subform}
-                    level={level + 1}
-                    parentPath={currentPath}
-                    value={value?.[item.id] || {}}
-                    errors={errors}
-                    submitting={submitting}
-                    handleFieldChange={handleFieldChange}
-                    formulaValues={formulaValues}
-                    toggleSubform={toggleSubform}
-                    collapsedSubforms={collapsedSubforms}
-                  />
-                </div>
+            (() => {
+              const visibleItems = allItems.filter((item) => {
+                if (item.type === "field") {
+                  const f = item.item as FormField
+                  if (f.visible === false) return false
+                  if (f.properties && f.properties.hidden === true) return false
+                  return true
+                }
+                // For subforms, respect a `visible` flag if present
+                if (item.type === "subform") {
+                  const sf = item.item as Subform
+                  if ((sf as any).visible === false) return false
+                  if ((sf as any).properties && (sf as any).properties.hidden === true) return false
+                  return true
+                }
+                return true
+              })
+
+              return visibleItems.map((item) =>
+                item.type === "field" ? (
+                  <div key={item.id} className="space-y-2">
+                    {(item.item as FormField).type !== "checkbox" &&
+                     (item.item as FormField).type !== "switch" &&
+                     (item.item as FormField).type !== "hidden" && (
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        {(item.item as FormField).label}
+                        {(item.item as FormField).validation?.required && <span className="text-red-500">*</span>}
+                      </Label>
+                    )}
+                    {(item.item as FormField).description && (item.item as FormField).type !== "hidden" && (
+                      <p className="text-xs text-muted-foreground">{(item.item as FormField).description}</p>
+                    )}
+                    <FormRenderer
+                      field={item.item as FormField}
+                      value={value?.[item.id]}
+                      error={errors[item.id]}
+                      submitting={submitting}
+                      submitted={submitted}
+                      handleFieldChange={handleFieldChange}
+                      formulaValues={formulaValues}
+                      isInSubform={true}
+                    />
+                    {errors[item.id] && (
+                      <p className="text-sm text-red-500 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {errors[item.id]}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div key={item.id} className="ml-6 mt-4">
+                    <RenderSubform
+                      subform={item.item as Subform}
+                      level={level + 1}
+                      parentPath={currentPath}
+                      value={value?.[item.id] || {}}
+                      errors={errors}
+                      submitting={submitting}
+                      handleFieldChange={handleFieldChange}
+                      formulaValues={formulaValues}
+                      toggleSubform={toggleSubform}
+                      collapsedSubforms={collapsedSubforms}
+                    />
+                  </div>
+                )
               )
-            )
+            })()
           ) : (
             <div className="border-2 border-dashed rounded-lg p-6 text-center border-gray-300 bg-gray-50">
               <Layers className={`w-6 h-6 mx-auto mb-2 ${colorScheme.accent}`} />

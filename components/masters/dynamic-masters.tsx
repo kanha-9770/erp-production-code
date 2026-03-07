@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Plus, Trash2, Save, Edit2, Loader2, X, Search, Filter, MoreHorizontal, ChevronDown, ChevronUp, Upload } from "lucide-react"
+import { Plus, Trash2, Save, Edit2, Loader2, X, Search, Filter, ChevronDown, ChevronUp, Upload } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 
@@ -43,7 +43,6 @@ const ExcelCell: React.FC<{
   children?: React.ReactNode
 }> = ({ content, isExpanded, onToggleExpand, className, children }) => {
   const needsExpansion = content && content.length > 50
-
   return (
     <div className={cn("relative group h-full flex items-center", className)}>
       {children ? (
@@ -82,6 +81,7 @@ export function DynamicMasters() {
   const [modules, setModules] = useState<any[]>([])
   const [forms, setForms] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [processingRows, setProcessingRows] = useState<Set<string>>(new Set())
   const [recordSearchQuery, setRecordSearchQuery] = useState("")
   const [selectedModuleFilter, setSelectedModuleFilter] = useState("all")
   const [recordsPerPage, setRecordsPerPage] = useState(10)
@@ -106,7 +106,6 @@ export function DynamicMasters() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [rowToDelete, setRowToDelete] = useState<string | null>(null)
   const { toast } = useToast()
-
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const valueInputRefs = useRef<Map<string, HTMLInputElement[]>>(new Map())
 
@@ -180,7 +179,6 @@ export function DynamicMasters() {
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
       const row = newRows[idx]
-
       if (field === "module_id") {
         const mod = modules.find((m) => m.id === value)
         row.module_id = value
@@ -210,9 +208,8 @@ export function DynamicMasters() {
         row.form_id = value
         row.form_name = form?.name || ""
       } else {
-        ; (row as any)[field] = value
+        ;(row as any)[field] = value
       }
-
       return newRows
     })
   }, [modules, forms, findNode])
@@ -232,15 +229,12 @@ export function DynamicMasters() {
       const newRows = [...prev]
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
-
-      const newValueId = `temp-${Date.now()}`
+      const newValueId = `temp-${Date.now()}-${Math.random()}`
       newRows[idx].values.push({
         id: newValueId,
         value: "",
         code: "",
       })
-
-      // Focus the new input after state update
       setTimeout(() => {
         const refsForRow = valueInputRefs.current.get(rowId)
         if (refsForRow && refsForRow.length > 0) {
@@ -248,7 +242,6 @@ export function DynamicMasters() {
           lastInput?.focus()
         }
       }, 0)
-
       return newRows
     })
   }, [])
@@ -267,7 +260,6 @@ export function DynamicMasters() {
     const idx = rows.findIndex(r => r.id === rowId)
     if (idx < 0) return
     const row = rows[idx]
-
     if (!row.form_id || !row.master_data_type_name.trim() || row.values.length === 0 || row.values.every(v => !v.value.trim())) {
       toast({
         title: "Validation Error",
@@ -276,41 +268,60 @@ export function DynamicMasters() {
       })
       return
     }
-
+    setProcessingRows(prev => new Set([...prev, rowId]))
     const payload = {
       ...(row.isNew ? { form_id: row.form_id } : { id: row.id }),
       master_data_type_name: row.master_data_type_name.trim(),
       values: row.values.map((v) => v.value.trim()).filter(Boolean),
     }
-
     const method = row.isNew ? "POST" : "PUT"
-    const res = await fetch("/api/master-data", {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-
-    if (res.ok) {
-      toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
-      fetchData()
-      setCurrentPage(1)
-    } else {
-      const err = await res.json()
-      toast({ title: "Error", description: err.error || "Save failed", variant: "destructive" })
+    try {
+      const res = await fetch("/api/master-data", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
+        await fetchData()
+        setCurrentPage(1)
+      } else {
+        const err = await res.json()
+        toast({ title: "Error", description: err.error || "Save failed", variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "Error", description: "Network error - could not save", variant: "destructive" })
+    } finally {
+      setProcessingRows(prev => {
+        const next = new Set(prev)
+        next.delete(rowId)
+        return next
+      })
     }
   }, [rows, toast])
 
   const handleConfirmDelete = useCallback(async (id: string) => {
-    const res = await fetch(`/api/master-data?id=${id}`, { method: "DELETE" })
-    if (res.ok) {
-      toast({ title: "Deleted", description: "Dropdown removed" })
-      fetchData()
-      setCurrentPage(1)
-    } else {
-      toast({ title: "Error", description: "Delete failed", variant: "destructive" })
+    setProcessingRows(prev => new Set([...prev, id]))
+    try {
+      const res = await fetch(`/api/master-data?id=${id}`, { method: "DELETE" })
+      if (res.ok) {
+        toast({ title: "Deleted", description: "Dropdown removed" })
+        await fetchData()
+        setCurrentPage(1)
+      } else {
+        toast({ title: "Error", description: "Delete failed", variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "Error", description: "Network error - could not delete", variant: "destructive" })
+    } finally {
+      setProcessingRows(prev => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setDeleteDialogOpen(false)
+      setRowToDelete(null)
     }
-    setDeleteDialogOpen(false)
-    setRowToDelete(null)
   }, [toast])
 
   const deleteRow = useCallback((id: string) => {
@@ -336,7 +347,6 @@ export function DynamicMasters() {
   const sortRecords = useCallback((records: DropdownRow[]): DropdownRow[] => {
     const sorted = [...records].sort((a, b) => {
       let valA: any, valB: any
-
       switch (recordSortField) {
         case "module":
           valA = a.module_name
@@ -369,12 +379,10 @@ export function DynamicMasters() {
         default:
           return 0
       }
-
       if (valA < valB) return recordSortOrder === "asc" ? -1 : 1
       if (valA > valB) return recordSortOrder === "asc" ? 1 : -1
       return 0
     })
-
     return sorted
   }, [recordSortField, recordSortOrder])
 
@@ -382,9 +390,7 @@ export function DynamicMasters() {
   if (selectedModuleFilter !== "all") {
     filteredRecords = filteredRecords.filter(r => r.module_id === selectedModuleFilter)
   }
-
   const sortedRecords = sortRecords(filteredRecords)
-
   const totalRecords = sortedRecords.length
   const startIdx = (currentPage - 1) * recordsPerPage
   const endIdx = currentPage * recordsPerPage
@@ -402,7 +408,6 @@ export function DynamicMasters() {
 
   useEffect(() => {
     if (!resizingColumn) return
-
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - resizeStartX
       const newWidth = Math.max(100, resizeStartWidth + deltaX)
@@ -412,14 +417,11 @@ export function DynamicMasters() {
         return updated
       })
     }
-
     const handleMouseUp = () => {
       setResizingColumn(null)
     }
-
     document.addEventListener("mousemove", handleMouseMove)
     document.addEventListener("mouseup", handleMouseUp)
-
     return () => {
       document.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("mouseup", handleMouseUp)
@@ -448,12 +450,9 @@ export function DynamicMasters() {
       const numDummy = Math.max(0, maxRows - paginatedRecords.length)
       setNumDummyRows(numDummy)
     }
-
     const timer = setTimeout(calculateFillers, 100)
-
     const resizeHandler = () => calculateFillers()
     window.addEventListener("resize", resizeHandler)
-
     return () => {
       clearTimeout(timer)
       window.removeEventListener("resize", resizeHandler)
@@ -474,13 +473,12 @@ export function DynamicMasters() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-screen-2xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-          <div className="p-6 border-b flex justify-between items-center bg-gradient-to-r  text-white">
+          <div className="p-6 border-b flex justify-between items-center bg-gradient-to-r text-white">
             <h1 className="text-2xl font-bold text-black">Master Dropdown Management</h1>
             <Button onClick={addNewRow} className="bg-white text-blue-700 hover:bg-gray-100">
               <Plus className="w-4 h-4 mr-2" /> Add New Dropdown
             </Button>
           </div>
-
           <div className="p-4 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1">
@@ -519,11 +517,11 @@ export function DynamicMasters() {
                     <SelectItem value="10">10 per page</SelectItem>
                     <SelectItem value="20">20 per page</SelectItem>
                     <SelectItem value="50">50 per page</SelectItem>
+                    <SelectItem value="100">100 per page</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-
             {hasActiveFilters && (
               <div className="flex items-center gap-2 flex-wrap p-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-300 rounded-xl shadow-sm">
                 <span className="text-xs font-semibold text-blue-900">Active Filters:</span>
@@ -556,7 +554,6 @@ export function DynamicMasters() {
                 </Button>
               </div>
             )}
-
             {totalRecords > recordsPerPage && (
               <div className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-300 p-4 rounded-xl shadow-sm">
                 <div className="text-sm font-medium text-gray-700">
@@ -588,7 +585,6 @@ export function DynamicMasters() {
                 </div>
               </div>
             )}
-
             <div className="border border-gray-200 bg-white rounded-xl overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300">
               <div className="overflow-auto h-[75vh] max-h-[75vh]" ref={tableContainerRef}>
                 <div className="inline-block min-w-full">
@@ -610,8 +606,6 @@ export function DynamicMasters() {
                       <div className="w-12 h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center text-xs font-bold text-gray-800 flex-shrink-0">
                         #
                       </div>
-
-                      {/* Module Header */}
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("module") || 200}px` }}
@@ -640,7 +634,6 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
-                      {/* Level 2 Header */}
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("level2") || 150}px` }}
@@ -669,7 +662,6 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
-                      {/* Similar for level3, level4, form, dropdown, values */}
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("level3") || 150}px` }}
@@ -814,7 +806,6 @@ export function DynamicMasters() {
                         Actions
                       </div>
                     </div>
-
                     {paginatedRecords.length === 0 ? (
                       <div className="flex items-center justify-center py-12 text-gray-500">
                         <p className="text-sm font-medium">
@@ -826,11 +817,11 @@ export function DynamicMasters() {
                         {paginatedRecords.map((row, rowIndex) => {
                           const rowId = row.id
                           const isEditing = row.isEditing
+                          const isProcessing = processingRows.has(rowId)
                           const cellKeyPrefix = `${rowId}-`
                           const num = startIdx + rowIndex + 1
                           const valuesContent = row.values.map(v => v.value).filter(Boolean).join(", ") || "—"
                           const isSelected = selectedRecords.has(rowId)
-
                           return (
                             <div
                               key={rowId}
@@ -854,8 +845,6 @@ export function DynamicMasters() {
                               <div className="w-12 h-9 border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
                                 {num}
                               </div>
-
-
                               {/* Module Cell */}
                               <div
                                 className={cn(
@@ -888,7 +877,6 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
                               {/* Level 2 Cell */}
                               <div
                                 className={cn(
@@ -926,7 +914,6 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
                               {/* Level 3 Cell */}
                               <div
                                 className={cn(
@@ -964,7 +951,6 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
                               {/* Level 4 Cell */}
                               <div
                                 className={cn(
@@ -1002,7 +988,6 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
                               {/* Form Cell */}
                               <div
                                 className={cn(
@@ -1039,7 +1024,6 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
                               {/* Dropdown Name Cell */}
                               <div
                                 className={cn(
@@ -1066,8 +1050,7 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
-                              {/* Values Cell – only this part is modified */}
+                              {/* Values Cell */}
                               <div
                                 className={cn(
                                   "border-r border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200",
@@ -1078,7 +1061,6 @@ export function DynamicMasters() {
                                 <div className={cn("w-full", isEditing ? "min-h-[20px]" : "h-full flex items-center")}>
                                   {isEditing ? (
                                     <div className="w-full space-y-4">
-                                      {/* Import button */}
                                       <Button
                                         variant="outline"
                                         size="sm"
@@ -1090,26 +1072,22 @@ export function DynamicMasters() {
                                           input.onchange = (e) => {
                                             const file = (e.target as HTMLInputElement).files?.[0]
                                             if (!file) return
-
                                             const reader = new FileReader()
                                             reader.onload = (ev) => {
                                               try {
                                                 const text = ev.target?.result as string
                                                 let values: string[] = []
-
                                                 if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
                                                   values = text
                                                     .split(/\r?\n/)
                                                     .map(line => line.trim())
                                                     .filter(line => line.length > 0)
                                                 } else {
-                                                  // Very basic fallback for xlsx (split lines, take first token)
                                                   values = text
                                                     .split(/\r?\n/)
                                                     .map(line => line.split(/[,;\t]/)[0]?.trim() || "")
                                                     .filter(Boolean)
                                                 }
-
                                                 if (values.length === 0) {
                                                   toast({
                                                     title: "No values imported",
@@ -1118,19 +1096,17 @@ export function DynamicMasters() {
                                                   })
                                                   return
                                                 }
-
                                                 setRows(prev => {
                                                   const next = [...prev]
                                                   const idx = next.findIndex(r => r.id === rowId)
                                                   if (idx === -1) return prev
                                                   next[idx].values = values.map((v, i) => ({
-                                                    id: `file-import-${Date.now()}-${i}`,
+                                                    id: `file-import-${Date.now()}-${i}-${Math.random()}`,
                                                     value: v,
                                                     code: ""
                                                   }))
                                                   return next
                                                 })
-
                                                 toast({
                                                   title: `Imported ${values.length} values`,
                                                   description: `from ${file.name}`
@@ -1151,7 +1127,6 @@ export function DynamicMasters() {
                                         <Upload className="h-4 w-4 mr-2" />
                                         Import values from file (.xlsx / .csv / .txt)
                                       </Button>
-
                                       <div className="relative my-2">
                                         <div className="absolute inset-0 flex items-center">
                                           <span className="w-full border-t border-gray-300" />
@@ -1160,8 +1135,6 @@ export function DynamicMasters() {
                                           <span className="bg-white px-2 text-gray-500">or enter manually</span>
                                         </div>
                                       </div>
-
-                                      {/* Original manual value inputs */}
                                       {row.values.map((val, vi) => (
                                         <div key={val.id} className="flex gap-2">
                                           <Input
@@ -1216,25 +1189,43 @@ export function DynamicMasters() {
                                   )}
                                 </div>
                               </div>
-
+                              {/* Actions Column - only icons for Edit & Delete */}
                               <div className="w-32 h-9 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0 px-1">
-                                <div className="flex gap-1 w-full justify-center">
+                                <div className="flex gap-3 w-full justify-center">
                                   {isEditing ? (
                                     <>
                                       <Button
                                         size="sm"
                                         onClick={() => saveRow(rowId)}
-                                        className="h-6 px-2 text-xs flex-1"
+                                        disabled={isProcessing}
+                                        className={cn(
+                                          "h-6 px-2 text-xs flex items-center gap-1 min-w-[80px]",
+                                          isProcessing && "opacity-70 cursor-not-allowed"
+                                        )}
                                       >
-                                        <Save className="w-3 h-3 mr-1" />
+                                        {isProcessing ? (
+                                          <>
+                                            <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                                            Saving...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Save className="w-3 h-3 mr-1" />
+                                            Save
+                                          </>
+                                        )}
                                       </Button>
                                       <Button
                                         variant="outline"
                                         size="sm"
                                         onClick={() => cancelRow(rowId)}
-                                        className="h-6 px-2 text-xs"
+                                        disabled={isProcessing}
+                                        className={cn(
+                                          "h-6 px-2 text-xs",
+                                          isProcessing && "opacity-70 cursor-not-allowed"
+                                        )}
                                       >
-                                        <X className="w-3 h-3 mr-1" />
+                                        <X className="w-3 h-3" />
                                       </Button>
                                     </>
                                   ) : (
@@ -1242,17 +1233,29 @@ export function DynamicMasters() {
                                       <Button
                                         size="sm"
                                         onClick={() => startEdit(rowId)}
-                                        className="h-6 px-2 text-xs flex-1"
+                                        disabled={isProcessing}
+                                        className={cn(
+                                          "h-6 px-2 text-xs flex-1 bg-blue-600 text-white hover:bg-blue-700",
+                                          isProcessing && "opacity-70 cursor-not-allowed"
+                                        )}
                                       >
                                         <Edit2 className="w-3 h-3 mr-1" />
                                       </Button>
                                       <Button
-                                        variant="destructive"
                                         size="sm"
+                                        variant="destructive"
                                         onClick={() => deleteRow(rowId)}
-                                        className="h-6 px-2 text-xs"
+                                        disabled={isProcessing}
+                                        className={cn(
+                                          "h-6 w-8 p-0 flex items-center justify-center",
+                                          isProcessing && "opacity-70 cursor-not-allowed"
+                                        )}
                                       >
-                                        <Trash2 className="w-3 h-3 mr-1" />
+                                        {isProcessing ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Trash2 className="h-4 w-4" />
+                                        )}
                                       </Button>
                                     </>
                                   )}
@@ -1261,12 +1264,10 @@ export function DynamicMasters() {
                             </div>
                           )
                         })}
-
                         {Array.from({ length: numDummyRows }).map((_, dummyIndex) => (
                           <div key={`dummy-${dummyIndex}`} className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0">
                             <div className="w-10 border-r border-gray-200 flex items-center justify-center flex-shrink-0" />
                             <div className="w-12 border-r border-gray-200 flex items-center justify-center flex-shrink-0" />
-                            <div className="w-32 border-r border-gray-200 flex items-center justify-center flex-shrink-0" />
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("module") || 200}px` }} />
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("level2") || 150}px` }} />
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("level3") || 150}px` }} />
@@ -1274,6 +1275,7 @@ export function DynamicMasters() {
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("form") || 200}px` }} />
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("dropdown") || 200}px` }} />
                             <div className="border-r border-gray-200 bg-white px-3 flex items-center flex-shrink-0" style={{ width: `${columnWidths.get("values") || 300}px` }} />
+                            <div className="w-32 border-r border-gray-200 flex items-center justify-center flex-shrink-0" />
                           </div>
                         ))}
                       </>
@@ -1284,7 +1286,6 @@ export function DynamicMasters() {
             </div>
           </div>
         </div>
-
         <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
@@ -1294,11 +1295,26 @@ export function DynamicMasters() {
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setDeleteDialogOpen(false)}
+                disabled={processingRows.has(rowToDelete || "")}
+              >
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={() => rowToDelete && handleConfirmDelete(rowToDelete)}>
-                Delete
+              <Button
+                variant="destructive"
+                onClick={() => rowToDelete && handleConfirmDelete(rowToDelete)}
+                disabled={processingRows.has(rowToDelete || "")}
+              >
+                {processingRows.has(rowToDelete || "") ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1306,4 +1322,4 @@ export function DynamicMasters() {
       </div>
     </div>
   )
-} 
+}

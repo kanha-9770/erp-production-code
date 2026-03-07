@@ -78,21 +78,21 @@ export default function LoginPage() {
       ) {
         setError("email", {
           type: "manual",
-          message: "This email is not registered. Please sign up.",
+          message: "User not found. Please sign up.",
         })
 
         toast({
-          title: "Account Not Found",
+          title: "User Not Found",
           description: (
             <>
-              No account exists with this email.{" "}
+              No user found with this email.{" "}
               <Link href="/register" className="underline font-medium">
                 Create one here
               </Link>
             </>
           ),
           variant: "destructive",
-          duration: 6000, // longer so they can read the link
+          duration: 6000,
         })
         return
       }
