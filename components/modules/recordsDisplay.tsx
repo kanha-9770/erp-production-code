@@ -1903,25 +1903,25 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         e.stopPropagation();
 
         if (
-  editMode === "double-click" &&
-  !savingChanges &&
-  !isImageField(fieldDef.label) &&
-  hasPermissionForForm(fieldDef.formId, "EDIT")
-) {
-  const fieldData = getFieldData(record, fieldDef);
-  
-  // Allow editing ALWAYS (even if empty / null / NaN / undefined)
-  setEditingCell({
-    recordId: record.id,
-    fieldId: fieldDef.id,
-    value: fieldData?.value ?? "",           // start empty if null/undefined
-    originalValue: fieldData?.value ?? "",
-    fieldType: fieldDef.type,
-    options: fieldDef.options,
-  });
-  setSelectedCell(`${record.id}-${fieldDef.id}`);
-  setFocusedCell(`${record.id}-${fieldDef.id}`);
-}
+          editMode === "double-click" &&
+          !savingChanges &&
+          !isImageField(fieldDef.label) &&
+          hasPermissionForForm(fieldDef.formId, "EDIT")
+        ) {
+          const fieldData = getFieldData(record, fieldDef);
+
+          // Allow editing ALWAYS (even if empty / null / NaN / undefined)
+          setEditingCell({
+            recordId: record.id,
+            fieldId: fieldDef.id,
+            value: fieldData?.value ?? "",           // start empty if null/undefined
+            originalValue: fieldData?.value ?? "",
+            fieldType: fieldDef.type,
+            options: fieldDef.options,
+          });
+          setSelectedCell(`${record.id}-${fieldDef.id}`);
+          setFocusedCell(`${record.id}-${fieldDef.id}`);
+        }
 
         setLastPointerDownTime(0); // reset
       } else {

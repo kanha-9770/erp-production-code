@@ -880,27 +880,38 @@ export function PublicFormDialog({
     );
   };
 
+  // Add this function
+  const evaluateConditionalVisibility = (field: FormField, formData: Record<string, any>): boolean => {
+    if (!field.conditional) return true;
+    const { type = "show", parentFieldId, value: targetValue } = field.conditional;
+    if (!parentFieldId || targetValue === undefined) return true;
+
+    const parentVal = formData[parentFieldId];
+    const parentStr = Array.isArray(parentVal) ? parentVal : [String(parentVal ?? "")];
+
+    const matches = parentStr.some(v => String(v) === String(targetValue));
+
+    return type === "show" ? matches : !matches;
+  };
+
+  // Update isFieldVisible
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
     const fieldPermId = fieldPermissions[field.id];
-    const effectivePermId =
-      fieldPermId !== undefined ? fieldPermId : sectionPermissions[sectionId];
+    const effectivePermId = fieldPermId ?? sectionPermissions[sectionId];
 
-    // Permission check: hidden by permissions
-    if (effectivePermId === undefined) return true;
     if (effectivePermId === "NONE") return false;
+    if (field.visible === false || field.properties?.hidden === true) return false;
 
-    // Admin-level visibility: if field explicitly marked invisible/hidden, hide it
-    if (field.visible === false) return false;
-    if (field.properties?.hidden === true) return false;
-
-    // NEW: Conditional visibility based on parent value
-    if (!isFieldVisibleDependingOnParent(field)) {
+    // ← NEW: Conditional visibility
+    if (field.conditional && !evaluateConditionalVisibility(field, formData)) {
       return false;
     }
 
+    // Existing dependent options logic
+    if (!isFieldVisibleDependingOnParent(field)) return false;
+
     return true;
   };
-
   useEffect(() => {
     if (!form) return;
 

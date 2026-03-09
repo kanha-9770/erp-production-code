@@ -106,80 +106,44 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const copyToClipboard = async (text: string) => {
-    try {
-      if (
-        typeof navigator !== "undefined" &&
-        navigator.clipboard &&
-        typeof navigator.clipboard.writeText === "function"
-      ) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        // try selecting the visible input first (better UX & more reliable in some browsers)
-        const valueToCopy =
-          (inputRef && inputRef.current && inputRef.current.value) || text
-
-        if (inputRef && inputRef.current) {
-          try {
-            inputRef.current.focus()
-            inputRef.current.select()
-            if (inputRef.current.setSelectionRange) {
-              inputRef.current.setSelectionRange(0, inputRef.current.value.length)
-            }
-            const ok = document.execCommand("copy")
-            if (!ok) throw new Error("Copy command failed when selecting input")
-          } catch (e) {
-            // fallback to hidden textarea
-            const el = document.createElement("textarea")
-            el.value = valueToCopy
-            el.setAttribute("readonly", "")
-            el.style.position = "absolute"
-            el.style.left = "-9999px"
-            document.body.appendChild(el)
-            el.focus()
-            el.select()
-            if (el.setSelectionRange) el.setSelectionRange(0, el.value.length)
-            const successful = document.execCommand("copy")
-            document.body.removeChild(el)
-            if (!successful) throw new Error("Copy command failed with textarea fallback")
-          }
-        } else {
-          // no input ref available, use hidden textarea
-          const el = document.createElement("textarea")
-          el.value = text
-          el.setAttribute("readonly", "")
-          el.style.position = "absolute"
-          el.style.left = "-9999px"
-          document.body.appendChild(el)
-          el.focus()
-          el.select()
-          if (el.setSelectionRange) el.setSelectionRange(0, el.value.length)
-          const successful = document.execCommand("copy")
-          document.body.removeChild(el)
-          if (!successful) throw new Error("Copy command failed with textarea fallback")
-        }
-      }
-
+  try {
+    // Modern API first (works on HTTPS/localhost in most browsers)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
       toast({
         title: "Copied!",
         description: "URL copied to clipboard",
         duration: 2000,
-      })
-    } catch (error: any) {
-      console.error("Failed to copy:", error)
-      toast({
-        title: "Failed to copy",
-        description: error?.message || "Could not copy automatically — select and copy manually",
-        variant: "destructive",
-      })
-      try {
-        // final fallback: show prompt so user can copy manually
-        // eslint-disable-next-line no-alert
-        window.prompt("Copy this URL", text)
-      } catch (e) {
-        // ignore
-      }
+      });
+      return;
     }
+
+    // Fallback: Use hidden textarea + execCommand
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.setAttribute("readonly", "");
+    el.style.position = "absolute";
+    el.style.left = "-9999px";
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+
+    toast({
+      title: "Copied!",
+      description: "URL copied to clipboard",
+      duration: 2000,
+    });
+  } catch (error: any) {
+    console.error("Failed to copy:", error);
+    toast({
+      title: "Failed to copy",
+      description: error?.message || "Please select and copy manually",
+      variant: "destructive",
+    });
   }
+};
 
   // If `form.formUrl` is already a login-wrapped URL like
   //  https://host/login?callbackUrl=%2Fform%2F..., unwrap to the direct form path.

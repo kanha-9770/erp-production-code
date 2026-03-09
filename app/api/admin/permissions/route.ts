@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
         headers: {
           cookie: request.headers.get("cookie") || "",
         },
+        signal: AbortSignal.timeout(10000), // Add timeout for reliability
       },
     );
 
