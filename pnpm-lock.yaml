@@ -254,9 +254,6 @@ importers:
       swr:
         specifier: ^2.3.6
         version: 2.3.6(react@18.3.1)
-      table:
-        specifier: git+https://github.com/tanstack/react-table.git
-        version: git+https://github.com/tanstack/react-table.git#e172109fca4cc403a07236ed8fa103450ceba5e9
       tailwind-merge:
         specifier: ^2.5.5
         version: 2.6.0
@@ -2774,10 +2771,6 @@ packages:
     resolution: {integrity: sha512-wfHRmHWk/isGNMwlLGlZX5Gzz/uTgo0o2IRuTMcf4CPuPFJZlq0rDaKUx+ozB5nBOReNV1kiOyzMfj+MBMikLw==}
     peerDependencies:
       react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  table@git+https://github.com/tanstack/react-table.git#e172109fca4cc403a07236ed8fa103450ceba5e9:
-    resolution: {commit: e172109fca4cc403a07236ed8fa103450ceba5e9, repo: https://github.com/tanstack/react-table.git, type: git}
-    version: 0.0.0
 
   tailwind-merge@2.6.0:
     resolution: {integrity: sha512-P+Vu1qXfzediirmHOC3xKGAYeZtPcV9g76X+xg2FD4tYgR71ewMA35Y3sCz3zhiN/dwefRpJX0yBcgwi1fXNQA==}
@@ -5310,8 +5303,6 @@ snapshots:
       dequal: 2.0.3
       react: 18.3.1
       use-sync-external-store: 1.6.0(react@18.3.1)
-
-  table@git+https://github.com/tanstack/react-table.git#e172109fca4cc403a07236ed8fa103450ceba5e9: {}
 
   tailwind-merge@2.6.0: {}
 
