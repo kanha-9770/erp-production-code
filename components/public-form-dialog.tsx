@@ -70,7 +70,7 @@ interface LookupFieldData {
 
 const getParentValue = (
   field: FormField,
-  formData: Record<string, any>
+  formData: Record<string, any>,
 ): string | string[] | undefined => {
   if (!field.parentFieldId) return undefined;
 
@@ -80,8 +80,8 @@ const getParentValue = (
   }
 
   // Look for dynamic instance keys that contain parentFieldId
-  const possibleKeys = Object.keys(formData).filter((key) =>
-    key.includes(`__`) && key.includes(field.parentFieldId!)
+  const possibleKeys = Object.keys(formData).filter(
+    (key) => key.includes(`__`) && key.includes(field.parentFieldId!),
   );
 
   if (possibleKeys.length > 0) {
@@ -421,12 +421,9 @@ export function PublicFormDialog({
 
   const evaluatorFields = useMemo(() => {
     return allFields.map((f) => {
-      if (
-        f.type === "formula" &&
-        f.properties?.formulaConfig?.returnType
-      ) {
+      if (f.type === "formula" && f.properties?.formulaConfig?.returnType) {
         const effectiveType = String(
-          f.properties.formulaConfig.returnType
+          f.properties.formulaConfig.returnType,
         ).toLowerCase();
         return { ...f, type: effectiveType } as FormField;
       }
@@ -442,14 +439,20 @@ export function PublicFormDialog({
     // the running variable map so that formula-to-formula references work.
     const runningValues: Record<string, any> = {};
     formulaFields.forEach((field) => {
-      const config = field.properties?.formulaConfig as FormulaConfig | undefined;
+      const config = field.properties?.formulaConfig as
+        | FormulaConfig
+        | undefined;
       if (!config || !config.expression) return;
       try {
         const referencedFields = extractFieldReferences(config.expression);
         const variables: Record<string, any> = {};
         referencedFields.forEach((refId) => {
           // First check formData, then check already-computed formula values
-          if (formData[refId] !== undefined && formData[refId] !== null && formData[refId] !== "") {
+          if (
+            formData[refId] !== undefined &&
+            formData[refId] !== null &&
+            formData[refId] !== ""
+          ) {
             variables[refId] = formData[refId];
           } else if (runningValues[refId] !== undefined) {
             variables[refId] = runningValues[refId];
@@ -478,15 +481,18 @@ export function PublicFormDialog({
             const numValue = Number(finalValue);
             if (!isNaN(numValue)) {
               finalValue = numValue.toFixed(config.decimalPlaces || 2);
-              if (config.returnType === "Currency") finalValue = `$${finalValue}`;
-              if (config.returnType === "Percent") finalValue = `${finalValue}%`;
+              if (config.returnType === "Currency")
+                finalValue = `$${finalValue}`;
+              if (config.returnType === "Percent")
+                finalValue = `${finalValue}%`;
             }
           }
           newFormulaValues[field.id] = finalValue;
           // Store raw numeric value for downstream formula-to-formula usage
           runningValues[field.id] = result.value;
         } else {
-          newFormulaValues[field.id] = config.blankPreference === "Zero" ? 0 : "";
+          newFormulaValues[field.id] =
+            config.blankPreference === "Zero" ? 0 : "";
           runningValues[field.id] = config.blankPreference === "Zero" ? 0 : "";
         }
       } catch (err) {
@@ -510,21 +516,25 @@ export function PublicFormDialog({
       });
       return fields;
     };
-    const locationFields = form.sections.flatMap((s) =>
-      s.fields.filter((f) => {
-        const type = (f.type || "").toLowerCase();
-        return (
-          (type === "location" || type === "newlocation") &&
-          f.properties?.autoFetchLocation
-        );
-      }),
-    ).concat(getAllSubformFields(form.subforms || []).filter((f) => {
-      const type = (f.type || "").toLowerCase();
-      return (
-        (type === "location" || type === "newlocation") &&
-        f.properties?.autoFetchLocation
+    const locationFields = form.sections
+      .flatMap((s) =>
+        s.fields.filter((f) => {
+          const type = (f.type || "").toLowerCase();
+          return (
+            (type === "location" || type === "newlocation") &&
+            f.properties?.autoFetchLocation
+          );
+        }),
+      )
+      .concat(
+        getAllSubformFields(form.subforms || []).filter((f) => {
+          const type = (f.type || "").toLowerCase();
+          return (
+            (type === "location" || type === "newlocation") &&
+            f.properties?.autoFetchLocation
+          );
+        }),
       );
-    }));
     if (locationFields.length === 0) return;
     const updates: Record<string, any> = {};
     let anySuccess = false;
@@ -536,7 +546,10 @@ export function PublicFormDialog({
       if (loc) {
         updates[fieldId] = loc.address;
         const coordId = `${fieldId}_coords`;
-        const allFields = [...form.sections.flatMap((s) => s.fields), ...getAllSubformFields(form.subforms || [])];
+        const allFields = [
+          ...form.sections.flatMap((s) => s.fields),
+          ...getAllSubformFields(form.subforms || []),
+        ];
         const hasCoord = allFields.some(
           (f) => f.id === coordId && f.type === "hidden",
         );
@@ -593,21 +606,25 @@ export function PublicFormDialog({
       });
       return fields;
     };
-    const dateTimeFields = form.sections.flatMap((s) =>
-      s.fields.filter(
-        (f) =>
-          (f.type === "date" && f.properties?.autoFetchDate) ||
-          (f.type === "time" && f.properties?.autoFetchTime) ||
-          (f.type === "datetime" &&
-            (f.properties?.autoFetchDate || f.properties?.autoFetchTime)),
-      ),
-    ).concat(getAllSubformFields(form.subforms || []).filter(
-      (f) =>
-        (f.type === "date" && f.properties?.autoFetchDate) ||
-        (f.type === "time" && f.properties?.autoFetchTime) ||
-        (f.type === "datetime" &&
-          (f.properties?.autoFetchDate || f.properties?.autoFetchTime)),
-    ));
+    const dateTimeFields = form.sections
+      .flatMap((s) =>
+        s.fields.filter(
+          (f) =>
+            (f.type === "date" && f.properties?.autoFetchDate) ||
+            (f.type === "time" && f.properties?.autoFetchTime) ||
+            (f.type === "datetime" &&
+              (f.properties?.autoFetchDate || f.properties?.autoFetchTime)),
+        ),
+      )
+      .concat(
+        getAllSubformFields(form.subforms || []).filter(
+          (f) =>
+            (f.type === "date" && f.properties?.autoFetchDate) ||
+            (f.type === "time" && f.properties?.autoFetchTime) ||
+            (f.type === "datetime" &&
+              (f.properties?.autoFetchDate || f.properties?.autoFetchTime)),
+        ),
+      );
     if (dateTimeFields.length === 0) return;
     fetch("/api/system-time")
       .then((r) => r.json())
@@ -762,9 +779,9 @@ export function PublicFormDialog({
     }
   };
   const getAllPermissionableIds = (formData: Form): string[] => {
-    const ids: string[] = formData.sections.map(s => s.id);
+    const ids: string[] = formData.sections.map((s) => s.id);
     const collectSubformIds = (subforms: Subform[]) => {
-      subforms.forEach(sf => {
+      subforms.forEach((sf) => {
         ids.push(sf.id);
         if (sf.childSubforms) collectSubformIds(sf.childSubforms);
       });
@@ -799,10 +816,7 @@ export function PublicFormDialog({
           const data = await res.json();
           console.log("📦 Received Data:", data);
           if (data.error) {
-            console.error(
-              `❌ Data Error for id ${id}:`,
-              data.error,
-            );
+            console.error(`❌ Data Error for id ${id}:`, data.error);
             sectionPerms[id] = "VIEW";
             console.groupEnd();
             return;
@@ -851,7 +865,7 @@ export function PublicFormDialog({
 
   const getParentValueMemo = useCallback(
     (field: FormField) => getParentValue(field, formData),
-    [formData]
+    [formData],
   );
 
   const isFieldVisibleDependingOnParent = (field: FormField): boolean => {
@@ -876,20 +890,29 @@ export function PublicFormDialog({
 
     // Check if this parent value has a corresponding group
     return !!field.dependentGroups?.some(
-      (group) => group.parentValue === parentValue
+      (group) => group.parentValue === parentValue,
     );
   };
 
   // Add this function
-  const evaluateConditionalVisibility = (field: FormField, formData: Record<string, any>): boolean => {
+  const evaluateConditionalVisibility = (
+    field: FormField,
+    formData: Record<string, any>,
+  ): boolean => {
     if (!field.conditional) return true;
-    const { type = "show", parentFieldId, value: targetValue } = field.conditional;
+    const {
+      type = "show",
+      parentFieldId,
+      value: targetValue,
+    } = field.conditional;
     if (!parentFieldId || targetValue === undefined) return true;
 
     const parentVal = formData[parentFieldId];
-    const parentStr = Array.isArray(parentVal) ? parentVal : [String(parentVal ?? "")];
+    const parentStr = Array.isArray(parentVal)
+      ? parentVal
+      : [String(parentVal ?? "")];
 
-    const matches = parentStr.some(v => String(v) === String(targetValue));
+    const matches = parentStr.some((v) => String(v) === String(targetValue));
 
     return type === "show" ? matches : !matches;
   };
@@ -900,7 +923,8 @@ export function PublicFormDialog({
     const effectivePermId = fieldPermId ?? sectionPermissions[sectionId];
 
     if (effectivePermId === "NONE") return false;
-    if (field.visible === false || field.properties?.hidden === true) return false;
+    if (field.visible === false || field.properties?.hidden === true)
+      return false;
 
     // ← NEW: Conditional visibility
     if (field.conditional && !evaluateConditionalVisibility(field, formData)) {
@@ -915,13 +939,15 @@ export function PublicFormDialog({
   useEffect(() => {
     if (!form) return;
 
-    const fieldsToCheck = allFields.filter(f => f.isDependent && f.parentFieldId);
+    const fieldsToCheck = allFields.filter(
+      (f) => f.isDependent && f.parentFieldId,
+    );
 
-    fieldsToCheck.forEach(field => {
-      if (!isFieldVisible(field, /* sectionId — you'll need to find it */)) {
+    fieldsToCheck.forEach((field) => {
+      if (!isFieldVisible(field /* sectionId — you'll need to find it */)) {
         // If field is now hidden, clear its value
         if (formData[field.id] !== undefined && formData[field.id] !== "") {
-          setFormData(prev => {
+          setFormData((prev) => {
             const next = { ...prev };
             delete next[field.id];
             return next;
@@ -952,20 +978,28 @@ export function PublicFormDialog({
   const getVisibleRequiredFields = (): FormField[] => {
     if (!form) return [];
     const visible: FormField[] = [];
-    form.sections.forEach(section => {
+    form.sections.forEach((section) => {
       if (isSectionVisible(section.id)) {
-        section.fields.forEach(f => {
-          if (isFieldVisible(f, section.id) && f.validation?.required && f.type !== "formula") {
+        section.fields.forEach((f) => {
+          if (
+            isFieldVisible(f, section.id) &&
+            f.validation?.required &&
+            f.type !== "formula"
+          ) {
             visible.push(f);
           }
         });
       }
     });
     const collectSubformFields = (subforms: Subform[]) => {
-      subforms.forEach(sf => {
+      subforms.forEach((sf) => {
         if (isSectionVisible(sf.id)) {
-          sf.fields.forEach(f => {
-            if (isFieldVisible(f, sf.id) && f.validation?.required && f.type !== "formula") {
+          sf.fields.forEach((f) => {
+            if (
+              isFieldVisible(f, sf.id) &&
+              f.validation?.required &&
+              f.type !== "formula"
+            ) {
               visible.push(f);
             }
           });
@@ -1004,7 +1038,10 @@ export function PublicFormDialog({
         { key: "country", label: "Country", required: true },
       ];
       for (const sub of subfields) {
-        if (sub.required && (!addr[sub.key] || String(addr[sub.key]).trim() === "")) {
+        if (
+          sub.required &&
+          (!addr[sub.key] || String(addr[sub.key]).trim() === "")
+        ) {
           return `${field.label} → ${sub.label} is required`;
         }
       }
@@ -1159,7 +1196,10 @@ export function PublicFormDialog({
           subforms.forEach((subform) => {
             fields = [...fields, ...subform.fields];
             if (subform.childSubforms?.length) {
-              fields = [...fields, ...getAllSubformFields(subform.childSubforms)];
+              fields = [
+                ...fields,
+                ...getAllSubformFields(subform.childSubforms),
+              ];
             }
           });
           return fields;
@@ -1274,7 +1314,9 @@ export function PublicFormDialog({
           variant: "destructive",
         });
         setSubmitting(false);
-        console.log("User not authenticated, showing toast, set submitting to false, and returning");
+        console.log(
+          "User not authenticated, showing toast, set submitting to false, and returning",
+        );
         return;
       }
       let attendanceHandled = false;
@@ -1312,9 +1354,9 @@ export function PublicFormDialog({
         console.log("Check-out successful, attendanceHandled set to true");
       }
       const hasFields =
-        form?.sections.some(
-          (s) => s.fields.length > 0,
-        ) || form?.subforms?.length > 0 || false;
+        form?.sections.some((s) => s.fields.length > 0) ||
+        form?.subforms?.length > 0 ||
+        false;
       console.log("hasFields:", hasFields);
       console.log("attendanceHandled after checks:", attendanceHandled);
       if (hasFields || !attendanceHandled) {
@@ -1326,11 +1368,15 @@ export function PublicFormDialog({
         console.log("Initializing dynamicRowsData");
         Object.entries(dynamicSubformInstances).forEach(
           ([subformId, instances]) => {
-            console.log(`Processing subformId: ${subformId}, instances length: ${instances.length}`);
+            console.log(
+              `Processing subformId: ${subformId}, instances length: ${instances.length}`,
+            );
             if (instances.length > 0) {
               dynamicRowsData[`_dynamicRows_${subformId}`] = instances.map(
                 (instanceId, index) => {
-                  console.log(`Processing instanceId: ${instanceId}, index: ${index}`);
+                  console.log(
+                    `Processing instanceId: ${instanceId}, index: ${index}`,
+                  );
                   const rowData: Record<string, any> = {
                     _rowIndex: index + 1,
                     _instanceId: instanceId,
@@ -1339,7 +1385,9 @@ export function PublicFormDialog({
                     if (key.includes(`__${instanceId}`)) {
                       const cleanKey = key.replace(`__${instanceId}`, "");
                       rowData[cleanKey] = dataToSubmit[key];
-                      console.log(`Added to rowData: ${cleanKey} = ${dataToSubmit[key]}`);
+                      console.log(
+                        `Added to rowData: ${cleanKey} = ${dataToSubmit[key]}`,
+                      );
                     }
                   });
                   return rowData;
@@ -1490,9 +1538,7 @@ export function PublicFormDialog({
                 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2
                 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50
                 ${field.readonly ? "bg-muted cursor-not-allowed" : ""}
-                ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform
-                    ? "border-purple-200 focus:border-purple-400"
-                    : ""
+                ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
                   }`,
               }}
               countrySelectProps={{ className: "rounded-l-md border-r-0" }}
@@ -1687,12 +1733,43 @@ export function PublicFormDialog({
         );
       case "address": {
         const subfields = field.properties?.subfields || [
-          { key: "line1", label: "Address Line 1", placeholder: "Street address, house no.", required: true },
-          { key: "line2", label: "Address Line 2", placeholder: "Apartment, suite, floor", required: false },
-          { key: "city", label: "City / District", placeholder: "Enter City", required: true },
-          { key: "state", label: "State / Province", placeholder: "Enter State", required: true },
-          { key: "postal", label: "Postal / Zip Code", placeholder: "Enter Postal Code", required: true },
-          { key: "country", label: "Country", type: "select", placeholder: "Select country", required: true },
+          {
+            key: "line1",
+            label: "Address Line 1",
+            placeholder: "Street address, house no.",
+            required: true,
+          },
+          {
+            key: "line2",
+            label: "Address Line 2",
+            placeholder: "Apartment, suite, floor",
+            required: false,
+          },
+          {
+            key: "city",
+            label: "City / District",
+            placeholder: "Enter City",
+            required: true,
+          },
+          {
+            key: "state",
+            label: "State / Province",
+            placeholder: "Enter State",
+            required: true,
+          },
+          {
+            key: "postal",
+            label: "Postal / Zip Code",
+            placeholder: "Enter Postal Code",
+            required: true,
+          },
+          {
+            key: "country",
+            label: "Country",
+            type: "select",
+            placeholder: "Select country",
+            required: true,
+          },
         ];
         const addressValue = (value as Record<string, string>) || {};
         const handleSubChange = (subKey: string, subVal: string) => {
@@ -1711,38 +1788,205 @@ export function PublicFormDialog({
                 if (sub.type === "select") {
                   // Simple country dropdown (you can expand with full list later)
                   const countries = [
-                    "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia",
-                    "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium",
-                    "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil",
-                    "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cambodia", "Cameroon", "Canada",
-                    "Cape Verde", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros",
-                    "Congo", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Denmark", "Djibouti",
-                    "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea",
-                    "Eritrea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
-                    "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guyana", "Haiti",
-                    "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
-                    "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan",
-                    "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
-                    "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands",
-                    "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro",
-                    "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand",
-                    "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman", "Pakistan",
-                    "Palau", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
-                    "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia",
-                    "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe",
-                    "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
-                    "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan",
-                    "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan",
-                    "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago",
-                    "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
-                    "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City",
-                    "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+                    "Afghanistan",
+                    "Albania",
+                    "Algeria",
+                    "Andorra",
+                    "Angola",
+                    "Argentina",
+                    "Armenia",
+                    "Australia",
+                    "Austria",
+                    "Azerbaijan",
+                    "Bahamas",
+                    "Bahrain",
+                    "Bangladesh",
+                    "Barbados",
+                    "Belarus",
+                    "Belgium",
+                    "Belize",
+                    "Benin",
+                    "Bhutan",
+                    "Bolivia",
+                    "Bosnia and Herzegovina",
+                    "Botswana",
+                    "Brazil",
+                    "Brunei",
+                    "Bulgaria",
+                    "Burkina Faso",
+                    "Burundi",
+                    "Cambodia",
+                    "Cameroon",
+                    "Canada",
+                    "Cape Verde",
+                    "Central African Republic",
+                    "Chad",
+                    "Chile",
+                    "China",
+                    "Colombia",
+                    "Comoros",
+                    "Congo",
+                    "Costa Rica",
+                    "Croatia",
+                    "Cuba",
+                    "Cyprus",
+                    "Czech Republic",
+                    "Denmark",
+                    "Djibouti",
+                    "Dominica",
+                    "Dominican Republic",
+                    "Ecuador",
+                    "Egypt",
+                    "El Salvador",
+                    "Equatorial Guinea",
+                    "Eritrea",
+                    "Estonia",
+                    "Eswatini",
+                    "Ethiopia",
+                    "Fiji",
+                    "Finland",
+                    "France",
+                    "Gabon",
+                    "Gambia",
+                    "Georgia",
+                    "Germany",
+                    "Ghana",
+                    "Greece",
+                    "Grenada",
+                    "Guatemala",
+                    "Guinea",
+                    "Guyana",
+                    "Haiti",
+                    "Honduras",
+                    "Hungary",
+                    "Iceland",
+                    "India",
+                    "Indonesia",
+                    "Iran",
+                    "Iraq",
+                    "Ireland",
+                    "Israel",
+                    "Italy",
+                    "Jamaica",
+                    "Japan",
+                    "Jordan",
+                    "Kazakhstan",
+                    "Kenya",
+                    "Kiribati",
+                    "Kuwait",
+                    "Kyrgyzstan",
+                    "Laos",
+                    "Latvia",
+                    "Lebanon",
+                    "Lesotho",
+                    "Liberia",
+                    "Libya",
+                    "Liechtenstein",
+                    "Lithuania",
+                    "Luxembourg",
+                    "Madagascar",
+                    "Malawi",
+                    "Malaysia",
+                    "Maldives",
+                    "Mali",
+                    "Malta",
+                    "Marshall Islands",
+                    "Mauritania",
+                    "Mauritius",
+                    "Mexico",
+                    "Micronesia",
+                    "Moldova",
+                    "Monaco",
+                    "Mongolia",
+                    "Montenegro",
+                    "Morocco",
+                    "Mozambique",
+                    "Myanmar",
+                    "Namibia",
+                    "Nauru",
+                    "Nepal",
+                    "Netherlands",
+                    "New Zealand",
+                    "Nicaragua",
+                    "Niger",
+                    "Nigeria",
+                    "North Korea",
+                    "North Macedonia",
+                    "Norway",
+                    "Oman",
+                    "Pakistan",
+                    "Palau",
+                    "Panama",
+                    "Papua New Guinea",
+                    "Paraguay",
+                    "Peru",
+                    "Philippines",
+                    "Poland",
+                    "Portugal",
+                    "Qatar",
+                    "Romania",
+                    "Russia",
+                    "Rwanda",
+                    "Saint Kitts and Nevis",
+                    "Saint Lucia",
+                    "Saint Vincent and the Grenadines",
+                    "Samoa",
+                    "San Marino",
+                    "Sao Tome and Principe",
+                    "Saudi Arabia",
+                    "Senegal",
+                    "Serbia",
+                    "Seychelles",
+                    "Sierra Leone",
+                    "Singapore",
+                    "Slovakia",
+                    "Slovenia",
+                    "Solomon Islands",
+                    "Somalia",
+                    "South Africa",
+                    "South Korea",
+                    "South Sudan",
+                    "Spain",
+                    "Sri Lanka",
+                    "Sudan",
+                    "Suriname",
+                    "Sweden",
+                    "Switzerland",
+                    "Syria",
+                    "Taiwan",
+                    "Tajikistan",
+                    "Tanzania",
+                    "Thailand",
+                    "Timor-Leste",
+                    "Togo",
+                    "Tonga",
+                    "Trinidad and Tobago",
+                    "Tunisia",
+                    "Turkey",
+                    "Turkmenistan",
+                    "Tuvalu",
+                    "Uganda",
+                    "Ukraine",
+                    "United Arab Emirates",
+                    "United Kingdom",
+                    "United States",
+                    "Uruguay",
+                    "Uzbekistan",
+                    "Vanuatu",
+                    "Vatican City",
+                    "Venezuela",
+                    "Vietnam",
+                    "Yemen",
+                    "Zambia",
+                    "Zimbabwe",
                   ].sort(); // alphabetical order
                   return (
                     <div key={sub.key} className="space-y-1.5">
                       <Label className="text-sm font-medium">
                         {sub.label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
+                        {isRequired && (
+                          <span className="text-red-500 ml-1">*</span>
+                        )}
                       </Label>
                       <Select
                         value={subVal}
@@ -1750,7 +1994,9 @@ export function PublicFormDialog({
                         disabled={submitting || submitted || isReadOnly}
                       >
                         <SelectTrigger className="bg-white">
-                          <SelectValue placeholder={sub.placeholder || "Select country"} />
+                          <SelectValue
+                            placeholder={sub.placeholder || "Select country"}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {countries.map((c) => (
@@ -1767,7 +2013,9 @@ export function PublicFormDialog({
                   <div key={sub.key} className="space-y-1.5">
                     <Label className="text-sm font-medium">
                       {sub.label}
-                      {isRequired && <span className="text-red-500 ml-1">*</span>}
+                      {isRequired && (
+                        <span className="text-red-500 ml-1">*</span>
+                      )}
                     </Label>
                     <Input
                       placeholder={sub.placeholder}
@@ -1805,10 +2053,10 @@ export function PublicFormDialog({
     }
   };
 
-
   const renderField = (field: FormField, isInSubform: boolean = false) => {
     // Respect admin-level visibility flags first
-    if (field.visible === false || field.properties?.hidden === true) return null;
+    if (field.visible === false || field.properties?.hidden === true)
+      return null;
     const value = formData[field.id];
     const error = errors[field.id];
     const fieldType = (field.type || "").toLowerCase();
@@ -1902,7 +2150,7 @@ export function PublicFormDialog({
         const returnType = formulaConfig?.returnType || "Number";
         const displayExpression = formulaConfig?.expression.replace(
           /\{([^}]+)\}/g,
-          (match, id) => `{${idToLabel[id] || id}}`
+          (match, id) => `{${idToLabel[id] || id}}`,
         );
         return (
           <div className="space-y-1">
@@ -2130,13 +2378,18 @@ export function PublicFormDialog({
       case "select": {
         let effectiveOptions: FieldOption[] = [];
 
-        if (field.isDependent && field.parentFieldId && field.dependentGroups?.length) {
+        if (
+          field.isDependent &&
+          field.parentFieldId &&
+          field.dependentGroups?.length
+        ) {
           const parentValueRaw = getParentValueMemo(field);
-          const parentValue = typeof parentValueRaw === "string" ? parentValueRaw : undefined;
+          const parentValue =
+            typeof parentValueRaw === "string" ? parentValueRaw : undefined;
 
           if (parentValue) {
             const matchingGroup = field.dependentGroups.find(
-              (g) => g.parentValue === parentValue
+              (g) => g.parentValue === parentValue,
             );
 
             if (matchingGroup?.options?.length) {
@@ -2151,20 +2404,27 @@ export function PublicFormDialog({
           effectiveOptions = options;
         }
 
-        const isDisabledDueToParent = field.isDependent && !getParentValueMemo(field);
+        const isDisabledDueToParent =
+          field.isDependent && !getParentValueMemo(field);
 
         return (
           <div className="space-y-1">
             <Select
               value={value || ""}
               onValueChange={(v) => handleFieldChange(field.id, v)}
-              disabled={submitting || submitted || isDisabledDueToParent || isReadOnly}
+              disabled={
+                submitting || submitted || isDisabledDueToParent || isReadOnly
+              }
             >
-              <SelectTrigger className={`
+              <SelectTrigger
+                className={`
                 error ? "border-red-500" : "",
                 isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-             `}>
-                <SelectValue placeholder={field.placeholder || "Select an option"} />
+             `}
+              >
+                <SelectValue
+                  placeholder={field.placeholder || "Select an option"}
+                />
               </SelectTrigger>
 
               <SelectContent>
@@ -2191,22 +2451,26 @@ export function PublicFormDialog({
 
             {field.isDependent && (
               <p className="text-xs text-muted-foreground mt-1">
-                Depends on: {idToLabel[field.parentFieldId!] || field.parentFieldId}
+                Depends on:{" "}
+                {idToLabel[field.parentFieldId!] || field.parentFieldId}
               </p>
             )}
 
             {field.isDependent && !getParentValueMemo(field) && (
               <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1">
                 <Info className="h-3.5 w-3.5" />
-                Select a value in "{idToLabel[field.parentFieldId!] || field.parentFieldId}" first
+                Select a value in "
+                {idToLabel[field.parentFieldId!] || field.parentFieldId}" first
               </p>
             )}
 
-            {effectiveOptions.length === 0 && getParentValueMemo(field) && field.isDependent && (
-              <p className="text-xs text-amber-700 mt-1.5">
-                No matching options for "{getParentValueMemo(field)}"
-              </p>
-            )}
+            {effectiveOptions.length === 0 &&
+              getParentValueMemo(field) &&
+              field.isDependent && (
+                <p className="text-xs text-amber-700 mt-1.5">
+                  No matching options for "{getParentValueMemo(field)}"
+                </p>
+              )}
 
             {error && (
               <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
@@ -2326,12 +2590,43 @@ export function PublicFormDialog({
       case "address": {
         // Get subfields from field.properties (if customized in builder) or use defaults
         const subfields = field.properties?.subfields || [
-          { key: "line1", label: "Address Line 1", placeholder: "Street address, house no.", required: true },
-          { key: "line2", label: "Address Line 2", placeholder: "Apartment, suite, floor", required: false },
-          { key: "city", label: "City / District", placeholder: "Enter City", required: true },
-          { key: "state", label: "State / Province", placeholder: "Enter State", required: true },
-          { key: "postal", label: "Postal / Zip Code", placeholder: "Enter Postal Code", required: true },
-          { key: "country", label: "Country", type: "select", placeholder: "Select country", required: true },
+          {
+            key: "line1",
+            label: "Address Line 1",
+            placeholder: "Street address, house no.",
+            required: true,
+          },
+          {
+            key: "line2",
+            label: "Address Line 2",
+            placeholder: "Apartment, suite, floor",
+            required: false,
+          },
+          {
+            key: "city",
+            label: "City / District",
+            placeholder: "Enter City",
+            required: true,
+          },
+          {
+            key: "state",
+            label: "State / Province",
+            placeholder: "Enter State",
+            required: true,
+          },
+          {
+            key: "postal",
+            label: "Postal / Zip Code",
+            placeholder: "Enter Postal Code",
+            required: true,
+          },
+          {
+            key: "country",
+            label: "Country",
+            type: "select",
+            placeholder: "Select country",
+            required: true,
+          },
         ];
         // Current value is an object { line1: "...", city: "...", ... }
         const addressValue = (value as Record<string, string>) || {};
@@ -2351,38 +2646,205 @@ export function PublicFormDialog({
                 if (sub.type === "select") {
                   // Simple country dropdown (you can expand with full list later)
                   const countries = [
-                    "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia", "Australia",
-                    "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium",
-                    "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil",
-                    "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cambodia", "Cameroon", "Canada",
-                    "Cape Verde", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros",
-                    "Congo", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czech Republic", "Denmark", "Djibouti",
-                    "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea",
-                    "Eritrea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia",
-                    "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guyana", "Haiti",
-                    "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
-                    "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan",
-                    "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
-                    "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands",
-                    "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro",
-                    "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand",
-                    "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman", "Pakistan",
-                    "Palau", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal",
-                    "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia",
-                    "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe",
-                    "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia",
-                    "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan",
-                    "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan",
-                    "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago",
-                    "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates",
-                    "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City",
-                    "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"
+                    "Afghanistan",
+                    "Albania",
+                    "Algeria",
+                    "Andorra",
+                    "Angola",
+                    "Argentina",
+                    "Armenia",
+                    "Australia",
+                    "Austria",
+                    "Azerbaijan",
+                    "Bahamas",
+                    "Bahrain",
+                    "Bangladesh",
+                    "Barbados",
+                    "Belarus",
+                    "Belgium",
+                    "Belize",
+                    "Benin",
+                    "Bhutan",
+                    "Bolivia",
+                    "Bosnia and Herzegovina",
+                    "Botswana",
+                    "Brazil",
+                    "Brunei",
+                    "Bulgaria",
+                    "Burkina Faso",
+                    "Burundi",
+                    "Cambodia",
+                    "Cameroon",
+                    "Canada",
+                    "Cape Verde",
+                    "Central African Republic",
+                    "Chad",
+                    "Chile",
+                    "China",
+                    "Colombia",
+                    "Comoros",
+                    "Congo",
+                    "Costa Rica",
+                    "Croatia",
+                    "Cuba",
+                    "Cyprus",
+                    "Czech Republic",
+                    "Denmark",
+                    "Djibouti",
+                    "Dominica",
+                    "Dominican Republic",
+                    "Ecuador",
+                    "Egypt",
+                    "El Salvador",
+                    "Equatorial Guinea",
+                    "Eritrea",
+                    "Estonia",
+                    "Eswatini",
+                    "Ethiopia",
+                    "Fiji",
+                    "Finland",
+                    "France",
+                    "Gabon",
+                    "Gambia",
+                    "Georgia",
+                    "Germany",
+                    "Ghana",
+                    "Greece",
+                    "Grenada",
+                    "Guatemala",
+                    "Guinea",
+                    "Guyana",
+                    "Haiti",
+                    "Honduras",
+                    "Hungary",
+                    "Iceland",
+                    "India",
+                    "Indonesia",
+                    "Iran",
+                    "Iraq",
+                    "Ireland",
+                    "Israel",
+                    "Italy",
+                    "Jamaica",
+                    "Japan",
+                    "Jordan",
+                    "Kazakhstan",
+                    "Kenya",
+                    "Kiribati",
+                    "Kuwait",
+                    "Kyrgyzstan",
+                    "Laos",
+                    "Latvia",
+                    "Lebanon",
+                    "Lesotho",
+                    "Liberia",
+                    "Libya",
+                    "Liechtenstein",
+                    "Lithuania",
+                    "Luxembourg",
+                    "Madagascar",
+                    "Malawi",
+                    "Malaysia",
+                    "Maldives",
+                    "Mali",
+                    "Malta",
+                    "Marshall Islands",
+                    "Mauritania",
+                    "Mauritius",
+                    "Mexico",
+                    "Micronesia",
+                    "Moldova",
+                    "Monaco",
+                    "Mongolia",
+                    "Montenegro",
+                    "Morocco",
+                    "Mozambique",
+                    "Myanmar",
+                    "Namibia",
+                    "Nauru",
+                    "Nepal",
+                    "Netherlands",
+                    "New Zealand",
+                    "Nicaragua",
+                    "Niger",
+                    "Nigeria",
+                    "North Korea",
+                    "North Macedonia",
+                    "Norway",
+                    "Oman",
+                    "Pakistan",
+                    "Palau",
+                    "Panama",
+                    "Papua New Guinea",
+                    "Paraguay",
+                    "Peru",
+                    "Philippines",
+                    "Poland",
+                    "Portugal",
+                    "Qatar",
+                    "Romania",
+                    "Russia",
+                    "Rwanda",
+                    "Saint Kitts and Nevis",
+                    "Saint Lucia",
+                    "Saint Vincent and the Grenadines",
+                    "Samoa",
+                    "San Marino",
+                    "Sao Tome and Principe",
+                    "Saudi Arabia",
+                    "Senegal",
+                    "Serbia",
+                    "Seychelles",
+                    "Sierra Leone",
+                    "Singapore",
+                    "Slovakia",
+                    "Slovenia",
+                    "Solomon Islands",
+                    "Somalia",
+                    "South Africa",
+                    "South Korea",
+                    "South Sudan",
+                    "Spain",
+                    "Sri Lanka",
+                    "Sudan",
+                    "Suriname",
+                    "Sweden",
+                    "Switzerland",
+                    "Syria",
+                    "Taiwan",
+                    "Tajikistan",
+                    "Tanzania",
+                    "Thailand",
+                    "Timor-Leste",
+                    "Togo",
+                    "Tonga",
+                    "Trinidad and Tobago",
+                    "Tunisia",
+                    "Turkey",
+                    "Turkmenistan",
+                    "Tuvalu",
+                    "Uganda",
+                    "Ukraine",
+                    "United Arab Emirates",
+                    "United Kingdom",
+                    "United States",
+                    "Uruguay",
+                    "Uzbekistan",
+                    "Vanuatu",
+                    "Vatican City",
+                    "Venezuela",
+                    "Vietnam",
+                    "Yemen",
+                    "Zambia",
+                    "Zimbabwe",
                   ].sort(); // alphabetical order
                   return (
                     <div key={sub.key} className="space-y-1.5">
                       <Label className="text-sm font-medium">
                         {sub.label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
+                        {isRequired && (
+                          <span className="text-red-500 ml-1">*</span>
+                        )}
                       </Label>
                       <Select
                         value={subVal}
@@ -2390,7 +2852,9 @@ export function PublicFormDialog({
                         disabled={submitting || submitted}
                       >
                         <SelectTrigger className="bg-white">
-                          <SelectValue placeholder={sub.placeholder || "Select country"} />
+                          <SelectValue
+                            placeholder={sub.placeholder || "Select country"}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {countries.map((c) => (
@@ -2407,7 +2871,9 @@ export function PublicFormDialog({
                   <div key={sub.key} className="space-y-1.5">
                     <Label className="text-sm font-medium">
                       {sub.label}
-                      {isRequired && <span className="text-red-500 ml-1">*</span>}
+                      {isRequired && (
+                        <span className="text-red-500 ml-1">*</span>
+                      )}
                     </Label>
                     <Input
                       placeholder={sub.placeholder}
@@ -2456,8 +2922,12 @@ export function PublicFormDialog({
       : subform.name;
     const pathParts = currentPath.split(" > ");
     // Combine fields and child subforms, sorted by order
-    const visibleFields = subform.fields.filter(f => isFieldVisible(f, subform.id));
-    const visibleChildSubforms = (subform.childSubforms || []).filter(sf => isSectionVisible(sf.id));
+    const visibleFields = subform.fields.filter((f) =>
+      isFieldVisible(f, subform.id),
+    );
+    const visibleChildSubforms = (subform.childSubforms || []).filter((sf) =>
+      isSectionVisible(sf.id),
+    );
     const allItems = [
       ...visibleFields.map((f) => ({
         type: "field" as const,
@@ -2474,7 +2944,9 @@ export function PublicFormDialog({
     ].sort((a, b) => a.order - b.order);
     const hasChildSubforms = visibleChildSubforms.length > 0;
     const instances = dynamicSubformInstances[subform.id] || [];
-    const allInstances = hasChildSubforms ? instances : ["original", ...instances];
+    const allInstances = hasChildSubforms
+      ? instances
+      : ["original", ...instances];
     const getFieldTypeLabel = (type: string) => {
       switch (type) {
         case "textarea":
@@ -2635,7 +3107,8 @@ export function PublicFormDialog({
                 </div>
               )
             ) : null}
-            {((hasChildSubforms && instances.length > 0) || !hasChildSubforms) &&
+            {((hasChildSubforms && instances.length > 0) ||
+              !hasChildSubforms) &&
               visibleFields.length > 0 && (
                 <div
                   className={
@@ -2684,7 +3157,9 @@ export function PublicFormDialog({
                         return (
                           <div
                             key={isOriginal ? "original" : instanceId}
-                            className={`flex min-w-max ${isOriginal && !hasChildSubforms ? "bg-white" : "bg-blue-50/40"
+                            className={`flex min-w-max ${isOriginal && !hasChildSubforms
+                              ? "bg-white"
+                              : "bg-blue-50/40"
                               } border-b border-slate-200`}
                           >
                             {visibleFields.map((field) => {
@@ -2969,9 +3444,9 @@ export function PublicFormDialog({
                 {/* Top-level subforms */}
                 {form.subforms?.length > 0 && (
                   <div className="mt-12 space-y-6">
-                    {form.subforms.filter(sf => isSectionVisible(sf.id)).map((subform: Subform) =>
-                      renderSubform(subform, 0, ""),
-                    )}
+                    {form.subforms
+                      .filter((sf) => isSectionVisible(sf.id))
+                      .map((subform: Subform) => renderSubform(subform, 0, ""))}
                   </div>
                 )}
               </div>
