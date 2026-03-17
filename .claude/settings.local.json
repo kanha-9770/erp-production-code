@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(wc -l /c/Users/pc/Desktop/ERP/app/[module_name]/[module_Id]/[[...slug]]/page.tsx)",
+      "Bash(xargs wc:*)"
+    ]
+  }
+}

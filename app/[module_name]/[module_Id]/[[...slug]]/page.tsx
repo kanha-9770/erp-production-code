@@ -538,58 +538,125 @@ export default function ModulePage({
   // ─────────────────────────────────────────────────────────────────────────────
   const saveAllPendingChanges = async (changesToSave?: Map<string, PendingChange>) => {
     const changesToProcess = changesToSave || pendingChanges;
-    if (changesToProcess.size === 0) return;
 
+    console.log(`[Save] saveAllPendingChanges called — ${changesToProcess.size} change(s)`);
+    if (changesToProcess.size === 0) {
+      console.log(`[Save] nothing to process, returning early`);
+      return;
+    }
+
+    changesToProcess.forEach((change, key) => {
+      console.log(`[Save] change key="${key}" | field="${change.fieldLabel}" | fieldId=${change.fieldId} | originalFieldId=${change.originalFieldId} | value="${change.value}" | type=${change.fieldType}`);
+    });
+
+    // ── Step 1: Optimistic update — immediately reflect new values in formRecords ──
+    // This prevents the UI from reverting when pendingChanges is cleared below.
     const optimisticUpdates = new Map<string, any>();
 
     changesToProcess.forEach((change) => {
       if (!optimisticUpdates.has(change.recordId)) {
         const record = formRecords.find((r) => r.id === change.recordId);
-        if (record) optimisticUpdates.set(change.recordId, { ...record });
+        if (record) {
+          optimisticUpdates.set(change.recordId, { ...record });
+          console.log(`[Save] optimistic snapshot created for record=${change.recordId}`);
+        } else {
+          console.warn(`[Save] record ${change.recordId} NOT FOUND in formRecords — optimistic update skipped`);
+        }
       }
 
       const record = optimisticUpdates.get(change.recordId);
       if (record) {
+        // Update raw recordData (what the server stores)
+        const recordDataKey = change.originalFieldId || change.fieldId;
         record.recordData = {
           ...record.recordData,
-          [change.originalFieldId || change.fieldId]: {
+          [recordDataKey]: {
             value: change.value,
             type: change.fieldType,
             label: change.fieldLabel,
           },
         };
-        record.processedData = record.processedData.map((pd: any) =>
-          pd.fieldId === change.fieldId
+        console.log(`[Save] optimistic recordData updated — key="${recordDataKey}" value="${change.value}"`);
+
+        // Update processedData (what the table renders)
+        const updated = record.processedData.map((pd: any) =>
+          pd.fieldId === change.fieldId ||
+          pd.fieldId === change.originalFieldId ||
+          (change.fieldLabel && pd.fieldLabel === change.fieldLabel)
             ? { ...pd, value: change.value, displayValue: formatFieldValue(change.fieldType, change.value) }
             : pd,
         );
+
+        const didMatch = updated.some((pd: any) =>
+          pd.fieldId === change.fieldId ||
+          pd.fieldId === change.originalFieldId ||
+          (change.fieldLabel && pd.fieldLabel === change.fieldLabel),
+        );
+
+        if (!didMatch) {
+          // Field not yet in processedData (e.g. newly added field) — insert it
+          console.log(`[Save] processedData had no match for "${change.fieldLabel}" — inserting new entry`);
+          updated.push({
+            recordId: change.recordId,
+            recordIdFromAPI: change.recordId,
+            fieldId: change.originalFieldId || change.fieldId,
+            fieldLabel: change.fieldLabel || "",
+            fieldType: change.fieldType,
+            value: change.value,
+            displayValue: formatFieldValue(change.fieldType, change.value),
+            icon: change.fieldType,
+            order: 999,
+            sectionId: "other",
+            sectionTitle: "Uncategorized",
+            formId: record.formId || "",
+            formName: record.formName || "",
+            lookup: {},
+            options: [],
+          });
+        } else {
+          console.log(`[Save] processedData updated for "${change.fieldLabel}"`);
+        }
+
+        record.processedData = updated;
       }
     });
 
+    // Commit optimistic state — UI shows new values immediately
     setFormRecords((prev) =>
       prev.map((record) => optimisticUpdates.get(record.id) || record),
     );
+    console.log(`[Save] optimistic formRecords committed for ${optimisticUpdates.size} record(s)`);
 
+    // ── Step 2: Clear pending changes so the memo stops overlaying them ──
     if (changesToSave) {
       const newPendingChanges = new Map(pendingChanges);
       changesToSave.forEach((_, key) => newPendingChanges.delete(key));
       setPendingChanges(newPendingChanges);
+      console.log(`[Save] cleared ${changesToSave.size} key(s) from pendingChanges, ${newPendingChanges.size} remaining`);
     } else {
       setPendingChanges(new Map());
+      console.log(`[Save] cleared all pendingChanges`);
     }
 
     setEditingCell(null);
     setSavingChanges(true);
 
+    // ── Step 3: Persist to database ──
     try {
+      // Group changes by record (one API call per record)
       const changesByRecord = new Map<string, { changes: PendingChange[]; formId: string }>();
 
       changesToProcess.forEach((change) => {
         if (!changesByRecord.has(change.recordId)) {
+          // Determine formId from processedData
           const formId =
             formRecords
               .flatMap((r) => r.processedData)
               .find((pd) => pd.recordId === change.recordId)?.formId || "";
+          console.log(`[Save] record=${change.recordId} → formId="${formId}"`);
+          if (!formId) {
+            console.warn(`[Save] formId is empty for record=${change.recordId} — API call may fail`);
+          }
           changesByRecord.set(change.recordId, { changes: [], formId });
         }
         changesByRecord.get(change.recordId)!.changes.push(change);
@@ -597,14 +664,22 @@ export default function ModulePage({
 
       for (const [actualRecordId, { changes, formId }] of changesByRecord) {
         const sourceRecord = formRecords.find((r) => r.id === actualRecordId);
+
+        // Merge new field values on top of the existing recordData
         const updatedRecordData: Record<string, any> = { ...(sourceRecord?.recordData || {}) };
 
         changes.forEach((change) => {
-          updatedRecordData[change.originalFieldId || change.fieldId] = {
+          const key = change.originalFieldId || change.fieldId;
+          updatedRecordData[key] = {
             value: change.value,
             type: change.fieldType,
             label: change.fieldLabel,
           };
+          console.log(`[Save] API payload — record=${actualRecordId} key="${key}" value="${change.value}"`);
+        });
+
+        console.log(`[Save] calling PUT /${formId}/records/${actualRecordId}`, {
+          recordDataKeys: Object.keys(updatedRecordData),
         });
 
         const result = await updateRecord({
@@ -617,15 +692,20 @@ export default function ModulePage({
           },
         }).unwrap();
 
+        console.log(`[Save] API response for record=${actualRecordId}:`, result);
+
         if (!result.success) {
           throw new Error(`Failed to save record ${actualRecordId}: ${result.error || "Unknown error"}`);
         }
+
+        console.log(`[Save] record=${actualRecordId} saved successfully`);
       }
 
+      console.log(`[Save] all records saved — triggering refetch`);
       refetchRecords();
     } catch (error: any) {
-      console.error("[v0] Save error:", error);
-      await refetchRecords();
+      console.error(`[Save] ERROR:`, error);
+      await refetchRecords(); // revert to server state on failure
       toast({
         title: "Error Saving Changes",
         description: error.message || "Failed to save changes. Changes have been reverted.",

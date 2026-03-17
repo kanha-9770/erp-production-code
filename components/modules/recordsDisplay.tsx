@@ -78,7 +78,7 @@ import AdvancedFilterSidebar from "./AdvancedFilterSidebar";
 import { DynamicDataPreviewModal2 } from "../DynamicDataPreviewModal";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser"; // already there
-import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
+
 // ============== TYPES ==============
 
 interface Permission {
@@ -150,6 +150,7 @@ interface FormFieldWithSection {
   options?: any[];
   lookup?: any;
   returnType?: "text" | "number" | "currency" | "percent" | "date" | "boolean";
+  properties?: any;
 }
 
 interface EditingCell {
@@ -818,82 +819,197 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     record: EnhancedFormRecord,
     changedFieldIds: Set<string> = new Set(),
   ) => {
-    const newProcessed = [...record.processedData];
-    const affected = new Set<string>();
-
-    // Build current values (including pending changes)
-    const currentValues: Record<string, any> = {};
-    record.processedData.forEach((pd) => {
-      const pending = pendingChanges.get(`${record.id}-${pd.fieldId}`);
-      currentValues[pd.fieldId] = pending ? pending.value : pd.value;
+    console.log(`[Formula] recalculateFormulasForRecord START — recordId=${record.id}`, {
+      changedFieldIds: Array.from(changedFieldIds),
+      processedDataFields: record.processedData.map((p) => ({ id: p.fieldId, value: p.value })),
     });
 
-    // Use enhanced fields for formulas
-    enhancedFormFields
+    const newProcessed = [...record.processedData];
+    const affected = new Set<string>();
+    const runningValues: Record<string, any> = {};
+
+    // Build current values keyed by every possible identifier so formula
+    // expressions that reference fields by label, raw ID, or composite ID
+    // all resolve correctly.
+    const currentValues: Record<string, any> = {};
+    record.processedData.forEach((pd) => {
+      // The pending-change key uses the composite field ID (fieldDef.id).
+      // Find the enhanced field that matches this pd so we can look it up.
+      const ef = enhancedFormFields.find(
+        (f) => f.originalId === pd.fieldId || f.label === pd.fieldLabel,
+      );
+      const pendingKey = ef
+        ? `${record.id}-${ef.id}`         // composite key used when storing changes
+        : `${record.id}-${pd.fieldId}`;   // fallback: raw key
+      const pending = pendingChanges.get(pendingKey);
+      const val = pending ? pending.value : pd.value;
+
+      // Store under all useful keys
+      currentValues[pd.fieldId] = val;                        // raw DB ID
+      if (pd.fieldLabel) currentValues[pd.fieldLabel] = val; // human label
+      if (ef) {
+        if (ef.id)         currentValues[ef.id]         = val; // composite ID
+        if (ef.originalId) currentValues[ef.originalId] = val; // raw ID (dup-safe)
+      }
+    });
+
+    console.log(`[Formula] currentValues built:`, currentValues);
+
+    // Get sorted formula fields to handle formula chaining
+    const formulaFieldsToProcess = enhancedFormFields
       .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
-      .forEach((formulaField) => {
-        const config = formulaField.properties.formulaConfig!;
-        const deps = formulaDependencies.get(formulaField.id) || new Set();
-        console.log(
-          "Formula updated for",
-          record.id,
-          "→",
-          updatedProcessedData,
-        );
-        // Skip if no relevant change
-        if (
-          changedFieldIds.size > 0 &&
-          !Array.from(deps).some((d) => changedFieldIds.has(d))
-        ) {
-          return;
-        }
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-        try {
-          const evaluator = getFormulaEvaluatorInstance();
-          const result = evaluator.evaluate(
-            config.expression,
-            currentValues,
-            config.returnType || "Text",
-            config.blankPreference || "Empty",
-            enhancedFormFields, // evaluatorFields
-            config.decimalPlaces ?? 2,
-          );
+    console.log(`[Formula] formulaFields to process:`, formulaFieldsToProcess.map((f) => ({ id: f.id, label: f.label, expression: f.properties?.formulaConfig?.expression })));
 
-          let finalValue = result.success
-            ? result.value
-            : config.blankPreference === "Zero"
-              ? 0
-              : "";
+    // Use enhanced fields for formulas
+    formulaFieldsToProcess.forEach((formulaField) => {
+      const config = formulaField.properties.formulaConfig!;
+      const deps = formulaDependencies.get(formulaField.id) || new Set();
 
-          // Format like PublicFormDialog
+      // Skip if no relevant change and we're filtering by changed fields
+      if (
+        changedFieldIds.size > 0 &&
+        !Array.from(deps).some((d) => changedFieldIds.has(d))
+      ) {
+        console.log(`[Formula] SKIPPED ${formulaField.label} — no matching dep in changedFieldIds`, {
+          deps: Array.from(deps), changedFieldIds: Array.from(changedFieldIds),
+        });
+        return;
+      }
+
+      try {
+        const evaluator = getFormulaEvaluatorInstance();
+
+        // Build variables for this formula, supporting chaining
+        const variables: Record<string, any> = {};
+        const referencedIds = extractFieldReferences(config.expression);
+
+        console.log(`[Formula] ${formulaField.label} — expression="${config.expression}" referencedIds=`, referencedIds);
+
+        referencedIds.forEach((refId) => {
           if (
-            ["Number", "Currency", "Percent"].includes(config.returnType || "")
+            currentValues[refId] !== undefined &&
+            currentValues[refId] !== null &&
+            currentValues[refId] !== ""
           ) {
-            const num = Number(finalValue);
-            if (!isNaN(num)) {
-              finalValue = num.toFixed(config.decimalPlaces || 2);
-              if (config.returnType === "Currency")
-                finalValue = `₹${finalValue}`;
-              if (config.returnType === "Percent")
-                finalValue = `${finalValue}%`;
-            }
+            variables[refId] = currentValues[refId];
+          } else if (runningValues[refId] !== undefined) {
+            // Support formula chaining - use previously calculated formula values
+            variables[refId] = runningValues[refId];
+          } else {
+            variables[refId] = currentValues[refId];
           }
+        });
 
-          const idx = newProcessed.findIndex(
-            (p) => p.fieldId === formulaField.id,
-          );
-          if (idx !== -1) {
-            newProcessed[idx] = {
-              ...newProcessed[idx],
-              value: finalValue,
-              displayValue: String(finalValue),
-            };
-            affected.add(formulaField.id);
+        console.log(`[Formula] ${formulaField.label} — variables resolved:`, variables);
+
+        const result = evaluator.evaluate(
+          config.expression,
+          variables,
+          config.returnType || "Text",
+          config.blankPreference || "Empty",
+          formulaFieldsToProcess, // evaluatorFields
+          config.decimalPlaces ?? 2,
+        );
+
+        console.log(`[Formula] ${formulaField.label} — evaluator result:`, result);
+
+        let finalValue = result.success
+          ? result.value
+          : config.blankPreference === "Zero"
+            ? 0
+            : "";
+
+        // Format like PublicFormDialog
+        if (
+          ["Number", "Currency", "Percent"].includes(config.returnType || "")
+        ) {
+          const num = Number(finalValue);
+          if (!isNaN(num)) {
+            finalValue = num.toFixed(config.decimalPlaces || 2);
+            if (config.returnType === "Currency")
+              finalValue = `₹${finalValue}`;
+            if (config.returnType === "Percent")
+              finalValue = `${finalValue}%`;
           }
-        } catch (err) {
-          console.error(`Formula error in ${formulaField.label}`, err);
         }
-      });
+
+        console.log(`[Formula] ${formulaField.label} — finalValue=${finalValue}`);
+
+        // Match by composite ID, raw (originalId), or label — whichever the
+        // processedData entry was created with.
+        const idx = newProcessed.findIndex(
+          (p) =>
+            p.fieldId === formulaField.id ||
+            p.fieldId === formulaField.originalId ||
+            p.fieldLabel === formulaField.label,
+        );
+        console.log(`[Formula] ${formulaField.label} — idx in processedData=${idx} (formulaField.id=${formulaField.id} originalId=${formulaField.originalId})`);
+        if (idx !== -1) {
+          newProcessed[idx] = {
+            ...newProcessed[idx],
+            value: finalValue,
+            displayValue: String(finalValue),
+          };
+          affected.add(formulaField.id);
+          // Store result under all keys for chaining (other formulas may reference by label)
+          try {
+            const chainVal = Number(finalValue) || result.value;
+            runningValues[formulaField.id] = chainVal;
+            if (formulaField.originalId) runningValues[formulaField.originalId] = chainVal;
+            if (formulaField.label) runningValues[formulaField.label] = chainVal;
+          } catch {
+            runningValues[formulaField.id] = result.value;
+          }
+        } else {
+          // Formula field not yet in processedData — add it so it renders in the column.
+          // Use composite ID (formulaField.id) to match getUniqueFieldDefinitions deduplication.
+          newProcessed.push({
+            fieldId: formulaField.id,
+            fieldLabel: formulaField.label,
+            fieldType: "formula",
+            value: finalValue,
+            displayValue: String(finalValue),
+            order: formulaField.order ?? 999,
+            sectionId: formulaField.sectionId || "default",
+            sectionTitle: formulaField.sectionTitle || "General",
+            subformId: formulaField.subformId,
+            subformTitle: formulaField.subformTitle,
+            formId: formulaField.formId || "",
+            formName: formulaField.formName || "",
+            lookup: {},
+            options: [],
+            fieldDefinitions: [],
+            icon: "",
+          });
+          affected.add(formulaField.id);
+          try {
+            const chainVal = Number(finalValue) || result.value;
+            runningValues[formulaField.id] = chainVal;
+            if (formulaField.originalId) runningValues[formulaField.originalId] = chainVal;
+            if (formulaField.label) runningValues[formulaField.label] = chainVal;
+          } catch {
+            runningValues[formulaField.id] = result.value;
+          }
+        }
+      } catch (err) {
+        console.error(`Formula error in ${formulaField.label}:`, err);
+        const idx = newProcessed.findIndex(
+          (p) =>
+            p.fieldId === formulaField.id ||
+            p.fieldId === formulaField.originalId ||
+            p.fieldLabel === formulaField.label,
+        );
+        if (idx !== -1) {
+          newProcessed[idx] = {
+            ...newProcessed[idx],
+            value: "",
+            displayValue: "Error",
+          };
+        }
+      }
+    });
 
     return {
       updatedProcessedData: newProcessed,
@@ -903,19 +1019,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   React.useEffect(() => {
     const deps = new Map<string, Set<string>>();
 
-    formFieldsWithSections.forEach((field) => {
-      if (field.type === "formula" && field.formula) {
-        // assuming you have formula expression in field.formula
+    enhancedFormFields.forEach((field) => {
+      if (field.type === "formula" && field.properties?.formulaConfig?.expression) {
         // Extract referenced field IDs from the formula expression
-        // You probably already have extractFieldReferences from your public form
-        const referencedIds = extractFieldReferences(field.formula); // returns string[]
-
+        const referencedIds = extractFieldReferences(field.properties.formulaConfig.expression);
         deps.set(field.id, new Set(referencedIds));
       }
     });
 
     setFormulaDependencies(deps);
-  }, [formFieldsWithSections]);
+  }, [enhancedFormFields]);
 
   React.useEffect(() => {
     const saved = localStorage.getItem("table-cell-comments");
@@ -2233,13 +2346,96 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     }
 
     const handleAutoSave = () => {
-      const pendingChange = pendingChanges.get(`${record.id}-${fieldDef.id}`);
-      if (pendingChange) {
-        const singleChangeMap = new Map([
-          [`${record.id}-${fieldDef.id}`, pendingChange],
-        ]);
-        saveAllPendingChanges(singleChangeMap);
+      const pendingKey = `${record.id}-${fieldDef.id}`;
+      const pendingChange = pendingChanges.get(pendingKey);
+
+      console.log(`[AutoSave] triggered — record=${record.id} field="${fieldDef.label}" (${fieldDef.id})`);
+      console.log(`[AutoSave] pendingChange found:`, pendingChange ?? "NONE — nothing to save");
+
+      if (!pendingChange) {
+        setEditingCell(null);
+        return;
       }
+
+      // ── Step 1: build a record with the new value baked into processedData ──
+      // record here comes from populatedRecordsWithPending so the pending value
+      // is already applied; this ensures recalculation uses the latest value
+      // even if the memo hasn't committed yet.
+      const tempRecord: EnhancedFormRecord = {
+        ...record,
+        processedData: record.processedData.map((pd) =>
+          pd.fieldId === fieldDef.id ||
+          pd.fieldId === fieldDef.originalId ||
+          pd.fieldLabel === fieldDef.label
+            ? { ...pd, value: pendingChange.value }
+            : pd,
+        ),
+      };
+
+      console.log(`[AutoSave] tempRecord processedData (fields with values):`,
+        tempRecord.processedData.map((p) => ({ fieldId: p.fieldId, label: p.fieldLabel, value: p.value }))
+      );
+
+      // ── Step 2: recalculate ALL formula fields using the updated record ──
+      const { updatedProcessedData } = recalculateFormulasForRecord(tempRecord, new Set());
+
+      console.log(`[AutoSave] formula recalc result:`,
+        updatedProcessedData
+          .filter((p) => p.fieldType === "formula")
+          .map((p) => ({ fieldId: p.fieldId, label: p.fieldLabel, value: p.value }))
+      );
+
+      // ── Step 3: build saveMap — edited field + any changed formula fields ──
+      const saveMap = new Map<string, PendingChange>([[pendingKey, pendingChange]]);
+
+      console.log(`[AutoSave] saveMap initial — edited field "${fieldDef.label}" = "${pendingChange.value}"`);
+
+      enhancedFormFields
+        .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
+        .forEach((formulaField) => {
+          // Find the recalculated value for this formula field
+          const recalcPd = updatedProcessedData.find(
+            (p) =>
+              p.fieldId === formulaField.id ||
+              p.fieldId === formulaField.originalId ||
+              p.fieldLabel === formulaField.label,
+          );
+
+          if (!recalcPd) {
+            console.log(`[AutoSave] formula "${formulaField.label}" — no recalcPd found, skipping`);
+            return;
+          }
+
+          // Find what the formula currently holds in the record (before this edit)
+          const existingPd = record.processedData.find(
+            (p) =>
+              p.fieldId === formulaField.id ||
+              p.fieldId === formulaField.originalId ||
+              p.fieldLabel === formulaField.label,
+          );
+
+          const oldValue = existingPd?.value ?? "";
+          const newValue = recalcPd.value;
+
+          console.log(`[AutoSave] formula "${formulaField.label}" — old="${oldValue}" new="${newValue}" changed=${String(oldValue) !== String(newValue)}`);
+
+          // Always include formula in save so DB stays in sync
+          const formulaKey = `${record.id}-${formulaField.id}`;
+          saveMap.set(formulaKey, {
+            recordId: record.id,
+            fieldId: formulaField.id,
+            originalFieldId: formulaField.originalId || formulaField.id,
+            value: newValue,
+            originalValue: oldValue,
+            fieldType: "formula",
+            fieldLabel: formulaField.label,
+          });
+        });
+
+      console.log(`[AutoSave] final saveMap keys:`, Array.from(saveMap.keys()));
+      console.log(`[AutoSave] calling saveAllPendingChanges with ${saveMap.size} change(s)`);
+
+      saveAllPendingChanges(saveMap);
       setEditingCell(null);
     };
 
@@ -2313,21 +2509,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               fieldLabel: fieldDef.label,
             });
 
+            // Setting pending changes is sufficient — populatedRecordsWithPending
+            // will apply the new value and recalculate dependent formulas in the
+            // same render cycle. Calling updateRecordWithNewProcessedData here
+            // would trigger an extra setFormRecords on every keystroke, causing
+            // unnecessary re-renders and potential focus loss.
             setPendingChanges(newPending);
-
-            // ── NEW: Recalculate formulas immediately ────────────────────────
-            const { updatedProcessedData, affectedFormulaFields } =
-              recalculateFormulasForRecord(
-                currentRecord,
-                new Set([fieldDef.id]),
-              );
-
-            if (affectedFormulaFields.size > 0) {
-              updateRecordWithNewProcessedData(
-                currentRecord.id,
-                updatedProcessedData,
-              );
-            }
           }}
           onBlur={handleAutoSave}
           onKeyDown={(e) => {
@@ -2380,17 +2567,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             fieldType: fieldDef.type,
             fieldLabel: fieldDef.label,
           });
+          // Setting pending changes is sufficient — populatedRecordsWithPending
+          // recalculates formulas on the next render. No extra setFormRecords needed.
           setPendingChanges(newPending);
-
-          const { updatedProcessedData, affectedFormulaFields } =
-            recalculateFormulasForRecord(currentRecord, new Set([fieldDef.id]));
-
-          if (affectedFormulaFields.size > 0) {
-            updateRecordWithNewProcessedData(
-              currentRecord.id,
-              updatedProcessedData,
-            );
-          }
 
           setTimeout(() => {
             saveAllPendingChanges(
@@ -2513,8 +2692,17 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         hasPending = true;
 
         const fieldId = change.fieldId;
+        // pd.fieldId is a raw field ID; change.fieldId may be composite (formId_fieldId).
+        // Fall back to change.originalFieldId (raw) so the lookup succeeds.
         const pdIndex = updatedProcessed.findIndex(
-          (pd) => pd.fieldId === fieldId,
+          (pd) =>
+            pd.fieldId === fieldId ||
+            (change.originalFieldId && pd.fieldId === change.originalFieldId) ||
+            (change.fieldLabel && pd.fieldLabel === change.fieldLabel),
+        );
+        console.log(
+          `[PendingApply] record=${record.id} fieldId=${fieldId} originalFieldId=${change.originalFieldId} pdIndex=${pdIndex}`,
+          "processedData fieldIds:", updatedProcessed.map((p) => p.fieldId),
         );
 
         if (pdIndex !== -1) {
@@ -2534,21 +2722,17 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
       enhanced.processedData = updatedProcessed;
 
-      // If any changes were applied → re-evaluate formulas for this record
+      // If any changes were applied → re-evaluate ALL formulas for this record.
+      // Pass empty Set so no formula is skipped by the dependency check
+      // (composite vs raw field ID mismatch would otherwise cause all to be skipped).
       if (hasPending) {
-        const changedIds = new Set(
-          Array.from(pendingChanges.keys())
-            .filter((k) => k.startsWith(`${record.id}-`))
-            .map((k) => k.split("-")[1]),
+        console.log(`[PendingMemo] hasPending=true for record=${record.id}, triggering formula recalc`);
+        const { updatedProcessedData } = recalculateFormulasForRecord(
+          enhanced,
+          new Set(),
         );
-
-        if (changedIds.size > 0) {
-          const { updatedProcessedData } = recalculateFormulasForRecord(
-            enhanced,
-            changedIds,
-          );
-          enhanced.processedData = updatedProcessedData;
-        }
+        enhanced.processedData = updatedProcessedData;
+        console.log(`[PendingMemo] formula recalc done for record=${record.id}`, updatedProcessedData.map((p) => ({ id: p.fieldId, value: p.value })));
       }
 
       return enhanced;
