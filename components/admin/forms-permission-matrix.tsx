@@ -133,7 +133,7 @@ export function FormsPermissionMatrix({
           fetch("/api/admin/users").then(r => r.json()),
           fetch("/api/permissions").then(r => r.json()),
           fetch(`/api/role-permissions?formId=${selectedForm}`).then(r => r.json()),
-          fetch("/api/user-permissions").then(r => r.json()), // ← was missing!
+          fetch("/api/user-permissions").then(r => r.json()),
         ])
 
         if (!isCurrent) return
@@ -143,7 +143,7 @@ export function FormsPermissionMatrix({
         setUsers(uRes.success ? uRes.data : [])
         setPermissions(pRes.success && pRes.data?.length ? pRes.data : standardPermissions)
         setRolePermissions(rpRes.success ? rpRes.data : [])
-        setUserPermissions(upRes.success ? upRes.data : []) // ← now set!
+        setUserPermissions(upRes.success ? upRes.data : [])
 
       } catch (err: any) {
         if (isCurrent) {

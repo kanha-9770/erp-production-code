@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,9 +47,7 @@ import {
   Table2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  TooltipProvider,
-} from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   Popover,
   PopoverContent,
@@ -78,7 +76,9 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import AdvancedFilterSidebar from "./AdvancedFilterSidebar";
 import { DynamicDataPreviewModal2 } from "../DynamicDataPreviewModal";
-
+import { getFormulaEvaluator } from "@/lib/formula/evaluator";
+import { extractFieldReferences } from "@/lib/formula/parser"; // already there
+import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
 // ============== TYPES ==============
 
 interface Permission {
@@ -149,6 +149,7 @@ interface FormFieldWithSection {
   validation?: any;
   options?: any[];
   lookup?: any;
+  returnType?: "text" | "number" | "currency" | "percent" | "date" | "boolean";
 }
 
 interface EditingCell {
@@ -517,7 +518,8 @@ const SortableColumnHeader = ({
               ))}
             {(isMergedMode ||
               field.subformTitle ||
-              (field.sectionTitle && field.sectionTitle !== "Default Section")) && (
+              (field.sectionTitle &&
+                field.sectionTitle !== "Default Section")) && (
                 <Popover>
                   <PopoverTrigger asChild>
                     <button
@@ -631,7 +633,9 @@ const SortableColumnItem: React.FC<{
           <div className="text-xs text-gray-500 mt-1">
             {field.formName}
             {field.subformTitle && ` • ${field.subformTitle}`}
-            {field.sectionTitle && field.sectionTitle !== "Default Section" && ` • ${field.sectionTitle}`}
+            {field.sectionTitle &&
+              field.sectionTitle !== "Default Section" &&
+              ` • ${field.sectionTitle}`}
           </div>
         )}
       </label>
@@ -671,6 +675,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   setPendingChanges,
   onDeleteRecord,
   onViewDetails,
+  setFormRecords,
   permissions = [],
   isAdmin = false,
   users = [],
@@ -678,7 +683,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   console.log("RecordsDisplay received permissions:", {
     isAdmin,
     permissionCount: permissions.length,
-    permissions: permissions.map(p => ({
+    permissions: permissions.map((p) => ({
       id: p.id,
       name: p.name,
       resource: p.resource,
@@ -689,7 +694,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     })),
   });
   const [viewDetailsOpen, setViewDetailsOpen] = React.useState(false);
-  const [selectedRecord, setSelectedRecord] = React.useState<EnhancedFormRecord | null>(null);
+  const [selectedRecord, setSelectedRecord] =
+    React.useState<EnhancedFormRecord | null>(null);
   const [columnWidths, setColumnWidths] = React.useState<Map<string, number>>(
     new Map(),
   );
@@ -717,11 +723,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
   const [recordToDelete, setRecordToDelete] =
     React.useState<EnhancedFormRecord | null>(null);
-  const [lastPointerDownTime, setLastPointerDownTime] = React.useState<number>(0);
+  const [lastPointerDownTime, setLastPointerDownTime] =
+    React.useState<number>(0);
   const DOUBLE_CLICK_THRESHOLD = 300;
   // State for Dynamic Row Preview Modal
-  console.log("formRecord", formRecords)
-
+  console.log("formRecord", formRecords);
 
   const [previewData, setPreviewData] = React.useState<{
     isOpen: boolean;
@@ -758,8 +764,158 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   const [conditionalRules, setConditionalRules] = React.useState<
     ConditionalFormatRule[]
   >([]);
+  // Add near other state declarations
+  const [formulaDependencies, setFormulaDependencies] = React.useState<
+    Map<string, Set<string>>
+  >(new Map());
+  // key = formula fieldId, value = Set of fieldIds it depends on
 
   // ============== EFFECTS ==============
+  // ── MERGE REAL FORMULA CONFIG (exactly like PublicFormDialog) ──
+  const [enhancedFormFields, setEnhancedFormFields] = React.useState<
+    FormFieldWithSection[]
+  >([]);
+
+  React.useEffect(() => {
+    const mergeFormulas = async () => {
+      const res = await fetch("/api/testing");
+      const result = await res.json();
+
+      if (!result.success || !Array.isArray(result.data)) return;
+
+      const formulas = result.data;
+
+      const updated = formFieldsWithSections.map((field) => {
+        const match = formulas.find((f: any) => f.formFieldId === field.id);
+        if (!match) return field;
+
+        return {
+          ...field,
+          type: "formula",
+          formula: match.expression, // ← your existing field.formula
+          returnType: match.returnType,
+          properties: {
+            ...field.properties,
+            formulaConfig: {
+              expression: match.expression,
+              returnType: match.returnType,
+              decimalPlaces: match.formField?.decimalPlaces ?? 2,
+              blankPreference: match.blankPreference ?? "Empty",
+            },
+          },
+        } as FormFieldWithSection;
+      });
+
+      setEnhancedFormFields(updated);
+      // Also update formulaDependencies with real config
+    };
+
+    mergeFormulas();
+  }, [formFieldsWithSections]);
+  const getFormulaEvaluatorInstance = () => getFormulaEvaluator();
+
+  const recalculateFormulasForRecord = (
+    record: EnhancedFormRecord,
+    changedFieldIds: Set<string> = new Set(),
+  ) => {
+    const newProcessed = [...record.processedData];
+    const affected = new Set<string>();
+
+    // Build current values (including pending changes)
+    const currentValues: Record<string, any> = {};
+    record.processedData.forEach((pd) => {
+      const pending = pendingChanges.get(`${record.id}-${pd.fieldId}`);
+      currentValues[pd.fieldId] = pending ? pending.value : pd.value;
+    });
+
+    // Use enhanced fields for formulas
+    enhancedFormFields
+      .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
+      .forEach((formulaField) => {
+        const config = formulaField.properties.formulaConfig!;
+        const deps = formulaDependencies.get(formulaField.id) || new Set();
+        console.log(
+          "Formula updated for",
+          record.id,
+          "→",
+          updatedProcessedData,
+        );
+        // Skip if no relevant change
+        if (
+          changedFieldIds.size > 0 &&
+          !Array.from(deps).some((d) => changedFieldIds.has(d))
+        ) {
+          return;
+        }
+
+        try {
+          const evaluator = getFormulaEvaluatorInstance();
+          const result = evaluator.evaluate(
+            config.expression,
+            currentValues,
+            config.returnType || "Text",
+            config.blankPreference || "Empty",
+            enhancedFormFields, // evaluatorFields
+            config.decimalPlaces ?? 2,
+          );
+
+          let finalValue = result.success
+            ? result.value
+            : config.blankPreference === "Zero"
+              ? 0
+              : "";
+
+          // Format like PublicFormDialog
+          if (
+            ["Number", "Currency", "Percent"].includes(config.returnType || "")
+          ) {
+            const num = Number(finalValue);
+            if (!isNaN(num)) {
+              finalValue = num.toFixed(config.decimalPlaces || 2);
+              if (config.returnType === "Currency")
+                finalValue = `₹${finalValue}`;
+              if (config.returnType === "Percent")
+                finalValue = `${finalValue}%`;
+            }
+          }
+
+          const idx = newProcessed.findIndex(
+            (p) => p.fieldId === formulaField.id,
+          );
+          if (idx !== -1) {
+            newProcessed[idx] = {
+              ...newProcessed[idx],
+              value: finalValue,
+              displayValue: String(finalValue),
+            };
+            affected.add(formulaField.id);
+          }
+        } catch (err) {
+          console.error(`Formula error in ${formulaField.label}`, err);
+        }
+      });
+
+    return {
+      updatedProcessedData: newProcessed,
+      affectedFormulaFields: affected,
+    };
+  };
+  React.useEffect(() => {
+    const deps = new Map<string, Set<string>>();
+
+    formFieldsWithSections.forEach((field) => {
+      if (field.type === "formula" && field.formula) {
+        // assuming you have formula expression in field.formula
+        // Extract referenced field IDs from the formula expression
+        // You probably already have extractFieldReferences from your public form
+        const referencedIds = extractFieldReferences(field.formula); // returns string[]
+
+        deps.set(field.id, new Set(referencedIds));
+      }
+    });
+
+    setFormulaDependencies(deps);
+  }, [formFieldsWithSections]);
 
   React.useEffect(() => {
     const saved = localStorage.getItem("table-cell-comments");
@@ -863,6 +1019,17 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     [getRecordForms, hasPermissionForForm, isAdmin],
   );
 
+  const updateRecordWithNewProcessedData = useCallback(
+    (recordId: string, newProcessed: ProcessedFieldData[]) => {
+      setFormRecords((prev) =>
+        prev.map((rec) =>
+          rec.id === recordId ? { ...rec, processedData: newProcessed } : rec,
+        ),
+      );
+    },
+    [setFormRecords],
+  );
+
   // ============== DATA PROCESSING HELPERS ==============
 
   const formatDynamicRowValue = (rows: any[]): string => {
@@ -879,8 +1046,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       .join(" ");
   };
 
-
-
   const getLabelForField = (
     fieldId: string,
     record: EnhancedFormRecord,
@@ -889,7 +1054,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     const standardField = formFieldsWithSections.find(
       (f) => f.id === fieldId || f.originalId === fieldId,
     );
-    if (standardField && !standardField.label.startsWith("cmk") && !standardField.label.startsWith("cm")) {
+    if (
+      standardField &&
+      !standardField.label.startsWith("cmk") &&
+      !standardField.label.startsWith("cm")
+    ) {
       return standardField.label;
     }
 
@@ -932,7 +1101,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
     // 3. Check in recordData.sections (new structure)
     if (record.recordData?.sections) {
-      for (const [_, sectionData] of Object.entries(record.recordData.sections) as [string, any][]) {
+      for (const [_, sectionData] of Object.entries(
+        record.recordData.sections,
+      ) as [string, any][]) {
         if (sectionData.fields?.[fieldId]) {
           return sectionData.fields[fieldId].label || "Unknown Field";
         }
@@ -941,14 +1112,21 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
     // 4. Check in recordData.subforms (new structure)
     if (record.recordData?.subforms) {
-      for (const [_, subformData] of Object.entries(record.recordData.subforms) as [string, any][]) {
+      for (const [_, subformData] of Object.entries(
+        record.recordData.subforms,
+      ) as [string, any][]) {
         if (subformData.fields?.[fieldId]) {
           return subformData.fields[fieldId].label || "Unknown Field";
         }
         // Check child subforms
         if (subformData.childSubforms) {
-          const searchChildSubforms = (children: Record<string, any>): string | null => {
-            for (const [_, childData] of Object.entries(children) as [string, any][]) {
+          const searchChildSubforms = (
+            children: Record<string, any>,
+          ): string | null => {
+            for (const [_, childData] of Object.entries(children) as [
+              string,
+              any,
+            ][]) {
               if (childData.fields?.[fieldId]) {
                 return childData.fields[fieldId].label || null;
               }
@@ -1007,7 +1185,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     return "Unknown Field";
   };
 
-
   const buildProcessedDataFromRecordData = (
     rec: EnhancedFormRecord,
   ): ProcessedFieldData[] => {
@@ -1016,7 +1193,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     const results: ProcessedFieldData[] = [];
 
     // Helper to format display value
-    const formatDisplayValue = (value: any, type: string, key: string): string => {
+    const formatDisplayValue = (
+      value: any,
+      type: string,
+      key: string,
+    ): string => {
       if (value === null || value === undefined || value === "") {
         return "NaN";
       }
@@ -1052,11 +1233,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       } else {
         return String(value);
       }
-
     };
 
     // Helper to get field definitions for subform dynamic rows
-    const getFieldDefinitions = (subformId: string): { id: string; label: string; type: string }[] => {
+    const getFieldDefinitions = (
+      subformId: string,
+    ): { id: string; label: string; type: string }[] => {
       // Check new structure: recordData.subforms
       const subformData = rec.recordData?.subforms?.[subformId];
       if (subformData?.fields) {
@@ -1111,189 +1293,250 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     if (hasNewStructure) {
       // Process sections
       if (rec.recordData.sections) {
-        Object.entries(rec.recordData.sections).forEach(([sectionId, sectionData]: [string, any]) => {
-          const sectionTitle = sectionData.sectionTitle || "Default Section";
+        Object.entries(rec.recordData.sections).forEach(
+          ([sectionId, sectionData]: [string, any]) => {
+            const sectionTitle = sectionData.sectionTitle || "Default Section";
 
-          // Process fields within section
-          if (sectionData.fields) {
-            Object.entries(sectionData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-              const value = fieldEntry.value;
-              const type = fieldEntry.type || "text";
-              const displayVal = formatDisplayValue(value, type, fieldId);
+            // Process fields within section
+            if (sectionData.fields) {
+              Object.entries(sectionData.fields).forEach(
+                ([fieldId, fieldEntry]: [string, any]) => {
+                  const value = fieldEntry.value;
+                  const type = fieldEntry.type || "text";
+                  const displayVal = formatDisplayValue(value, type, fieldId);
 
-              results.push({
-                recordId: rec.id,
-                fieldId: fieldId,
-                fieldLabel: fieldEntry.label || getLabelForField(fieldId, rec),
-                fieldType: type,
-                value: value,
-                displayValue: displayVal,
-                order: fieldEntry.order ?? 999,
-                sectionId: sectionId,
-                sectionTitle: sectionTitle,
-                subformId: fieldEntry.subformId,
-                subformTitle: fieldEntry.subformName,
-                formId: rec.formId,
-                formName: rec.recordData.formName || rec.form?.name || rec.formName || "Unknown Form",
-                lookup: fieldEntry.lookup || {},
-                options: fieldEntry.options || [],
-                fieldDefinitions: [],
-                icon: "",
-              });
-            });
-          }
-        });
+                  results.push({
+                    recordId: rec.id,
+                    fieldId: fieldId,
+                    fieldLabel:
+                      fieldEntry.label || getLabelForField(fieldId, rec),
+                    fieldType: type,
+                    value: value,
+                    displayValue: displayVal,
+                    order: fieldEntry.order ?? 999,
+                    sectionId: sectionId,
+                    sectionTitle: sectionTitle,
+                    subformId: fieldEntry.subformId,
+                    subformTitle: fieldEntry.subformName,
+                    formId: rec.formId,
+                    formName:
+                      rec.recordData.formName ||
+                      rec.form?.name ||
+                      rec.formName ||
+                      "Unknown Form",
+                    lookup: fieldEntry.lookup || {},
+                    options: fieldEntry.options || [],
+                    fieldDefinitions: [],
+                    icon: "",
+                  });
+                },
+              );
+            }
+          },
+        );
       }
 
       // Process subforms
       if (rec.recordData.subforms) {
-        Object.entries(rec.recordData.subforms).forEach(([subformId, subformData]: [string, any]) => {
-          const subformName = subformData.subformName || "Subform";
-          const fieldDefs = getFieldDefinitions(subformId);
+        Object.entries(rec.recordData.subforms).forEach(
+          ([subformId, subformData]: [string, any]) => {
+            const subformName = subformData.subformName || "Subform";
+            const fieldDefs = getFieldDefinitions(subformId);
 
-          // Process fields directly in subform
-          if (subformData.fields) {
-            Object.entries(subformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-              const value = fieldEntry.value;
-              const type = fieldEntry.type || "text";
-              const displayVal = formatDisplayValue(value, type, fieldId);
-
-              results.push({
-                recordId: rec.id,
-                fieldId: fieldId,
-                fieldLabel: fieldEntry.label || getLabelForField(fieldId, rec),
-                fieldType: type,
-                value: value,
-                displayValue: displayVal,
-                order: fieldEntry.order ?? 999,
-                sectionId: fieldEntry.sectionId || "default",
-                sectionTitle: fieldEntry.sectionTitle || "General",
-                subformId: subformId,
-                subformTitle: subformName,
-                formId: rec.formId,
-                formName: rec.recordData.formName || rec.form?.name || rec.formName || "Unknown Form",
-                lookup: fieldEntry.lookup || {},
-                options: fieldEntry.options || [],
-                fieldDefinitions: [],
-                icon: "",
-              });
-            });
-          }
-
-          // Process dynamic rows in subform
-          if (subformData.rows && Array.isArray(subformData.rows) && subformData.rows.length > 0) {
-            const dynamicRowKey = `_dynamicRows_${subformId}`;
-            const rowValues = subformData.rows.map((row: any) => {
-              const rowData: Record<string, any> = {};
-              if (row.fields) {
-                Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                  rowData[fId] = fEntry.value;
-                });
-              }
-              return rowData;
-            });
-
-            results.push({
-              recordId: rec.id,
-              fieldId: dynamicRowKey,
-              fieldLabel: subformName,
-              fieldType: "dynamicRows",
-              value: rowValues,
-              displayValue: formatDynamicRowValue(rowValues),
-              order: subformData.order ?? 999,
-              sectionId: "default",
-              sectionTitle: "Subforms",
-              subformId: subformId,
-              subformTitle: subformName,
-              formId: rec.formId,
-              formName: rec.recordData.formName || rec.form?.name || rec.formName || "Unknown Form",
-              lookup: {},
-              options: [],
-              fieldDefinitions: fieldDefs,
-              icon: "",
-            });
-          }
-
-          // Process child subforms recursively
-          if (subformData.childSubforms) {
-            const processChildSubforms = (childSubforms: Record<string, any>, parentSubformName: string) => {
-              Object.entries(childSubforms).forEach(([childSubformId, childSubformData]: [string, any]) => {
-                const childSubformName = childSubformData.subformName || "Child Subform";
-                const childFieldDefs = getFieldDefinitions(childSubformId);
-
-                // Process child subform fields
-                if (childSubformData.fields) {
-                  Object.entries(childSubformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-                    const value = fieldEntry.value;
-                    const type = fieldEntry.type || "text";
-                    const displayVal = formatDisplayValue(value, type, fieldId);
-
-                    results.push({
-                      recordId: rec.id,
-                      fieldId: fieldId,
-                      fieldLabel: fieldEntry.label || getLabelForField(fieldId, rec),
-                      fieldType: type,
-                      value: value,
-                      displayValue: displayVal,
-                      order: fieldEntry.order ?? 999,
-                      sectionId: fieldEntry.sectionId || "default",
-                      sectionTitle: fieldEntry.sectionTitle || "General",
-                      subformId: childSubformId,
-                      subformTitle: `${parentSubformName} → ${childSubformName}`,
-                      formId: rec.formId,
-                      formName: rec.recordData.formName || rec.form?.name || rec.formName || "Unknown Form",
-                      lookup: fieldEntry.lookup || {},
-                      options: fieldEntry.options || [],
-                      fieldDefinitions: [],
-                      icon: "",
-                    });
-                  });
-                }
-
-                // Process child subform dynamic rows
-                if (childSubformData.rows && Array.isArray(childSubformData.rows) && childSubformData.rows.length > 0) {
-                  const dynamicRowKey = `_dynamicRows_${childSubformId}`;
-                  const rowValues = childSubformData.rows.map((row: any) => {
-                    const rowData: Record<string, any> = {};
-                    if (row.fields) {
-                      Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                        rowData[fId] = fEntry.value;
-                      });
-                    }
-                    return rowData;
-                  });
+            // Process fields directly in subform
+            if (subformData.fields) {
+              Object.entries(subformData.fields).forEach(
+                ([fieldId, fieldEntry]: [string, any]) => {
+                  const value = fieldEntry.value;
+                  const type = fieldEntry.type || "text";
+                  const displayVal = formatDisplayValue(value, type, fieldId);
 
                   results.push({
                     recordId: rec.id,
-                    fieldId: dynamicRowKey,
-                    fieldLabel: childSubformName,
-                    fieldType: "dynamicRows",
-                    value: rowValues,
-                    displayValue: formatDynamicRowValue(rowValues),
-                    order: childSubformData.order ?? 999,
-                    sectionId: "default",
-                    sectionTitle: "Subforms",
-                    subformId: childSubformId,
-                    subformTitle: `${parentSubformName} → ${childSubformName}`,
+                    fieldId: fieldId,
+                    fieldLabel:
+                      fieldEntry.label || getLabelForField(fieldId, rec),
+                    fieldType: type,
+                    value: value,
+                    displayValue: displayVal,
+                    order: fieldEntry.order ?? 999,
+                    sectionId: fieldEntry.sectionId || "default",
+                    sectionTitle: fieldEntry.sectionTitle || "General",
+                    subformId: subformId,
+                    subformTitle: subformName,
                     formId: rec.formId,
-                    formName: rec.recordData.formName || rec.form?.name || rec.formName || "Unknown Form",
-                    lookup: {},
-                    options: [],
-                    fieldDefinitions: childFieldDefs,
+                    formName:
+                      rec.recordData.formName ||
+                      rec.form?.name ||
+                      rec.formName ||
+                      "Unknown Form",
+                    lookup: fieldEntry.lookup || {},
+                    options: fieldEntry.options || [],
+                    fieldDefinitions: [],
                     icon: "",
                   });
-                }
+                },
+              );
+            }
 
-                // Recursively process nested child subforms
-                if (childSubformData.childSubforms) {
-                  processChildSubforms(childSubformData.childSubforms, `${parentSubformName} → ${childSubformName}`);
+            // Process dynamic rows in subform
+            if (
+              subformData.rows &&
+              Array.isArray(subformData.rows) &&
+              subformData.rows.length > 0
+            ) {
+              const dynamicRowKey = `_dynamicRows_${subformId}`;
+              const rowValues = subformData.rows.map((row: any) => {
+                const rowData: Record<string, any> = {};
+                if (row.fields) {
+                  Object.entries(row.fields).forEach(
+                    ([fId, fEntry]: [string, any]) => {
+                      rowData[fId] = fEntry.value;
+                    },
+                  );
                 }
+                return rowData;
               });
-            };
 
-            processChildSubforms(subformData.childSubforms, subformName);
-          }
-        });
+              results.push({
+                recordId: rec.id,
+                fieldId: dynamicRowKey,
+                fieldLabel: subformName,
+                fieldType: "dynamicRows",
+                value: rowValues,
+                displayValue: formatDynamicRowValue(rowValues),
+                order: subformData.order ?? 999,
+                sectionId: "default",
+                sectionTitle: "Subforms",
+                subformId: subformId,
+                subformTitle: subformName,
+                formId: rec.formId,
+                formName:
+                  rec.recordData.formName ||
+                  rec.form?.name ||
+                  rec.formName ||
+                  "Unknown Form",
+                lookup: {},
+                options: [],
+                fieldDefinitions: fieldDefs,
+                icon: "",
+              });
+            }
+
+            // Process child subforms recursively
+            if (subformData.childSubforms) {
+              const processChildSubforms = (
+                childSubforms: Record<string, any>,
+                parentSubformName: string,
+              ) => {
+                Object.entries(childSubforms).forEach(
+                  ([childSubformId, childSubformData]: [string, any]) => {
+                    const childSubformName =
+                      childSubformData.subformName || "Child Subform";
+                    const childFieldDefs = getFieldDefinitions(childSubformId);
+
+                    // Process child subform fields
+                    if (childSubformData.fields) {
+                      Object.entries(childSubformData.fields).forEach(
+                        ([fieldId, fieldEntry]: [string, any]) => {
+                          const value = fieldEntry.value;
+                          const type = fieldEntry.type || "text";
+                          const displayVal = formatDisplayValue(
+                            value,
+                            type,
+                            fieldId,
+                          );
+
+                          results.push({
+                            recordId: rec.id,
+                            fieldId: fieldId,
+                            fieldLabel:
+                              fieldEntry.label ||
+                              getLabelForField(fieldId, rec),
+                            fieldType: type,
+                            value: value,
+                            displayValue: displayVal,
+                            order: fieldEntry.order ?? 999,
+                            sectionId: fieldEntry.sectionId || "default",
+                            sectionTitle: fieldEntry.sectionTitle || "General",
+                            subformId: childSubformId,
+                            subformTitle: `${parentSubformName} → ${childSubformName}`,
+                            formId: rec.formId,
+                            formName:
+                              rec.recordData.formName ||
+                              rec.form?.name ||
+                              rec.formName ||
+                              "Unknown Form",
+                            lookup: fieldEntry.lookup || {},
+                            options: fieldEntry.options || [],
+                            fieldDefinitions: [],
+                            icon: "",
+                          });
+                        },
+                      );
+                    }
+
+                    // Process child subform dynamic rows
+                    if (
+                      childSubformData.rows &&
+                      Array.isArray(childSubformData.rows) &&
+                      childSubformData.rows.length > 0
+                    ) {
+                      const dynamicRowKey = `_dynamicRows_${childSubformId}`;
+                      const rowValues = childSubformData.rows.map(
+                        (row: any) => {
+                          const rowData: Record<string, any> = {};
+                          if (row.fields) {
+                            Object.entries(row.fields).forEach(
+                              ([fId, fEntry]: [string, any]) => {
+                                rowData[fId] = fEntry.value;
+                              },
+                            );
+                          }
+                          return rowData;
+                        },
+                      );
+
+                      results.push({
+                        recordId: rec.id,
+                        fieldId: dynamicRowKey,
+                        fieldLabel: childSubformName,
+                        fieldType: "dynamicRows",
+                        value: rowValues,
+                        displayValue: formatDynamicRowValue(rowValues),
+                        order: childSubformData.order ?? 999,
+                        sectionId: "default",
+                        sectionTitle: "Subforms",
+                        subformId: childSubformId,
+                        subformTitle: `${parentSubformName} → ${childSubformName}`,
+                        formId: rec.formId,
+                        formName:
+                          rec.recordData.formName ||
+                          rec.form?.name ||
+                          rec.formName ||
+                          "Unknown Form",
+                        lookup: {},
+                        options: [],
+                        fieldDefinitions: childFieldDefs,
+                        icon: "",
+                      });
+                    }
+
+                    // Recursively process nested child subforms
+                    if (childSubformData.childSubforms) {
+                      processChildSubforms(
+                        childSubformData.childSubforms,
+                        `${parentSubformName} → ${childSubformName}`,
+                      );
+                    }
+                  },
+                );
+              };
+
+              processChildSubforms(subformData.childSubforms, subformName);
+            }
+          },
+        );
       }
 
       return results;
@@ -1321,15 +1564,25 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         let sectionId = fieldEntry.sectionId || "default";
         let sectionTitle = fieldEntry.sectionTitle || "General";
         let subformId: string | undefined = fieldEntry.subformId;
-        let subformTitle: string | undefined = fieldEntry.subformTitle || fieldEntry.subformName;
+        let subformTitle: string | undefined =
+          fieldEntry.subformTitle || fieldEntry.subformName;
 
         // Enhanced logic to assign subform and section for hierarchy
         // Check new structure: form.subforms -> sections
         if (!subformId && rec.form?.subforms) {
-          const findFieldInSubforms = (subforms: any[]): { subformId: string; subformTitle: string; sectionId?: string; sectionTitle?: string } | null => {
+          const findFieldInSubforms = (
+            subforms: any[],
+          ): {
+            subformId: string;
+            subformTitle: string;
+            sectionId?: string;
+            sectionTitle?: string;
+          } | null => {
             for (const sf of subforms) {
               // Check direct fields in subform
-              const foundField = sf.fields?.find((f: any) => f.id === key || f.id === key.split("__")[0]);
+              const foundField = sf.fields?.find(
+                (f: any) => f.id === key || f.id === key.split("__")[0],
+              );
               if (foundField) {
                 return {
                   subformId: sf.id,
@@ -1339,7 +1592,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               // Check sections within subform
               if (sf.sections) {
                 for (const sec of sf.sections) {
-                  const secField = sec.fields?.find((f: any) => f.id === key || f.id === key.split("__")[0]);
+                  const secField = sec.fields?.find(
+                    (f: any) => f.id === key || f.id === key.split("__")[0],
+                  );
                   if (secField) {
                     return {
                       subformId: sf.id,
@@ -1373,7 +1628,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           // Check new structure
           if (rec.form?.subforms) {
-            const findSubform = (subforms: any[]): { subformId: string; subformTitle: string } | null => {
+            const findSubform = (
+              subforms: any[],
+            ): { subformId: string; subformTitle: string } | null => {
               for (const sf of subforms) {
                 if (sf.id === dynSubformId) {
                   return { subformId: sf.id, subformTitle: sf.name };
@@ -1415,15 +1672,26 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           // Check new structure
           if (rec.form?.subforms) {
-            const findFieldInSubforms = (subforms: any[]): { subformId: string; subformTitle: string; sectionId?: string; sectionTitle?: string } | null => {
+            const findFieldInSubforms = (
+              subforms: any[],
+            ): {
+              subformId: string;
+              subformTitle: string;
+              sectionId?: string;
+              sectionTitle?: string;
+            } | null => {
               for (const sf of subforms) {
-                const foundField = sf.fields?.find((f: any) => f.id === baseFieldId);
+                const foundField = sf.fields?.find(
+                  (f: any) => f.id === baseFieldId,
+                );
                 if (foundField) {
                   return { subformId: sf.id, subformTitle: sf.name };
                 }
                 if (sf.sections) {
                   for (const sec of sf.sections) {
-                    const secField = sec.fields?.find((f: any) => f.id === baseFieldId);
+                    const secField = sec.fields?.find(
+                      (f: any) => f.id === baseFieldId,
+                    );
                     if (secField) {
                       return {
                         subformId: sf.id,
@@ -1498,53 +1766,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       record: EnhancedFormRecord,
       fieldDef: FormFieldWithSection,
     ): ProcessedFieldData | undefined => {
-      // Handle formula fields
-      if (fieldDef.type === "formula" && fieldDef.formula) {
-        const variables: Record<string, any> = {};
-        record.processedData.forEach((pd) => {
-          variables[pd.fieldLabel] = pd.value;
-          variables[pd.fieldId] = pd.value;
-        });
-        pendingChanges.forEach((change, key) => {
-          if (key.startsWith(`${record.id}-`)) {
-            const changedFieldId = key.split("-")[1];
-            const changedField = formFieldsWithSections.find(
-              (f) => f.id === changedFieldId || f.originalId === changedFieldId,
-            );
-            if (changedField) {
-              variables[changedField.label] = change.value;
-              variables[changedFieldId] = change.value;
-            }
-          }
-        });
-
-        // Basic formula evaluation - replace with actual evaluator if available
-        try {
-          // Placeholder for formula evaluation
-          return {
-            recordId: record.id,
-            fieldId: fieldDef.id,
-            fieldLabel: fieldDef.label,
-            fieldType: "formula",
-            value: null,
-            displayValue: "NaN",
-            lookup: null,
-            options: [],
-            icon: "",
-            order: fieldDef.order,
-            sectionId: fieldDef.sectionId,
-            sectionTitle: fieldDef.sectionTitle || "Default Section",
-            subformId: fieldDef.subformId,
-            subformTitle: fieldDef.subformTitle,
-            formId: fieldDef.formId,
-            formName: fieldDef.formName,
-          };
-        } catch (err) {
-          console.warn("Formula error:", err);
-        }
-      }
-
-      let matchedField = record.processedData.find(
+      // ── FORMULAS ARE ALREADY CALCULATED BY recalculateFormulasForRecord ──
+      // We just return the latest value from processedData
+      const matchedField = record.processedData.find(
         (pd) =>
           pd.fieldId === fieldDef.id ||
           pd.fieldId === fieldDef.originalId ||
@@ -1552,7 +1776,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       );
       return matchedField;
     },
-    [pendingChanges, formFieldsWithSections],
+    [pendingChanges, enhancedFormFields], // ← important change
   );
 
   const getUniqueFieldDefinitions = (
@@ -1611,7 +1835,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     return Array.from(fieldMap.values()).sort((a, b) => a.order - b.order);
   };
 
-
   const sortRecords = (records: EnhancedFormRecord[]): EnhancedFormRecord[] => {
     return [...records].sort((a, b) => {
       let valA: any, valB: any;
@@ -1652,6 +1875,42 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       return 0;
     });
   };
+
+  // Add this function near the top of the file (or in utils)
+  function evaluateFormula(
+    formula: string,
+    variables: Record<string, any>,
+    returnType: string = "text",
+  ): { success: boolean; value: any } {
+    try {
+      // Very simple replacement-based evaluation (good enough for num1 + num2)
+      let expr = formula;
+
+      // Replace field references like {{num1}} or {num1} or just num1
+      Object.entries(variables).forEach(([key, val]) => {
+        const regex = new RegExp(`\\{\\{${key}\\}\\}|\\{${key}\\}|${key}`, "g");
+        expr = expr.replace(regex, String(val ?? 0));
+      });
+
+      // Basic math evaluation (you can use mathjs later for safety)
+      // WARNING: this uses new Function → only use if formulas are trusted!
+      const fn = new Function("return " + expr);
+      const rawResult = fn();
+
+      let finalValue = rawResult;
+
+      // Type coercion based on returnType
+      if (returnType === "number") {
+        finalValue = Number(rawResult);
+        if (isNaN(finalValue)) finalValue = 0;
+      }
+
+      return { success: true, value: finalValue };
+    } catch (err) {
+      console.warn("Formula evaluation failed:", err);
+      return { success: false, value: null };
+    }
+  }
 
   const applyFieldFilters = (
     records: EnhancedFormRecord[],
@@ -1891,7 +2150,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   };
 
   const handleCellPointerDown = React.useCallback(
-    (e: React.PointerEvent<HTMLDivElement>, record: EnhancedFormRecord, fieldDef: FormFieldWithSection) => {
+    (
+      e: React.PointerEvent<HTMLDivElement>,
+      record: EnhancedFormRecord,
+      fieldDef: FormFieldWithSection,
+    ) => {
       // Only handle left click
       if (e.button !== 0) return;
 
@@ -1914,7 +2177,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           setEditingCell({
             recordId: record.id,
             fieldId: fieldDef.id,
-            value: fieldData?.value ?? "",           // start empty if null/undefined
+            value: fieldData?.value ?? "", // start empty if null/undefined
             originalValue: fieldData?.value ?? "",
             fieldType: fieldDef.type,
             options: fieldDef.options,
@@ -1938,9 +2201,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       getFieldData,
       hasPermissionForForm,
       isImageField,
-    ]
+    ],
   );
-
 
   // ============== EDITOR RENDERER ==============
 
@@ -1985,7 +2247,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       let editValue = currentValue ?? "";
 
       // ── Special case: Address field ────────────────────────────────
-      if (fieldDef.type === "address" && typeof currentValue === "object" && currentValue !== null) {
+      if (
+        fieldDef.type === "address" &&
+        typeof currentValue === "object" &&
+        currentValue !== null
+      ) {
         const addr = currentValue as Record<string, string>;
         const parts: string[] = [];
 
@@ -1995,7 +2261,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         if (addr.state) parts.push(addr.state.trim());
         if (addr.postal) parts.push(addr.postal.trim());
         if (addr.country) parts.push(addr.country.trim());
-
         editValue = parts.filter(Boolean).join(", ");
       }
 
@@ -2004,13 +2269,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           value={editValue}
           onChange={(e) => {
             const newRawValue = e.target.value;
-
             let finalValue: any = newRawValue;
 
-            // If it's an address field → try to parse back to object
             if (fieldDef.type === "address") {
               // Very simple split-based parsing (you can improve this later)
-              const parts = newRawValue.split(",").map(p => p.trim()).filter(Boolean);
+              const parts = newRawValue
+                .split(",")
+                .map((p) => p.trim())
+                .filter(Boolean);
 
               // Naive mapping - assumes order: line1, line2?, city, state, postal, country
               finalValue = {
@@ -2023,13 +2289,21 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               };
 
               // If user cleared everything → empty object or null
-              if (Object.values(finalValue).every(v => !v)) {
+              if (Object.values(finalValue).every((v) => !v)) {
                 finalValue = {};
               }
             }
 
-            const newPendingChanges = new Map(pendingChanges);
-            newPendingChanges.set(`${record.id}-${fieldDef.id}`, {
+            const currentRecord = populatedRecordsWithPending.find(
+              (r: { id: string }) => r.id === record.id,
+            );
+            if (!currentRecord) {
+              console.warn("Record not found during edit:", record.id);
+              return;
+            }
+
+            const newPending = new Map(pendingChanges);
+            newPending.set(`${currentRecord.id}-${fieldDef.id}`, {
               recordId: actualRecordId,
               fieldId: fieldDef.id,
               originalFieldId: originalFieldId,
@@ -2038,7 +2312,22 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               fieldType: fieldDef.type,
               fieldLabel: fieldDef.label,
             });
-            setPendingChanges(newPendingChanges);
+
+            setPendingChanges(newPending);
+
+            // ── NEW: Recalculate formulas immediately ────────────────────────
+            const { updatedProcessedData, affectedFormulaFields } =
+              recalculateFormulasForRecord(
+                currentRecord,
+                new Set([fieldDef.id]),
+              );
+
+            if (affectedFormulaFields.size > 0) {
+              updateRecordWithNewProcessedData(
+                currentRecord.id,
+                updatedProcessedData,
+              );
+            }
           }}
           onBlur={handleAutoSave}
           onKeyDown={(e) => {
@@ -2054,7 +2343,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           }}
           autoFocus
           className="h-7 text-[10px] sm:text-xs p-1"
-          placeholder={fieldDef.type === "address" ? "e.g. 123 Main St, Jaipur, Rajasthan, 302001, India" : ""}
+          placeholder={
+            fieldDef.type === "address"
+              ? "e.g. 123 Main St, Jaipur, Rajasthan, 302001, India"
+              : ""
+          }
         />
       );
     }
@@ -2072,8 +2365,13 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       <Select
         value={currentValue?.toString() ?? ""}
         onValueChange={(newValue) => {
-          const newPendingChanges = new Map(pendingChanges);
-          newPendingChanges.set(`${record.id}-${fieldDef.id}`, {
+          const currentRecord = formRecords.find((r) => r.id === record.id);
+          if (!currentRecord) {
+            console.warn("Record not found during select change");
+            return;
+          }
+          const newPending = new Map(pendingChanges);
+          newPending.set(`${currentRecord.id}-${fieldDef.id}`, {
             recordId: actualRecordId,
             fieldId: fieldDef.id,
             originalFieldId: originalFieldId,
@@ -2082,15 +2380,27 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             fieldType: fieldDef.type,
             fieldLabel: fieldDef.label,
           });
-          setPendingChanges(newPendingChanges);
+          setPendingChanges(newPending);
+
+          const { updatedProcessedData, affectedFormulaFields } =
+            recalculateFormulasForRecord(currentRecord, new Set([fieldDef.id]));
+
+          if (affectedFormulaFields.size > 0) {
+            updateRecordWithNewProcessedData(
+              currentRecord.id,
+              updatedProcessedData,
+            );
+          }
+
           setTimeout(() => {
-            const singleChangeMap = new Map([
-              [
-                `${record.id}-${fieldDef.id}`,
-                newPendingChanges.get(`${record.id}-${fieldDef.id}`)!,
-              ],
-            ]);
-            saveAllPendingChanges(singleChangeMap);
+            saveAllPendingChanges(
+              new Map([
+                [
+                  `${record.id}-${fieldDef.id}`,
+                  newPending.get(`${record.id}-${fieldDef.id}`)!,
+                ],
+              ]),
+            );
           }, 0);
         }}
         onOpenChange={(open) => !open && setEditingCell(null)}
@@ -2111,7 +2421,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   };
 
   // ============== EVENT HANDLERS ==============
-
 
   const handleResizeStart = (
     e: React.MouseEvent,
@@ -2190,21 +2499,75 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
   // ============== COMPUTED DATA ==============
 
-  const populatedOriginalRecords = React.useMemo(
-    () =>
-      formRecords.map((r) => ({
-        ...r,
-        processedData: buildProcessedDataFromRecordData(r),
-      })),
-    [formRecords],
-  );
+  const populatedRecordsWithPending = useMemo(() => {
+    return formRecords.map((record) => {
+      // Clone to avoid mutation
+      const enhanced = { ...record };
+
+      // Apply pending changes for this record
+      let hasPending = false;
+      const updatedProcessed = [...enhanced.processedData];
+
+      pendingChanges.forEach((change, changeKey) => {
+        if (!changeKey.startsWith(`${record.id}-`)) return;
+        hasPending = true;
+
+        const fieldId = change.fieldId;
+        const pdIndex = updatedProcessed.findIndex(
+          (pd) => pd.fieldId === fieldId,
+        );
+
+        if (pdIndex !== -1) {
+          // Update display value using the same formatting logic you use elsewhere
+          const displayVal =
+            typeof change.value === "number"
+              ? change.value.toLocaleString()
+              : String(change.value ?? "—");
+
+          updatedProcessed[pdIndex] = {
+            ...updatedProcessed[pdIndex],
+            value: change.value,
+            displayValue: displayVal,
+          };
+        }
+      });
+
+      enhanced.processedData = updatedProcessed;
+
+      // If any changes were applied → re-evaluate formulas for this record
+      if (hasPending) {
+        const changedIds = new Set(
+          Array.from(pendingChanges.keys())
+            .filter((k) => k.startsWith(`${record.id}-`))
+            .map((k) => k.split("-")[1]),
+        );
+
+        if (changedIds.size > 0) {
+          const { updatedProcessedData } = recalculateFormulasForRecord(
+            enhanced,
+            changedIds,
+          );
+          enhanced.processedData = updatedProcessedData;
+        }
+      }
+
+      return enhanced;
+    });
+  }, [
+    formRecords,
+    pendingChanges,
+    enhancedFormFields, // ← add this
+    formulaDependencies,
+  ]);
 
   const baseRecords = React.useMemo(
     () =>
       isMergedMode
-        ? populatedOriginalRecords
-        : populatedOriginalRecords.filter((r) => r.formId === activeTab),
-    [isMergedMode, populatedOriginalRecords, activeTab],
+        ? populatedRecordsWithPending
+        : populatedRecordsWithPending.filter(
+          (r: { formId: string }) => r.formId === activeTab,
+        ),
+    [isMergedMode, populatedRecordsWithPending, activeTab],
   );
 
   const sortedRecords = sortRecords(baseRecords);
@@ -2291,7 +2654,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     setIsFilterSidebarOpen(true);
   };
 
-
   React.useEffect(() => {
     if (!isFilterSidebarOpen) {
       setSelectedFieldForAdvancedFilter(null);
@@ -2372,7 +2734,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   const requestDeleteComment = (commentId: string) =>
     setConfirmDeleteCommentId(commentId);
 
-
   const cancelDeleteComment = () => setConfirmDeleteCommentId(null);
 
   // ============== HIERARCHY GROUPING (form -> subform -> section) ==============
@@ -2396,7 +2757,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
       // If field has a subform, add to subform group
       if (field.subformId) {
-        let subformGroup = formGroup.subforms.find(sf => sf.id === field.subformId);
+        let subformGroup = formGroup.subforms.find(
+          (sf) => sf.id === field.subformId,
+        );
         if (!subformGroup) {
           subformGroup = {
             id: field.subformId,
@@ -2407,11 +2770,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         }
 
         // Add to section within subform
-        let sectionGroup = subformGroup.sections.find(sec => sec.id === field.sectionId);
+        let sectionGroup = subformGroup.sections.find(
+          (sec) => sec.id === field.sectionId,
+        );
         if (!sectionGroup) {
           sectionGroup = {
             id: field.sectionId,
-            title: field.sectionTitle !== "Default Section" ? field.sectionTitle : undefined,
+            title:
+              field.sectionTitle !== "Default Section"
+                ? field.sectionTitle
+                : undefined,
             fields: [],
           };
           subformGroup.sections.push(sectionGroup);
@@ -2419,11 +2787,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         sectionGroup.fields.push(field);
       } else {
         // Field is directly in a section (no subform)
-        let sectionGroup = formGroup.directSections.find(sec => sec.id === field.sectionId);
+        let sectionGroup = formGroup.directSections.find(
+          (sec) => sec.id === field.sectionId,
+        );
         if (!sectionGroup) {
           sectionGroup = {
             id: field.sectionId,
-            title: field.sectionTitle !== "Default Section" ? field.sectionTitle : undefined,
+            title:
+              field.sectionTitle !== "Default Section"
+                ? field.sectionTitle
+                : undefined,
             fields: [],
           };
           formGroup.directSections.push(sectionGroup);
@@ -2451,7 +2824,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         <AdvancedFilterSidebar
           isOpen={isFilterSidebarOpen}
           onClose={() => setIsFilterSidebarOpen(false)}
-          fields={orderedFields.length > 0 ? orderedFields : formFieldsWithSections}
+          fields={
+            orderedFields.length > 0 ? orderedFields : formFieldsWithSections
+          }
           filters={activeFieldFilters}
           onFiltersChange={(newFilters) => {
             setActiveFieldFilters(newFilters);
@@ -2564,7 +2939,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                 </span>{" "}
                                 {rule.value && (
                                   <span className="font-medium">
-                                    {'"'}{rule.value}{'"'}
+                                    {'"'}
+                                    {rule.value}
+                                    {'"'}
                                   </span>
                                 )}
                               </div>
@@ -2654,8 +3031,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                             <div className="w-20 sm:w-24 h-8 border-r border-gray-300 bg-indigo-100 flex-shrink-0" />
                             {hierarchyGroups.map((formGroup) => {
                               const formWidth =
-                                formGroup.directSections.reduce((sum, sec) => sum + getGroupWidth(sec.fields), 0) +
-                                formGroup.subforms.reduce((sum, sf) => sum + sf.sections.reduce((s, sec) => s + getGroupWidth(sec.fields), 0), 0);
+                                formGroup.directSections.reduce(
+                                  (sum, sec) => sum + getGroupWidth(sec.fields),
+                                  0,
+                                ) +
+                                formGroup.subforms.reduce(
+                                  (sum, sf) =>
+                                    sum +
+                                    sf.sections.reduce(
+                                      (s, sec) => s + getGroupWidth(sec.fields),
+                                      0,
+                                    ),
+                                  0,
+                                );
                               return (
                                 <div
                                   key={formGroup.id}
@@ -2670,10 +3058,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                         )}
 
                         {/* Header Row 2: Subform Names */}
-                        <div className={cn(
-                          "flex bg-gradient-to-r from-slate-100 via-gray-100 to-slate-100 border-b-2 border-gray-400 sticky z-20 min-w-max shadow-sm",
-                          isMergedMode && hierarchyGroups.length > 1 ? "top-8" : "top-0"
-                        )}>
+                        <div
+                          className={cn(
+                            "flex bg-gradient-to-r from-slate-100 via-gray-100 to-slate-100 border-b-2 border-gray-400 sticky z-20 min-w-max shadow-sm",
+                            isMergedMode && hierarchyGroups.length > 1
+                              ? "top-8"
+                              : "top-0",
+                          )}
+                        >
                           <div className="w-10 h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center flex-shrink-0">
                             <Checkbox
                               checked={
@@ -2704,14 +3096,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                 <div
                                   key={`${formGroup.id}-direct-${sec.id}`}
                                   className="h-10 bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-800 border-r border-gray-300"
-                                  style={{ width: `${getGroupWidth(sec.fields)}px` }}
+                                  style={{
+                                    width: `${getGroupWidth(sec.fields)}px`,
+                                  }}
                                 >
                                   {sec.title || "Fields"}
                                 </div>
                               ))}
                               {/* Subforms */}
                               {formGroup.subforms.map((sf) => {
-                                const sfWidth = sf.sections.reduce((sum, sec) => sum + getGroupWidth(sec.fields), 0);
+                                const sfWidth = sf.sections.reduce(
+                                  (sum, sec) => sum + getGroupWidth(sec.fields),
+                                  0,
+                                );
                                 return (
                                   <div
                                     key={sf.id}
@@ -2726,7 +3123,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                           ))}
                         </div>
 
-
                         {/* Header Row 4: Field Names */}
                         <div
                           className={cn(
@@ -2734,7 +3130,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                             "sticky z-10",
                             isMergedMode && hierarchyGroups.length > 1
                               ? "top-[70px]"
-                              : "top-[40px]"
+                              : "top-[40px]",
                           )}
                         >
                           <div className="w-10 flex-shrink-0" />
@@ -2758,9 +3154,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                     recordSortField={recordSortField}
                                     recordSortOrder={recordSortOrder}
                                     activeFieldFilters={activeFieldFilters}
-                                    handleOpenAdvancedFilterForColumn={handleOpenAdvancedFilterForColumn}
+                                    handleOpenAdvancedFilterForColumn={
+                                      handleOpenAdvancedFilterForColumn
+                                    }
                                   />
-                                ))
+                                )),
                               ),
                               ...formGroup.subforms.flatMap((sf) =>
                                 sf.sections.flatMap((sec) =>
@@ -2775,10 +3173,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                       recordSortField={recordSortField}
                                       recordSortOrder={recordSortOrder}
                                       activeFieldFilters={activeFieldFilters}
-                                      handleOpenAdvancedFilterForColumn={handleOpenAdvancedFilterForColumn}
+                                      handleOpenAdvancedFilterForColumn={
+                                        handleOpenAdvancedFilterForColumn
+                                      }
                                     />
-                                  ))
-                                )
+                                  )),
+                                ),
                               ),
                             ])}
                           </SortableContext>
@@ -2795,7 +3195,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                           <>
                             {paginatedRecords.map((record, rowIndex) => {
                               const canEditThisRecord = canEditRecord(record);
-                              const canDeleteThisRecord = canDeleteRecord(record);
+                              const canDeleteThisRecord =
+                                canDeleteRecord(record);
                               return (
                                 <div
                                   key={record.id}
@@ -2837,20 +3238,27 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           className="text-xs cursor-pointer"
-                                          onClick={() => handleViewDetails(record)}
+                                          onClick={() =>
+                                            handleViewDetails(record)
+                                          }
                                         >
-                                          <Eye className="h-4 w-4 mr-2" /> View Details
+                                          <Eye className="h-4 w-4 mr-2" /> View
+                                          Details
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           className={cn(
                                             "text-xs text-red-600 cursor-pointer",
-                                            !canDeleteThisRecord && "text-gray-400 opacity-50",
+                                            !canDeleteThisRecord &&
+                                            "text-gray-400 opacity-50",
                                           )}
-                                          onClick={() => handleOpenDeleteConfirm(record)}
+                                          onClick={() =>
+                                            handleOpenDeleteConfirm(record)
+                                          }
                                           disabled={!canDeleteThisRecord}
                                         >
-                                          <Trash2 className="h-4 w-4 mr-2" /> Delete Record
+                                          <Trash2 className="h-4 w-4 mr-2" />{" "}
+                                          Delete Record
                                         </DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -2859,8 +3267,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                   {hierarchyGroups.flatMap((formGroup) => [
                                     ...formGroup.directSections.flatMap((sec) =>
                                       sec.fields.map((fieldDef) => {
-                                        const fieldData = getFieldData(record, fieldDef);
-                                        const pendingChange = pendingChanges.get(`${record.id}-${fieldDef.id}`);
+                                        const fieldData = getFieldData(
+                                          record,
+                                          fieldDef,
+                                        );
+                                        const pendingChange =
+                                          pendingChanges.get(
+                                            `${record.id}-${fieldDef.id}`,
+                                          );
                                         const actualValue = pendingChange
                                           ? pendingChange.value
                                           : fieldData?.value || null;
@@ -2871,13 +3285,21 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           editingCell?.recordId === record.id &&
                                           editingCell?.fieldId === fieldDef.id;
                                         const cellKey = `${record.id}-${fieldDef.id}`;
-                                        const isExpanded = expandedCells.has(cellKey);
-                                        const columnWidth = columnWidths.get(fieldDef.id) || 192;
-                                        const hasImages = Array.isArray(actualValue)
+                                        const isExpanded =
+                                          expandedCells.has(cellKey);
+                                        const columnWidth =
+                                          columnWidths.get(fieldDef.id) || 192;
+                                        const hasImages = Array.isArray(
+                                          actualValue,
+                                        )
                                           ? actualValue.some(isImageUrl)
                                           : isImageUrl(actualValue);
-                                        const isImageColumn = isImageField(fieldDef.label) || hasImages;
-                                        const hasComments = (comments.get(cellKey) || []).length > 0;
+                                        const isImageColumn =
+                                          isImageField(fieldDef.label) ||
+                                          hasImages;
+                                        const hasComments =
+                                          (comments.get(cellKey) || []).length >
+                                          0;
 
                                         return (
                                           <div
@@ -2887,23 +3309,43 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                               isWrapTextEnabled || isExpanded
                                                 ? "h-auto min-h-[36px] py-2 items-start"
                                                 : "h-9 items-center",
-                                              selectedCell === cellKey && "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
-                                              isEditing && "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
-                                              pendingChange && !isEditing && "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
-                                              editMode !== "locked" && !isEditing && !isImageColumn && "cursor-pointer hover:bg-gray-50",
-                                              focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
+                                              selectedCell === cellKey &&
+                                              "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
+                                              isEditing &&
+                                              "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
+                                              pendingChange &&
+                                              !isEditing &&
+                                              "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
+                                              editMode !== "locked" &&
+                                              !isEditing &&
+                                              !isImageColumn &&
+                                              "cursor-pointer hover:bg-gray-50",
+                                              focusedCell === cellKey &&
+                                              !isEditing &&
+                                              "ring-1 ring-blue-300 ring-inset",
                                             )}
                                             style={{
                                               width: `${columnWidth}px`,
-                                              boxShadow: "inset -1px 0 0 0 #e5e7eb",
+                                              boxShadow:
+                                                "inset -1px 0 0 0 #e5e7eb",
                                             }}
                                             onClick={() => {
-                                              if (!isEditing && editMode !== "locked" && !isImageColumn) {
+                                              if (
+                                                !isEditing &&
+                                                editMode !== "locked" &&
+                                                !isImageColumn
+                                              ) {
                                                 setSelectedCell(cellKey);
                                                 setFocusedCell(cellKey);
                                               }
                                             }}
-                                            onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
+                                            onPointerDown={(e) =>
+                                              handleCellPointerDown(
+                                                e,
+                                                record,
+                                                fieldDef,
+                                              )
+                                            }
                                             onContextMenu={(e) => {
                                               if (!isImageColumn) {
                                                 e.preventDefault();
@@ -2915,35 +3357,65 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             <div
                                               className={cn(
                                                 "w-full h-full flex items-center",
-                                                isWrapTextEnabled || isExpanded ? "items-start py-2" : "",
+                                                isWrapTextEnabled || isExpanded
+                                                  ? "items-start py-2"
+                                                  : "",
                                               )}
                                             >
                                               {isEditing ? (
-                                                renderFieldEditor(record, fieldDef, actualValue, displayText)
+                                                renderFieldEditor(
+                                                  record,
+                                                  fieldDef,
+                                                  actualValue,
+                                                  displayText,
+                                                )
                                               ) : isImageColumn ? (
                                                 <div className="flex items-center gap-2 flex-wrap py-1">
-                                                  {Array.isArray(actualValue) ? (
+                                                  {Array.isArray(
+                                                    actualValue,
+                                                  ) ? (
                                                     actualValue
                                                       .filter(isImageUrl)
                                                       .slice(0, 3)
-                                                      .map((url: string, idx: number) => (
-                                                        <img
-                                                          key={idx}
-                                                          src={url || "/placeholder.svg"}
-                                                          alt="Field data"
-                                                          className="h-7 w-7 object-cover rounded border border-gray-300"
-                                                          onError={(e) => (e.currentTarget.style.display = "none")}
-                                                        />
-                                                      ))
-                                                  ) : isImageUrl(actualValue) ? (
+                                                      .map(
+                                                        (
+                                                          url: string,
+                                                          idx: number,
+                                                        ) => (
+                                                          <img
+                                                            key={idx}
+                                                            src={
+                                                              url ||
+                                                              "/placeholder.svg"
+                                                            }
+                                                            alt="Field data"
+                                                            className="h-7 w-7 object-cover rounded border border-gray-300"
+                                                            onError={(e) =>
+                                                            (e.currentTarget.style.display =
+                                                              "none")
+                                                            }
+                                                          />
+                                                        ),
+                                                      )
+                                                  ) : isImageUrl(
+                                                    actualValue,
+                                                  ) ? (
                                                     <img
-                                                      src={actualValue || "/placeholder.svg"}
+                                                      src={
+                                                        actualValue ||
+                                                        "/placeholder.svg"
+                                                      }
                                                       alt="Field data"
                                                       className="h-7 w-7 object-cover rounded border border-gray-300"
-                                                      onError={(e) => (e.currentTarget.style.display = "none")}
+                                                      onError={(e) =>
+                                                      (e.currentTarget.style.display =
+                                                        "none")
+                                                      }
                                                     />
                                                   ) : (
-                                                    <span className="text-xs text-gray-400">No image</span>
+                                                    <span className="text-xs text-gray-400">
+                                                      No image
+                                                    </span>
                                                   )}
                                                 </div>
                                               ) : (
@@ -2951,30 +3423,41 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                   <div
                                                     className={cn(
                                                       "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
-                                                      isWrapTextEnabled || isExpanded
+                                                      isWrapTextEnabled ||
+                                                        isExpanded
                                                         ? "whitespace-normal break-words"
                                                         : "whitespace-nowrap overflow-hidden text-ellipsis",
                                                     )}
-                                                    style={getConditionalStyle(fieldDef, actualValue, displayText)}
+                                                    style={getConditionalStyle(
+                                                      fieldDef,
+                                                      actualValue,
+                                                      displayText,
+                                                    )}
                                                     title={displayText}
                                                   >
-                                                    {(displayText ?? "") === "" ? "—" : displayText}
+                                                    {(displayText ?? "") === ""
+                                                      ? "—"
+                                                      : displayText}
                                                   </div>
-                                                  {!isWrapTextEnabled && displayText && displayText.length > 40 && (
-                                                    <button
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        toggleCellExpansion(cellKey);
-                                                      }}
-                                                      className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
-                                                    >
-                                                      {isExpanded ? (
-                                                        <ChevronUp className="h-3 w-3" />
-                                                      ) : (
-                                                        <ChevronDown className="h-3 w-3" />
-                                                      )}
-                                                    </button>
-                                                  )}
+                                                  {!isWrapTextEnabled &&
+                                                    displayText &&
+                                                    displayText.length > 40 && (
+                                                      <button
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          toggleCellExpansion(
+                                                            cellKey,
+                                                          );
+                                                        }}
+                                                        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
+                                                      >
+                                                        {isExpanded ? (
+                                                          <ChevronUp className="h-3 w-3" />
+                                                        ) : (
+                                                          <ChevronDown className="h-3 w-3" />
+                                                        )}
+                                                      </button>
+                                                    )}
                                                 </div>
                                               )}
                                             </div>
@@ -2984,7 +3467,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                   className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs"
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    setActiveCommentCell(cellKey);
+                                                    setActiveCommentCell(
+                                                      cellKey,
+                                                    );
                                                   }}
                                                 >
                                                   <MessageSquare className="h-3 w-3" />
@@ -2993,13 +3478,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             )}
                                           </div>
                                         );
-                                      })
+                                      }),
                                     ),
                                     ...formGroup.subforms.flatMap((sf) =>
                                       sf.sections.flatMap((sec) =>
                                         sec.fields.map((fieldDef) => {
-                                          const fieldData = getFieldData(record, fieldDef);
-                                          const pendingChange = pendingChanges.get(`${record.id}-${fieldDef.id}`);
+                                          const fieldData = getFieldData(
+                                            record,
+                                            fieldDef,
+                                          );
+                                          const pendingChange =
+                                            pendingChanges.get(
+                                              `${record.id}-${fieldDef.id}`,
+                                            );
                                           const actualValue = pendingChange
                                             ? pendingChange.value
                                             : fieldData?.value || null;
@@ -3007,16 +3498,27 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             ? String(pendingChange.value ?? "")
                                             : fieldData?.displayValue || "";
                                           const isEditing =
-                                            editingCell?.recordId === record.id &&
-                                            editingCell?.fieldId === fieldDef.id;
+                                            editingCell?.recordId ===
+                                            record.id &&
+                                            editingCell?.fieldId ===
+                                            fieldDef.id;
                                           const cellKey = `${record.id}-${fieldDef.id}`;
-                                          const isExpanded = expandedCells.has(cellKey);
-                                          const columnWidth = columnWidths.get(fieldDef.id) || 192;
-                                          const hasImages = Array.isArray(actualValue)
+                                          const isExpanded =
+                                            expandedCells.has(cellKey);
+                                          const columnWidth =
+                                            columnWidths.get(fieldDef.id) ||
+                                            192;
+                                          const hasImages = Array.isArray(
+                                            actualValue,
+                                          )
                                             ? actualValue.some(isImageUrl)
                                             : isImageUrl(actualValue);
-                                          const isImageColumn = isImageField(fieldDef.label) || hasImages;
-                                          const hasComments = (comments.get(cellKey) || []).length > 0;
+                                          const isImageColumn =
+                                            isImageField(fieldDef.label) ||
+                                            hasImages;
+                                          const hasComments =
+                                            (comments.get(cellKey) || [])
+                                              .length > 0;
 
                                           return (
                                             <div
@@ -3026,23 +3528,43 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                 isWrapTextEnabled || isExpanded
                                                   ? "h-auto min-h-[36px] py-2 items-start"
                                                   : "h-9 items-center",
-                                                selectedCell === cellKey && "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
-                                                isEditing && "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
-                                                pendingChange && !isEditing && "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
-                                                editMode !== "locked" && !isEditing && !isImageColumn && "cursor-pointer hover:bg-gray-50",
-                                                focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
+                                                selectedCell === cellKey &&
+                                                "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
+                                                isEditing &&
+                                                "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
+                                                pendingChange &&
+                                                !isEditing &&
+                                                "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
+                                                editMode !== "locked" &&
+                                                !isEditing &&
+                                                !isImageColumn &&
+                                                "cursor-pointer hover:bg-gray-50",
+                                                focusedCell === cellKey &&
+                                                !isEditing &&
+                                                "ring-1 ring-blue-300 ring-inset",
                                               )}
                                               style={{
                                                 width: `${columnWidth}px`,
-                                                boxShadow: "inset -1px 0 0 0 #e5e7eb",
+                                                boxShadow:
+                                                  "inset -1px 0 0 0 #e5e7eb",
                                               }}
                                               onClick={() => {
-                                                if (!isEditing && editMode !== "locked" && !isImageColumn) {
+                                                if (
+                                                  !isEditing &&
+                                                  editMode !== "locked" &&
+                                                  !isImageColumn
+                                                ) {
                                                   setSelectedCell(cellKey);
                                                   setFocusedCell(cellKey);
                                                 }
                                               }}
-                                              onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
+                                              onPointerDown={(e) =>
+                                                handleCellPointerDown(
+                                                  e,
+                                                  record,
+                                                  fieldDef,
+                                                )
+                                              }
                                               onContextMenu={(e) => {
                                                 if (!isImageColumn) {
                                                   e.preventDefault();
@@ -3054,38 +3576,72 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                               <div
                                                 className={cn(
                                                   "w-full h-full flex items-center",
-                                                  isWrapTextEnabled || isExpanded ? "items-start py-2" : "",
+                                                  isWrapTextEnabled ||
+                                                    isExpanded
+                                                    ? "items-start py-2"
+                                                    : "",
                                                 )}
                                               >
                                                 {isEditing ? (
-                                                  renderFieldEditor(record, fieldDef, actualValue, displayText)
+                                                  renderFieldEditor(
+                                                    record,
+                                                    fieldDef,
+                                                    actualValue,
+                                                    displayText,
+                                                  )
                                                 ) : isImageColumn ? (
                                                   <div className="flex items-center gap-2 flex-wrap py-1">
-                                                    {Array.isArray(actualValue) ? (
+                                                    {Array.isArray(
+                                                      actualValue,
+                                                    ) ? (
                                                       actualValue
                                                         .filter(isImageUrl)
                                                         .slice(0, 3)
-                                                        .map((url: string, idx: number) => (
-                                                          <img
-                                                            key={idx}
-                                                            src={url || "/placeholder.svg"}
-                                                            alt="Field data"
-                                                            className="h-7 w-7 object-cover rounded border border-gray-300"
-                                                            onError={(e) => (e.currentTarget.style.display = "none")}
-                                                          />
-                                                        ))
-                                                    ) : isImageUrl(actualValue) ? (
+                                                        .map(
+                                                          (
+                                                            url: string,
+                                                            idx: number,
+                                                          ) => (
+                                                            <img
+                                                              key={idx}
+                                                              src={
+                                                                url ||
+                                                                "/placeholder.svg"
+                                                              }
+                                                              alt="Field data"
+                                                              className="h-7 w-7 object-cover rounded border border-gray-300"
+                                                              onError={(e) =>
+                                                              (e.currentTarget.style.display =
+                                                                "none")
+                                                              }
+                                                            />
+                                                          ),
+                                                        )
+                                                    ) : isImageUrl(
+                                                      actualValue,
+                                                    ) ? (
                                                       <img
-                                                        src={actualValue || "/placeholder.svg"}
+                                                        src={
+                                                          actualValue ||
+                                                          "/placeholder.svg"
+                                                        }
                                                         alt="Field data"
                                                         className="h-7 w-7 object-cover rounded border border-gray-300"
-                                                        onError={(e) => (e.currentTarget.style.display = "none")}
+                                                        onError={(e) =>
+                                                        (e.currentTarget.style.display =
+                                                          "none")
+                                                        }
                                                       />
                                                     ) : (
-                                                      <span className="text-xs text-gray-400">No image</span>
+                                                      <span className="text-xs text-gray-400">
+                                                        No image
+                                                      </span>
                                                     )}
                                                   </div>
-                                                ) : fieldDef.id.startsWith("_dynamicRows_") && Array.isArray(actualValue) ? (
+                                                ) : fieldDef.id.startsWith(
+                                                  "_dynamicRows_",
+                                                ) &&
+                                                  Array.isArray(actualValue) ? (
                                                   <div
                                                     className="flex items-center gap-2 cursor-pointer hover:text-blue-600"
                                                     onClick={(e) => {
@@ -3094,15 +3650,18 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                         isOpen: true,
                                                         rows: actualValue,
                                                         title: fieldDef.label,
-                                                        fieldDefinitions: fieldData?.fieldDefinitions,
+                                                        fieldDefinitions:
+                                                          fieldData?.fieldDefinitions,
                                                       });
                                                     }}
                                                   >
                                                     <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                                      <Layers className="h-3 w-3" /> {actualValue.length}
+                                                      <Layers className="h-3 w-3" />{" "}
+                                                      {actualValue.length}
                                                     </div>
                                                     <span className="text-gray-400 text-xs truncate max-w-[120px] italic">
-                                                      {displayText || "Click to view"}
+                                                      {displayText ||
+                                                        "Click to view"}
                                                     </span>
                                                   </div>
                                                 ) : (
@@ -3110,30 +3669,43 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                     <div
                                                       className={cn(
                                                         "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
-                                                        isWrapTextEnabled || isExpanded
+                                                        isWrapTextEnabled ||
+                                                          isExpanded
                                                           ? "whitespace-normal break-words"
                                                           : "whitespace-nowrap overflow-hidden text-ellipsis",
                                                       )}
-                                                      style={getConditionalStyle(fieldDef, actualValue, displayText)}
+                                                      style={getConditionalStyle(
+                                                        fieldDef,
+                                                        actualValue,
+                                                        displayText,
+                                                      )}
                                                       title={displayText}
                                                     >
-                                                      {(displayText ?? "") === "" ? "NaN" : displayText}
+                                                      {(displayText ?? "") ===
+                                                        ""
+                                                        ? "NaN"
+                                                        : displayText}
                                                     </div>
-                                                    {!isWrapTextEnabled && displayText && displayText.length > 40 && (
-                                                      <button
-                                                        onClick={(e) => {
-                                                          e.stopPropagation();
-                                                          toggleCellExpansion(cellKey);
-                                                        }}
-                                                        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
-                                                      >
-                                                        {isExpanded ? (
-                                                          <ChevronUp className="h-3 w-3" />
-                                                        ) : (
-                                                          <ChevronDown className="h-3 w-3" />
-                                                        )}
-                                                      </button>
-                                                    )}
+                                                    {!isWrapTextEnabled &&
+                                                      displayText &&
+                                                      displayText.length >
+                                                      40 && (
+                                                        <button
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            toggleCellExpansion(
+                                                              cellKey,
+                                                            );
+                                                          }}
+                                                          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
+                                                        >
+                                                          {isExpanded ? (
+                                                            <ChevronUp className="h-3 w-3" />
+                                                          ) : (
+                                                            <ChevronDown className="h-3 w-3" />
+                                                          )}
+                                                        </button>
+                                                      )}
                                                   </div>
                                                 )}
                                               </div>
@@ -3143,7 +3715,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                                     className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs"
                                                     onClick={(e) => {
                                                       e.stopPropagation();
-                                                      setActiveCommentCell(cellKey);
+                                                      setActiveCommentCell(
+                                                        cellKey,
+                                                      );
                                                     }}
                                                   >
                                                     <MessageSquare className="h-3 w-3" />
@@ -3152,33 +3726,35 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                               )}
                                             </div>
                                           );
-                                        })
-                                      )
+                                        }),
+                                      ),
                                     ),
                                   ])}
                                 </div>
                               );
                             })}
                             {/* Dummy rows for filling space */}
-                            {Array.from({ length: numDummyRows }).map((_, i) => (
-                              <div
-                                key={`dummy-${i}`}
-                                className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0"
-                              >
-                                <div className="w-10 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-12 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-20 sm:w-24 border-r border-gray-200 flex-shrink-0" />
-                                {displayedFields.map((field) => (
-                                  <div
-                                    key={field.id}
-                                    className="border-r border-gray-200 bg-white px-3 flex-shrink-0"
-                                    style={{
-                                      width: `${columnWidths.get(field.id) || 192}px`,
-                                    }}
-                                  />
-                                ))}
-                              </div>
-                            ))}
+                            {Array.from({ length: numDummyRows }).map(
+                              (_, i) => (
+                                <div
+                                  key={`dummy-${i}`}
+                                  className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0"
+                                >
+                                  <div className="w-10 border-r border-gray-200 flex-shrink-0" />
+                                  <div className="w-12 border-r border-gray-200 flex-shrink-0" />
+                                  <div className="w-20 sm:w-24 border-r border-gray-200 flex-shrink-0" />
+                                  {displayedFields.map((field) => (
+                                    <div
+                                      key={field.id}
+                                      className="border-r border-gray-200 bg-white px-3 flex-shrink-0"
+                                      style={{
+                                        width: `${columnWidths.get(field.id) || 192}px`,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              ),
+                            )}
                           </>
                         )}
                       </div>
@@ -3186,7 +3762,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     <DragOverlay>
                       {activeDragId ? (
                         <div className="bg-white shadow-2xl border-2 border-blue-500 rounded-lg px-4 py-2 opacity-90 font-medium">
-                          {orderedFields.find((f) => f.id === activeDragId)?.label || "Column"}
+                          {orderedFields.find((f) => f.id === activeDragId)
+                            ?.label || "Column"}
                         </div>
                       ) : null}
                     </DragOverlay>
@@ -3224,7 +3801,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           </Card>
 
           {/* Manage Columns Dialog */}
-          <Dialog open={isManageColumnsOpen} onOpenChange={setIsManageColumnsOpen}>
+          <Dialog
+            open={isManageColumnsOpen}
+            onOpenChange={setIsManageColumnsOpen}
+          >
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Manage Columns</DialogTitle>
@@ -3239,8 +3819,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   onDragEnd={(e) => {
                     if (e.over && e.active.id !== e.over.id) {
                       setOrderedFields((items) => {
-                        const oldIndex = items.findIndex((f) => f.id === e.active.id);
-                        const newIndex = items.findIndex((f) => f.id === e.over.id);
+                        const oldIndex = items.findIndex(
+                          (f) => f.id === e.active.id,
+                        );
+                        const newIndex = items.findIndex(
+                          (f) => f.id === e.over.id,
+                        );
                         return arrayMove(items, oldIndex, newIndex);
                       });
                     }
@@ -3276,7 +3860,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           {/* Dynamic Data Preview Modal */}
           <DynamicDataPreviewModal
             isOpen={previewData.isOpen}
-            onClose={() => setPreviewData((prev) => ({ ...prev, isOpen: false }))}
+            onClose={() =>
+              setPreviewData((prev) => ({ ...prev, isOpen: false }))
+            }
             rows={previewData.rows}
             title={previewData.title}
             fieldDefinitions={previewData.fieldDefinitions}
@@ -3293,7 +3879,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteConfirmOpen(false)}
+                >
                   Cancel
                 </Button>
                 <Button variant="destructive" onClick={handleConfirmDelete}>
@@ -3304,7 +3893,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           </Dialog>
 
           {/* Comments Dialog */}
-          <Dialog open={!!activeCommentCell} onOpenChange={() => setActiveCommentCell(null)}>
+          <Dialog
+            open={!!activeCommentCell}
+            onOpenChange={() => setActiveCommentCell(null)}
+          >
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle>Comments</DialogTitle>
@@ -3349,7 +3941,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               isOpen={viewDetailsOpen}
               onClose={() => setViewDetailsOpen(false)}
               rows={[selectedRecord]}
-              title={selectedRecord.title || "Record Details"} formFieldsWithSections={[]} />
+              title={selectedRecord.title || "Record Details"}
+              formFieldsWithSections={[]}
+            />
           )}
         </div>
       </div>
@@ -3358,3 +3952,21 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 };
 
 export default RecordsDisplay;
+
+function formatFormulaResult(value: any, returnType?: string): string {
+  if (value === null || value === undefined) return "—";
+
+  if (returnType === "number") {
+    return Number(value).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  if (returnType === "currency") {
+    return `₹${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  }
+  if (returnType === "percent") {
+    return `${Number(value).toFixed(2)}%`;
+  }
+  return String(value);
+}

@@ -17,18 +17,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   try {
     const organizationId = params.id;
     const data = await request.json();
-
     // Basic validation
     if (!data.name) {
       return NextResponse.json({ error: "Role name is required" }, { status: 400 });
     }
-
     // Check if organization exists (redundant with createRole, but early fail)
     const organization = await prisma.organization.findUnique({ where: { id: organizationId } });
     if (!organization) {
       return NextResponse.json({ error: `Organization with id ${organizationId} not found` }, { status: 404 });
     }
-
     const role = await createRole({ ...data, organizationId });
     return NextResponse.json(role, { status: 201 });
   } catch (error: any) {

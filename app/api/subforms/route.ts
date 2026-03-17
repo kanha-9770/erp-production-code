@@ -154,6 +154,7 @@ export async function POST(request: NextRequest) {
       data: {
         formId: targetFormId,
         parentSubformId: parentSubformId || undefined,
+        parentSectionId: body.parentSectionId || null,
         name,
         description: description || "",
         order: calculatedOrder,

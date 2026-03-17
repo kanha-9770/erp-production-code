@@ -531,6 +531,7 @@ model FormSection {
   conditional Json?
   styling     Json?
   fields      FormField[]
+  subforms        Subform[]
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
 
@@ -605,6 +606,8 @@ model Subform {
   parentSubformId   String?
   parentSubform     Subform?      @relation("SubformHierarchy", fields: [parentSubformId], references: [id], onDelete: Cascade)
   childSubforms     Subform[]     @relation("SubformHierarchy")
+  parentSectionId String?  
+  section         FormSection? @relation(fields: [parentSectionId], references: [id], onDelete: SetNull)
   
   name              String
   description       String?
@@ -1557,7 +1560,6 @@ model AIConfiguration {
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
-  @@unique([organizationId, provider])
   @@index([organizationId])
   @@index([provider])
   @@index([isActive])

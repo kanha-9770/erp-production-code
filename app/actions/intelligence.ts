@@ -1,7 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/prisma';
-import { requireAuth } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth2';
 import { getDateRange } from '@/lib/date-utils';
 
 // Helpers

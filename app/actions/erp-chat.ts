@@ -2,20 +2,54 @@
 
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth2';
+import type { UIMessage } from 'ai';
+import { Client } from "basic-ftp";
+import { Readable } from "stream";
 
+// ====================== FTP CONFIG ======================
+const FTP_HOST = "217.21.82.234";
+const FTP_USER = "u386199748.businesscardglobal";
+const FTP_PASSWORD = "Kafka@India1122";
+const FTP_PORT = 21;
+const FTP_UPLOAD_DIR = "businesscard";
+const PUBLIC_ACCESS_URL = "https://businesscard.nesscoglobal.com";
+
+async function uploadToHostinger(buffer: Buffer, filename: string): Promise<string> {
+  const client = new Client();
+  try {
+    await client.access({ host: FTP_HOST, user: FTP_USER, password: FTP_PASSWORD, port: FTP_PORT, secure: false });
+    await client.cd(FTP_UPLOAD_DIR);
+    const stream = Readable.from(buffer);
+    await client.uploadFrom(stream, filename);
+    return `${PUBLIC_ACCESS_URL}/${filename}`;
+  } catch (error) {
+    console.error("[FTP] Error:", error);
+    throw error;
+  } finally {
+    client.close();
+  }
+}
+
+export async function uploadFile(formData: FormData): Promise<string> {
+  const file = formData.get("file") as File | null;
+  if (!file) throw new Error("No file selected");
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "")}`;
+  return await uploadToHostinger(buffer, safeName);
+}
+
+// ====================== CONVERSATION ACTIONS ======================
 export async function createConversation(title?: string) {
   const session = await getSession();
   if (!session?.user) return null;
 
-  const conversation = await prisma.chatConversation.create({
+  return prisma.chatConversation.create({
     data: {
       userId: session.user.id,
       title: title || 'New Conversation',
       metadata: { organizationId: session.user.organizationId },
     },
   });
-
-  return conversation;
 }
 
 export async function getConversations() {
@@ -33,12 +67,13 @@ export async function getConversations() {
       messages: {
         orderBy: { createdAt: 'desc' },
         take: 1,
-        select: { content: true, sender: true, createdAt: true },
+        select: { content: true, sender: true },
       },
     },
   });
 }
 
+// 🔥 FIXED - Restores full AI response (text + tool cards) + exact order
 export async function getConversationMessages(conversationId: string) {
   const session = await getSession();
   if (!session?.user) return [];
@@ -48,26 +83,47 @@ export async function getConversationMessages(conversationId: string) {
   });
   if (!conversation) return [];
 
-  return prisma.chatMessage.findMany({
+  const dbMessages = await prisma.chatMessage.findMany({
     where: { conversationId },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'asc' },   // ← EXACT CONVERSATION ORDER
     select: {
       id: true,
       sender: true,
       content: true,
       metadata: true,
-      createdAt: true,
     },
+  });
+
+  return dbMessages.map((m: any) => {
+    let parts = [{ type: 'text' as const, text: m.content || '' }];
+
+    if (m.metadata?.parts && Array.isArray(m.metadata.parts)) {
+      parts = m.metadata.parts;
+    }
+
+    return {
+      id: m.id,
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      parts,
+    } as UIMessage;
   });
 }
 
-export async function updateConversationTitle(conversationId: string, title: string) {
+export async function saveMessage(
+  conversationId: string,
+  role: 'user' | 'ai',
+  content: string
+) {
   const session = await getSession();
   if (!session?.user) return null;
 
-  return prisma.chatConversation.updateMany({
-    where: { id: conversationId, userId: session.user.id },
-    data: { title },
+  return prisma.chatMessage.create({
+    data: {
+      conversationId,
+      sender: role,
+      content,
+      metadata: {},
+    },
   });
 }
 
@@ -84,7 +140,6 @@ export async function getSuggestedQuestions() {
   const session = await getSession();
   if (!session?.user?.organizationId) return [];
 
-  // Check user's role for context-aware suggestions
   const permissions = await prisma.userPermission.findMany({
     where: { userId: session.user.id, isActive: true, granted: true },
     select: { isSystemAdmin: true },
@@ -105,18 +160,9 @@ export async function getSuggestedQuestions() {
   ];
 
   if (hasManagerRole) {
-    base.push(
-      'List all users and their roles',
-      'Show recent audit log activity',
-      'Which forms have the most submissions?',
-      'Compare this month with last month',
-    );
+    base.push('List all users and their roles', 'Show recent audit log activity');
   } else {
-    base.push(
-      'Show my recent activity',
-      'What forms have I submitted to?',
-    );
+    base.push('Show my recent activity', 'What forms have I submitted to?');
   }
-
   return base;
 }

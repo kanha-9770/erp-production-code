@@ -11,14 +11,17 @@ import {
   FormulaBuilder,
   type FormulaConfig,
 } from "@/components/formula-builder";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { useState, useEffect } from "react";
 
 interface FormulaConfigurationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   formId: string;
   fieldId: string;
-  fieldLabel: string;                    // Now required (we always pass it)
-  initialConfig?: FormulaConfig | null;  // Existing formula config
+  fieldLabel: string;
+  initialConfig?: FormulaConfig | null;
   onSave: (config: FormulaConfig, fieldId: string) => void;
 }
 
@@ -33,8 +36,23 @@ export default function FormulaConfigurationDialog({
 }: FormulaConfigurationDialogProps) {
   if (!fieldId) return null;
 
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    if (initialConfig?.visibleInForm !== undefined) {
+      setIsVisible(initialConfig.visibleInForm);
+    } else {
+      setIsVisible(true);
+    }
+  }, [initialConfig]);
+
   const handleSave = (config: FormulaConfig) => {
-    onSave(config, fieldId);
+    const finalConfig = {
+      ...config,
+      visibleInForm: isVisible,           // true = show, false = hide
+    };
+
+    onSave(finalConfig, fieldId);
     onOpenChange(false);
   };
 
@@ -49,11 +67,31 @@ export default function FormulaConfigurationDialog({
           <DialogTitle className="text-2xl font-semibold">
             {initialConfig ? "Edit Formula" : "Configure Formula Field"}
           </DialogTitle>
+
           <DialogDescription className="text-base mt-2 text-gray-600">
             Build a dynamic calculation for{" "}
-            <span className="font-medium text-gray-900">“{fieldLabel}”</span>
-            . The result will update automatically.
+            <span className="font-medium text-gray-900">“{fieldLabel}”</span>.
+            The result will update automatically.
           </DialogDescription>
+
+          {/* VISIBILITY TOGGLE */}
+          <div className="mt-5 flex items-center gap-3 bg-gray-50/70 p-3 rounded-lg border">
+            <Switch
+              id="field-visibility"
+              checked={isVisible}
+              onCheckedChange={setIsVisible}
+            />
+            <div className="grid gap-0.5">
+              <Label htmlFor="field-visibility" className="font-medium">
+                Show this field in the form
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                {isVisible
+                  ? "Field will be visible to users"
+                  : "Field will be hidden (calculation still runs in background)"}
+              </p>
+            </div>
+          </div>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto bg-gray-50">

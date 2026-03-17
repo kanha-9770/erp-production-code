@@ -1,631 +1,4 @@
-// "use client";
-
-// import { useState, useRef, useEffect } from "react";
-// import { useDroppable } from "@dnd-kit/core";
-// import {
-//   useSortable,
-//   SortableContext,
-//   horizontalListSortingStrategy,
-// } from "@dnd-kit/sortable";
-// import { CSS } from "@dnd-kit/utilities";
-
-// import { Card, CardContent } from "@/components/ui/card";
-// import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input";
-// import {
-//   DropdownMenu,
-//   DropdownMenuContent,
-//   DropdownMenuItem,
-//   DropdownMenuSeparator,
-//   DropdownMenuTrigger,
-// } from "@/components/ui/dropdown-menu";
-// import {
-//   Dialog,
-//   DialogContent,
-//   DialogHeader,
-//   DialogTitle,
-//   DialogFooter,
-// } from "@/components/ui/dialog";
-// import {
-//   Select,
-//   SelectContent,
-//   SelectItem,
-//   SelectTrigger,
-//   SelectValue,
-// } from "@/components/ui/select";
-
-// import {
-//   MoreHorizontal,
-//   Trash2,
-//   ChevronDown,
-//   ChevronRight,
-//   Settings,
-//   Lock,
-//   Copy,
-//   ShieldCheck,
-//   Loader2,
-// } from "lucide-react";
-
-// import FieldSettings from "@/components/field-settings";
-// import type { FormField, Subform } from "@/types/item-types";
-// import { useToast } from "@/hooks/use-toast";
-
-// // Types for Permissions (Matching your original logic)
-// interface PermissionDefinition { id: string; name: string; category: string; resource: string; }
-// interface RolePermission { id: string; name: string; permission: string; }
-
-// interface SubformComponentProps {
-//   subform: Subform;
-//   onUpdateSubform: (updates: Partial<Subform>) => void;
-//   onDeleteSubform: () => void;
-//   onUpdateField: (fieldId: string, updates: Partial<FormField>) => Promise<void>;
-//   onDeleteField: (fieldId: string) => void;
-//   onCopyField?: (field: FormField) => void;
-//   formId?: string;
-// }
-
-// export default function SubformComponent({
-//   subform,
-//   onUpdateSubform,
-//   onDeleteSubform,
-//   onUpdateField,
-//   onDeleteField,
-//   onCopyField,
-//   formId = "",
-// }: SubformComponentProps) {
-//   const [isExpanded, setIsExpanded] = useState(!subform.collapsed ?? true);
-//   const { toast } = useToast();
-
-//   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
-//     id: `subform-dropzone-${subform.id}`,
-//     data: {
-//       isSubformDropzone: true,
-//       type: "SubformDropzone",
-//       subform: subform,
-//       subformId: subform.id,
-//     },
-//   });
-
-//   const addField = async (type: string) => {
-//     try {
-//       const payload = {
-//         subformId: subform.id,
-//         type,
-//         label: `${type === 'textarea' ? 'Multi-Line' : 'Single Line'} ${subform.fields.length + 1}`,
-//         order: subform.fields.length,
-//       };
-//       const res = await fetch("/api/fields", {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(payload),
-//       });
-//       if (!res.ok) throw new Error();
-//       const { data } = await res.json();
-//       onUpdateSubform({ fields: [...subform.fields, data] });
-//       toast({ title: "Field added" });
-//     } catch (err) {
-//       toast({ variant: "destructive", title: "Error", description: "Failed to add field" });
-//     }
-//   };
-
-//   const sortableIds = subform.fields.map((f) => f.id);
-
-//   return (
-//     <div className="mb-8">
-//       <div className="flex items-center gap-2 mb-3">
-//         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsExpanded(!isExpanded)}>
-//           {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-//         </Button>
-//         <h3 className="text-base font-semibold">{subform.name}</h3>
-//       </div>
-
-//       {isExpanded && (
-//         <div className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? 'border-blue-400 bg-blue-50/50 ring-2 ring-blue-200' : 'border-slate-300 bg-white'}`}>
-//           <div ref={setDroppableRef} className="overflow-x-auto custom-scrollbar w-full">
-//             <div className="flex min-w-max border-b border-slate-200">
-//               <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
-//                 {subform.fields.map((field) => (
-//                   <TabularFieldHeader
-//                     key={field.id}
-//                     field={field}
-//                     onUpdate={onUpdateField}
-//                     onDelete={() => onDeleteField(field.id)}
-//                     onCopy={() => onCopyField?.(field)}
-//                   />
-//                 ))}
-//               </SortableContext>
-
-//               {/* Add Field Button - Image Layout */}
-//               <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
-//                 <DropdownMenu>
-//                   <DropdownMenuTrigger asChild>
-//                     <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">Add Field</Button>
-//                   </DropdownMenuTrigger>
-//                   <DropdownMenuContent>
-//                     <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
-//                     <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
-//                     <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
-//                   </DropdownMenuContent>
-//                 </DropdownMenu>
-//               </div>
-//             </div>
-
-//             {/* Empty Row Placeholder */}
-//             <div className="flex min-w-max h-12 bg-white">
-//               {subform.fields.map((f) => <div key={f.id} className="min-w-[280px] border-r border-slate-100" />)}
-//               <div className="min-w-[140px]" />
-//             </div>
-//           </div>
-//         </div>
-//       )}
-
-//       <style jsx global>{`
-//         .custom-scrollbar::-webkit-scrollbar { height: 10px; }
-//         .custom-scrollbar::-webkit-scrollbar-track { background: #f8f9fa; }
-//         .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 5px; border: 2px solid #f8f9fa; }
-//       `}</style>
-//     </div>
-//   );
-// }
-
-// function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
-//   const [showSettings, setShowSettings] = useState(false);
-//   const [showPermissions, setShowPermissions] = useState(false);
-//   const { toast } = useToast();
-
-//   // --- PERMISSION LOGIC (From your original code) ---
-//   const [permissions, setPermissions] = useState<RolePermission[]>([]);
-//   const [availablePermissions, setAvailablePermissions] = useState<PermissionDefinition[]>([]);
-//   const [permissionsLoading, setPermissionsLoading] = useState(false);
-//   const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
-
-//   useEffect(() => {
-//     if (showPermissions && !hasLoadedPermissions) {
-//       const fetchPermissions = async () => {
-//         setPermissionsLoading(true);
-//         try {
-//           const res = await fetch(`/api/permissions/field/${field.id}`);
-//           if (!res.ok) throw new Error();
-//           const data = await res.json();
-//           setPermissions(data.profiles ?? []);
-//           setAvailablePermissions(data.availablePermissions ?? []);
-//           setHasLoadedPermissions(true);
-//         } catch (err) {
-//           toast({ variant: "destructive", title: "Error", description: "Failed to load permissions" });
-//         } finally {
-//           setPermissionsLoading(false);
-//         }
-//       };
-//       fetchPermissions();
-//     }
-//   }, [showPermissions, hasLoadedPermissions, field.id, toast]);
-
-//   const handlePermissionChange = async (roleId: string, permissionId: string) => {
-//     try {
-//       const res = await fetch(`/api/permissions/field/${field.id}`, {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify({ roleId, permissionId }),
-//       });
-//       if (!res.ok) throw new Error();
-//       setPermissions(prev => prev.map(p => p.id === roleId ? { ...p, permission: permissionId } : p));
-//       toast({ title: "Success", description: "Permission updated" });
-//     } catch {
-//       toast({ variant: "destructive", title: "Error", description: "Save failed" });
-//     }
-//   };
-
-//   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-//     id: field.id,
-//     data: {
-//       type: "Field",
-//       field: field,
-//     },
-//   });
-//   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : 1 };
-
-//   return (
-//     <>
-//       <div
-//         ref={setNodeRef}
-//         style={style}
-//         {...attributes}
-//         {...listeners}
-//         className={`min-w-[280px] p-4 bg-[#f8f9fb] border-r border-slate-200 h-[90px] flex flex-col justify-between group cursor-move ${isDragging ? 'opacity-40' : ''}`}
-//       >
-//         <div className="flex justify-between items-start">
-//           <span className="font-medium text-[#374151] text-[15px] truncate pr-2">{field.label}</span>
-//           <DropdownMenu>
-//             <DropdownMenuTrigger asChild>
-//               <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 opacity-0 group-hover:opacity-100"><MoreHorizontal className="h-4 w-4" /></Button>
-//             </DropdownMenuTrigger>
-//             <DropdownMenuContent align="end">
-//               <DropdownMenuItem onClick={() => setShowSettings(true)}><Settings className="mr-2 h-4 w-4" /> Settings</DropdownMenuItem>
-//               <DropdownMenuItem onClick={() => setShowPermissions(true)}><Lock className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
-//               <DropdownMenuItem onClick={onCopy}><Copy className="mr-2 h-4 w-4" /> Duplicate</DropdownMenuItem>
-//               <DropdownMenuSeparator />
-//               <DropdownMenuItem onClick={onDelete} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
-//             </DropdownMenuContent>
-//           </DropdownMenu>
-//         </div>
-//         <div className="text-[#a1b0cb] text-[13px]">{field.type === 'textarea' ? 'Multi-Line' : 'Single Line'}</div>
-//       </div>
-
-//       {/* Settings Dialog */}
-//       {showSettings && (
-//         <FieldSettings
-//           field={field}
-//           open={showSettings}
-//           onOpenChange={setShowSettings}
-//           onUpdate={(updates) => onUpdate(field.id, updates)}
-//         />
-//       )}
-
-//       {/* Permissions Dialog (Restored Logic) */}
-//       <Dialog open={showPermissions} onOpenChange={setShowPermissions}>
-//         <DialogContent className="sm:max-w-xl">
-//           <DialogHeader>
-//             <DialogTitle className="flex items-center gap-2">
-//               <ShieldCheck className="h-5 w-5 text-primary" /> Permissions — {field.label}
-//             </DialogTitle>
-//           </DialogHeader>
-
-//           {permissionsLoading ? (
-//             <div className="py-12 flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-//           ) : (
-//             <div className="space-y-2 py-4 max-h-[50vh] overflow-y-auto">
-//               {permissions.map((role) => (
-//                 <div key={role.id} className="flex items-center justify-between gap-4 p-2 rounded-md hover:bg-muted transition-colors">
-//                   <span className="font-medium">{role.name}</span>
-//                   <Select value={role.permission} onValueChange={(v) => handlePermissionChange(role.id, v)}>
-//                     <SelectTrigger className="w-48"><SelectValue placeholder="Select Access" /></SelectTrigger>
-//                     <SelectContent>
-//                       <SelectItem value="NONE">No access (Hidden)</SelectItem>
-//                       {availablePermissions.map((perm) => (
-//                         <SelectItem key={perm.id} value={perm.id}>{perm.name.replace(/_/g, " ")}</SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-//                 </div>
-//               ))}
-//             </div>
-//           )}
-//           <DialogFooter><Button variant="outline" onClick={() => setShowPermissions(false)}>Close</Button></DialogFooter>
-//         </DialogContent>
-//       </Dialog>
-//     </>
-//   );
-// }
-
-
-// "use client";
-
-// import { useEffect, useState } from "react";
-// import { useDroppable } from "@dnd-kit/core";
-// import {
-//   useSortable,
-//   SortableContext,
-//   horizontalListSortingStrategy,
-// } from "@dnd-kit/sortable";
-// import { CSS } from "@dnd-kit/utilities";
-
-// import { Button } from "@/components/ui/button";
-// import {
-//   DropdownMenu,
-//   DropdownMenuContent,
-//   DropdownMenuItem,
-//   DropdownMenuSeparator,
-//   DropdownMenuTrigger,
-// } from "@/components/ui/dropdown-menu";
-// import {
-//   Dialog,
-//   DialogContent,
-//   DialogHeader,
-//   DialogTitle,
-//   DialogFooter,
-// } from "@/components/ui/dialog";
-// import {
-//   Select,
-//   SelectContent,
-//   SelectItem,
-//   SelectTrigger,
-//   SelectValue,
-// } from "@/components/ui/select";
-
-// import {
-//   MoreHorizontal,
-//   Trash2,
-//   ChevronDown,
-//   ChevronRight,
-//   Settings,
-//   Lock,
-//   Copy,
-//   ShieldCheck,
-//   Loader2,
-// } from "lucide-react";
-
-// import FieldSettings from "@/components/field-settings";
-// import type { FormField, Subform } from "@/types/item-types";
-// import { useToast } from "@/hooks/use-toast";
-
-// // Types for Permissions (Matching your original logic)
-// interface PermissionDefinition { id: string; name: string; category: string; resource: string; }
-// interface RolePermission { id: string; name: string; permission: string; }
-
-// interface SubformComponentProps {
-//   subform: Subform;
-//   onUpdateSubform: (updates: Partial<Subform>) => void;
-//   onDeleteSubform: () => void;
-//   onUpdateField: (fieldId: string, updates: Partial<FormField>) => Promise<void>;
-//   onDeleteField: (fieldId: string) => void;
-//   onCopyField?: (field: FormField) => void;
-//   formId?: string;
-// }
-
-// export default function SubformComponent({
-//   subform,
-//   onUpdateSubform,
-//   onDeleteSubform,
-//   onUpdateField,
-//   onDeleteField,
-//   onCopyField,
-//   formId = "",
-// }: SubformComponentProps) {
-//   const [isExpanded, setIsExpanded] = useState(!subform.collapsed ?? true);
-//   const { toast } = useToast();
-
-//   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
-//     id: `subform-dropzone-${subform.id}`,
-//     data: {
-//       isSubformDropzone: true,
-//       type: "SubformDropzone",
-//       subform: subform,
-//       subformId: subform.id,
-//     },
-//   });
-
-//   const addField = async (type: string) => {
-//     try {
-//       const payload = {
-//         subformId: subform.id,
-//         type,
-//         label: `${type === 'textarea' ? 'Multi-Line' : 'Single Line'} ${subform.fields.length + 1}`,
-//         order: subform.fields.length,
-//       };
-//       const res = await fetch("/api/fields", {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify(payload),
-//       });
-//       if (!res.ok) throw new Error();
-//       const { data } = await res.json();
-//       onUpdateSubform({ fields: [...subform.fields, data] });
-//       toast({ title: "Field added" });
-//     } catch (err) {
-//       toast({ variant: "destructive", title: "Error", description: "Failed to add field" });
-//     }
-//   };
-
-//   const sortableIds = subform.fields.map((f) => f.id);
-
-//   return (
-//     <div className="mb-8">
-//       <div className="flex items-center gap-2 mb-3">
-//         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsExpanded(!isExpanded)}>
-//           {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-//         </Button>
-//         <h3 className="text-base font-semibold">{subform.name}</h3>
-//       </div>
-
-//       {isExpanded && (
-//         <div className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? 'border-blue-400 bg-blue-50/50 ring-2 ring-blue-200' : 'border-slate-300 bg-white'}`}>
-//           {/* The scrollable area — only this part should scroll horizontally */}
-//           <div
-//             ref={setDroppableRef}
-//             className="overflow-x-auto overflow-y-hidden"
-//             style={{ scrollbarWidth: "thin" }}
-//           >
-//             {/* Inner container that can become wider than the viewport */}
-//             <div className="inline-flex min-w-full">
-//               <div className="flex border-b border-slate-200">
-//                 <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
-//                   {subform.fields.map((field) => (
-//                     <TabularFieldHeader
-//                       key={field.id}
-//                       field={field}
-//                       onUpdate={onUpdateField}
-//                       onDelete={() => onDeleteField(field.id)}
-//                       onCopy={() => onCopyField?.(field)}
-//                     />
-//                   ))}
-//                 </SortableContext>
-
-//                 {/* Add Field Button */}
-//                 <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
-//                   <DropdownMenu>
-//                     <DropdownMenuTrigger asChild>
-//                       <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">Add Field</Button>
-//                     </DropdownMenuTrigger>
-//                     <DropdownMenuContent>
-//                       <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
-//                       <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
-//                       <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
-//                     </DropdownMenuContent>
-//                   </DropdownMenu>
-//                 </div>
-//               </div>
-
-//               {/* Empty Row Placeholder */}
-//               <div className="flex min-w-full h-12 bg-white">
-//                 {subform.fields.map((f) => (
-//                   <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
-//                 ))}
-//                 <div className="min-w-[140px]" />
-//               </div>
-//             </div>
-//           </div>
-//         </div>
-//       )}
-
-//       <style jsx global>{`
-//         /* Webkit browsers (Chrome, Safari, Edge, Opera) */
-//         .overflow-x-auto::-webkit-scrollbar {
-//           height: 8px;
-//         }
-//         .overflow-x-auto::-webkit-scrollbar-track {
-//           background: #f1f5f9;
-//           border-radius: 4px;
-//         }
-//         .overflow-x-auto::-webkit-scrollbar-thumb {
-//           background: #94a3b8;
-//           border-radius: 4px;
-//         }
-//         .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-//           background: #64748b;
-//         }
-
-//         /* Firefox */
-//         .overflow-x-auto {
-//           scrollbar-width: thin;
-//           scrollbar-color: #94a3b8 #f1f5f9;
-//         }
-//       `}</style>
-//     </div>
-//   );
-// }
-
-// function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
-//   const [showSettings, setShowSettings] = useState(false);
-//   const [showPermissions, setShowPermissions] = useState(false);
-//   const { toast } = useToast();
-
-//   // --- PERMISSION LOGIC (From your original code) ---
-//   const [permissions, setPermissions] = useState<RolePermission[]>([]);
-//   const [availablePermissions, setAvailablePermissions] = useState<PermissionDefinition[]>([]);
-//   const [permissionsLoading, setPermissionsLoading] = useState(false);
-//   const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
-
-//   useEffect(() => {
-//     if (showPermissions && !hasLoadedPermissions) {
-//       const fetchPermissions = async () => {
-//         setPermissionsLoading(true);
-//         try {
-//           const res = await fetch(`/api/permissions/field/${field.id}`);
-//           if (!res.ok) throw new Error();
-//           const data = await res.json();
-//           setPermissions(data.profiles ?? []);
-//           setAvailablePermissions(data.availablePermissions ?? []);
-//           setHasLoadedPermissions(true);
-//         } catch (err) {
-//           toast({ variant: "destructive", title: "Error", description: "Failed to load permissions" });
-//         } finally {
-//           setPermissionsLoading(false);
-//         }
-//       };
-//       fetchPermissions();
-//     }
-//   }, [showPermissions, hasLoadedPermissions, field.id, toast]);
-
-//   const handlePermissionChange = async (roleId: string, permissionId: string) => {
-//     try {
-//       const res = await fetch(`/api/permissions/field/${field.id}`, {
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-//         body: JSON.stringify({ roleId, permissionId }),
-//       });
-//       if (!res.ok) throw new Error();
-//       setPermissions(prev => prev.map(p => p.id === roleId ? { ...p, permission: permissionId } : p));
-//       toast({ title: "Success", description: "Permission updated" });
-//     } catch {
-//       toast({ variant: "destructive", title: "Error", description: "Save failed" });
-//     }
-//   };
-
-//   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-//     id: field.id,
-//     data: {
-//       type: "Field",
-//       field: field,
-//     },
-//   });
-//   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : 1 };
-
-//   return (
-//     <>
-//       <div
-//         ref={setNodeRef}
-//         style={style}
-//         {...attributes}
-//         {...listeners}
-//         className={`min-w-[280px] p-4 bg-[#f8f9fb] border-r border-slate-200 h-[90px] flex flex-col justify-between group cursor-move ${isDragging ? 'opacity-40' : ''}`}
-//       >
-//         <div className="flex justify-between items-start">
-//           <span className="font-medium text-[#374151] text-[15px] truncate pr-2">{field.label}</span>
-//           <DropdownMenu>
-//             <DropdownMenuTrigger asChild>
-//               <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 opacity-0 group-hover:opacity-100"><MoreHorizontal className="h-4 w-4" /></Button>
-//             </DropdownMenuTrigger>
-//             <DropdownMenuContent align="end">
-//               <DropdownMenuItem onClick={() => setShowSettings(true)}><Settings className="mr-2 h-4 w-4" /> Settings</DropdownMenuItem>
-//               <DropdownMenuItem onClick={() => setShowPermissions(true)}><Lock className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
-//               <DropdownMenuItem onClick={onCopy}><Copy className="mr-2 h-4 w-4" /> Duplicate</DropdownMenuItem>
-//               <DropdownMenuSeparator />
-//               <DropdownMenuItem onClick={onDelete} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
-//             </DropdownMenuContent>
-//           </DropdownMenu>
-//         </div>
-//         <div className="text-[#a1b0cb] text-[13px]">{field.type === 'textarea' ? 'Multi-Line' : 'Single Line'}</div>
-//       </div>
-
-//       {/* Settings Dialog */}
-//       {showSettings && (
-//         <FieldSettings
-//           field={field}
-//           open={showSettings}
-//           onOpenChange={setShowSettings}
-//           onUpdate={(updates) => onUpdate(field.id, updates)}
-//         />
-//       )}
-
-//       {/* Permissions Dialog (Restored Logic) */}
-//       <Dialog open={showPermissions} onOpenChange={setShowPermissions}>
-//         <DialogContent className="sm:max-w-xl">
-//           <DialogHeader>
-//             <DialogTitle className="flex items-center gap-2">
-//               <ShieldCheck className="h-5 w-5 text-primary" /> Permissions — {field.label}
-//             </DialogTitle>
-//           </DialogHeader>
-
-//           {permissionsLoading ? (
-//             <div className="py-12 flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-//           ) : (
-//             <div className="space-y-2 py-4 max-h-[50vh] overflow-y-auto">
-//               {permissions.map((role) => (
-//                 <div key={role.id} className="flex items-center justify-between gap-4 p-2 rounded-md hover:bg-muted transition-colors">
-//                   <span className="font-medium">{role.name}</span>
-//                   <Select value={role.permission} onValueChange={(v) => handlePermissionChange(role.id, v)}>
-//                     <SelectTrigger className="w-48"><SelectValue placeholder="Select Access" /></SelectTrigger>
-//                     <SelectContent>
-//                       <SelectItem value="NONE">No access (Hidden)</SelectItem>
-//                       {availablePermissions.map((perm) => (
-//                         <SelectItem key={perm.id} value={perm.id}>{perm.name.replace(/_/g, " ")}</SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-//                 </div>
-//               ))}
-//             </div>
-//           )}
-//           <DialogFooter><Button variant="outline" onClick={() => setShowPermissions(false)}>Close</Button></DialogFooter>
-//         </DialogContent>
-//       </Dialog>
-//     </>
-//   );
-// }
-
-
 "use client";
-
 import { useEffect, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -634,7 +7,6 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -658,7 +30,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   MoreHorizontal,
   Trash2,
@@ -669,24 +43,31 @@ import {
   Copy,
   ShieldCheck,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
-
 import FieldSettings from "@/components/field-settings";
 import type { FormField, Subform } from "@/types/item-types";
 import { useToast } from "@/hooks/use-toast";
 
-// Types for Permissions
-interface PermissionDefinition { id: string; name: string; category: string; resource: string; }
-interface RolePermission { id: string; name: string; permission: string; }
-
+interface PermissionDefinition {
+  id: string;
+  name: string;
+  category: string;
+  resource: string;
+}
+interface RolePermission {
+  id: string;
+  name: string;
+  permission: string;
+}
 interface SubformComponentProps {
-  subform: Subform;
+  subform: Subform & { fields: FormField[] };
   onUpdateSubform: (updates: Partial<Subform>) => void;
-  onDeleteSubform: () => void;               // ← called by parent after successful delete
+  onDeleteSubform: () => void;
   onUpdateField: (fieldId: string, updates: Partial<FormField>) => Promise<void>;
   onDeleteField: (fieldId: string) => void;
   onCopyField?: (field: FormField) => void;
-  formId?: string;
+  formId: string;
 }
 
 export default function SubformComponent({
@@ -696,11 +77,20 @@ export default function SubformComponent({
   onUpdateField,
   onDeleteField,
   onCopyField,
-  formId = "",
+  formId,
 }: SubformComponentProps) {
   const [isExpanded, setIsExpanded] = useState(!subform.collapsed ?? true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showSubformSettings, setShowSubformSettings] = useState(false);
+
+  const [formFields, setFormFields] = useState<FormField[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldsError, setFieldsError] = useState<string | null>(null);
+
+  // Local state for editing conditional visibility
+  const [localConditional, setLocalConditional] = useState<Subform["conditional"] | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
 
   const { toast } = useToast();
 
@@ -713,6 +103,62 @@ export default function SubformComponent({
       subformId: subform.id,
     },
   });
+
+  // Debug: component mount / major prop change
+  useEffect(() => {
+    console.log("[SubformComponent] Rendered / props changed", {
+      subformId: subform.id,
+      subformName: subform.name,
+      hasConditional: !!subform.conditional,
+      conditional: subform.conditional,
+      fieldsCount: subform.fields?.length ?? 0,
+    });
+  }, [subform]);
+
+  // Load main form fields when visibility settings dialog is opened
+  useEffect(() => {
+    if (showSubformSettings && formId) {
+      console.log("[Subform Visibility] Dialog opened → fetching parent form fields", { formId });
+      const fetchFormFields = async () => {
+        setFieldsLoading(true);
+        setFieldsError(null);
+        try {
+          const res = await fetch(`/api/forms/${formId}/fields`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const fields = Array.isArray(data) ? data : data.data || data.fields || [];
+          console.log("[Subform Visibility] Loaded parent form fields", {
+            count: fields.length,
+            firstFew: fields.slice(0, 3).map(f => ({ id: f.id, label: f.label, type: f.type })),
+          });
+          setFormFields(fields);
+        } catch (err: any) {
+          console.error("[Subform Visibility] Failed to load parent fields", err);
+          setFieldsError("Could not load available fields. Try again.");
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Failed to load fields for conditional visibility.",
+          });
+        } finally {
+          setFieldsLoading(false);
+        }
+      };
+      fetchFormFields();
+    }
+  }, [showSubformSettings, formId, toast]);
+
+  // Sync local conditional state when dialog visibility changes
+  useEffect(() => {
+    if (showSubformSettings) {
+      console.log("[Subform Visibility] Syncing local conditional state from props", {
+        previousLocal: localConditional,
+        newFromProps: subform.conditional,
+      });
+      setLocalConditional(subform.conditional ?? null);
+      setHasChanges(false);
+    }
+  }, [showSubformSettings, subform.conditional]);
 
   const addField = async (type: string) => {
     try {
@@ -743,20 +189,15 @@ export default function SubformComponent({
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
-
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || "Failed to delete subform");
       }
-
       toast({
         title: "Subform deleted",
         description: "The subform and all nested content have been removed.",
       });
-
-      // Tell parent to remove this subform from the list
       onDeleteSubform();
-
     } catch (err: any) {
       console.error("[Subform Delete]", err);
       toast({
@@ -786,7 +227,6 @@ export default function SubformComponent({
           </Button>
           <h3 className="text-base font-semibold">{subform.name}</h3>
         </div>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7">
@@ -794,8 +234,8 @@ export default function SubformComponent({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled>
-              <Settings className="mr-2 h-4 w-4" /> Edit subform
+            <DropdownMenuItem onClick={() => setShowSubformSettings(true)}>
+              <Settings className="mr-2 h-4 w-4" /> Visibility Settings
             </DropdownMenuItem>
             <DropdownMenuItem disabled>
               <Copy className="mr-2 h-4 w-4" /> Duplicate
@@ -814,15 +254,16 @@ export default function SubformComponent({
       </div>
 
       {isExpanded && (
-        <div className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? 'border-blue-400 bg-blue-50/50 ring-2 ring-blue-200' : 'border-slate-300 bg-white'}`}>
-          {/* The scrollable area — only this part should scroll horizontally */}
+        <div
+          className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? "border-blue-400 bg-blue-50/50 ring-2 ring-blue-200" : "border-slate-300 bg-white"
+            }`}
+        >
           <div
             ref={setDroppableRef}
             className="overflow-x-auto overflow-y-hidden"
             style={{ scrollbarWidth: "thin" }}
           >
-            {/* Inner container that can become wider than the viewport */}
-            <div className="inline-flex min-w-full">
+            <div className="inline-flex w-[20rem]">
               <div className="flex border-b border-slate-200">
                 <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
                   {subform.fields.map((field) => (
@@ -835,12 +276,12 @@ export default function SubformComponent({
                     />
                   ))}
                 </SortableContext>
-
-                {/* Add Field Button */}
                 <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">Add Field</Button>
+                      <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">
+                        Add Field
+                      </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
                       <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
@@ -850,8 +291,6 @@ export default function SubformComponent({
                   </DropdownMenu>
                 </div>
               </div>
-
-              {/* Empty Row Placeholder */}
               <div className="flex min-w-full h-12 bg-white">
                 {subform.fields.map((f) => (
                   <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
@@ -863,7 +302,6 @@ export default function SubformComponent({
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
@@ -901,8 +339,257 @@ export default function SubformComponent({
         </DialogContent>
       </Dialog>
 
+      {/* ── VISIBILITY SETTINGS DIALOG ── */}
+      <Dialog open={showSubformSettings} onOpenChange={setShowSubformSettings}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Visibility Settings — {subform.name}
+            </DialogTitle>
+            <DialogDescription>
+              Show or hide this subform based on the value of a field in the main form.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-base font-medium">Enable Conditional Visibility</Label>
+                <p className="text-sm text-muted-foreground">
+                  Control visibility based on another field’s value
+                </p>
+              </div>
+              <Switch
+                checked={!!localConditional}
+                onCheckedChange={(enabled) => {
+                  console.log("[Subform Visibility] Enable toggle changed →", enabled ? "ON" : "OFF");
+                  if (enabled) {
+                    setLocalConditional({
+                      type: "show",
+                      parentFieldId: "",
+                      value: "",
+                    });
+                  } else {
+                    setLocalConditional(null);
+                  }
+                  setHasChanges(true);
+                }}
+              />
+            </div>
+
+            {localConditional && (
+              <div className="pl-6 border-l-2 border-muted space-y-5">
+                {/* Depends on field */}
+                <div className="space-y-2">
+                  <Label>Depends on field</Label>
+
+                  {fieldsLoading ? (
+                    <div className="flex items-center gap-2 py-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">Loading form fields...</span>
+                    </div>
+                  ) : fieldsError ? (
+                    <div className="text-sm text-destructive flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" />
+                      {fieldsError}
+                    </div>
+                  ) : formFields.length === 0 ? (
+                    <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded">
+                      No fields found in the main form yet.
+                    </div>
+                  ) : (
+                    <Select
+                      value={localConditional.parentFieldId || ""}
+                      onValueChange={(val) => {
+                        console.log("[Subform Visibility] Parent field selected →", val);
+                        setLocalConditional((prev) => ({
+                          ...prev!,
+                          parentFieldId: val,
+                          value: "", // reset value when parent changes
+                        }));
+                        setHasChanges(true);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a field from the main form" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {formFields.map((f) => (
+                          <SelectItem key={f.id} value={f.id}>
+                            {f.label || "Unnamed"} <span className="text-xs text-muted-foreground">({f.type})</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* Action: Show / Hide */}
+                <div className="space-y-2">
+                  <Label>Action</Label>
+                  <Select
+                    value={localConditional.type}
+                    onValueChange={(val) => {
+                      console.log("[Subform Visibility] Action changed →", val);
+                      setLocalConditional((prev) => ({
+                        ...prev!,
+                        type: val as "show" | "hide",
+                      }));
+                      setHasChanges(true);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="show">Show this subform</SelectItem>
+                      <SelectItem value="hide">Hide this subform</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Trigger value */}
+                <div className="space-y-2">
+                  <Label>Trigger value</Label>
+
+                  {(() => {
+                    const parent = formFields.find((f) => f.id === localConditional.parentFieldId);
+                    const options = parent?.options ?? [];
+
+                    console.log("[Subform Visibility] Rendering trigger value input", {
+                      parentId: localConditional.parentFieldId,
+                      parentLabel: parent?.label,
+                      hasOptions: options.length > 0,
+                      optionCount: options.length,
+                    });
+
+                    if (options.length > 0) {
+                      return (
+                        <Select
+                          value={localConditional.value || ""}
+                          onValueChange={(val) => {
+                            console.log("[Subform Visibility] Trigger value (dropdown) selected →", val);
+                            setLocalConditional((prev) => ({ ...prev!, value: val }));
+                            setHasChanges(true);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Choose value that triggers the action" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {options.map((opt) => (
+                              <SelectItem key={opt.value || opt.label} value={opt.value || opt.label}>
+                                {opt.label}
+                                {opt.value && opt.value !== opt.label && (
+                                  <span className="text-xs text-muted-foreground ml-1">({opt.value})</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      );
+                    }
+
+                    return (
+                      <Input
+                        value={localConditional.value || ""}
+                        onChange={(e) => {
+                          console.log("[Subform Visibility] Trigger value (free text) changed →", e.target.value);
+                          setLocalConditional((prev) => ({ ...prev!, value: e.target.value }));
+                          setHasChanges(true);
+                        }}
+                        placeholder="e.g. Yes, Active, 1, Rajasthan, true"
+                      />
+                    );
+                  })()}
+
+                  <p className="text-xs text-muted-foreground">
+                    The subform will {localConditional.type === "show" ? "appear" : "be hidden"} when the field equals this value.
+                  </p>
+                </div>
+
+                {/* Preview / current rule */}
+                {localConditional.parentFieldId && localConditional.value && (
+                  <div className="mt-3 p-3 bg-muted/50 rounded border text-sm">
+                    <strong>Current rule:</strong><br />
+                    This subform will be <strong>{localConditional.type === "show" ? "shown" : "hidden"}</strong> when{" "}
+                    <em>{formFields.find((f) => f.id === localConditional.parentFieldId)?.label || "selected field"}</em> ={" "}
+                    <strong>"{localConditional.value}"</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-3 sm:gap-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                console.log("[Subform Visibility] Cancel clicked → discarding changes");
+                setShowSubformSettings(false);
+                setLocalConditional(subform.conditional ?? null);
+                setHasChanges(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                console.log("[Subform Visibility] SAVE clicked → preparing to send to API", {
+                  subformId: subform.id,
+                  conditional: localConditional ?? null,
+                });
+
+                try {
+                  const response = await fetch(`/api/subforms/${subform.id}`, {
+                    method: "PATCH",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      conditional: localConditional ?? null,
+                    }),
+                  });
+
+                  if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Server responded with status ${response.status}`);
+                  }
+
+                  const result = await response.json();
+                  console.log("[Subform Visibility] API save successful → server returned:", result);
+
+                  // Update parent component state (optimistic / sync)
+                  onUpdateSubform({
+                    conditional: localConditional ?? undefined,
+                  });
+
+                  toast({
+                    title: "Saved",
+                    description: "Subform visibility settings updated.",
+                  });
+                } catch (err: any) {
+                  console.error("[Subform Visibility] Failed to save conditional visibility:", err);
+                  toast({
+                    variant: "destructive",
+                    title: "Save failed",
+                    description: err.message || "Could not save visibility settings. Please try again.",
+                  });
+                } finally {
+                  setHasChanges(false);
+                  setShowSubformSettings(false);
+                }
+              }}
+              disabled={!hasChanges}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <style jsx global>{`
-        /* Webkit browsers (Chrome, Safari, Edge, Opera) */
         .overflow-x-auto::-webkit-scrollbar {
           height: 8px;
         }
@@ -917,8 +604,6 @@ export default function SubformComponent({
         .overflow-x-auto::-webkit-scrollbar-thumb:hover {
           background: #64748b;
         }
-
-        /* Firefox */
         .overflow-x-auto {
           scrollbar-width: thin;
           scrollbar-color: #94a3b8 #f1f5f9;
@@ -928,16 +613,10 @@ export default function SubformComponent({
   );
 }
 
-// ────────────────────────────────────────────────
-// TabularFieldHeader remains unchanged
-// ────────────────────────────────────────────────
-
 function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
   const { toast } = useToast();
-
-  // --- PERMISSION LOGIC ---
   const [permissions, setPermissions] = useState<RolePermission[]>([]);
   const [availablePermissions, setAvailablePermissions] = useState<PermissionDefinition[]>([]);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
@@ -972,7 +651,9 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
         body: JSON.stringify({ roleId, permissionId }),
       });
       if (!res.ok) throw new Error();
-      setPermissions(prev => prev.map(p => p.id === roleId ? { ...p, permission: permissionId } : p));
+      setPermissions((prev) =>
+        prev.map((p) => (p.id === roleId ? { ...p, permission: permissionId } : p)),
+      );
       toast({ title: "Success", description: "Permission updated" });
     } catch {
       toast({ variant: "destructive", title: "Error", description: "Save failed" });
@@ -986,6 +667,7 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
       field: field,
     },
   });
+
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : 1 };
 
   return (
@@ -995,27 +677,43 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
         style={style}
         {...attributes}
         {...listeners}
-        className={`min-w-[280px] p-4 bg-[#f8f9fb] border-r border-slate-200 h-[90px] flex flex-col justify-between group cursor-move ${isDragging ? 'opacity-40' : ''}`}
+        className={`min-w-[280px] p-4 bg-[#f8f9fb] border-r border-slate-200 h-[90px] flex flex-col justify-between group cursor-move ${isDragging ? "opacity-40" : ""
+          }`}
       >
         <div className="flex justify-between items-start">
           <span className="font-medium text-[#374151] text-[15px] truncate pr-2">{field.label}</span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 opacity-0 group-hover:opacity-100"><MoreHorizontal className="h-4 w-4" /></Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-slate-400 opacity-0 group-hover:opacity-100"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setShowSettings(true)}><Settings className="mr-2 h-4 w-4" /> Settings</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowPermissions(true)}><Lock className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
-              <DropdownMenuItem onClick={onCopy}><Copy className="mr-2 h-4 w-4" /> Duplicate</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowSettings(true)}>
+                <Settings className="mr-2 h-4 w-4" /> Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowPermissions(true)}>
+                <Lock className="mr-2 h-4 w-4" /> Permissions
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onCopy}>
+                <Copy className="mr-2 h-4 w-4" /> Duplicate
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onDelete} className="text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
+              <DropdownMenuItem onClick={onDelete} className="text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <div className="text-[#a1b0cb] text-[13px]">{field.type === 'textarea' ? 'Multi-Line' : 'Single Line'}</div>
+        <div className="text-[#a1b0cb] text-[13px]">
+          {field.type === "textarea" ? "Multi-Line" : "Single Line"}
+        </div>
       </div>
 
-      {/* Settings Dialog */}
       {showSettings && (
         <FieldSettings
           field={field}
@@ -1025,7 +723,6 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
         />
       )}
 
-      {/* Permissions Dialog */}
       <Dialog open={showPermissions} onOpenChange={setShowPermissions}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -1033,20 +730,31 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
               <ShieldCheck className="h-5 w-5 text-primary" /> Permissions — {field.label}
             </DialogTitle>
           </DialogHeader>
-
           {permissionsLoading ? (
-            <div className="py-12 flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            <div className="py-12 flex justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
           ) : (
             <div className="space-y-2 py-4 max-h-[50vh] overflow-y-auto">
               {permissions.map((role) => (
-                <div key={role.id} className="flex items-center justify-between gap-4 p-2 rounded-md hover:bg-muted transition-colors">
+                <div
+                  key={role.id}
+                  className="flex items-center justify-between gap-4 p-2 rounded-md hover:bg-muted transition-colors"
+                >
                   <span className="font-medium">{role.name}</span>
-                  <Select value={role.permission} onValueChange={(v) => handlePermissionChange(role.id, v)}>
-                    <SelectTrigger className="w-48"><SelectValue placeholder="Select Access" /></SelectTrigger>
+                  <Select
+                    value={role.permission}
+                    onValueChange={(v) => handlePermissionChange(role.id, v)}
+                  >
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Select Access" />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="NONE">No access (Hidden)</SelectItem>
                       {availablePermissions.map((perm) => (
-                        <SelectItem key={perm.id} value={perm.id}>{perm.name.replace(/_/g, " ")}</SelectItem>
+                        <SelectItem key={perm.id} value={perm.id}>
+                          {perm.name.replace(/_/g, " ")}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1054,7 +762,11 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
               ))}
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => setShowPermissions(false)}>Close</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPermissions(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

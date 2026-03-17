@@ -18,7 +18,6 @@ export async function getAIConfigurations() {
   const session = await getSession();
   if (!session?.user?.organizationId) return [];
 
-  // All users in org can view configs (admin check only for create/update/delete)
   const configs = await prisma.aIConfiguration.findMany({
     where: { organizationId: session.user.organizationId },
     orderBy: { updatedAt: 'desc' },
@@ -36,7 +35,6 @@ export async function getAIConfigurations() {
     },
   });
 
-  // Mask API keys for display
   return configs.map(c => ({
     ...c,
     apiKeyMasked: maskApiKey(c.apiKey),
@@ -51,9 +49,8 @@ export async function createAIConfiguration(data: AIConfigFormData) {
 
   const isOwner = await checkIsOrgOwnerOrAdmin(session.user.id, session.user.organizationId);
 
-
   try {
-    // If setting as active, deactivate others of same provider
+    // If setting as active, deactivate others of same provider (still works perfectly with multiples)
     if (data.isActive) {
       await prisma.aIConfiguration.updateMany({
         where: {
@@ -65,6 +62,8 @@ export async function createAIConfiguration(data: AIConfigFormData) {
       });
     }
 
+    // ALWAYS create a brand new configuration (this is what you asked for)
+    // No more auto-update of existing one
     const config = await prisma.aIConfiguration.create({
       data: {
         organizationId: session.user.organizationId,
@@ -81,9 +80,14 @@ export async function createAIConfiguration(data: AIConfigFormData) {
     revalidatePath('/admin/settings');
     return { success: true, id: config.id };
   } catch (error: any) {
-    // Handle unique constraint
+    // Special handling only for the old unique constraint
     if (error?.code === 'P2002') {
-      return { error: 'A configuration for this provider already exists. Please edit the existing one instead.' };
+      return { 
+        error: 'A configuration for this provider already exists. ' +
+               'To allow multiple API keys for the same provider and same model, ' +
+               'remove the unique constraint on (organizationId, provider) from your Prisma schema ' +
+               '(AIConfiguration model) and run: npx prisma migrate dev or npx prisma db push' 
+      };
     }
     return { error: 'Failed to create configuration' };
   }
@@ -97,15 +101,12 @@ export async function updateAIConfiguration(configId: string, data: Partial<AICo
 
   const isOwner = await checkIsOrgOwnerOrAdmin(session.user.id, session.user.organizationId);
 
-
-  // Verify config belongs to org
   const existing = await prisma.aIConfiguration.findFirst({
     where: { id: configId, organizationId: session.user.organizationId },
   });
   if (!existing) return { error: 'Configuration not found' };
 
   try {
-    // If setting as active, deactivate others of same provider
     if (data.isActive) {
       await prisma.aIConfiguration.updateMany({
         where: {
@@ -121,9 +122,12 @@ export async function updateAIConfiguration(configId: string, data: Partial<AICo
     const updateData: any = {};
     if (data.provider !== undefined) updateData.provider = data.provider;
     if (data.model !== undefined) updateData.model = data.model;
-    if (data.apiKey !== undefined && data.apiKey.trim() !== '' && !data.apiKey.startsWith('sk-***')) {
+
+    // Protected: never overwrite real API key when user sees masked value (***)
+    if (data.apiKey !== undefined && data.apiKey.trim() !== '' && !data.apiKey.includes('***')) {
       updateData.apiKey = data.apiKey;
     }
+
     if (data.temperature !== undefined) updateData.temperature = data.temperature;
     if (data.maxTokens !== undefined) updateData.maxTokens = data.maxTokens;
     if (data.isActive !== undefined) updateData.isActive = data.isActive;

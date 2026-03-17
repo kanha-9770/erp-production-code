@@ -177,7 +177,7 @@ export function OrganizationTree() {
               <Target className="h-3.5 w-3.5" />
             </Button>
           </div>
-        </div>
+        </div> 
 
         <div className="flex items-center gap-2">
           <div className="hidden md:flex bg-slate-100 p-1 rounded-xl border border-slate-200">

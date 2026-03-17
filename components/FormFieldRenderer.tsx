@@ -712,13 +712,14 @@ const FormulaCalculator: React.FC<FormulaCalculatorProps> = ({ form, formData, s
       });
       return fields;
     };
-    return form.sections.flatMap((s) =>
-      s.fields.filter(
-        (f) => f.type === "formula" && f.properties?.formulaConfig,
+    return [
+      ...form.sections.flatMap((s) =>
+        s.fields.filter((f) => f.type === "formula" && f.properties?.formulaConfig)
       ),
-    ).concat(getAllSubformFields(form.subforms || []).filter(
-      (f) => f.type === "formula" && f.properties?.formulaConfig,
-    ));
+      ...getAllSubformFields(form.subforms || []).filter(
+        (f) => f.type === "formula" && f.properties?.formulaConfig
+      ),
+    ];
   }, [form]);
 
   const fieldLabelToValue = useMemo(() => {
@@ -741,39 +742,44 @@ const FormulaCalculator: React.FC<FormulaCalculatorProps> = ({ form, formData, s
         }
       });
     };
-    if (form.subforms) {
-      processSubforms(form.subforms);
-    }
+    if (form.subforms) processSubforms(form.subforms);
     return mapping;
-  }, [form, formData]);
+  }, [form, formData]); // ← depends on formData → re-computes when data changes
 
-  useEffect(() => {
-    if (!form || formulaFields.length === 0) return;
+  // This runs immediately whenever formData changes
+  useMemo(() => {
+    if (!form || formulaFields.length === 0) {
+      setFormulaValues({});
+      return;
+    }
+
     const evaluator = getFormulaEvaluator();
     const newFormulaValues: Record<string, any> = {};
+
     formulaFields.forEach((field) => {
       const config = field.properties?.formulaConfig as FormulaConfig | undefined;
       if (!config || !config.expression) return;
+
       try {
         const referencedFields = extractFieldReferences(config.expression);
         const variables: Record<string, any> = {};
+
         referencedFields.forEach((refLabel) => {
           if (fieldLabelToValue[refLabel] !== undefined) {
             variables[refLabel] = fieldLabelToValue[refLabel];
           }
         });
+
         const result = evaluator.evaluate(
           config.expression,
           variables,
           config.returnType || "Number",
           config.blankPreference || "Empty",
         );
+
         if (result.success) {
           let finalValue = result.value;
-          if (
-            config.returnType === "Number" ||
-            config.returnType === "Currency"
-          ) {
+          if (config.returnType === "Number" || config.returnType === "Currency") {
             const numValue = Number(finalValue);
             if (!isNaN(numValue)) {
               finalValue = numValue.toFixed(config.decimalPlaces || 2);
@@ -787,12 +793,14 @@ const FormulaCalculator: React.FC<FormulaCalculatorProps> = ({ form, formData, s
           newFormulaValues[field.id] =
             config.blankPreference === "Zero" ? 0 : "";
         }
-      } catch {
+      } catch (err) {
+        console.warn(`Formula error for ${field.label}:`, err);
         newFormulaValues[field.id] = "";
       }
     });
+
     setFormulaValues(newFormulaValues);
-  }, [form, formulaFields, fieldLabelToValue, setFormulaValues]);
+  }, [formulaFields, fieldLabelToValue, form, setFormulaValues]); // ← key dependencies
 
   return null;
 };

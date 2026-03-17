@@ -8,8 +8,8 @@ import {
   type UserPermissionUpdate,
 } from "@/lib/database";
 
-const VIEW_PERMISSION_ID = "1"; // ← Change to your actual VIEW permission ID
-const CREATE_PERMISSION_ID = "2"; // ← Change to your actual IDs
+const VIEW_PERMISSION_ID = "1"; // ← your actual VIEW permission ID
+const CREATE_PERMISSION_ID = "2"; // ← your actual IDs
 const EDIT_PERMISSION_ID = "3";
 const DELETE_PERMISSION_ID = "4";
 
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     const userPermissions = await getUserPermissions(userId || undefined);
     console.log(
-      `[GET] Successfully retrieved ${userPermissions.length} user permissions for userId: ${userId || "all"}`,
+      `[GET] Retrieved ${userPermissions.length} permissions for userId: ${userId || "all"}`,
     );
 
     return NextResponse.json({
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[GET] Failed to fetch user permissions:", error);
+    console.error("[GET] Failed:", error);
     return NextResponse.json(
       {
         success: false,
@@ -64,10 +64,9 @@ export async function PUT(request: NextRequest) {
     console.log("[PUT /api/user-permissions] Starting request");
 
     const body = await request.json();
-    console.log("[PUT] Raw request body:", JSON.stringify(body, null, 2));
+    console.log("[PUT] Raw body:", JSON.stringify(body, null, 2));
 
     if (!Array.isArray(body)) {
-      console.log("[PUT] Invalid request body: must be an array");
       return NextResponse.json(
         { success: false, error: "Request body must be an array" },
         { status: 400 },
@@ -75,7 +74,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Group updates by (userId, formId/moduleId) to enforce VIEW-only rule
+    // Group updates by scope to make processing / logging clearer
     // ────────────────────────────────────────────────────────────────
     const groupedUpdates: Record<string, UserPermissionUpdate[]> = {};
 
@@ -91,7 +90,7 @@ export async function PUT(request: NextRequest) {
 
       if (!userId || !permissionId) {
         console.warn(
-          "[PUT] Skipping invalid update: missing userId or permissionId",
+          "[PUT] Skipping invalid update → missing userId/permissionId",
           raw,
         );
         continue;
@@ -117,68 +116,33 @@ export async function PUT(request: NextRequest) {
 
     const finalUpdates: UserPermissionUpdate[] = [];
 
-    // ────────────────────────────────────────────────────────────────
-    // Enforce VIEW-only rule per scope
-    // ────────────────────────────────────────────────────────────────
     for (const [scope, updates] of Object.entries(groupedUpdates)) {
-      console.log(
-        `[PUT] Processing scope: ${scope} (${updates.length} permissions)`,
-      );
+      console.log(`[PUT] Processing scope ${scope} (${updates.length} perms)`);
 
-      const hasView = updates.some(
-        (u) => u.permissionId === VIEW_PERMISSION_ID && u.granted,
-      );
-      const hasWrite = updates.some(
-        (u) => WRITE_PERMISSIONS.includes(u.permissionId) && u.granted,
-      );
-
-      if (hasView && hasWrite) {
-        // Option 1: Strict rejection (recommended for security)
-        console.warn(
-          `[PUT] Rejected: VIEW + WRITE permissions cannot coexist in scope ${scope}`,
-        );
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              "Cannot grant VIEW together with CREATE/EDIT/DELETE permissions",
-            details:
-              "Admin tried to assign multiple permissions including VIEW + write access",
-          },
-          { status: 400 },
-        );
-
-        // Option 2: Auto-disable write permissions (less strict - uncomment if preferred)
-        /*
-        console.warn(`[PUT] Auto-correcting: disabling write permissions because VIEW is granted in scope ${scope}`);
-        updates.forEach(u => {
-          if (WRITE_PERMISSIONS.includes(u.permissionId)) {
-            u.granted = false;
-          }
-        });
-        */
-      }
+      // ───────────────────────────────────────
+      // Previously here: VIEW + WRITE rejection
+      // Now removed → VIEW + CREATE/EDIT/DELETE allowed
+      // ───────────────────────────────────────
 
       finalUpdates.push(...updates);
     }
 
     if (finalUpdates.length === 0) {
-      console.log("[PUT] No valid updates after validation");
       return NextResponse.json(
-        { success: false, error: "No valid updates provided after validation" },
+        {
+          success: false,
+          error: "No valid permission updates after validation",
+        },
         { status: 400 },
       );
     }
 
-    console.log(`[PUT] Final validated updates count: ${finalUpdates.length}`);
-    console.log("[PUT] Final updates:", JSON.stringify(finalUpdates, null, 2));
-
+    console.log(`[PUT] Applying ${finalUpdates.length} validated updates`);
     const success = await updateUserPermissions(finalUpdates);
-    console.log("[PUT] updateUserPermissions result:", success);
 
     return NextResponse.json({
       success: true,
-      message: `Updated ${finalUpdates.length} user permissions (VIEW-only rule enforced)`,
+      message: `Successfully updated ${finalUpdates.length} permission records`,
       updatedCount: finalUpdates.length,
     });
   } catch (error) {

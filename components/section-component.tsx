@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
@@ -102,6 +101,7 @@ interface SectionComponentProps {
     updates: Partial<FormField>,
   ) => Promise<void>;
   onDeleteField: (fieldId: string) => void;
+  onAddSubform?: (sectionId: string) => void; // ← NEW PROP
   isOverlay?: boolean;
   isDeleting?: boolean;
   formId: string;
@@ -113,6 +113,7 @@ export default function SectionComponent({
   onDeleteSection,
   onUpdateField,
   onDeleteField,
+  onAddSubform,
   isOverlay = false,
   isDeleting = false,
   formId,
@@ -123,18 +124,16 @@ export default function SectionComponent({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState(section.title);
 
-  // --- UPDATED STATES (With Caching Guard) ---
   const [permissions, setPermissions] = useState<RolePermission[]>([]);
   const [availablePermissions, setAvailablePermissions] = useState<
     PermissionDefinition[]
   >([]);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
-  const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false); // Cache flag
+  const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  // ── Drag & Drop setup ──────────────────────────────────────────────────
   const {
     attributes,
     listeners,
@@ -159,7 +158,6 @@ export default function SectionComponent({
     opacity: isDragging ? 0.82 : isDeleting ? 0.38 : 1,
   };
 
-  // ── Title editing logic ────────────────────────────────────────────────
   useEffect(() => {
     if (isEditingTitle && inputRef.current) {
       inputRef.current.focus();
@@ -179,21 +177,17 @@ export default function SectionComponent({
     setIsEditingTitle(false);
   };
 
-  // ── Permissions Logic (CACHED FETCH) ───────────────────────────────────
   useEffect(() => {
-    // Only fetch if dialog is opened AND we haven't already cached the data
     if (showPermissionsDialog && !hasLoadedPermissions) {
       const fetchPermissions = async () => {
         setPermissionsLoading(true);
         try {
           const res = await fetch(`/api/permissions/section/${section.id}`);
           if (!res.ok) throw new Error("Failed to load permissions");
-
           const data = await res.json();
-          // Assuming API returns: { profiles: RolePermission[], availablePermissions: PermissionDefinition[] }
           setPermissions(data.profiles ?? []);
           setAvailablePermissions(data.availablePermissions ?? []);
-          setHasLoadedPermissions(true); // Mark as cached
+          setHasLoadedPermissions(true);
         } catch (err) {
           toast({
             variant: "destructive",
@@ -208,7 +202,6 @@ export default function SectionComponent({
     }
   }, [showPermissionsDialog, hasLoadedPermissions, section.id, toast]);
 
-  // ── Save Permissions to Database ──────────────────────────────────────
   const handlePermissionChange = async (
     roleId: string,
     permissionId: string,
@@ -217,12 +210,11 @@ export default function SectionComponent({
       const res = await fetch(`/api/permissions/section/${section.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roleId, permissionId }), // Sending the dynamic ID to server
+        body: JSON.stringify({ roleId, permissionId }),
       });
 
       if (!res.ok) throw new Error("Failed to save");
 
-      // Update local state so UI reflects change immediately
       setPermissions((prev) =>
         prev.map((p) =>
           p.id === roleId ? { ...p, permission: permissionId } : p,
@@ -239,14 +231,9 @@ export default function SectionComponent({
     }
   };
 
-  // ── Create new field ───────────────────────────────────────────────────
   const createField = async (type: string) => {
     try {
-      // Calculate correct order based on fields
-      const maxOrder = Math.max(
-        ...section.fields.map((f) => f.order ?? 0),
-        -1,
-      );
+      const maxOrder = Math.max(...section.fields.map((f) => f.order ?? 0), -1);
       const order = maxOrder + 1;
 
       const payload = {
@@ -298,17 +285,12 @@ export default function SectionComponent({
     }
   };
 
-  // ── Duplicate existing field ───────────────────────────────────────────
   const duplicateField = async (original: FormField) => {
     try {
       const tempId = `temp_${uuidv4()}`;
       const newLabel = `${original.label} (copy)`;
 
-      // Calculate correct order
-      const maxOrder = Math.max(
-        ...section.fields.map((f) => f.order ?? 0),
-        -1,
-      );
+      const maxOrder = Math.max(...section.fields.map((f) => f.order ?? 0), -1);
       const newOrder = maxOrder + 1;
 
       const duplicated: FormField = {
@@ -320,7 +302,6 @@ export default function SectionComponent({
         updatedAt: new Date(),
       };
 
-      // Optimistic update
       onUpdateSection({
         fields: [...section.fields, duplicated],
       });
@@ -353,7 +334,6 @@ export default function SectionComponent({
       if (!res.ok) throw new Error("Failed to duplicate field");
       const { data } = await res.json();
 
-      // Replace temp ID with real ID from server
       onUpdateSection({
         fields: section.fields.map((f) =>
           f.id === tempId ? { ...f, id: data.id } : f,
@@ -379,7 +359,6 @@ export default function SectionComponent({
     return map[section.columns as keyof typeof map] ?? "grid-cols-1";
   };
 
-  // ── Render Logic ───────────────────────────────────────────────────────
   if (!section.visible) {
     return (
       <Card
@@ -433,10 +412,11 @@ export default function SectionComponent({
       <Card
         ref={setNodeRef}
         style={style}
-        className={`group border transition-all duration-200 ${isDragging
+        className={`group border transition-all duration-200 ${
+          isDragging
             ? "shadow-2xl scale-[1.015] rotate-[0.5deg] border-blue-400 bg-blue-50/30 z-50"
             : "hover:shadow-md hover:border-gray-300"
-          }`}
+        }`}
       >
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-4">
@@ -447,9 +427,10 @@ export default function SectionComponent({
                   {...listeners}
                   className={`
                     p-1.5 rounded opacity-0 group-hover:opacity-100 transition
-                    ${isDragging
-                      ? "bg-blue-600 text-white"
-                      : "hover:bg-gray-200"
+                    ${
+                      isDragging
+                        ? "bg-blue-600 text-white"
+                        : "hover:bg-gray-200"
                     }
                   `}
                 >
@@ -556,6 +537,9 @@ export default function SectionComponent({
                   >
                     {section.collapsible ? "Disable" : "Enable"} collapsible
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onAddSubform?.(section.id)}>
+                    <Layers className="mr-2 h-4 w-4" /> Add Subform here
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => createField("text")}>
                     <Type className="mr-2 h-4 w-4" /> Text field
@@ -592,10 +576,11 @@ export default function SectionComponent({
           <CardContent className="pt-1 pb-6">
             <div
               ref={setDroppableRef}
-              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all ${isOver
+              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all ${
+                isOver
                   ? "border-primary bg-primary/5"
                   : "border-muted-foreground/30"
-                }`}
+              }`}
             >
               {section.fields.length > 0 ? (
                 <SortableContext
@@ -603,7 +588,7 @@ export default function SectionComponent({
                   strategy={verticalListSortingStrategy}
                 >
                   <div className={`grid gap-5 p-4 ${getColumnClass()}`}>
-                    {section.fields.map((field) =>
+                    {section.fields.map((field) => (
                       <FieldComponent
                         key={field.id}
                         field={field}
@@ -612,24 +597,33 @@ export default function SectionComponent({
                         onCopy={duplicateField}
                         formId={formId}
                       />
-                    )}
+                    ))}
                   </div>
                 </SortableContext>
               ) : (
                 <div className="flex flex-col items-center justify-center min-h-[180px] text-muted-foreground">
                   <Plus className="h-10 w-10 mb-3 opacity-50" />
                   <p className="text-sm font-medium">Empty section</p>
-                  <p className="text-xs mt-1">
-                    Drag & drop fields here
-                  </p>
+                  <p className="text-xs mt-1">Drag & drop fields here</p>
                 </div>
               )}
+            </div>
+
+            <div className="mt-6 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => onAddSubform?.(section.id)}
+              >
+                <Layers className="h-4 w-4" />
+                Add Subform under this section
+              </Button>
             </div>
           </CardContent>
         )}
       </Card>
 
-      {/* ── Section Permissions Dialog ────────────────────────────────────── */}
       <Dialog
         open={showPermissionsDialog}
         onOpenChange={setShowPermissionsDialog}
@@ -720,7 +714,6 @@ export default function SectionComponent({
         </DialogContent>
       </Dialog>
 
-      {/* Settings Modal */}
       {showSettings && (
         <SectionSettings
           section={section}
@@ -730,7 +723,6 @@ export default function SectionComponent({
         />
       )}
 
-      {/* Delete Confirmation */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

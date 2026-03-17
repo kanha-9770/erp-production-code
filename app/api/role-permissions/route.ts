@@ -26,7 +26,10 @@ export async function GET(request: NextRequest) {
 
     if (!organizationId) {
       console.warn("[GET /api/role-permissions] No organizationId in session");
-      return NextResponse.json({ error: "No organization context" }, { status: 403 });
+      return NextResponse.json(
+        { error: "No organization context" },
+        { status: 403 },
+      );
     }
 
     const roleId = request.nextUrl.searchParams.get("roleId");
@@ -37,7 +40,9 @@ export async function GET(request: NextRequest) {
       formId = null;
     }
 
-    console.log(`[GET] Query → roleId: ${roleId ?? "(any)"}, formId: ${formId ?? "(any / both module & form level)"}`);
+    console.log(
+      `[GET] Query → roleId: ${roleId ?? "(any)"}, formId: ${formId ?? "(any / both module & form level)"}`,
+    );
 
     const whereClause: any = {
       role: {
@@ -96,17 +101,19 @@ export async function GET(request: NextRequest) {
       ],
     });
 
-    console.log(`[GET /api/role-permissions] Found ${rolePermissions.length} records`);
+    console.log(
+      `[GET /api/role-permissions] Found ${rolePermissions.length} records`,
+    );
 
     if (rolePermissions.length > 0) {
       console.log(
         "[GET] First few:",
-        rolePermissions.slice(0, 3).map(p => ({
+        rolePermissions.slice(0, 3).map((p) => ({
           perm: p.permission?.name || p.permissionId,
           module: p.module?.name || p.moduleId || "—",
           form: p.form?.name || p.formId || "—",
           granted: p.granted,
-        }))
+        })),
       );
     }
 
@@ -122,7 +129,7 @@ export async function GET(request: NextRequest) {
     console.error("[GET /api/role-permissions] Error:", error);
     return NextResponse.json(
       { error: "Failed to fetch role permissions", details: String(error) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -133,7 +140,9 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  console.log("[PUT /api/role-permissions] Request received - consider using PATCH instead");
+  console.log(
+    "[PUT /api/role-permissions] Request received - consider using PATCH instead",
+  );
   return handleUpdate(request, "PUT");
 }
 
@@ -162,18 +171,27 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
     }
 
     const body = await request.json();
-    console.log(`[${method} /api/role-permissions] Body:`, JSON.stringify(body, null, 2));
+    console.log(
+      `[${method} /api/role-permissions] Body:`,
+      JSON.stringify(body, null, 2),
+    );
 
     if (!Array.isArray(body) || body.length === 0) {
       console.log(`[${method}] Invalid or empty body`);
-      return NextResponse.json({ error: "Body must be a non-empty array" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Body must be a non-empty array" },
+        { status: 400 },
+      );
     }
 
     const updated = [];
     const skipped = [];
 
     for (const [index, item] of body.entries()) {
-      console.log(`[${method}] Processing item ${index + 1}/${body.length}:`, item);
+      console.log(
+        `[${method}] Processing item ${index + 1}/${body.length}:`,
+        item,
+      );
 
       const {
         roleId,
@@ -185,7 +203,9 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
       } = item;
 
       if (!roleId || !permissionId) {
-        console.warn(`[${method}] Skipping item ${index + 1} - missing roleId or permissionId`);
+        console.warn(
+          `[${method}] Skipping item ${index + 1} - missing roleId or permissionId`,
+        );
         skipped.push({ index, reason: "missing roleId or permissionId", item });
         continue;
       }
@@ -196,7 +216,9 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
       });
 
       if (!role) {
-        console.warn(`[${method}] Skipping - role ${roleId} not in org ${organizationId}`);
+        console.warn(
+          `[${method}] Skipping - role ${roleId} not in org ${organizationId}`,
+        );
         skipped.push({ index, reason: "role not in organization", roleId });
         continue;
       }
@@ -225,20 +247,30 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
           },
         });
 
-        console.log(`[${method}] Upserted permission ${permissionId} for role ${roleId}`);
+        console.log(
+          `[${method}] Upserted permission ${permissionId} for role ${roleId}`,
+        );
         updated.push(result);
       } catch (upsertError) {
-        console.error(`Upsert failed for role=${roleId} perm=${permissionId}:`, upsertError);
+        console.error(
+          `Upsert failed for role=${roleId} perm=${permissionId}:`,
+          upsertError,
+        );
         skipped.push({
           index,
           reason: "upsert failed",
-          error: upsertError instanceof Error ? upsertError.message : String(upsertError),
+          error:
+            upsertError instanceof Error
+              ? upsertError.message
+              : String(upsertError),
           item,
         });
       }
     }
 
-    console.log(`[${method}] Finished. Updated: ${updated.length}, Skipped: ${skipped.length}`);
+    console.log(
+      `[${method}] Finished. Updated: ${updated.length}, Skipped: ${skipped.length}`,
+    );
 
     return NextResponse.json({
       success: true,
@@ -255,7 +287,7 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
         error: "Failed to process permission updates",
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
