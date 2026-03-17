@@ -2,22 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Loader2,
-  Type,
-  Mail,
-  Hash,
-  CalendarDays,
-  Link,
-  Upload,
-  CheckSquare,
-  Radio,
-  ChevronDown,
-  Lock,
-  Edit3,
-  MousePointer2,
-  FileText,
-} from "lucide-react";
+import { Loader2, Lock, Edit3, MousePointer2 } from "lucide-react";
 import FormsContent from "@/components/dynamicSubmodule/formsContent";
 import { PublicFormDialog } from "@/components/public-form-dialog";
 import { useGetModuleByIdQuery } from "@/lib/api/modules";
@@ -29,127 +14,30 @@ import {
 import RecordsDisplay from "@/components/modules/recordsDisplay";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Types — imported from shared type files (Week 1 refactor)
 // ─────────────────────────────────────────────────────────────────────────────
+import type {
+  FormModule,
+  Form,
+  FormSection,
+  FormField,
+  FormRecord,
+} from "@/types/forms";
+import type {
+  ProcessedFieldData,
+  EnhancedFormRecord,
+  FormFieldWithSection,
+  EditingCell,
+  PendingChange,
+  PermissionItem,
+  PermissionSummary,
+} from "@/types/records";
 
-interface FormModule {
-  id: string;
-  name: string;
-  description?: string;
-  parentId?: string;
-  children?: FormModule[];
-  forms?: Form[];
-}
-
-interface Form {
-  id: string;
-  name: string;
-  description?: string;
-  moduleId: string;
-  isPublished: boolean;
-  updatedAt: string;
-  sections: FormSection[];
-}
-
-interface FormSection {
-  id: string;
-  title: string;
-  fields: FormField[];
-}
-
-interface FormField {
-  id: string;
-  label: string;
-  type: string;
-  order: number;
-  placeholder?: string;
-  description?: string;
-  validation?: any;
-  options?: any[];
-  lookup?: any;
-}
-
-interface FormRecord {
-  id: string;
-  formId: string;
-  formName?: string;
-  recordData: Record<string, any>;
-  submittedAt: string;
-  status: "pending" | "approved" | "rejected" | "submitted";
-}
-
-interface ProcessedFieldData {
-  recordId?: string;
-  recordIdFromAPI?: string;
-  lookup: any;
-  options: any;
-  fieldId: string;
-  fieldLabel: string;
-  fieldType: string;
-  value: any;
-  displayValue: string;
-  icon: string;
-  order: number;
-  sectionId?: string;
-  sectionTitle?: string;
-  formId?: string;
-  formName?: string;
-}
-
-interface EnhancedFormRecord extends FormRecord {
-  processedData: ProcessedFieldData[];
-  originalRecordIds?: Map<string, string>;
-}
-
-interface FormFieldWithSection extends FormField {
-  originalId: string;
-  sectionTitle: string;
-  sectionId: string;
-  formId: string;
-  formName: string;
-}
-
-interface EditingCell {
-  recordId: string;
-  fieldId: string;
-  value: any;
-  originalValue: any;
-  fieldType: string;
-  options?: any[];
-}
-
-interface PendingChange {
-  recordId: string;
-  fieldId: string;
-  originalFieldId: string;
-  value: any;
-  originalValue: any;
-  fieldType: string;
-  fieldLabel: string;
-}
-
-// Matches the PermissionItem shape returned by the updated API
-interface PermissionItem {
-  id: string;
-  name: string;
-  category: string;
-  resource: string;
-  canDelegate: boolean;
-  source: "role" | "user";
-  module: { id: string; name: string };
-  form: { id: string; name: string };
-  grantedBy: string;
-  grantedTo: string;
-  reason?: string;
-  expiresAt?: string | null;
-}
-
-interface PermissionSummary {
-  total: number;
-  fromRole: number;
-  fromUser: number;
-  denied: number;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Utilities — imported from shared utility files (Week 1 refactor)
+// ─────────────────────────────────────────────────────────────────────────────
+import { formatFieldValue, getFieldIcon } from "@/lib/utils/fieldUtils";
+import { processRecordData } from "@/lib/utils/recordUtils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -406,132 +294,6 @@ export default function ModulePage({
       delete (window as any).__handleRecordsRefresh;
     };
   }, [formFieldsWithSections]);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────────
-  const getFieldIcon = (fieldType: string) => {
-    switch (fieldType) {
-      case "text": return Type;
-      case "email": return Mail;
-      case "number": return Hash;
-      case "date":
-      case "datetime": return CalendarDays;
-      case "checkbox": return CheckSquare;
-      case "radio": return Radio;
-      case "select": return ChevronDown;
-      case "file": return Upload;
-      case "lookup": return Link;
-      case "textarea": return FileText;
-      case "tel":
-      case "phone": return Hash;
-      case "url": return Link;
-      default: return Type;
-    }
-  };
-
-  const formatFieldValue = (fieldType: string, value: any): string => {
-    if (value === null || value === undefined || value === "") return "";
-
-    switch (fieldType) {
-      case "date":
-      case "datetime":
-        try { return new Date(value).toLocaleDateString(); }
-        catch { return String(value); }
-
-      case "email":
-      case "tel":
-      case "phone":
-      case "text":
-      case "textarea":
-      case "url":
-        return String(value);
-
-      case "number":
-        if (typeof value === "number") return value.toLocaleString();
-        if (typeof value === "string" && !isNaN(Number(value)))
-          return Number(value).toLocaleString();
-        return String(value);
-
-      case "checkbox":
-      case "switch":
-        if (typeof value === "boolean") return value ? "✓ Yes" : "✗ No";
-        if (typeof value === "string")
-          return value.toLowerCase() === "true" || value === "1" ? "✓ Yes" : "✗ No";
-        return value ? "✓ Yes" : "✗ No";
-
-      case "lookup": return String(value);
-
-      case "file":
-        if (typeof value === "object" && value !== null) {
-          if (value.name) return String(value.name);
-          if (Array.isArray(value)) return `${value.length} file(s)`;
-          if (value.files && Array.isArray(value.files))
-            return `${value.files.length} file(s)`;
-        }
-        return String(value);
-
-      case "radio":
-      case "select":
-        return String(value);
-
-      default:
-        if (typeof value === "object" && value !== null)
-          return JSON.stringify(value).substring(0, 50) + "...";
-        return String(value);
-    }
-  };
-
-  const processRecordData = (
-    record: FormRecord,
-    formFields: FormFieldWithSection[],
-  ): EnhancedFormRecord => {
-    const processedData: ProcessedFieldData[] = [];
-
-    const fieldById = new Map<string, FormFieldWithSection>();
-    formFields.forEach((field) => {
-      fieldById.set(field.id, field);
-      fieldById.set(field.originalId, field);
-    });
-
-    if (record.recordData && typeof record.recordData === "object") {
-      Object.entries(record.recordData).forEach(([fieldKey, fieldData]) => {
-        const formField =
-          fieldById.get(fieldKey) ||
-          fieldById.get(fieldKey.split("_").pop() || "");
-
-        const value =
-          fieldData && typeof fieldData === "object" && "value" in fieldData
-            ? fieldData.value
-            : fieldData;
-
-        const fieldType =
-          formField?.type ||
-          (fieldKey.startsWith("_dynamicRows_") ? "dynamicRows" : "text");
-
-        processedData.push({
-          recordId: record.id,
-          recordIdFromAPI: record.id,
-          fieldId: fieldKey,
-          fieldLabel: formField?.label || fieldKey,
-          fieldType,
-          value,
-          displayValue: formatFieldValue(fieldType, value),
-          icon: fieldType,
-          order: formField?.order ?? 999,
-          sectionId: formField?.sectionId || "other",
-          sectionTitle: formField?.sectionTitle || "Uncategorized",
-          formId: record.formId,
-          formName: formField?.formName || record.formName || "Form",
-          lookup: formField?.lookup || {},
-          options: formField?.options || [],
-        });
-      });
-    }
-
-    processedData.sort((a, b) => a.order - b.order);
-    return { ...record, processedData };
-  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Save / discard pending changes

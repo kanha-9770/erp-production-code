@@ -7,7 +7,11 @@ import { validateSession } from "@/lib/auth";
 import bcrypt from 'bcryptjs';
 
 function isAdmin(user: any) {
-  return user?.unitAssignments?.some((ua: any) => ua.role?.isAdmin) || false;
+  const hasAdminRole = user?.unitAssignments?.some(
+    (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+  ) || false;
+  const isOrgOwner = !!user?.ownedOrganization;
+  return hasAdminRole || isOrgOwner;
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {

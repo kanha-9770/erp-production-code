@@ -18,6 +18,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 })
     }
 
+    const isOrgOwner = !!session.user.ownedOrganization
+    const hasAdminRole = session.user.unitAssignments.some(
+      (ua) => ua.role.isAdmin || ua.role.name.toLowerCase().includes("admin")
+    )
+    const isAdmin = isOrgOwner || hasAdminRole
+
     return NextResponse.json({
       success: true,
       user: {
@@ -36,6 +42,8 @@ export async function GET(request: NextRequest) {
         phone: session.user.phone,
         location: session.user.location,
         joinDate: session.user.joinDate,
+        isAdmin,
+        isOrgOwner,
         organization: session.user.organization
           ? {
               id: session.user.organization.id,
@@ -50,6 +58,7 @@ export async function GET(request: NextRequest) {
           role: {
             id: ua.role.id,
             name: ua.role.name,
+            isAdmin: ua.role.isAdmin,
           },
           notes: ua.notes,
         })),

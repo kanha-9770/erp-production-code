@@ -79,148 +79,26 @@ import { DynamicDataPreviewModal2 } from "../DynamicDataPreviewModal";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser"; // already there
 
-// ============== TYPES ==============
+// ── Types — imported from shared type files (Week 1 refactor) ──────────────
+import type {
+  ProcessedFieldData,
+  EnhancedFormRecord,
+  FormFieldWithSection,
+  EditingCell,
+  PendingChange,
+  FieldFilter,
+  User,
+  Comment,
+  ConditionalFormatRule,
+  Permission,
+  FieldGroup,
+  SubformGroup,
+  FormGroup,
+} from "@/types/records";
+import type { Form } from "@/types/forms";
 
-interface Permission {
-  id: string;
-  name: string;
-  category: string;
-  resource: string;
-  source: string;
-  canDelegate: boolean;
-  module: { id: string; name: string };
-  form: { id: string; name: string };
-}
-
-interface Form {
-  id: string;
-  name: string;
-}
-
-interface ProcessedFieldData {
-  recordId?: string;
-  recordIdFromAPI?: string;
-  lookup: any;
-  options: any;
-  fieldId: string;
-  fieldLabel: string;
-  fieldType: string;
-  value: any;
-  displayValue: string;
-  icon: string;
-  order: number;
-  sectionId?: string;
-  sectionTitle?: string;
-  subformId?: string;
-  subformTitle?: string;
-  formId?: string;
-  formName?: string;
-  fieldDefinitions?: { id: string; label: string; type: string }[];
-}
-
-interface EnhancedFormRecord {
-  title: string;
-  id: string;
-  formId: string;
-  formName?: string;
-  recordData: Record<string, any>;
-  submittedAt: string;
-  status: "pending" | "approved" | "rejected" | "submitted";
-  processedData: ProcessedFieldData[];
-  originalRecordIds?: Map<string, string>;
-  form?: any;
-}
-
-interface FormFieldWithSection {
-  id: string;
-  originalId: string;
-  label: string;
-  type: string;
-  order: number;
-  sectionTitle: string;
-  sectionId: string;
-  subformId?: string;
-  subformTitle?: string;
-  formId: string;
-  formName: string;
-  formula?: string;
-  placeholder?: string;
-  description?: string;
-  validation?: any;
-  options?: any[];
-  lookup?: any;
-  returnType?: "text" | "number" | "currency" | "percent" | "date" | "boolean";
-  properties?: any;
-}
-
-interface EditingCell {
-  recordId: string;
-  fieldId: string;
-  value: any;
-  originalValue: any;
-  fieldType: string;
-  options?: any[];
-}
-
-interface PendingChange {
-  recordId: string;
-  fieldId: string;
-  originalFieldId: string;
-  value: any;
-  originalValue: any;
-  fieldType: string;
-  fieldLabel: string;
-}
-
-export interface FieldFilter {
-  fieldId: string;
-  fieldLabel: string;
-  fieldType: string;
-  operator: string;
-  value: any;
-  value2?: any;
-}
-
-interface User {
-  id: string;
-  name: string;
-}
-
-interface Comment {
-  id: string;
-  author: string;
-  text: string;
-  timestamp: string;
-  mentions: { name: string; id: string }[];
-}
-
-interface ConditionalFormatRule {
-  id: string;
-  fieldId: string;
-  condition:
-  | "equals"
-  | "notEquals"
-  | "contains"
-  | "notContains"
-  | "greaterThan"
-  | "lessThan"
-  | "isEmpty"
-  | "isNotEmpty"
-  | "startsWith"
-  | "endsWith"
-  | "today"
-  | "overdue"
-  | "dueSoon"
-  | "pastDue"
-  | "thisWeek"
-  | "nextWeek";
-  value?: string | number;
-  textColor?: string;
-  backgroundColor?: string;
-  bold?: boolean;
-  italic?: boolean;
-  underline?: boolean;
-}
+// Re-export FieldFilter so existing consumers of this module are not broken
+export type { FieldFilter };
 
 interface RecordsDisplayProps {
   allModuleForms: Form[];
@@ -265,43 +143,8 @@ interface RecordsDisplayProps {
   users?: User[];
 }
 
-// Hierarchy grouping types for form -> subform -> section structure
-interface FieldGroup {
-  id: string;
-  title?: string;
-  fields: FormFieldWithSection[];
-}
-
-interface SubformGroup {
-  id: string;
-  name: string;
-  sections: FieldGroup[];
-}
-
-interface FormGroup {
-  id: string;
-  name: string;
-  subforms: SubformGroup[];
-  directSections: FieldGroup[]; // Sections without subforms
-}
-
-// ============== HELPER FUNCTIONS ==============
-
-const isImageUrl = (val: any): boolean => {
-  if (typeof val !== "string") return false;
-  return (
-    val.startsWith("http") && /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(val)
-  );
-};
-
-const isImageField = (label: string): boolean => {
-  const lowerLabel = label.toLowerCase();
-  return (
-    lowerLabel.includes("image") ||
-    lowerLabel.includes("photo") ||
-    lowerLabel.includes("camera")
-  );
-};
+// ── Field utilities — imported from shared utility files (Week 1 refactor) ──
+import { isImageUrl, isImageField, formatDynamicRowValue } from "@/lib/utils/fieldUtils";
 
 // ============== SUB-COMPONENTS ==============
 
@@ -1144,20 +987,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   );
 
   // ============== DATA PROCESSING HELPERS ==============
-
-  const formatDynamicRowValue = (rows: any[]): string => {
-    if (!Array.isArray(rows) || rows.length === 0) return "NaN";
-    return rows
-      .map((row) => {
-        const values = Object.entries(row)
-          .filter(([key]) => !key.startsWith("_"))
-          .map(([_, val]) => String(val))
-          .filter((v) => v && v !== "undefined" && v !== "null");
-        return values.length > 0 ? `(${values.join(", ")})` : "";
-      })
-      .filter((v) => v !== "")
-      .join(" ");
-  };
+  // formatDynamicRowValue is now imported from @/lib/utils/fieldUtils
 
   const getLabelForField = (
     fieldId: string,

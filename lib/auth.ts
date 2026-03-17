@@ -66,6 +66,7 @@ export async function validateSession(token: string) {
           include: {
             employee: true,
             organization: true,
+            ownedOrganization: true,
             unitAssignments: {
               include: {
                 role: true,
