@@ -343,8 +343,8 @@ export default function ModulePage({
         // Update processedData (what the table renders)
         const updated = record.processedData.map((pd: any) =>
           pd.fieldId === change.fieldId ||
-          pd.fieldId === change.originalFieldId ||
-          (change.fieldLabel && pd.fieldLabel === change.fieldLabel)
+            pd.fieldId === change.originalFieldId ||
+            (change.fieldLabel && pd.fieldLabel === change.fieldLabel)
             ? { ...pd, value: change.value, displayValue: formatFieldValue(change.fieldType, change.value) }
             : pd,
         );
