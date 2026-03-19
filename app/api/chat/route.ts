@@ -2,30 +2,20 @@
 export const dynamic = 'force-dynamic';
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { validateSession } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { prisma } from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth-token')?.value;
-
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'Not authenticated' },
         { status: 401 }
       );
     }
 
-    const session = await validateSession(token);
-
-    if (!session || !session.user?.id) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired session' },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = authUser.id;
 
     const conversation = await prisma.chatConversation.create({
       data: {
@@ -66,25 +56,15 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth-token')?.value;
-
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'Not authenticated' },
         { status: 401 }
       );
     }
 
-    const session = await validateSession(token);
-
-    if (!session || !session.user?.id) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired session' },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = authUser.id;
 
     const conversations = await prisma.chatConversation.findMany({
       where: { userId },

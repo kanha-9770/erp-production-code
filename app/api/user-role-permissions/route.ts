@@ -1,9 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { validateSession } from '@/lib/auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,23 +16,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Validate the session
-    const token = request.cookies.get('auth-token')?.value;
-    
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-    
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Invalid session' },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     // Get user's role-based permissions through unit assignments
     const userWithRolePermissions = await prisma.user.findUnique({

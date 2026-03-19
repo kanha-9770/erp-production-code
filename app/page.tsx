@@ -43,7 +43,7 @@ export default async function AdminLayout({
     <div className="flex h-screen  bg-background">
       <div className="w-full">
         <AdminNav user={user} />
-        <main className="overflow-auto p-4 lg:p-8">
+        <main className="overflow-auto p-3 sm:p-4 lg:p-8">
           <DashboardPage />
         </main>
       </div>

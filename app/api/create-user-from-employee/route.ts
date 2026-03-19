@@ -5,28 +5,19 @@ import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { parseEmployeeData } from '@/lib/employeeDataParser';
 import { generateJWT, generateSessionToken } from '@/lib/auth';
-import { validateSession } from '@/lib/auth'; // Add this import if not present
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('Creating user from employee record...');
-
-    // Get auth token
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    // Authenticate user
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    // Validate session
-    const userSession = await validateSession(token);
-    console.log("this is the session data", userSession);
-    if (!userSession) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
     // Get current user's organization ID
     const currentUser = await prisma.user.findUnique({
-      where: { id: userSession.user.id },
+      where: { id: authUser.id },
       select: {
         organizationId: true,
         ownedOrganization: { select: { id: true } }
@@ -34,7 +25,6 @@ export async function POST(request: NextRequest) {
     });
 
     const orgId = currentUser?.organizationId || currentUser?.ownedOrganization?.id;
-    console.log(`Retrieved orgId for POST: ${orgId}`);
 
     if (!orgId) {
       return NextResponse.json({ error: "No organization associated with user" }, { status: 400 });
@@ -49,8 +39,6 @@ export async function POST(request: NextRequest) {
       password,
       confirmPassword
     } = body;
-
-    console.log('Request data:', { employeeRecordId, employee_id, employeeName, email, hasPassword: !!password });
 
     // Validate required fields
     if (!employeeRecordId || !employee_id || !employeeName || !email || !password) {
@@ -151,8 +139,6 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    console.log('Starting database transaction...');
-
     // Main transaction: Create User + Employee + Link FormRecord14
     const result = await prisma.$transaction(async (tx) => {
       // 1. Create the User with organizationId
@@ -172,8 +158,6 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      console.log('User created:', newUser.id);
-
       let employee;
 
       // 2. Find existing employee by ID (if provided)
@@ -184,7 +168,6 @@ export async function POST(request: NextRequest) {
       }
 
       if (employee) {
-        console.log('Updating existing employee:', employee_id);
         // Update existing employee → overwrites old userId
         employee = await tx.employee.update({
           where: { id: employee_id },
@@ -201,7 +184,6 @@ export async function POST(request: NextRequest) {
           }
         });
       } else {
-        console.log('Creating new employee record');
         // Create new employee
         employee = await tx.employee.create({
           data: {
@@ -257,12 +239,8 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      console.log('FormRecord14 updated with employee_id and userId');
-
       return { user: newUser, employee };
     });
-
-    console.log('Transaction completed successfully');
 
     // Create session
     const sessionToken = generateSessionToken();
@@ -291,8 +269,6 @@ export async function POST(request: NextRequest) {
       jwtSecret,
       '7d'
     );
-
-    console.log('User creation completed successfully for:', result.user.email);
 
     return NextResponse.json({
       success: true,

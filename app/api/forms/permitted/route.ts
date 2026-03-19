@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
-import { prisma } from "@/lib/prisma"; // ✅ using global instance (no new PrismaClient per request)
+import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { prisma } from "@/lib/prisma";
 
 /**
  * GET /api/forms
@@ -10,35 +10,23 @@ import { prisma } from "@/lib/prisma"; // ✅ using global instance (no new Pris
  */
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const userId = session.user.id;
-    // 🔹 Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-    if (!user?.organizationId) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
-    const organizationId = user.organizationId;
+    // 🔹 Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
     let finalForms: any[] = [];
     if (isAdmin) {

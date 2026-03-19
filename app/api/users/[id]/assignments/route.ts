@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { validateSession } from "@/lib/auth"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 
 export const dynamic = 'force-dynamic';
 
@@ -9,20 +9,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const userId = params.id;
 
     // 1. Authenticate & get current user's org
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const currentOrgId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId;
+    const currentOrgId = authUser.organizationId;
 
     if (!currentOrgId) {
       return NextResponse.json({ error: "No organization context" }, { status: 403 });
@@ -69,16 +59,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const userId = params.id;
 
     // Same auth + org check as GET
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) return unauthorized();
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return unauthorized();
 
-    const session = await validateSession(token);
-    if (!session || !session.user) return unauthorized();
-
-    const currentOrgId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId;
+    const currentOrgId = authUser.organizationId;
 
     if (!currentOrgId) return forbidden();
 
@@ -119,16 +103,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     const userId = params.id;
 
     // Same auth + org check
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) return unauthorized();
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return unauthorized();
 
-    const session = await validateSession(token);
-    if (!session || !session.user) return unauthorized();
-
-    const currentOrgId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId;
+    const currentOrgId = authUser.organizationId;
 
     if (!currentOrgId) return forbidden();
 

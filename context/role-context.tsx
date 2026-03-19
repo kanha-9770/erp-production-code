@@ -143,8 +143,6 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
     // === OPTIMISTIC DELETE (used in RoleChartNode before API call) ===
     case "DELETE_ROLE": {
       const { roleId } = action.payload;
-      console.log(`[CONTEXT] Optimistic DELETE_ROLE for ID: ${roleId}`);
-
       const newRoles = removeRoleAndDescendants(state.roles, roleId);
 
       // Also clean up expanded nodes and selection

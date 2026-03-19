@@ -12,11 +12,10 @@ export async function GET(request: NextRequest) {
 
     // Fetch attendance data
     try {
-      const response = await fetch('http://localhost:3000/api/forms/testing');
-      console.log('Fetching attendance data for stats calculation',response);
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/forms/testing`);
       if (response.ok) {
         const data = await response.json();
-        console.log('Fetched attendance data for stats calculation',data);
         // Parse and calculate stats
         const emails = new Set();
         if (data.grouped?.['Check-In']) {
@@ -34,11 +33,11 @@ export async function GET(request: NextRequest) {
       console.error('Error fetching attendance:', err);
     }
 
-    return NextResponse.json({ stats });
+    return NextResponse.json({ success: true, stats });
   } catch (error) {
     console.error('Error calculating stats:', error);
     return NextResponse.json(
-      { error: 'Failed to calculate statistics' },
+      { success: false, error: 'Failed to calculate statistics' },
       { status: 500 }
     );
   }

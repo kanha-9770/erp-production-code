@@ -12,7 +12,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createXai } from '@ai-sdk/xai';
 import { createGroq } from '@ai-sdk/groq';
 import { z } from 'zod';
-import { validateSession } from '@/lib/auth2';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 import {
   resolveERPContext,
   discoverOrgStructure,
@@ -132,27 +132,25 @@ FORMATTING RULES:
 
 export async function POST(req: NextRequest) {
   try {
-    const token = req.cookies.get('auth-token')?.value;
+    const authUser = await getAuthenticatedUser(req);
 
-    if (!token) {
+    if (!authUser) {
       return Response.json({ error: 'Not authenticated. Please log in first.' }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-
-    if (!session) {
-      return Response.json({ error: 'Invalid or expired session. Please log in again.' }, { status: 401 });
-    }
-
-    if (!session.user.organizationId) {
+    if (!authUser.organizationId) {
       return Response.json({ error: 'No organization assigned to your account. Please contact your admin.' }, { status: 401 });
     }
 
     const { messages, conversationId }: { messages: UIMessage[]; conversationId?: string } = await req.json();
 
-    const userId = session.user.id;
-    const organizationId = session.user.organizationId;
-    const orgName = session.user.organization?.name || 'Organization';
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    const orgRecord = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+    const orgName = orgRecord?.name || 'Organization';
 
     const ctx = await resolveERPContext(userId, organizationId);
     const aiConfig = await getAIConfig(organizationId);

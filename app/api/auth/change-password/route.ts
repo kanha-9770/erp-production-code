@@ -1,22 +1,13 @@
 // app/api/auth/change-password/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    const session = await validateSession(token);
-
-    if (!session || !session.user?.id) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     const { currentPassword, newPassword } = await request.json();
 
@@ -36,7 +27,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch user with password
     const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: authUser.id },
       select: { password: true },
     });
 
@@ -60,7 +51,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: authUser.id },
       data: { password: hashedPassword },
     });
 

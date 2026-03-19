@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { formId: string } }
 ) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    const session = await validateSession(token || "");
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { newModuleId } = await request.json();
 

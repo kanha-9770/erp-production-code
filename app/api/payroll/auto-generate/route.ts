@@ -26,11 +26,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { month = new Date().toISOString().slice(0, 7) } = body;
 
-    console.log('[v0] Auto-generating payroll for month:', month);
-
-    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-    const host = process.env.VERCEL_URL || 'localhost:3000';
-    const baseUrl = `${protocol}://${host}`;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.NODE_ENV === 'production' ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
     const recordsResponse = await fetch(`${baseUrl}/api/forms/testing`, {
       headers: {
@@ -44,13 +40,12 @@ export async function POST(request: NextRequest) {
       const errorText = await recordsResponse.text();
       console.error('[v0] Error details:', errorText);
       return NextResponse.json(
-        { error: 'Failed to fetch employee records', details: `API endpoint returned ${recordsResponse.status}` },
+        { success: false, error: 'Failed to fetch employee records', details: `API endpoint returned ${recordsResponse.status}` },
         { status: 400 }
       );
     }
 
     const apiData = await recordsResponse.json();
-    console.log('[v0] Fetched API data:', JSON.stringify(apiData, null, 2));
 
     const employeeProfiles = new Map<string, any>();
     if (apiData.grouped?.['Employee Profile']) {
@@ -66,8 +61,6 @@ export async function POST(request: NextRequest) {
         });
       });
     }
-
-    console.log('[v0] Loaded employee profiles:', employeeProfiles.size);
 
     const dailyAttendance = new Map<string, any>();
 
@@ -100,8 +93,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log('[v0] Processed attendance records:', dailyAttendance.size);
-
     const employeeMonthlyData = new Map<string, any[]>();
 
     dailyAttendance.forEach((record) => {
@@ -119,17 +110,12 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    console.log('[v0] Employees with attendance in month:', employeeMonthlyData.size);
-    console.log('[v0] Monthly data keys:', Array.from(employeeMonthlyData.keys()));
-
     const payrolls: PayrollRecord[] = [];
 
     employeeMonthlyData.forEach((attendanceData, email) => {
       const profile = employeeProfiles.get(email);
-      console.log('[v0] Processing payroll for email:', email, 'Profile found:', !!profile);
-      
+
       if (!profile) {
-        console.log('[v0] No profile found for email:', email);
         return;
       }
 
@@ -172,8 +158,6 @@ export async function POST(request: NextRequest) {
       });
     });
 
-    console.log('[v0] Generated payroll records:', payrolls.length);
-
     if (payrolls.length === 0) {
       return NextResponse.json({
         success: false,
@@ -195,13 +179,12 @@ export async function POST(request: NextRequest) {
     if (!saveResponse.ok) {
       console.error('[v0] Failed to save payroll');
       return NextResponse.json(
-        { error: 'Failed to save payroll to database' },
+        { success: false, error: 'Failed to save payroll to database' },
         { status: 500 }
       );
     }
 
     const saveResult = await saveResponse.json();
-    console.log('[v0] Payroll saved successfully');
 
     return NextResponse.json({
       success: true,
@@ -214,6 +197,7 @@ export async function POST(request: NextRequest) {
     console.error('[v0] Error in auto-generate payroll:', error);
     return NextResponse.json(
       {
+        success: false,
         error: 'Failed to auto-generate payroll',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
@@ -238,7 +222,6 @@ function calculateWorkingHours(checkInTime: string, checkOutTime?: string): numb
     // Subtract 1 hour lunch break
     return Math.max(0, (diffMinutes - 60) / 60);
   } catch (error) {
-    console.log('[v0] Error calculating working hours:', error);
     return 0;
   }
 }

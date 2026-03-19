@@ -12,7 +12,6 @@ export async function GET(request: NextRequest) {
     }
 
     const session = await validateSession(token)
-    console.log("this is the session data", session)
 
     if (!session) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 })

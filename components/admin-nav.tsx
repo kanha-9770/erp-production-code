@@ -1,8 +1,9 @@
 'use client';
 
-import { BarChart3, Bot, Brain, FileDown, LayoutDashboard, LogOut, Search, Settings, User } from 'lucide-react';
+import { BarChart3, Bot, Brain, FileDown, LayoutDashboard, LogOut, Menu, Settings, User } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
 import {
@@ -13,6 +14,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 
 interface AdminNavProps {
   user: {
@@ -25,6 +33,7 @@ interface AdminNavProps {
 
 export function AdminNav({ user }: AdminNavProps) {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
     { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,8 +46,58 @@ export function AdminNav({ user }: AdminNavProps) {
 
   return (
     <nav className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-      <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+        {/* Left — logo + desktop nav */}
+        <div className="flex items-center gap-4 sm:gap-6">
+          {/* Mobile hamburger */}
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="md:hidden h-8 w-8">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Open menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-64 p-0">
+              <SheetHeader className="px-4 py-4 border-b">
+                <SheetTitle className="text-left text-base font-bold">
+                  {user.organizationName || 'Analytics'}
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="flex flex-col gap-1 p-3">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={[
+                        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                        isActive
+                          ? 'bg-secondary text-secondary-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                      ].join(' ')}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+                <div className="border-t mt-2 pt-2">
+                  <button
+                    onClick={() => { logoutAction(); setMobileOpen(false); }}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                  >
+                    <LogOut className="h-4 w-4 shrink-0" />
+                    Sign Out
+                  </button>
+                </div>
+              </nav>
+            </SheetContent>
+          </Sheet>
+
+          {/* Logo */}
           <Link href="/admin/dashboard" className="flex items-center gap-2 font-bold text-lg">
             <div className="p-1.5 rounded-lg bg-foreground text-background">
               <BarChart3 className="h-5 w-5" />
@@ -48,6 +107,7 @@ export function AdminNav({ user }: AdminNavProps) {
             </span>
           </Link>
 
+          {/* Desktop nav */}
           <div className="hidden md:flex gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -69,6 +129,7 @@ export function AdminNav({ user }: AdminNavProps) {
           </div>
         </div>
 
+        {/* Right — user menu */}
         <div className="flex items-center gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -87,42 +148,17 @@ export function AdminNav({ user }: AdminNavProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/admin/dashboard" className="cursor-pointer">
-                  <LayoutDashboard className="h-4 w-4 mr-2" />
-                  Dashboard
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/admin/analytics" className="cursor-pointer">
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Analytics
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/admin/intelligence" className="cursor-pointer">
-                  <Brain className="h-4 w-4 mr-2" />
-                  Intelligence
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/admin/reports" className="cursor-pointer">
-                  <FileDown className="h-4 w-4 mr-2" />
-                  Reports
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/admin/chatbot" className="cursor-pointer">
-                  <Bot className="h-4 w-4 mr-2" />
-                  Chatbot
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/admin/settings" className="cursor-pointer">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
-                </Link>
-              </DropdownMenuItem>
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <DropdownMenuItem key={item.href} asChild>
+                    <Link href={item.href} className="cursor-pointer">
+                      <Icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Link>
+                  </DropdownMenuItem>
+                );
+              })}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => logoutAction()}

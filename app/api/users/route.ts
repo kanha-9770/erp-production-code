@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import bcrypt from "bcryptjs"; // ← for password hashing
 
 // Optional: validation schema (add zod if you want stricter input)
@@ -17,32 +17,15 @@ const createUserSchema = {
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const currentUser = await getAuthenticatedUser(request);
 
-    if (!token) {
+    if (!currentUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    console.log("[GET /api/users] Session data:", session);
-
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const organizationId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId ||
-      session.organization?.id;
-
-    console.log("[GET /api/users] Extracted organizationId:", organizationId);
+    const { organizationId } = currentUser;
 
     if (!organizationId) {
-      console.warn("[GET /api/users] No organizationId found in session", {
-        userId: session.user?.id,
-        sessionUserKeys: Object.keys(session.user || {}),
-      });
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
@@ -83,8 +66,6 @@ export async function GET(request: NextRequest) {
       email_verified: user.email_verified, // ← expose it so frontend can show
     }));
 
-    console.log("[GET /api/users] Returning", transformedUsers.length, "users for org", organizationId);
-
     return NextResponse.json(transformedUsers);
   } catch (error) {
     console.error("[GET /api/users] Error fetching users:", error);
@@ -97,23 +78,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Auth check (same as GET)
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    const currentUser = await getAuthenticatedUser(request);
+    if (!currentUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    // Get organizationId from admin's session
-    const organizationId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId ||
-      session.organization?.id;
+    const { organizationId } = currentUser;
 
     if (!organizationId) {
       return NextResponse.json(

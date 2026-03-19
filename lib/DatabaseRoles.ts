@@ -8,8 +8,6 @@ export class DatabaseRoles {
     description?: string
   }): Promise<Role> {
     try {
-      console.log("[DatabaseRoles] Creating role (designation):", data.name)
-
       // Check if role already exists
       const existingRole = await prisma.role.findUnique({
         where: { name: data.name }
@@ -47,6 +45,39 @@ export class DatabaseRoles {
     }
   }
 
+  /**
+   * Get roles scoped to an organization with user count and hierarchy info
+   */
+  static async getRolesForOrganization(organizationId: string): Promise<any[]> {
+    try {
+      const roles = await prisma.role.findMany({
+        where: {
+          organizationId,
+          isActive: true,
+        },
+        include: {
+          userAssignments: {
+            select: { userId: true },
+          },
+          children: {
+            select: { id: true, name: true },
+          },
+          parent: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: [{ level: "asc" }, { name: "asc" }],
+      })
+      return roles.map(role => ({
+        ...role,
+        userCount: role.userAssignments.length,
+      }))
+    } catch (error: any) {
+      console.error("Database error fetching organization roles:", error)
+      throw new Error(`Failed to fetch roles: ${error?.message}`)
+    }
+  }
+
   static async getRole(id: string): Promise<Role | null> {
     try {
       const role = await prisma.role.findUnique({
@@ -66,8 +97,6 @@ export class DatabaseRoles {
     description?: string
   }): Promise<Role> {
     try {
-      console.log("[DatabaseRoles] Updating role:", id)
-
       // Check if new name conflicts with existing roles
       if (data.name) {
         const existingRole = await prisma.role.findFirst({
@@ -100,8 +129,6 @@ export class DatabaseRoles {
 
   static async deleteRole(id: string): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Deleting role:", id)
-
       // Check if role is in use (just for reference, not permissions)
       const usersWithRole = await prisma.formRecord15.count({
         where: {
@@ -116,12 +143,9 @@ export class DatabaseRoles {
         throw new Error(`Cannot delete role. ${usersWithRole} users are assigned to this role.`)
       }
 
-      // Delete the role
       await prisma.role.delete({
         where: { id }
       })
-
-      console.log("[DatabaseRoles] Role deleted successfully")
     } catch (error: any) {
       console.error("Database error deleting role:", error)
       throw new Error(`Failed to delete role: ${error?.message}`)
@@ -135,8 +159,6 @@ export class DatabaseRoles {
    */
   static async assignRoleToUser(userId: string, roleId: string): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Assigning role (designation) to user:", { userId, roleId })
-
       // Validate role exists
       const role = await prisma.role.findUnique({ where: { id: roleId } })
       if (!role) {
@@ -168,8 +190,6 @@ export class DatabaseRoles {
           updatedAt: new Date()
         }
       })
-
-      console.log("[DatabaseRoles] Role assigned to user successfully")
     } catch (error: any) {
       console.error("Database error assigning role to user:", error)
       throw new Error(`Failed to assign role to user: ${error?.message}`)
@@ -181,14 +201,11 @@ export class DatabaseRoles {
    */
   static async getUserPermissions(userId: string): Promise<any[]> {
     try {
-      console.log("[DatabaseRoles] Getting user permissions from UserPermission table:", userId)
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, returning empty permissions")
         tableExists = false
         return []
       }
@@ -213,8 +230,6 @@ export class DatabaseRoles {
         ]
       })
 
-      console.log(`[DatabaseRoles] Found ${userPermissions.length} permissions for user`)
-      
       // Get resource details for each permission
       const permissionsWithResources = await Promise.all(
         userPermissions.map(async (perm: any) => {
@@ -306,14 +321,11 @@ export class DatabaseRoles {
    */
   static async getUserPermissionsWithResources(userId: string): Promise<any[]> {
     try {
-      console.log("[DatabaseRoles] Getting user permissions with resources:", userId)
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, returning empty permissions")
         tableExists = false
         return []
       }
@@ -338,8 +350,6 @@ export class DatabaseRoles {
         ]
       })
 
-      console.log(`[DatabaseRoles] Found ${userPermissions.length} permissions for user`)
-      
       // Get all unique module and form IDs
       const moduleIds = userPermissions
         .filter(p => p.resourceType === 'module')
@@ -405,20 +415,17 @@ export class DatabaseRoles {
    * Check if user has specific permission on a resource
    */
   static async checkUserPermission(
-    userId: string, 
-    resourceType: 'module' | 'form', 
-    resourceId: string, 
+    userId: string,
+    resourceType: 'module' | 'form',
+    resourceId: string,
     action: 'view' | 'create' | 'edit' | 'delete'
   ): Promise<boolean> {
     try {
-      console.log("[DatabaseRoles] Checking user permission:", { userId, resourceType, resourceId, action })
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, returning false")
         return false
       }
 
@@ -440,7 +447,6 @@ export class DatabaseRoles {
       })
 
       if (systemAdminPermission) {
-        console.log("[DatabaseRoles] User has system admin permission")
         return true
       }
 
@@ -459,7 +465,6 @@ export class DatabaseRoles {
       })
 
       if (!permission) {
-        console.log("[DatabaseRoles] No permission found for resource")
         return false
       }
 
@@ -482,7 +487,6 @@ export class DatabaseRoles {
           hasPermission = false
       }
 
-      console.log(`[DatabaseRoles] Permission check result: ${hasPermission}`)
       return hasPermission
     } catch (error: any) {
       console.error("Database error checking user permission:", error)
@@ -508,14 +512,11 @@ export class DatabaseRoles {
     expiresAt?: Date
   }): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Granting user permission:", data)
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping permission grant")
         return
       }
 
@@ -582,8 +583,6 @@ export class DatabaseRoles {
           isActive: true
         }
       })
-
-      console.log("[DatabaseRoles] User permission granted successfully")
     } catch (error: any) {
       console.error("Database error granting user permission:", error)
       throw new Error(`Failed to grant user permission: ${error?.message}`)
@@ -599,14 +598,11 @@ export class DatabaseRoles {
     resourceId: string
   ): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Revoking user permission:", { userId, resourceType, resourceId })
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping permission revoke")
         return
       }
 
@@ -625,8 +621,6 @@ export class DatabaseRoles {
           updatedAt: new Date()
         }
       })
-
-      console.log("[DatabaseRoles] User permission revoked successfully")
     } catch (error: any) {
       console.error("Database error revoking user permission:", error)
       throw new Error(`Failed to revoke user permission: ${error?.message}`)
@@ -651,14 +645,11 @@ export class DatabaseRoles {
     }>
   ): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Batch updating user permissions:", { userId, updates: permissionUpdates.length })
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping batch update")
         return
       }
 
@@ -685,7 +676,6 @@ export class DatabaseRoles {
         })
       }
 
-      console.log("[DatabaseRoles] Batch user permissions updated successfully")
     } catch (error: any) {
       console.error("Database error batch updating user permissions:", error)
       throw new Error(`Failed to batch update user permissions: ${error?.message}`)
@@ -703,14 +693,11 @@ export class DatabaseRoles {
     }>
   ): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Batch updating user permissions by name:", { userId, updates: permissionUpdates.length })
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping permission updates")
         return
       }
 
@@ -736,7 +723,6 @@ export class DatabaseRoles {
       for (const update of permissionUpdates) {
         const parts = update.permissionName.split(':')
         if (parts.length !== 3) {
-          console.warn(`[DatabaseRoles] Invalid permission name format: ${update.permissionName}`)
           continue
         }
 
@@ -780,8 +766,6 @@ export class DatabaseRoles {
         }
       }
 
-      console.log(`[DatabaseRoles] Processing ${resourceUpdates.size} resource updates`)
-      
       // Apply all updates
       for (const [, resourceUpdate] of resourceUpdates) {
         // Get existing permissions first
@@ -795,7 +779,7 @@ export class DatabaseRoles {
             }
           })
         } catch (error) {
-          console.log("[DatabaseRoles] Error fetching existing permission, creating new one")
+          // Continue — will create new permission
         }
 
         // Merge with existing permissions
@@ -806,7 +790,6 @@ export class DatabaseRoles {
           canDelete: resourceUpdate.permissions.canDelete ?? existingPermission?.canDelete ?? false,
         }
 
-        console.log(`[DatabaseRoles] Updating ${resourceUpdate.resourceType} ${resourceUpdate.resourceId}:`, finalPermissions)
         await this.grantUserPermission({
           userId: userId,
           resourceType: resourceUpdate.resourceType,
@@ -815,7 +798,6 @@ export class DatabaseRoles {
         })
       }
 
-      console.log("[DatabaseRoles] Batch user permissions updated successfully")
     } catch (error: any) {
       console.error("Database error batch updating user permissions:", error)
       throw new Error(`Failed to batch update user permissions: ${error?.message}`)
@@ -831,8 +813,6 @@ export class DatabaseRoles {
     value: boolean
   ): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Updating user permission:", { userId, permissionName, value })
-
       const parts = permissionName.split(':')
       if (parts.length !== 3) {
         throw new Error(`Invalid permission name format: ${permissionName}`)
@@ -855,7 +835,6 @@ export class DatabaseRoles {
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping permission update")
         return
       }
 
@@ -905,8 +884,6 @@ export class DatabaseRoles {
         resourceId: resourceId,
         permissions: permissions
       })
-
-      console.log("[DatabaseRoles] User permission updated successfully")
     } catch (error: any) {
       console.error("Database error updating user permission:", error)
       throw new Error(`Failed to update user permission: ${error?.message}`)
@@ -915,8 +892,6 @@ export class DatabaseRoles {
 
   static async getUserById(userId: string): Promise<any | null> {
     try {
-      console.log("[DatabaseRoles] Fetching user by ID:", userId)
-
       // Try to find user by ID first
       let userRecord = await prisma.formRecord15.findUnique({
         where: { id: userId }
@@ -924,7 +899,6 @@ export class DatabaseRoles {
 
       // If not found by ID, try to find by email in recordData
       if (!userRecord) {
-        console.log("[DatabaseRoles] User not found by ID, searching by email pattern...")
         
         // Get all records and search for matching email
         const allRecords = await prisma.formRecord15.findMany()
@@ -955,11 +929,8 @@ export class DatabaseRoles {
       }
 
       if (!userRecord) {
-        console.log("[DatabaseRoles] User not found:", userId)
         return null
       }
-
-      console.log("[DatabaseRoles] User found")
 
       return {
         id: userRecord.id,
@@ -980,8 +951,6 @@ export class DatabaseRoles {
    */
   static async getUserByEmail(email: string): Promise<any | null> {
     try {
-      console.log("[DatabaseRoles] Fetching user by email:", email)
-
       // Get all records and search for matching email
       const allRecords = await prisma.formRecord15.findMany()
       
@@ -990,7 +959,6 @@ export class DatabaseRoles {
         if (recordData && typeof recordData === 'object') {
           // Check direct email property
           if (recordData.email && recordData.email.toLowerCase() === email.toLowerCase()) {
-            console.log("[DatabaseRoles] User found by direct email property")
             return {
               id: record.id,
               recordData: record.recordData,
@@ -1006,7 +974,6 @@ export class DatabaseRoles {
             const field = recordData[fieldId]
             if (field && typeof field === 'object' && field.value) {
               if (field.type === 'email' && field.value.toLowerCase() === email.toLowerCase()) {
-                console.log("[DatabaseRoles] User found by field-based email structure")
                 return {
                   id: record.id,
                   recordData: record.recordData,
@@ -1021,7 +988,6 @@ export class DatabaseRoles {
         }
       }
 
-      console.log("[DatabaseRoles] User not found by email:", email)
       return null
     } catch (error: any) {
       console.error("Database error fetching user by email:", error)
@@ -1040,14 +1006,10 @@ export class DatabaseRoles {
     permissions: Record<string, Record<string, Record<string, boolean>>>
   }>> {
     try {
-      console.log("[DatabaseRoles] Getting employees with permissions from UserPermission table")
-
       // Get all users from form_records_15
       const userRecords = await prisma.formRecord15.findMany({
         orderBy: { createdAt: "desc" }
       })
-
-      console.log(`[DatabaseRoles] Found ${userRecords.length} total records in form_records_15`)
 
       const employees = []
 
@@ -1092,7 +1054,6 @@ export class DatabaseRoles {
           try {
             await prisma.userPermission.findFirst({ take: 1 })
           } catch (error) {
-            console.log("[DatabaseRoles] UserPermission table not available, using empty permissions")
             tableExists = false
           }
 
@@ -1109,12 +1070,9 @@ export class DatabaseRoles {
             })
           }
         } catch (error) {
-          console.log(`[DatabaseRoles] Error fetching permissions for ${email}, using empty permissions:`, error)
           userPermissions = []
         }
-        
-        console.log(`[DatabaseRoles] User ${email} has ${userPermissions.length} permissions`)
-        
+
         // Get resource details for permissions
         const moduleIds = userPermissions
           .filter(p => p.resourceType === 'module')
@@ -1192,11 +1150,6 @@ export class DatabaseRoles {
           }
         }
 
-        console.log(`[DatabaseRoles] Built permission matrix for ${email}:`, {
-          moduleCount: Object.keys(permissionMatrix).length,
-          permissionMatrix: permissionMatrix
-        })
-        
         // Get role name from lookup field or direct field
         let roleName = 'No Role'
         if (recordData.roleName) {
@@ -1225,16 +1178,6 @@ export class DatabaseRoles {
         })
       }
 
-      console.log(`[DatabaseRoles] Found ${employees.length} employees with permissions`)
-      
-      // Log detailed permission info for debugging
-      employees.forEach(emp => {
-        const permissionCount = Object.keys(emp.permissions).reduce((total, moduleId) => {
-          return total + Object.keys(emp.permissions[moduleId]).length
-        }, 0)
-        console.log(`[DatabaseRoles] Employee ${emp.name}: ${permissionCount} permission entries`)
-      })
-      
       return employees
     } catch (error: any) {
       console.error("Database error getting employees with permissions:", error)
@@ -1252,7 +1195,6 @@ export class DatabaseRoles {
     }>
   }>> {
     try {
-      console.log("[DatabaseRoles] Getting modules with submodules (child modules)")
 
       // Get all parent modules with their child modules (treating child modules as submodules)
       const modules = await prisma.formModule.findMany({
@@ -1288,7 +1230,6 @@ export class DatabaseRoles {
         }
       })
 
-      console.log(`[DatabaseRoles] Found ${result.length} parent modules with ${result.reduce((total, m) => total + m.subModules.length, 0)} child modules`)
       return result
     } catch (error: any) {
       console.error("Database error getting modules with submodules:", error)
@@ -1307,20 +1248,11 @@ export class DatabaseRoles {
     value: boolean
   ): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Updating employee permission in UserPermission table:", {
-        employeeId,
-        moduleId,
-        submoduleId,
-        permissionType,
-        value
-      })
-
       // Check if UserPermission table exists
       let tableExists = true
       try {
         await prisma.userPermission.findFirst({ take: 1 })
       } catch (error) {
-        console.log("[DatabaseRoles] UserPermission table not available, skipping permission update")
         return
       }
 
@@ -1387,8 +1319,6 @@ export class DatabaseRoles {
         resourceId: resourceId,
         permissions: permissionData
       })
-
-      console.log("[DatabaseRoles] Employee permission updated successfully")
     } catch (error: any) {
       console.error("Database error updating employee permission:", error)
       throw new Error(`Failed to update employee permission: ${error?.message}`)
@@ -1410,7 +1340,6 @@ export class DatabaseRoles {
   // Seed default roles (just for designations now)
   static async seedDefaultRoles(): Promise<void> {
     try {
-      console.log("[DatabaseRoles] Seeding default roles (designations)")
 
       // Create default roles (just for designation purposes)
       const defaultRoles = [
@@ -1465,7 +1394,6 @@ export class DatabaseRoles {
         }
       }
 
-      console.log("[DatabaseRoles] Default roles (designations) seeded successfully")
     } catch (error: any) {
       console.error("Database error seeding default roles:", error)
       throw new Error(`Failed to seed default roles: ${error?.message}`)

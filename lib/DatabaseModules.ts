@@ -23,7 +23,6 @@ export class DatabaseModules {
     if (!data.name || data.name.trim() === "") {
       throw new Error("Module name is required");
     }
-    console.log("This is organizationID dATA", data)
     if (!data.organizationId) {
       throw new Error("Organization ID is required");
     }
@@ -464,9 +463,10 @@ export class DatabaseModules {
           sections: {
             include: {
               fields: {
+                include: { formula: true },
                 orderBy: { order: "asc" },
               },
-          
+
             },
             orderBy: { order: "asc" },
           },
@@ -503,8 +503,6 @@ export class DatabaseModules {
   // Enhanced getForm method with complete subform hierarchy
   static async getForm(id: string): Promise<Form | null> {
     try {
-      console.log("[DatabaseModules] Fetching form with complete subform hierarchy:", id);
-
       const form = await prisma.form.findUnique({
         where: { id },
         include: {
@@ -512,9 +510,10 @@ export class DatabaseModules {
           sections: {
             include: {
               fields: {
+                include: { formula: true },
                 orderBy: { order: "asc" },
               },
-          
+
             },
             orderBy: { order: "asc" },
           },
@@ -541,26 +540,10 @@ export class DatabaseModules {
       });
 
       if (!form) {
-        console.log("[DatabaseModules] Form not found:", id);
         return null;
       }
 
-      console.log("[DatabaseModules] Form found with sections:", form.sections?.length || 0);
-
-      // Log subform hierarchy information
-      form.sections?.forEach((section, sIndex) => {
-        if (section.subforms?.length > 0) {
-          console.log(`[DatabaseModules] Section ${sIndex} has ${section.subforms.length} subforms`);
-          section.subforms.forEach((subform, sfIndex) => {
-            console.log(`[DatabaseModules] Subform ${sfIndex}: name="${subform.name}", level=${subform.level}, path="${subform.path}", children=${subform.childSubforms?.length || 0}`);
-          });
-        }
-      });
-
-      const transformedForm = DatabaseTransforms.transformForm(form);
-      console.log("[DatabaseModules] Successfully transformed form with complete hierarchy");
-
-      return transformedForm;
+      return DatabaseTransforms.transformForm(form);
     } catch (error: any) {
       console.error("Database error fetching form:", error);
       throw new Error(`Failed to fetch form: ${error?.message}`);
@@ -597,9 +580,6 @@ export class DatabaseModules {
               update: { storageTable: targetTable },
               create: { formId: id, storageTable: targetTable },
             });
-            console.log(
-              `Updated table mapping for form ${id} -> ${targetTable} (isUserForm: ${data.isUserForm}, isEmployeeForm: ${data.isEmployeeForm})`
-            );
           } else {
             // For non-user/non-employee forms, let getFormRecordTable handle the assignment
             const existingMapping = await prisma.formTableMapping.findUnique({
@@ -615,7 +595,6 @@ export class DatabaseModules {
               await prisma.formTableMapping.delete({
                 where: { formId: id },
               });
-              console.log(`Removed special form table mapping for form ${id}`);
             }
           }
         }
@@ -699,8 +678,8 @@ export class DatabaseModules {
     }
   ): Promise<Form> {
     try {
-      const formUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-        }/form/${id}`;
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const formUrl = `${baseUrl}/form/${id}`;
 
       const form = await this.updateForm(id, {
         isPublished: true,
@@ -837,11 +816,6 @@ export class DatabaseModules {
    */
   static async deleteSectionWithCleanup(sectionId: string): Promise<void> {
     try {
-      console.log(
-        "[DatabaseService] Starting section deletion with cleanup:",
-        sectionId
-      );
-
       // First, get the section with all its fields to know what to clean up
       const section = await prisma.formSection.findUnique({
         where: { id: sectionId },
@@ -860,85 +834,52 @@ export class DatabaseModules {
       const formId = section.formId;
       const fieldLabels = section.fields.map((f) => f.label);
 
-      console.log(
-        `[DatabaseService] Found section "${section.title}" with ${section.fields.length} fields:`,
-        fieldLabels
-      );
-
       // Step 1: Clean up form records - remove field data for deleted fields
       if (fieldLabels.length > 0 && section.form.tableMapping) {
-        console.log("[DatabaseService] Cleaning up form records...");
-
-        const tableName = section.form.tableMapping.storageTable;
-
-        // Get all records for this form from the appropriate table
         const records = await this.getFormRecords(formId);
-
-        console.log(
-          `[DatabaseService] Found ${records.length} records to clean`
-        );
 
         // Clean each record by removing data for deleted fields
         for (const record of records) {
           const recordData = (record.recordData as any) || {};
           let hasChanges = false;
 
-          // Remove data for each deleted field
           for (const fieldLabel of fieldLabels) {
             if (recordData[fieldLabel]) {
               delete recordData[fieldLabel];
               hasChanges = true;
-              console.log(
-                `[DatabaseService] Removed field "${fieldLabel}" from record ${record.id}`
-              );
             }
           }
 
-          // Update record if changes were made
           if (hasChanges) {
             await this.updateFormRecord(record.id, {
               recordData,
               updatedAt: new Date(),
             });
-            console.log(`[DatabaseService] Updated record ${record.id}`);
           }
         }
-
-        console.log("[DatabaseService] Form records cleanup completed");
       }
 
       // Step 2: Clean up lookup relations for deleted fields
-      console.log("[DatabaseService] Cleaning up lookup relations...");
       const fieldIds = section.fields.map((f) => f.id);
       if (fieldIds.length > 0) {
-        const deletedRelations = await prisma.lookupFieldRelation.deleteMany({
+        await prisma.lookupFieldRelation.deleteMany({
           where: {
             formFieldId: { in: fieldIds },
           },
         });
-        console.log(
-          `[DatabaseService] Deleted ${deletedRelations.count} lookup relations`
-        );
       }
 
       // Step 3: Delete the section (this will cascade delete fields due to foreign key constraints)
-      console.log("[DatabaseService] Deleting section and fields...");
       await prisma.formSection.delete({
         where: { id: sectionId },
       });
 
-      console.log(
-        `[DatabaseService] Successfully deleted section "${section.title}" and cleaned up all associated data`
-      );
-
       // Step 4: Reorder remaining sections
-      console.log("[DatabaseService] Reordering remaining sections...");
       const remainingSections = await prisma.formSection.findMany({
         where: { formId },
         orderBy: { order: "asc" },
       });
 
-      // Update order for remaining sections
       for (let i = 0; i < remainingSections.length; i++) {
         if (remainingSections[i].order !== i) {
           await prisma.formSection.update({
@@ -947,13 +888,6 @@ export class DatabaseModules {
           });
         }
       }
-
-      console.log(
-        `[DatabaseService] Reordered ${remainingSections.length} remaining sections`
-      );
-      console.log(
-        "[DatabaseService] Section deletion with cleanup completed successfully"
-      );
     } catch (error: any) {
       console.error("Database error deleting section with cleanup:", error);
       throw new Error(
@@ -1135,8 +1069,6 @@ export class DatabaseModules {
     lookup?: any;
   }): Promise<FormField> {
     try {
-      console.log("[DatabaseService] Creating field with data:", data);
-
       const field = await prisma.formField.create({
         data: {
           sectionId: data.sectionId,
@@ -1155,8 +1087,6 @@ export class DatabaseModules {
           lookup: data.lookup, // Store complete lookup configuration
         },
       });
-
-      console.log("[DatabaseService] Field created successfully:", field.id);
 
       // Handle lookup relations after field creation
       if (data.type === "lookup" && data.lookup?.sourceId) {
@@ -1182,11 +1112,6 @@ export class DatabaseModules {
     fieldId: string,
     fieldData: any
   ): Promise<void> {
-    console.log(
-      "[DatabaseService] Handling lookup relations for field:",
-      fieldId
-    );
-
     if (!fieldData.lookup?.sourceId) {
       console.error(
         "[DatabaseService] Lookup field missing source information",
@@ -1239,10 +1164,6 @@ export class DatabaseModules {
     });
 
     if (!lookupSource) {
-      console.log("[DatabaseService] Creating new LookupSource", {
-        lookupSourceId,
-      });
-
       if (lookupSourceId.startsWith("module_")) {
         const sourceModuleId = lookupSourceId.replace("module_", "");
         const module = await prisma.formModule.findUnique({
@@ -1285,7 +1206,7 @@ export class DatabaseModules {
     if (!lookupSource) {
       console.error("[DatabaseService] Failed to create/find LookupSource", {
         lookupSourceId,
-      });
+      }); // Keep this error log - it signals a real problem
       return;
     }
 
@@ -1319,10 +1240,6 @@ export class DatabaseModules {
       },
     });
 
-    console.log(
-      "[DatabaseService] Successfully created/updated LookupFieldRelation",
-      { relationId }
-    );
   }
 
   static async getFields(sectionId: string): Promise<FormField[]> {

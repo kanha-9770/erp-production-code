@@ -1,9 +1,7 @@
-import { PrismaClient } from "@prisma/client"
+import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 import crypto from "crypto"
 import jwt from "jsonwebtoken"
-
-const prisma = new PrismaClient()
 
 // Environment variable for JWT secret
 const JWT_SECRET = process.env.JWT_SECRET || "your-fallback-secret-key"
@@ -85,11 +83,9 @@ export async function validateSession(token: string) {
           where: { id: session.id },
         })
       }
-      console.log("[validateSession] Session not found or expired")
       return null
     }
 
-    console.log(`[validateSession] Valid session found for user: ${session.user.email}`)
     return session
   } catch (error) {
     console.error("[validateSession] Error validating session:", error)

@@ -1,10 +1,8 @@
 // app/api/lookup/sources/route.ts
 import { type NextRequest, NextResponse } from "next/server"
-import { PrismaClient } from "@prisma/client"
+import { prisma } from "@/lib/prisma"
 import { LookupService } from "@/lib/lookup-service"
-import { validateSession } from "@/lib/auth"
-
-const prisma = new PrismaClient()
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 
 interface CachedEntry {
   data: any[]
@@ -60,18 +58,11 @@ export async function GET(request: NextRequest) {
     const quick = searchParams.get("quick") === "true"
     const now = Date.now()
 
-    const token = request.cookies.get("auth-token")?.value
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-    }
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
-    const session = await validateSession(token)
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
-    }
-
-    const userId = session.user.id
-    const organizationId = session.user.organizationId
+    const userId = authUser.id
+    const organizationId = authUser.organizationId
     const cacheKey = `${userId}_${quick ? "quick" : "full"}`
 
     // Check cache
@@ -218,8 +209,6 @@ export async function GET(request: NextRequest) {
       { success: false, error: "Failed to fetch lookup sources" },
       { status: 500 }
     )
-  } finally {
-    await prisma.$disconnect()
   }
 }
 

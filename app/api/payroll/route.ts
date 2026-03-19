@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 let payrollRecords: any[] = [];
 
 export async function GET() {
-  return NextResponse.json({ payrolls: payrollRecords });
+  return NextResponse.json({ success: true, payrolls: payrollRecords });
 }
 
 export async function POST(request: NextRequest) {
@@ -13,11 +13,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const payrolls = await calculatePayroll(body.month);
     payrollRecords = payrolls;
-    return NextResponse.json({ payrolls });
+    return NextResponse.json({ success: true, payrolls });
   } catch (error) {
     console.error('Error processing payroll:', error);
     return NextResponse.json(
-      { error: 'Failed to process payroll' },
+      { success: false, error: 'Failed to process payroll' },
       { status: 500 }
     );
   }

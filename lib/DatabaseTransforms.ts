@@ -251,7 +251,6 @@ export class DatabaseTransforms {
       })
 
       if (tableMapping) {
-        console.log(`Form ${formId} mapped to table: ${tableMapping.storageTable}`)
         return tableMapping.storageTable
       }
 
@@ -300,7 +299,6 @@ export class DatabaseTransforms {
       // Create mapping
       await this.createTableMapping(formId, tableName)
 
-      console.log(`Assigned form ${formId} to table: ${tableName}`)
       return tableName
     } catch (error: any) {
       console.error("Error determining form record table:", error)

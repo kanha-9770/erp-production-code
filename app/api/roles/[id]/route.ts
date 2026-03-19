@@ -36,8 +36,6 @@ export async function DELETE(
 ) {
   const roleId = params.id;
 
-  console.log(`[API] DELETE /roles/${roleId} - Started`);
-
   try {
     // 1. Quick existence check + basic info
     const role = await prisma.role.findUnique({
@@ -46,58 +44,40 @@ export async function DELETE(
     });
 
     if (!role) {
-      console.log(`[API] DELETE /roles/${roleId} - Role not found`);
       return NextResponse.json(
         { success: false, error: "Role not found" },
         { status: 404 }
       );
     }
 
-    console.log(`[API] DELETE /roles/${roleId} - Role found: "${role.name}"`);
-
     // 2. Do everything in one transaction
     const result = await prisma.$transaction(async (tx) => {
-      console.log(`[TX] Collecting all descendant roles for ${roleId}...`);
-
       const allRoleIds = await collectAllDescendantIds(tx, roleId);
 
       if (allRoleIds.length === 0) {
         throw new Error("No roles found to delete");
       }
 
-      console.log(`[TX] Found ${allRoleIds.length} roles to delete`);
-
       // 3. Clean up dependent records first (important order!)
-      console.log(`[TX] Deleting role permissions...`);
       const perms = await tx.rolePermission.deleteMany({
         where: { roleId: { in: allRoleIds } },
       });
-      console.log(`[TX] → Deleted ${perms.count} role permissions`);
 
-      console.log(`[TX] Deleting unit role assignments...`);
       const unitRoles = await tx.unitRoleAssignment.deleteMany({
         where: { roleId: { in: allRoleIds } },
       });
-      console.log(`[TX] → Deleted ${unitRoles.count} unit role assignments`);
 
-      console.log(`[TX] Deleting user unit assignments...`);
       const userAssignments = await tx.userUnitAssignment.deleteMany({
         where: { roleId: { in: allRoleIds } },
       });
-      console.log(`[TX] → Deleted ${userAssignments.count} user role assignments`);
 
       // 4. Finally delete the roles
-      console.log(`[TX] Deleting roles themselves...`);
       const rolesDeleted = await tx.role.deleteMany({
         where: { id: { in: allRoleIds } },
       });
 
-      console.log(`[TX] → Deleted ${rolesDeleted.count} roles`);
-
       return { deletedCount: allRoleIds.length };
     });
-
-    console.log(`[API] DELETE /roles/${roleId} - SUCCESS - Deleted ${result.deletedCount} roles`);
 
     return NextResponse.json({
       success: true,

@@ -4,16 +4,12 @@ import { NextRequest, NextResponse } from "next/server"
 
 export async function GET() {
   try {
-    console.log("[API] /api/employees/permissions - GET request received")
-    
     // Fetch employees with their permissions
     const employees = await DatabaseRoles.getEmployeesWithPermissions()
-    console.log(`[API] Found ${employees.length} employees`)
-    
+
     // Fetch modules with submodules (child modules)
     const modules = await DatabaseRoles.getModulesWithSubmodules()
-    console.log(`[API] Found ${modules.length} modules`)
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -38,11 +34,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[API] /api/employees/permissions - POST request received")
-    
     const body = await request.json()
-    console.log("[API] Request body:", body)
-    
     const { employeeId, batchUpdates } = body
     
     if (!employeeId) {
@@ -61,8 +53,6 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    console.log(`[API] Processing ${batchUpdates.length} permission updates for employee ${employeeId}`)
-    
     // Validate employee exists
     const employee = await DatabaseRoles.getUserById(employeeId)
     if (!employee) {
@@ -73,21 +63,15 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    console.log("[API] Employee found:", employee.id)
-    
     // Convert batchUpdates to the format expected by updateUserPermissionsBatch
     const permissionUpdates = batchUpdates.map((update: any) => ({
       permissionName: `${update.moduleId}:${update.submoduleId}:${update.permissionType}`,
       value: update.value
     }))
     
-    console.log("[API] Converted permission updates:", permissionUpdates)
-    
     // Process batch permission updates
     await DatabaseRoles.updateUserPermissionsBatch(employeeId, permissionUpdates)
-    
-    console.log("[API] Batch permission updates completed successfully")
-    
+
     return NextResponse.json({
       success: true,
       message: `Successfully updated ${batchUpdates.length} permissions for employee ${employeeId}`,

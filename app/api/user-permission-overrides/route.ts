@@ -3,12 +3,9 @@ import { getUserPermissionOverrides } from '@/lib/database'
 
 export async function GET() {
   try {
-    console.log('[v0] GET /api/user-permission-overrides - Starting request')
-    
     const overrides = await getUserPermissionOverrides()
-    console.log(`[v0] Successfully retrieved ${overrides.length} user permission overrides`)
-    
-    return NextResponse.json({ 
+
+    return NextResponse.json({
       success: true, 
       data: overrides 
     })

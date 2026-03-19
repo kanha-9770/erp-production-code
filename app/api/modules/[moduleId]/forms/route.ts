@@ -23,10 +23,6 @@ export const POST = async (
       description,
     })
 
-    console.log(
-      `[Forms API] Form created: ${name} in module: ${params.moduleId}`
-    )
-
     return NextResponse.json({ success: true, data: form })
   } catch (error: any) {
     console.error("Error creating form:", error)

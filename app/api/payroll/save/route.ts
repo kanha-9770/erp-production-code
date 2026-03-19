@@ -19,8 +19,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log('[v0] Payroll saved successfully:', savedPayrolls.length, 'records for', body.month);
-
     return NextResponse.json({
       success: true,
       message: `Saved ${savedPayrolls.length} payroll records for ${body.month}`,
@@ -30,7 +28,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error saving payroll:', error);
     return NextResponse.json(
-      { 
+      {
+        success: false,
         error: 'Failed to save payroll',
         details: error instanceof Error ? error.message : 'Unknown error'
       },

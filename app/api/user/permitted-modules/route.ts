@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma"; // ✅ using global instance (no new PrismaClient per request)
 
 /**
@@ -9,42 +9,21 @@ import { prisma } from "@/lib/prisma"; // ✅ using global instance (no new Pris
  */
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    if (!authUser.organizationId) return NextResponse.json({ error: "User is not associated with any organization" }, { status: 403 });
 
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
 
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    // 🔹 Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
 
-    const userId = session.user.id;
-
-    // 🔹 Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-
-    if (!user?.organizationId) {
-      return NextResponse.json(
-        { error: "User is not associated with any organization" },
-        { status: 403 }
-      );
-    }
-
-    const organizationId = user.organizationId;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
 
     let finalModules: any[] = [];

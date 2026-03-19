@@ -1,33 +1,3 @@
-// export const dynamic = 'force-dynamic';
-// import { NextRequest, NextResponse } from 'next/server'
-// import { deleteSession } from '@/lib/auth'
-
-// export async function POST(request: NextRequest) {
-//   try {
-//     const token = request.cookies.get('auth-token')?.value
-
-//     if (token) {
-//       await deleteSession(token)
-//     }
-
-//     const response = NextResponse.json({
-//       success: true,
-//       message: 'Logged out successfully',
-//     })
-
-//     // Clear authentication cookie
-//     response.cookies.delete('auth-token')
-
-//     return response
-//   } catch (error) {
-//     console.error('Logout error:', error)
-//     return NextResponse.json(
-//       { error: 'Internal server error' },
-//       { status: 500 }
-//     )
-//   }
-// }
-
 // app/api/auth/logout/route.ts
 
 export const dynamic = 'force-dynamic'
@@ -35,51 +5,13 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-
-// Fixed audit log helper — now accepts organizationId explicitly
-async function logAudit({
-  userId,
-  organizationId,      // ← Added
-  performedBy,
-  action,
-  details,
-  ipAddress,
-  userAgent,
-}: {
-  userId?: string
-  organizationId?: string | null   // ← Critical for multi-tenant
-  performedBy: string
-  action: string
-  details?: string
-  ipAddress: string
-  userAgent: string
-}) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId: userId || null,
-        organizationId: organizationId || null,  // ← Now correctly saved
-        performedBy,
-        action,
-        module: "Authentication",
-        details: details || null,
-        ipAddress,
-        userAgent,
-      },
-    })
-    console.log(`Audit log: ${action} by ${performedBy}`)
-  } catch (error) {
-    console.error("Failed to create audit log on logout:", error)
-    // Never break logout flow
-  }
-}
+import { getRequestMeta, logAudit } from '@/lib/api-helpers'
 
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     let performedBy = "unknown@user.com"
     let userId: string | undefined = undefined
@@ -94,7 +26,7 @@ export async function POST(request: NextRequest) {
           user: {
             select: {
               email: true,
-              organizationId: true,  // ← Fetch this!
+              organizationId: true,
             },
           },
         },
@@ -103,7 +35,7 @@ export async function POST(request: NextRequest) {
       if (session?.user) {
         performedBy = session.user.email
         userId = session.userId
-        organizationId = session.user.organizationId  // ← Save it
+        organizationId = session.user.organizationId
       } else if (session?.userId) {
         // Fallback: fetch user separately
         const user = await prisma.user.findUnique({
@@ -123,12 +55,12 @@ export async function POST(request: NextRequest) {
       // Delete the session
       await deleteSession(token)
 
-      // Log successful logout with correct organizationId
       await logAudit({
         userId,
-        organizationId,           // ← Now passed correctly
+        organizationId,
         performedBy,
         action: "Logout",
+        module: "Authentication",
         details: "Successful logout",
         ipAddress,
         userAgent,
@@ -139,6 +71,7 @@ export async function POST(request: NextRequest) {
         organizationId: null,
         performedBy,
         action: "Logout Attempt",
+        module: "Authentication",
         details: "No active session token found (possibly already logged out or expired)",
         ipAddress,
         userAgent,
@@ -151,20 +84,20 @@ export async function POST(request: NextRequest) {
     })
 
     // Clear cookie
-    response.cookies.delete('auth-token', { path: '/' })
+    response.cookies.delete('auth-token')
 
     return response
   } catch (error) {
     console.error('Logout error:', error)
 
-    const ipAddress = request.headers.get("x-forwarded-for") || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     // Best-effort error logging
     await logAudit({
       organizationId: null,
       performedBy: "unknown@user.com",
       action: "Logout Failed",
+      module: "Authentication",
       details: `Server error during logout: ${error instanceof Error ? error.message : 'Unknown'}`,
       ipAddress,
       userAgent,

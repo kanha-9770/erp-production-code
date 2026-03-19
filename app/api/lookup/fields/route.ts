@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
     if (!sourceId) {
       return NextResponse.json(
-        { error: "sourceId is required" },
+        { success: false, error: "sourceId is required" },
         { status: 400 }
       );
     }
@@ -22,8 +22,6 @@ export async function GET(request: NextRequest) {
     }
 
     const lookupService = new LookupService();
-
-    console.log(`[API] Calling getFields → sourceId=${sourceId}, sectionId=${sectionId}`);
 
     const result = await lookupService.getFields(sourceId, sectionId);
 
@@ -39,8 +37,6 @@ export async function GET(request: NextRequest) {
     } else {
       responseData = [];
     }
-
-    console.log(`[API] Final response data length: ${Array.isArray(responseData) ? responseData.length : 'N/A'}`);
 
     return NextResponse.json({
       success: true,

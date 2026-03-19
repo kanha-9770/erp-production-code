@@ -1,40 +1,28 @@
 export const dynamic = 'force-dynamic';
 
 import { type NextRequest, NextResponse } from "next/server"
-import { PrismaClient } from "@prisma/client"
-import { validateSession } from "@/lib/auth"
-
-const prisma = new PrismaClient()
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 
 // GET - Fetch employees based on user role
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value
-
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
-
-    const session = await validateSession(token)
-
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
+    if (!authUser.organizationId) {
+      return NextResponse.json({ error: "User is not associated with any organization" }, { status: 403 });
     }
+    const organizationId = authUser.organizationId;
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { organizationId: true },
-    })
-
-    if (!user?.organizationId) {
-      return NextResponse.json(
-        { error: "User is not associated with any organization" },
-        { status: 403 }
-      )
-    }
-
-    const organizationId = user.organizationId
-    const isAdmin = session.user.unitAssignments.some((ua: any) => ua.role.name.toLowerCase().includes("admin"))
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: { select: { name: true } } } } },
+    });
+    const isAdmin = userWithRoles?.unitAssignments.some(
+      (ua: any) => ua.role.name.toLowerCase().includes("admin")
+    ) ?? false;
 
     let employees
 
@@ -83,7 +71,7 @@ export async function GET(request: NextRequest) {
       // Non-admin can only see their own employee record
       employees = await prisma.employee.findMany({
         where: {
-          userId: session.user.id,
+          userId: authUser.id,
           status: "ACTIVE",
         },
         select: {

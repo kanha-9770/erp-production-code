@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 // PATCH - Update payroll record
 export async function PATCH(
@@ -8,28 +8,17 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Invalid session" },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
 
     // Check if user is admin
-    const isAdmin = session.unitAssignments?.some((ua: any) =>
-      ua.role.name.toLowerCase().includes("admin")
-    );
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
+    });
+    const isAdmin = userWithRoles?.unitAssignments.some(
+      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+    ) ?? false;
 
     if (!isAdmin) {
       return NextResponse.json(
@@ -53,7 +42,7 @@ export async function PATCH(
 
     // Validate the update data
     const updateData: any = {
-      processedBy: session.user.id,
+      processedBy: authUser.id,
       processedAt: new Date(),
     };
 
@@ -114,7 +103,7 @@ export async function PATCH(
         netSalary: (body.grossSalary || 0) - (body.deductions || 0),
         baseSalary: body.grossSalary || 0,
         status: body.status || "pending",
-        processedBy: session.user.id,
+        processedBy: authUser.id,
         processedAt: new Date(),
       },
     });
@@ -139,28 +128,17 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Invalid session" },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
 
     // Check if user is admin
-    const isAdmin = session.unitAssignments?.some((ua: any) =>
-      ua.role.name.toLowerCase().includes("admin")
-    );
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
+    });
+    const isAdmin = userWithRoles?.unitAssignments.some(
+      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+    ) ?? false;
 
     if (!isAdmin) {
       return NextResponse.json(

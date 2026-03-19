@@ -349,6 +349,8 @@ export function PublicFormDialog({
             last_name: user.last_name,
             email: user.email,
           });
+          // Ensure window global is always set so handleSubmit can find the userId
+          (window as any).__currentUserId = user.id;
         }
       } catch (err) {
         console.error("Failed to fetch current user:", err);

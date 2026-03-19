@@ -1,13 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, { params }: { params: { moduleId: string } }) {
   try {
-    const { id } = params
+    const { moduleId: id } = params
     const { newParentId, sortOrder } = await request.json()
 
     if (!id) {
-      return NextResponse.json({ error: "Module ID required" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "Module ID required" }, { status: 400 })
     }
 
     // Validate module exists
@@ -16,7 +16,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     })
 
     if (!module) {
-      return NextResponse.json({ error: "Module not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Module not found" }, { status: 404 })
     }
 
     // Update module with new parent and sort order

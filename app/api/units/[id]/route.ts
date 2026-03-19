@@ -16,7 +16,7 @@ export async function GET(
     })
 
     if (!unit) {
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 })
     }
 
     await authorizeOrgAdmin(request, unit.organizationId)
@@ -32,14 +32,14 @@ export async function GET(
     })
 
     if (!full) {
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 })
     }
 
     // ✅ Return the full data instead of the basic one
     return NextResponse.json(full)
   } catch (error) {
     console.error("Error fetching unit:", error)
-    return NextResponse.json({ error: "Failed to fetch unit" }, { status: 500 })
+    return NextResponse.json({ success: false, error: "Failed to fetch unit" }, { status: 500 })
   }
 }
 
@@ -107,7 +107,7 @@ export async function PUT(
     return NextResponse.json(result)
   } catch (error) {
     console.error("Error updating unit:", error)
-    return NextResponse.json({ error: "Failed to update unit" }, { status: 500 })
+    return NextResponse.json({ success: false, error: "Failed to update unit" }, { status: 500 })
   }
 }
 
@@ -138,6 +138,6 @@ export async function DELETE(
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("Error deleting unit:", error)
-    return NextResponse.json({ error: "Failed to delete unit" }, { status: 500 })
+    return NextResponse.json({ success: false, error: "Failed to delete unit" }, { status: 500 })
   }
 }

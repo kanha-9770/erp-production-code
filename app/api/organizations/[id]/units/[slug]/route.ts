@@ -9,7 +9,6 @@ export async function GET(
   try {
     const organizationId = params.id;
     const unitId = params.slug;
-    console.log(`GET organization/${organizationId}/units/${unitId}`);
     // Quick existence + ownership check
     const unit = await prisma.organizationUnit.findUnique({
       where: { id: unitId },
@@ -17,15 +16,11 @@ export async function GET(
     });
 
     if (!unit) {
-      console.log(`Unit not found: ${unitId}`);
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 });
     }
 
     if (unit.organizationId !== organizationId) {
-      console.log(
-        `Unauthorized - unit belongs to ${unit.organizationId}, requested ${organizationId}`
-      );
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 403 });
     }
 
     await authorizeOrgAdmin(request, organizationId);
@@ -41,7 +36,7 @@ export async function GET(
     });
 
     if (!fullUnit) {
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 });
     }
 
     return NextResponse.json(fullUnit);
@@ -62,8 +57,6 @@ export async function PUT(
     const organizationId = params.id;
     const unitId = params.unitId;
 
-    console.log(`PUT organization/${organizationId}/units/${unitId}`);
-
     const body = await request.json();
     const { name, description, assignedRoles, assignedUsers } = body;
 
@@ -73,11 +66,11 @@ export async function PUT(
     });
 
     if (!unit) {
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 });
     }
 
     if (unit.organizationId !== organizationId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 403 });
     }
 
     await authorizeOrgAdmin(request, organizationId);
@@ -145,7 +138,7 @@ export async function PUT(
   } catch (error) {
     console.error("Error updating unit:", error);
     return NextResponse.json(
-      { error: "Failed to update unit" },
+      { success: false, error: "Failed to update unit" },
       { status: 500 }
     );
   }
@@ -157,20 +150,13 @@ export async function DELETE(
   const organizationId = params.id?.trim();
   const unitId = params.slug?.trim();
 
-  console.log(`[UNIT-DELETE] Request started`, {
-    organizationId,
-    unitId,
-    timestamp: new Date().toISOString(),
-    method: request.method,
-  });
-
   if (!organizationId || !unitId) {
     console.error("[UNIT-DELETE] Missing required parameters", {
       organizationId,
       unitId,
     });
     return NextResponse.json(
-      { error: "Missing organization ID or unit ID" },
+      { success: false, error: "Missing organization ID or unit ID" },
       { status: 400 }
     );
   }
@@ -189,28 +175,15 @@ export async function DELETE(
     });
 
     if (!unit) {
-      console.log(`[UNIT-DELETE] Unit not found`, { unitId });
-      return NextResponse.json({ error: "Unit not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Unit not found" }, { status: 404 });
     }
 
     if (unit.organizationId !== organizationId) {
-      console.warn("[UNIT-DELETE] Organization mismatch", {
-        requested: organizationId,
-        actual: unit.organizationId,
-      });
       return NextResponse.json(
-        { error: "Unauthorized - unit does not belong to this organization" },
+        { success: false, error: "Unauthorized - unit does not belong to this organization" },
         { status: 403 }
       );
     }
-
-    console.log(`[UNIT-DELETE] Unit verified`, {
-      name: unit.name,
-      hasChildren: !!unit.children?.length,
-      childrenCount: unit.children?.length ?? 0,
-    });
-
-   
 
     // 3. Perform recursive delete
     let deletedCount = 0;
@@ -219,16 +192,11 @@ export async function DELETE(
       currentId: string,
       depth = 0
     ): Promise<void> => {
-      const indent = "  ".repeat(depth);
-      console.log(`${indent}[UNIT-DELETE] Processing unit: ${currentId}`);
-
       // Get children
       const children = await prisma.organizationUnit.findMany({
         where: { parentId: currentId },
         select: { id: true },
       });
-
-      console.log(`${indent}└─ Found ${children.length} children`);
 
       // Delete children first (depth-first)
       for (const child of children) {
@@ -236,7 +204,6 @@ export async function DELETE(
       }
 
       // Clean up relations
-      console.log(`${indent}└─ Cleaning assignments`);
       await prisma.unitRoleAssignment.deleteMany({
         where: { unitId: currentId },
       });
@@ -245,7 +212,6 @@ export async function DELETE(
       });
 
       // Delete the unit itself
-      console.log(`${indent}└─ Deleting unit ${currentId}`);
       await prisma.organizationUnit.delete({
         where: { id: currentId },
       });
@@ -254,11 +220,6 @@ export async function DELETE(
     };
 
     await deleteUnitRecursively(unitId);
-
-    console.log(`[UNIT-DELETE] Successfully completed`, {
-      deletedUnits: deletedCount,
-      rootUnit: unit.name,
-    });
 
     return NextResponse.json({
       success: true,
@@ -278,6 +239,7 @@ export async function DELETE(
 
     return NextResponse.json(
       {
+        success: false,
         error: "Failed to delete unit",
         message: error.message || "Server error during deletion",
         code: error.code || "UNKNOWN",

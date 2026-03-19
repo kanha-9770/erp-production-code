@@ -1,36 +1,23 @@
 // app/api/organization-units/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth"; // ← your session validation helper (adjust import if name is different)
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Get auth token from cookies (adjust cookie name if different)
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    // 1. Authenticate user
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json(
-        { success: false, error: "No authentication token provided" },
+        { success: false, error: "Not authenticated" },
         { status: 401 }
       );
     }
 
-    // 2. Validate session and get user
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      return NextResponse.json(
-        { success: false, error: "Invalid or expired session" },
-        { status: 401 }
-      );
-    }
-
-    // 3. Extract organization ID from session/user
-    const organizationId =
-      session.user.organizationId ||
-      session.user.orgId ||
-      session.user.tenantId ||
-      session.user.organization?.id;
+    // 2. Extract organization ID from authUser
+    const organizationId = authUser.organizationId;
 
     if (!organizationId) {
       return NextResponse.json(
@@ -39,7 +26,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 4. Fetch active organization units for this organization
+    // 3. Fetch active organization units for this organization
     const units = await prisma.organizationUnit.findMany({
       where: {
         organizationId,
@@ -63,7 +50,7 @@ export async function GET(request: NextRequest) {
       ],
     });
 
-    // 5. Optional: simple flatten + hierarchy info for frontend dropdown
+    // 4. Optional: simple flatten + hierarchy info for frontend dropdown
     // (you can also move this logic to frontend if preferred)
     const unitsForDropdown = units.map(unit => ({
       id: unit.id,

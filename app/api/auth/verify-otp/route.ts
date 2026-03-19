@@ -6,15 +6,11 @@ import { VerifyOTPSchema } from "@/lib/validations"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("OTP Verification API called")
     const body = await request.json()
-    console.log("Request body:", body)
 
     // Validate input
     const { otp } = VerifyOTPSchema.parse(body)
     const { userId, type: typeParam = "registration" } = body
-
-    console.log("Parsed data:", { otp, userId, typeParam })
 
     // Convert string type to enum
     let type: "REGISTRATION" | "LOGIN" | "PASSWORD_RESET"
@@ -29,15 +25,11 @@ export async function POST(request: NextRequest) {
       type = "REGISTRATION" // default fallback
     }
 
-    console.log("Converted type:", type)
-
     if (!userId) {
-      console.log("Missing userId")
       return NextResponse.json({ error: "User ID is required" }, { status: 400 })
     }
 
     // Find the OTP
-    console.log("Looking for OTP with:", { userId, code: otp, type })
     const otpRecord = await prisma.oTPCode.findFirst({
       where: {
         userId,
@@ -53,10 +45,7 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    console.log("OTP record found:", !!otpRecord)
-
     if (!otpRecord) {
-      console.log("OTP not found or invalid, incrementing attempts")
       await prisma.oTPCode.updateMany({
         where: {
           userId,
@@ -73,7 +62,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid or expired verification code" }, { status: 400 })
     }
 
-    console.log("Marking OTP as used")
     // Mark OTP as used
     await prisma.oTPCode.update({
       where: { id: otpRecord.id },
@@ -87,7 +75,6 @@ export async function POST(request: NextRequest) {
 
     // Only verify email and activate for REGISTRATION or PASSWORD_RESET
     if (type === "REGISTRATION" || type === "PASSWORD_RESET") {
-      console.log(`Verifying email and activating user for ${type}`)
       updatedUser = await prisma.user.update({
         where: { id: userId },
         data: {
@@ -102,12 +89,10 @@ export async function POST(request: NextRequest) {
         },
       })
     } else {
-      console.log("LOGIN flow — no email verification change")
       // For LOGIN: do NOT change email_verified or status
       // Just create session
     }
 
-    console.log("Creating session for user:", userId)
     const session = await createSession(
       userId,
       request.headers.get("x-forwarded-for") || "unknown",
@@ -120,8 +105,6 @@ export async function POST(request: NextRequest) {
     })
 
     const needsOrganization = type === "REGISTRATION" && !userWithOrg?.organizationId
-
-    console.log("OTP verification successful")
 
     const response = NextResponse.json({
       success: true,

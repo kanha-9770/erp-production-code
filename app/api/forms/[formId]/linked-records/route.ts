@@ -5,12 +5,8 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
   try {
     const { formId } = params
 
-    console.log("Fetching enhanced linked records for form:", formId)
-
     // Get enhanced linked records with detailed information
     const linkedRecords = await DatabaseService.getLinkedRecords(formId)
-
-    console.log(`Found ${linkedRecords.linkedForms.length} linked forms`)
 
     return NextResponse.json({
       success: true,

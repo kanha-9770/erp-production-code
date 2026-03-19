@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 export interface UserWithRoles {
   id: string;
@@ -29,8 +27,6 @@ export interface UserWithRoles {
  */
 export async function checkUserAdminRole(userId: string): Promise<boolean> {
   try {
-    console.log(`[checkUserAdminRole] Checking admin role for userId: ${userId}`);
-    
     const userWithRoles = await prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -57,7 +53,6 @@ export async function checkUserAdminRole(userId: string): Promise<boolean> {
     });
 
     if (!userWithRoles) {
-      console.log(`[checkUserAdminRole] User not found: ${userId}`);
       return false;
     }
 
@@ -68,15 +63,6 @@ export async function checkUserAdminRole(userId: string): Promise<boolean> {
         assignment.role.isActive &&
         assignment.unit.isActive
     );
-
-    console.log(`[checkUserAdminRole] User ${userId} admin status: ${hasAdminRole}`);
-    
-    if (hasAdminRole) {
-      const adminRoles = userWithRoles.unitAssignments
-        .filter(a => a.role.isAdmin && a.role.isActive && a.unit.isActive)
-        .map(a => a.role.name);
-      console.log(`[checkUserAdminRole] Admin roles: ${adminRoles.join(', ')}`);
-    }
 
     return hasAdminRole;
   } catch (error) {

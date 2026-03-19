@@ -1,6 +1,6 @@
 "use client";
 import type React from "react";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -164,14 +164,21 @@ export function FormulaBuilder({
 }: FormulaBuilderProps) {
   const [expression, setExpression] = useState("");
   const [returnType, setReturnType] = useState<FormulaReturnType>(
-    initialConfig?.returnType || "Number"
+    initialConfig?.returnType ?? "Number"
   );
   const [decimalPlaces, setDecimalPlaces] = useState(
-    initialConfig?.decimalPlaces || 2
+    initialConfig?.decimalPlaces ?? 2
   );
   const [blankPreference, setBlankPreference] = useState<BlankPreference>(
-    initialConfig?.blankPreference || "Empty"
+    initialConfig?.blankPreference ?? "Empty"
   );
+
+  // Sync settings whenever initialConfig changes (component may stay mounted across edits)
+  useEffect(() => {
+    setReturnType(initialConfig?.returnType ?? "Number");
+    setDecimalPlaces(initialConfig?.decimalPlaces ?? 2);
+    setBlankPreference(initialConfig?.blankPreference ?? "Empty");
+  }, [initialConfig]);
 
   const [syntaxValid, setSyntaxValid] = useState(true);
   const [syntaxErrors, setSyntaxErrors] = useState<string[]>([]);
@@ -211,13 +218,23 @@ export function FormulaBuilder({
     loadMasterData();
   }, []);
 
-  // Restore sources from initialConfig if editing
+  // Reset to current form when the field being edited changes
+  useEffect(() => {
+    setSelectedFormIds([formId]);
+    setSelectedModuleIds([]);
+  }, [formId]);
+
+  // Restore sources from initialConfig if editing (runs after the formId reset)
   useEffect(() => {
     if (initialConfig?.sources) {
       setSelectedModuleIds(initialConfig.sources.moduleIds);
-      setSelectedFormIds(initialConfig.sources.formIds);
+      setSelectedFormIds(
+        initialConfig.sources.formIds.length > 0
+          ? initialConfig.sources.formIds
+          : [formId]
+      );
     }
-  }, [initialConfig]);
+  }, [initialConfig, formId]);
 
   // Auto-select current form and its module if no selections
   useEffect(() => {
@@ -409,20 +426,31 @@ export function FormulaBuilder({
     return new Map<string, string>(allFields.map((f) => [f.id, f.label]));
   }, [allFields]);
 
-  // Convert initial expression from IDs to labels for display
+  // Track which initialConfig we have already converted so that adding/changing
+  // form sources (which reloads allFields) does NOT overwrite the user's edits.
+  const expressionInitializedForRef = useRef<typeof initialConfig | null>(null);
+
+  // Reset the ref whenever initialConfig changes so the new config's expression
+  // gets converted fresh on next field load.
   useEffect(() => {
-    if (initialConfig && !loading && allFields.length > 0) {
-      const displayExpression = initialConfig.expression.replace(
-        /\{([^}]+)\}/g,
-        (match, id) => {
-          const label = idToLabel.get(id) || id; // Fallback to ID if label not found (e.g., module not loaded)
-          return `{${label}}`;
-        }
-      );
-      setExpression(displayExpression);
-    } else if (!initialConfig) {
-      setExpression("");
-    }
+    expressionInitializedForRef.current = null;
+    if (!initialConfig) setExpression("");
+  }, [initialConfig]);
+
+  // Convert initial expression from IDs to labels — runs once per initialConfig,
+  // then skips on subsequent allFields changes to preserve user edits.
+  useEffect(() => {
+    if (!initialConfig) return;                  // already cleared above
+    if (loading || allFields.length === 0) return; // wait for fields to load
+    if (expressionInitializedForRef.current === initialConfig) return; // already done
+
+    expressionInitializedForRef.current = initialConfig;
+
+    const displayExpression = initialConfig.expression.replace(
+      /\{([^}]+)\}/g,
+      (_, id) => `{${idToLabel.get(id) || id}}`
+    );
+    setExpression(displayExpression);
   }, [initialConfig, loading, allFields, idToLabel]);
 
   const totalFields = allFields.length;
@@ -557,18 +585,18 @@ export function FormulaBuilder({
   const references = extractFieldReferences(expression);
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-4 space-y-6">
+    <div className="w-full max-w-6xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6">
       <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl">Formula Builder</CardTitle>
-          <CardDescription className="text-sm">
+        <CardHeader className="pb-3 sm:pb-4">
+          <CardTitle className="text-lg sm:text-xl">Formula Builder</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">
             Build formulas using fields from multiple modules and forms
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4 sm:space-y-6">
           {/* Settings */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             <div className="space-y-1">
               <Label className="text-xs">Field Label</Label>
               <Input value={fieldLabel} disabled className="h-8 text-xs bg-muted" />
@@ -636,14 +664,14 @@ export function FormulaBuilder({
           </div>
 
           {/* Main Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {/* Functions */}
             <div className="space-y-2">
               <h3 className="text-sm font-medium flex items-center gap-1">
                 <FolderOpen className="h-4 w-4" />
                 Functions
               </h3>
-              <ScrollArea className="h-64 border rounded bg-muted/30">
+              <ScrollArea className="h-48 sm:h-64 border rounded bg-muted/30">
                 <div className="p-2 space-y-2">
                   {Object.entries(groupedFunctions).map(([cat, funcs]) => (
                     <div key={cat} className="space-y-1">
@@ -651,7 +679,13 @@ export function FormulaBuilder({
                       {funcs.map((f) => (
                         <button
                           key={f.name}
-                          onClick={() => insertFunction(f.name)}
+                          onClick={() => {
+                            insertFunction(f.name);
+                            // Toggle help on click for touch devices
+                            setSelectedFunctionHelp((prev: any) =>
+                              prev?.name === f.name ? null : f
+                            );
+                          }}
                           onMouseEnter={() => setSelectedFunctionHelp(f)}
                           onMouseLeave={() => setSelectedFunctionHelp(null)}
                           className="w-full text-left text-xs px-3 py-1 rounded hover:bg-accent"
@@ -667,21 +701,22 @@ export function FormulaBuilder({
 
             {/* Fields - Single Button + Dialog */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium flex items-center gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-medium flex items-center gap-1 shrink-0">
                   <FormInput className="h-4 w-4" />
                   Fields ({totalFields})
                 </h3>
 
                 <Dialog open={sourcesDialogOpen} onOpenChange={setSourcesDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
+                    <Button variant="outline" size="sm" className="gap-1.5 shrink-0">
                       <Settings2 className="h-4 w-4" />
-                      Manage Field Sources
+                      <span className="hidden sm:inline">Manage Field Sources</span>
+                      <span className="sm:hidden">Sources</span>
                     </Button>
                   </DialogTrigger>
 
-                  <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+                  <DialogContent className="w-full max-w-[95vw] sm:max-w-xl md:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col">
                     <DialogHeader>
                       <DialogTitle>Select Modules & Forms</DialogTitle>
                       <DialogDescription>
@@ -689,7 +724,7 @@ export function FormulaBuilder({
                       </DialogDescription>
                     </DialogHeader>
 
-                    <div className="flex-1 grid grid-cols-2 gap-8 py-4 overflow-hidden">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8 py-4 overflow-y-auto">
                       {/* Modules */}
                       <div className="space-y-3">
                         <Label className="text-sm font-medium">Modules</Label>
@@ -761,19 +796,19 @@ export function FormulaBuilder({
 
               {/* Fields List */}
               {loading ? (
-                <div className="h-64 border rounded bg-muted/30 flex items-center justify-center">
+                <div className="h-48 sm:h-64 border rounded bg-muted/30 flex items-center justify-center">
                   <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
               ) : error ? (
-                <div className="h-64 border rounded bg-red-50 text-red-700 text-xs flex items-center justify-center p-3">
+                <div className="h-48 sm:h-64 border rounded bg-red-50 text-red-700 text-xs flex items-center justify-center p-3">
                   {error}
                 </div>
               ) : totalFields === 0 ? (
-                <div className="h-64 border rounded bg-muted/30 text-muted-foreground text-xs flex items-center justify-center">
+                <div className="h-48 sm:h-64 border rounded bg-muted/30 text-muted-foreground text-xs flex items-center justify-center">
                   No fields available
                 </div>
               ) : (
-                <ScrollArea className="h-64 border rounded bg-muted/30">
+                <ScrollArea className="h-48 sm:h-64 border rounded bg-muted/30">
                   <div className="p-2 space-y-3">
                     {Object.entries(groupedFields).map(([groupName, fields]) => (
                       <div key={groupName} className="space-y-2">
@@ -800,9 +835,9 @@ export function FormulaBuilder({
             </div>
 
             {/* Operators */}
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2 lg:col-span-1">
               <h3 className="text-sm font-medium">Operators</h3>
-              <ScrollArea className="h-64 border rounded bg-muted/30">
+              <ScrollArea className="h-48 sm:h-64 border rounded bg-muted/30">
                 <div className="p-2 space-y-2">
                   {Object.entries(groupedOperators).map(([cat, ops]) => (
                     <div key={cat} className="space-y-1">
@@ -872,11 +907,11 @@ export function FormulaBuilder({
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button variant="outline" onClick={onCancel}>
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 sm:gap-3 pt-4 border-t">
+            <Button variant="outline" onClick={onCancel} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={!syntaxValid || !expression.trim()}>
+            <Button onClick={handleSave} disabled={!syntaxValid || !expression.trim()} className="w-full sm:w-auto">
               Save Formula
             </Button>
           </div>

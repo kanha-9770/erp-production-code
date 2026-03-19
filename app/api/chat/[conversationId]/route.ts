@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { type NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 
 // Gemini configuration - using stable models that fully support parallel tool calling
@@ -134,25 +134,15 @@ export async function GET(
   // ... your existing GET code (unchanged) ...
   // (I kept it exactly as you had it)
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: "Not authenticated" },
         { status: 401 },
       );
     }
 
-    const session = await validateSession(token);
-
-    if (!session || !session.user?.id) {
-      return NextResponse.json(
-        { success: false, error: "Invalid or expired session" },
-        { status: 401 },
-      );
-    }
-
-    const userId = session.user.id;
+    const userId = authUser.id;
 
     const conversation = await prisma.chatConversation.findUnique({
       where: { id: params.conversationId },
@@ -218,29 +208,15 @@ export async function POST(
   { params }: { params: { conversationId: string } },
 ) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token)
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser)
       return NextResponse.json(
         { success: false, error: "Not authenticated" },
         { status: 401 },
       );
 
-    const session = await validateSession(token);
-    if (!session || !session.user?.id) {
-      return NextResponse.json(
-        { success: false, error: "Invalid or expired session" },
-        { status: 401 },
-      );
-    }
-
-    const userId = session.user.id;
-
-    // Get organizationId (critical for data isolation)
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { organizationId: true },
-    });
-    const organizationId = user?.organizationId || null;
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId ?? null;
 
     const body = await request.json();
     const { content } = body;

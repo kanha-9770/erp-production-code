@@ -103,7 +103,6 @@ async function isDatabaseConnected(): Promise<boolean> {
     await prisma.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
-    console.log("[v0] Database connectivity check failed:", error);
     return false;
   }
 }
@@ -114,10 +113,6 @@ async function getValidOrganizationId(): Promise<string> {
 
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log(
-      "[v0] Database not connected, using default organization ID:",
-      defaultOrgId
-    );
     return defaultOrgId;
   }
 
@@ -136,16 +131,11 @@ async function getValidOrganizationId(): Promise<string> {
         },
         select: { id: true },
       });
-      console.log(
-        "[v0] Created default organization with ID:",
-        organization.id
-      );
     }
 
     return organization.id;
   } catch (error) {
     console.error("[v0] Failed to fetch or create organization:", error);
-    console.log("[v0] Falling back to default organization ID:", defaultOrgId);
     return defaultOrgId;
   }
 }
@@ -154,7 +144,6 @@ async function getValidOrganizationId(): Promise<string> {
 async function ensureStandardPermissionsExist(): Promise<void> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log("[v0] Database not connected, skipping permissions setup");
     return;
   }
 
@@ -183,9 +172,7 @@ async function ensureStandardPermissionsExist(): Promise<void> {
           updatedAt: new Date(),
         },
       });
-      console.log(`[v0] Ensured permission: ${perm.id} - ${perm.name}`);
     }
-    console.log("[v0] Standard permissions ensured in database");
   } catch (error) {
     console.error("[v0] Failed to ensure standard permissions:", error);
   }
@@ -194,7 +181,6 @@ async function ensureStandardPermissionsExist(): Promise<void> {
 export async function getRolesWithUsers(): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log("[v0] Database not connected, returning empty roles data");
     return [];
   }
 
@@ -209,8 +195,6 @@ export async function getRolesWithUsers(): Promise<any[]> {
         },
       },
     });
-
-    console.log(`[v0] Retrieved roles from database: ${roles.length}`);
 
     return roles.map((role: any) => ({
       id: role.id,
@@ -237,10 +221,6 @@ export async function getRolesWithUsers(): Promise<any[]> {
       })),
     }));
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty roles data:",
-      error
-    );
     return [];
   }
 }
@@ -248,7 +228,6 @@ export async function getRolesWithUsers(): Promise<any[]> {
 export async function getUsers(): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log("[v0] Database not connected, returning empty users data");
     return [];
   }
 
@@ -263,8 +242,6 @@ export async function getUsers(): Promise<any[]> {
         },
       },
     });
-
-    console.log(`[v0] Retrieved users from database: ${users.length}`);
 
     return users.map((user: any) => ({
       id: user.id,
@@ -281,10 +258,6 @@ export async function getUsers(): Promise<any[]> {
       })),
     }));
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty users data:",
-      error
-    );
     return [];
   }
 }
@@ -292,9 +265,6 @@ export async function getUsers(): Promise<any[]> {
 export async function getPermissions(): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log(
-      "[v0] Database not connected, returning empty permissions data"
-    );
     return [];
   }
 
@@ -305,10 +275,6 @@ export async function getPermissions(): Promise<any[]> {
       where: { isActive: true },
       orderBy: { name: "asc" },
     });
-
-    console.log(
-      `[v0] Retrieved permissions from database: ${permissions.length}`
-    );
 
     return permissions.map(
       (p: {
@@ -324,10 +290,6 @@ export async function getPermissions(): Promise<any[]> {
       })
     );
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty permissions data:",
-      error
-    );
     return [];
   }
 }
@@ -337,9 +299,6 @@ export async function getRolePermissions(
 ): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log(
-      "[v0] Database not connected, returning empty role permissions data"
-    );
     return [];
   }
 
@@ -358,10 +317,6 @@ export async function getRolePermissions(
       },
     });
 
-    console.log(
-      `[v0] Retrieved role permissions from database: ${rolePermissions.length}`
-    );
-
     return rolePermissions.map((rp: any) => ({
       roleId: rp.roleId,
       permissionId: rp.permissionId,
@@ -371,10 +326,6 @@ export async function getRolePermissions(
       canDelegate: rp.canDelegate,
     }));
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty role permissions data:",
-      error
-    );
     return [];
   }
 }
@@ -382,9 +333,6 @@ export async function getRolePermissions(
 export async function getUserPermissionOverrides(): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log(
-      "[v0] Database not connected, returning empty user overrides data"
-    );
     return [];
   }
 
@@ -395,10 +343,6 @@ export async function getUserPermissionOverrides(): Promise<any[]> {
         permission: true,
       },
     });
-
-    console.log(
-      `[v0] Retrieved user permissions from database: ${overrides.length}`
-    );
 
     return overrides.map((override: any) => ({
       userId: override.userId,
@@ -413,10 +357,6 @@ export async function getUserPermissionOverrides(): Promise<any[]> {
       isActive: override.isActive,
     }));
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty user overrides data:",
-      error
-    );
     return [];
   }
 }
@@ -428,12 +368,10 @@ export async function getModulesWithForms(
 ): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log("[v0] Database not connected, returning empty modules data");
     return [];
   }
 
   try {
-    console.log("[v0] Fetching permitted modules with forms from database...");
 
     const topLevelWhere: any = {
       isActive: true,
@@ -496,8 +434,6 @@ export async function getModulesWithForms(
       orderBy: { sortOrder: "asc" },
     });
 
-    console.log(`[v0] Retrieved modules from database: ${modules.length}`);
-
     const result = modules
       .map((module: any) => {
         const showForms =
@@ -537,26 +473,8 @@ export async function getModulesWithForms(
       })
       .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-    // Log form counts for debugging
-    result.forEach((module: any) => {
-      console.log(`[v0] Module ${module.name}: ${module.forms.length} forms`);
-      module.children.forEach((child: any) => {
-        console.log(
-          `[v0] Submodule ${child.name}: ${child.forms.length} forms`
-        );
-      });
-    });
-
-    console.log("[v0] GET /api/modules-permission response:", {
-      success: true,
-      data: result,
-    });
     return result;
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty modules data:",
-      error
-    );
     return [];
   }
 }
@@ -667,7 +585,6 @@ export async function updateRolePermissions(
       { timeout: 30000 }
     );
 
-    console.log(`[v0] Updated ${validUpdates.length} role permissions`);
     return true;
   } catch (error) {
     console.error("[v0] Failed to update role permissions:", error);
@@ -766,7 +683,6 @@ export async function updateUserPermissions(
       { timeout: 30000 }
     );
 
-    console.log(`[v0] Updated ${validUpdates.length} user permissions`);
     return true;
   } catch (error) {
     console.error("[v0] Failed to update user permissions:", error);
@@ -777,9 +693,6 @@ export async function updateUserPermissions(
 export async function getUserPermissions(userId?: string): Promise<any[]> {
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
-    console.log(
-      "[v0] Database not connected, returning empty user permissions data"
-    );
     return [];
   }
 
@@ -823,10 +736,6 @@ export async function getUserPermissions(userId?: string): Promise<any[]> {
       ],
     });
 
-    console.log(
-      `[v0] Successfully retrieved ${userPermissions.length} user permissions`
-    );
-
     return userPermissions.map((up: any) => ({
       userId: up.userId,
       permissionId: up.permissionId,
@@ -843,10 +752,6 @@ export async function getUserPermissions(userId?: string): Promise<any[]> {
       module: up.module,
     }));
   } catch (error) {
-    console.log(
-      "[v0] Database query failed, returning empty user permissions data:",
-      error
-    );
     return [];
   }
 }

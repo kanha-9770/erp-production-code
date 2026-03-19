@@ -1,69 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
 import { DatabaseService } from "@/lib/database-service";
 import { prisma } from "@/lib/prisma";
-
-// Fixed audit log helper — now accepts organizationId
-async function logAudit({
-  userId,
-  organizationId,        // ← Added
-  performedBy,
-  action,
-  details,
-  ipAddress,
-  userAgent,
-  recordId,
-  recordName,
-}: {
-  userId: string;
-  organizationId: string | null;   // ← Critical
-  performedBy: string;
-  action: string;
-  details?: string;
-  ipAddress: string;
-  userAgent: string;
-  recordId?: string;
-  recordName?: string;
-}) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId,
-        organizationId,           // ← Now correctly saved
-        performedBy,
-        action,
-        module: "Form Modules",
-        recordId: recordId || null,
-        recordName: recordName || null,
-        details: details || null,
-        ipAddress,
-        userAgent,
-      },
-    });
-    console.log(`Audit log: ${action} "${recordName || recordId}" by ${performedBy}`);
-  } catch (err) {
-    console.error("Audit logging failed:", err);
-  }
-}
-
-// Helper to get user with organizationId
-async function getCurrentUserWithOrg(request: NextRequest) {
-  const token = request.cookies.get("auth-token")?.value;
-  if (!token) return null;
-
-  const session = await validateSession(token);
-  if (!session || !session.user) return null;
-
-  return await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { id: true, email: true, organizationId: true },
-  });
-}
+import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers";
 
 // GET: List all modules (hierarchy)
 export async function GET(request: NextRequest) {
   try {
-    const user = await getCurrentUserWithOrg(request);
+    const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
@@ -108,7 +51,7 @@ export async function GET(request: NextRequest) {
 // POST: Create new module
 export async function POST(request: NextRequest) {
   try {
-    const user = await getCurrentUserWithOrg(request);
+    const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
@@ -134,8 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const userAgent = request.headers.get("user-agent") || "unknown";
+    const { ipAddress, userAgent } = getRequestMeta(request);
 
     const module = await DatabaseService.createModule({
       name,
@@ -153,6 +95,7 @@ export async function POST(request: NextRequest) {
       organizationId: user.organizationId,
       performedBy: user.email,
       action: "Created",
+      module: "Form Modules",
       details: `Created module "${name}"${parentId ? " as child module" : ""}`,
       ipAddress,
       userAgent,
@@ -164,16 +107,16 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("[API] /api/modules POST - Error:", error);
 
-    const ipAddress = request.headers.get("x-forwarded-for") || "unknown";
-    const userAgent = request.headers.get("user-agent") || "unknown";
+    const { ipAddress, userAgent } = getRequestMeta(request);
 
-    const user = await getCurrentUserWithOrg(request);
+    const user = await getAuthenticatedUser(request);
     if (user) {
       await logAudit({
         userId: user.id,
         organizationId: user.organizationId,
         performedBy: user.email,
         action: "Create Failed",
+        module: "Form Modules",
         details: `Failed to create module: ${error.message}`,
         ipAddress,
         userAgent,
@@ -190,7 +133,7 @@ export async function POST(request: NextRequest) {
 // DELETE: Delete module (bulk/single via body)
 export async function DELETE(request: NextRequest) {
   try {
-    const user = await getCurrentUserWithOrg(request);
+    const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
@@ -215,8 +158,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const userAgent = request.headers.get("user-agent") || "unknown";
+    const { ipAddress, userAgent } = getRequestMeta(request);
 
     await DatabaseService.deleteModule(moduleId);
 
@@ -225,6 +167,7 @@ export async function DELETE(request: NextRequest) {
       organizationId: user.organizationId,
       performedBy: user.email,
       action: "Deleted",
+      module: "Form Modules",
       details: `Deleted module "${module.name}"`,
       ipAddress,
       userAgent,
@@ -239,16 +182,16 @@ export async function DELETE(request: NextRequest) {
   } catch (error: any) {
     console.error("[API] /api/modules DELETE - Error:", error);
 
-    const ipAddress = request.headers.get("x-forwarded-for") || "unknown";
-    const userAgent = request.headers.get("user-agent") || "unknown";
+    const { ipAddress, userAgent } = getRequestMeta(request);
 
-    const user = await getCurrentUserWithOrg(request);
+    const user = await getAuthenticatedUser(request);
     if (user) {
       await logAudit({
         userId: user.id,
         organizationId: user.organizationId,
         performedBy: user.email,
         action: "Delete Failed",
+        module: "Form Modules",
         details: `Failed to delete module: ${error.message}`,
         ipAddress,
         userAgent,

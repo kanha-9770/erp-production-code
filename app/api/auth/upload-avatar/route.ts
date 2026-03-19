@@ -1,23 +1,14 @@
 // app/api/auth/upload-avatar/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
 export async function POST(request: NextRequest) {
   try {
-    // Get token from cookie
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    // Validate session
-    const session = await validateSession(token);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     // Parse form data
     const formData = await request.formData();
@@ -37,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     // Generate unique filename
     const ext = path.extname(file.name) || ".jpg";
-    const filename = `${session.user.id}-${Date.now()}${ext}`;
+    const filename = `${authUser.id}-${Date.now()}${ext}`;
     
     // Define path
     const avatarsDir = path.join(process.cwd(), "public", "avatars");
@@ -54,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     // Update user in database
     await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: authUser.id },
       data: { avatar: avatarUrl },
     });
 

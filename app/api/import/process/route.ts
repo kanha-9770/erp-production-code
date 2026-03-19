@@ -3,7 +3,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { DatabaseService } from "@/lib/database-service";
-import { validateSession } from "@/lib/auth"; // ← Your custom auth file
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 const normalizeKey = (str: string): string => {
   return String(str)
@@ -49,11 +49,6 @@ async function transformToStructuredData(
   // Transform the record data to include field metadata
   for (const [fieldId, value] of Object.entries(recordData)) {
     const fieldDef = fieldIdToFieldMap[fieldId];
-    console.log(
-      `Processing field ID: ${fieldId}, value: ${value}, definition:`,
-      fieldDef
-    );
-
     if (fieldDef) {
       // Store structured data with field metadata
       structuredData[fieldId] = {
@@ -72,7 +67,6 @@ async function transformToStructuredData(
       };
     } else {
       // If no field definition found, store with minimal metadata
-      console.warn(`No field definition found for ID: ${fieldId}`);
       structuredData[fieldId] = {
         fieldId: fieldId,
         label: fieldId,
@@ -89,34 +83,10 @@ async function transformToStructuredData(
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[PROCESS] POST handler invoked");
+    // === Extract session from cookie ===
+    const authUser = await getAuthenticatedUser(request);
 
-    // === Extract session token from cookies ===
-    const token = request.cookies.get("auth-token")?.value;
-
-    let importingUserId: string | null = null;
-
-    if (token) {
-      const session = await validateSession(token);
-      if (session?.user?.id) {
-        importingUserId = session.user.id;
-        console.log(
-          `[PROCESS] Import running as user: ${importingUserId} (${session.user.email})`
-        );
-      } else {
-        console.warn("[PROCESS] Session token invalid or expired");
-      }
-    } else {
-      console.warn(
-        "[PROCESS] No auth-token cookie found – user_id will be NULL"
-      );
-    }
-
-    console.log(
-      `[PROCESS] Final importingUserId resolved to: ${
-        importingUserId || "NULL"
-      }`
-    );
+    let importingUserId: string | null = authUser?.id ?? null;
 
     const bodyText = await request.text();
     if (!bodyText) {
@@ -135,10 +105,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    console.log(
-      `[PROCESS] Processing job ${importJobId} with ${rows.length} rows`
-    );
 
     const job = await prisma.importJob.findUnique({
       where: { id: importJobId },
@@ -185,9 +151,6 @@ export async function POST(request: NextRequest) {
             storageTable: bestTable,
           },
         });
-        console.log(
-          `[PROCESS] Auto-created table mapping for form ${job.formId} to ${bestTable} (forms on this table: ${minCount})`
-        );
       } else {
         return NextResponse.json(
           { success: false, error: "Unable to assign storage table" },
@@ -197,7 +160,6 @@ export async function POST(request: NextRequest) {
     }
 
     const targetTable = tableMapping.storageTable;
-    console.log(`[PROCESS] Inserting records into table: ${targetTable}`);
 
     const form = await DatabaseService.getForm(job.formId);
     if (!form) {
@@ -305,17 +267,6 @@ export async function POST(request: NextRequest) {
           recordData
         );
 
-        console.log("Structured record data:", structuredRecordData);
-
-        // Log userId before creation
-        console.log(
-          `[PROCESS] About to create record for row ${
-            i + 1
-          }: passing importingUserId = ${
-            importingUserId || "NULL"
-          }, targetTable = ${targetTable}`
-        );
-
         // Create the form record using the same service as submission
         const record = await DatabaseService.createFormRecord(
           job.formId,
@@ -325,15 +276,6 @@ export async function POST(request: NextRequest) {
           undefined,
           undefined,
           importingUserId ?? undefined
-        );
-
-        // Log userId after creation to verify mapping
-        console.log(
-          `[PROCESS] Record created for row ${i + 1}: record.userId = ${
-            record.userId || "NULL"
-          }, expected importingUserId = ${
-            importingUserId || "NULL"
-          }, targetTable = ${targetTable}`
         );
 
         // Track form submission event (adapted for import)
@@ -356,20 +298,7 @@ export async function POST(request: NextRequest) {
           ipAddress
         );
 
-        console.log("Form submission successful:", {
-          recordId: record.id,
-          formId: job.formId,
-          userId: record.userId,
-          submittedBy: record.submittedBy,
-          structuredData: structuredRecordData,
-        });
-
         success++;
-        console.log(
-          `[PROCESS] Row ${i + 1} inserted – user_id: ${
-            importingUserId || "NULL"
-          } (actual record.userId: ${record.userId || "NULL"})`
-        );
       } catch (err: any) {
         failed++;
         console.error(`[PROCESS] Row ${i + 1} insert failed:`, err.message);

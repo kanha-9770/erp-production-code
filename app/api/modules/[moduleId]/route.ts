@@ -1,73 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DatabaseService } from '@/lib/database-service'
+import { DatabaseModules } from '@/lib/DatabaseModules'
 import { prisma } from '@/lib/prisma'
-import { validateSession } from '@/lib/auth'
-
-// Reusable audit log helper — now correctly includes organizationId
-async function logAudit({
-  userId,
-  organizationId,
-  performedBy,
-  action,
-  details,
-  ipAddress,
-  userAgent,
-  recordId,
-  recordName,
-  module = "Form Modules",
-}: {
-  userId: string
-  organizationId: string | null
-  performedBy: string
-  action: string
-  details?: string
-  ipAddress: string
-  userAgent: string
-  recordId?: string
-  recordName?: string
-  module?: string
-}) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId,
-        organizationId,
-        performedBy,
-        action,
-        module,
-        recordId: recordId || null,
-        recordName: recordName || null,
-        details: details || null,
-        ipAddress,
-        userAgent,
-      },
-    })
-    console.log(`Audit log: ${action} "${recordName || recordId}" by ${performedBy}`)
-  } catch (err) {
-    console.error("Failed to create audit log:", err)
-  }
-}
-
-// Get authenticated user WITH organizationId
-async function getAuthenticatedUser(request: NextRequest) {
-  const token = request.cookies.get("auth-token")?.value
-  if (!token) return null
-
-  const session = await validateSession(token)
-  if (!session || !session.user) return null
-
-  // Fetch user with organizationId
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
-      id: true,
-      email: true,
-      organizationId: true,
-    },
-  })
-
-  return user
-}
+import { getAuthenticatedUser, getRequestMeta, logAudit } from '@/lib/api-helpers'
 
 // ──────────────────────────────────────────────────────────────
 // GET: Fetch a single module
@@ -112,8 +47,7 @@ export async function PUT(
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     const data = await request.json()
 
@@ -176,8 +110,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Module not found" }, { status: 404 })
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     await DatabaseService.deleteModule(params.moduleId)
 
@@ -200,8 +133,7 @@ export async function DELETE(
   } catch (error: any) {
     console.error('Error deleting module:', error)
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
     const user = await getAuthenticatedUser(request)
 
     if (user) {
@@ -310,21 +242,10 @@ export async function PATCH(
       }
     }
 
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
-    // Perform the reparenting
-    const updatedModule = await prisma.formModule.update({
-      where: { id: moduleId },
-      data: {
-        parentId: parentId || null,
-      },
-      select: {
-        id: true,
-        name: true,
-        parentId: true,
-      },
-    })
+    // Perform the reparenting (also recalculates level and moduleType)
+    const movedModule = await DatabaseModules.moveModule(moduleId, parentId || undefined)
 
     // Log the move operation
     await logAudit({
@@ -332,16 +253,16 @@ export async function PATCH(
       organizationId: user.organizationId,
       performedBy: user.email,
       action: "Moved",
-      details: `Module "${updatedModule.name}" moved to parent: ${parentId || 'root'}`,
+      details: `Module "${movedModule.name}" moved to parent: ${parentId || 'root'}`,
       ipAddress,
       userAgent,
       recordId: moduleId,
-      recordName: updatedModule.name,
+      recordName: movedModule.name,
     })
 
     return NextResponse.json({
       success: true,
-      data: updatedModule,
+      data: { id: movedModule.id, name: movedModule.name, parentId: movedModule.parentId },
     })
   } catch (error: any) {
     console.error("[PATCH] Error moving module:", error)

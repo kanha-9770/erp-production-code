@@ -1,15 +1,17 @@
-import { Suspense } from 'react'
-import ResetPasswordForm from '@/components/ResetPasswordForm' // Adjust path as needed
-import { ArrowLeft } from 'lucide-react'
-import Link from 'next/link'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Suspense } from "react"
+import AuthPanel from "@/components/auth/AuthPanel"
 
-// Server component - receives searchParams prop automatically
-export default function ResetPasswordPage({ searchParams }: { searchParams: { userId?: string } }) {
+export default function ResetPasswordPage({
+  searchParams,
+}: {
+  searchParams: { userId?: string }
+}) {
   return (
-    <Suspense fallback={<div>Loading reset form...</div>}>
-      <ResetPasswordForm userId={searchParams.userId} />
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <AuthPanel
+        initialView="reset-password"
+        initialUserId={searchParams.userId}
+      />
     </Suspense>
   )
 }

@@ -12,16 +12,9 @@ const normalizeKey = (str: string | undefined): string => {
 
 export async function POST(request: Request) {
   try {
-    console.log("[ADD-MAPPINGS] POST handler invoked");
-
     let body: any;
     try {
       body = await request.json();
-      console.log("[ADD-MAPPINGS] Raw payload received:", {
-        importJobId: body?.importJobId,
-        mappingsCount: body?.mappings?.length ?? body?.mappingsCount ?? 0,
-        sampleMappings: body?.mappings?.slice(0, 3) ?? body?.sampleMappings ?? [],
-      });
     } catch (parseError) {
       console.error("[ADD-MAPPINGS] JSON parse error:", parseError);
       return NextResponse.json(
@@ -55,8 +48,6 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log("[ADD-MAPPINGS] Validating and normalizing", mappings.length, "mappings");
-
     const validMappings = mappings
       .map((m: any, index: number) => {
         // Support BOTH naming conventions your frontend might send
@@ -73,7 +64,6 @@ export async function POST(request: Request) {
           sectionId !== ""; // optional: remove this line if sectionId is not required
 
         if (!isValid) {
-          console.warn(`[ADD-MAPPINGS] Invalid mapping at index ${index}:`, m);
           return null;
         }
 
@@ -86,13 +76,6 @@ export async function POST(request: Request) {
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
-
-    console.log(
-      "[ADD-MAPPINGS] Valid mappings after filter:",
-      validMappings.length,
-      "Sample:",
-      validMappings.slice(0, 2)
-    );
 
     if (validMappings.length === 0) {
       return NextResponse.json(
@@ -118,11 +101,6 @@ export async function POST(request: Request) {
         inserted: created.count,
       };
     });
-
-    console.log(
-      `[ADD-MAPPINGS] Transaction OK for job ${importJobId}:`,
-      transactionResult
-    );
 
     return NextResponse.json(
       {

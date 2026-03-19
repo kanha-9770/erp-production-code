@@ -349,7 +349,19 @@ export default function FieldComponent({
 
   const handleFormulaSave = (config: any, savedFieldId: string) => {
     onUpdate(savedFieldId, {
-      properties: { ...field.properties, formulaConfig: config },
+      label: config.fieldLabel,
+      formula: {
+        expression: config.expression,
+        returnType: config.returnType,
+        blankPreference: config.blankPreference,
+        decimalPlaces: config.decimalPlaces,
+        visibleInForm: config.visibleInForm ?? true,
+      },
+      decimalPlaces: config.decimalPlaces,
+      properties: {
+        ...field.properties,
+        formulaConfig: config,
+      },
     })
       .then(() => {
         setShowSettings(false);

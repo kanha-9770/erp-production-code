@@ -1,15 +1,16 @@
 "use client"
 
 import type React from "react"
-
 import { usePathname } from "next/navigation"
 import { CrmSidebar } from "./sidebar"
 import { useState } from "react"
 import { PermissionProvider } from "@/context/PermissionContext"
+import { Menu } from "lucide-react"
 
 export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [currentView, setCurrentView] = useState<string>("home")
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   const publicRoutes = [
     "/login",
@@ -20,19 +21,56 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
     "/unauthorized",
   ]
 
-  // Render only children for public routes
-  if (publicRoutes.includes(pathname) || pathname.startsWith("/auth")) {
+  if (
+    publicRoutes.includes(pathname) ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/form/")
+  ) {
     return <>{children}</>
   }
 
-  // Render full layout with sidebar for other pages
   return (
     <PermissionProvider>
       <div className="flex h-screen bg-gray-50">
-        <CrmSidebar onViewChange={setCurrentView} />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Mobile backdrop */}
+        {mobileSidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 md:hidden"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar — drawer on mobile, static on md+ */}
+        <div
+          className={[
+            "fixed md:relative z-50 md:z-auto h-full",
+            "transition-transform duration-300 ease-in-out",
+            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          ].join(" ")}
+        >
+          <CrmSidebar
+            onViewChange={setCurrentView}
+            onMobileClose={() => setMobileSidebarOpen(false)}
+          />
+        </div>
+
+        {/* Main content area */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {/* Mobile top bar */}
+          <div className="md:hidden flex items-center gap-3 h-12 px-4 border-b bg-white shrink-0">
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100 transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5 text-gray-700" />
+            </button>
+            <span className="text-sm font-semibold text-gray-800">ERP</span>
+          </div>
+
           <main className="flex-1 overflow-y-auto">{children}</main>
         </div>
-      </div></PermissionProvider>
+      </div>
+    </PermissionProvider>
   )
 }

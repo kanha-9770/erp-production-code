@@ -24,8 +24,6 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
     const search = searchParams.get("search") || ""
     const limit = Number.parseInt(searchParams.get("limit") || "50")
 
-    console.log(`[Module Lookup API] User ${authResult.user!.userEmail} accessing module: ${params.moduleId}, search: ${search}`)
-
     // Get the module and its forms
     const module = await DatabaseService.getModule(params.moduleId)
     if (!module) {
@@ -45,7 +43,6 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
       )
 
       if (!hasFormPermission) {
-        console.log(`[Module Lookup API] User ${authResult.user!.userEmail} skipping form ${form.id} - no permission`)
         continue
       }
 
@@ -81,8 +78,6 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
 
     // Apply limit
     const limitedRecords = filteredRecords.slice(0, limit)
-
-    console.log(`[Module Lookup API] Returning ${limitedRecords.length} records to user ${authResult.user!.userEmail}`)
 
     return NextResponse.json({
       success: true,

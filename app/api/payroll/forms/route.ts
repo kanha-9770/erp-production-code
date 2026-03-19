@@ -1,28 +1,13 @@
 export const dynamic = 'force-dynamic';
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 // GET - Fetch all forms for payroll configuration
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Invalid session" },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
 
     // Fetch all published forms with their module information
     const forms = await prisma.form.findMany({

@@ -1,76 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { validateSession } from "@/lib/auth" // Your existing session validator
-
-// Reusable audit log helper with organizationId support
-async function logAudit({
-  userId,
-  organizationId,
-  performedBy,
-  action,
-  details,
-  ipAddress,
-  userAgent,
-  recordId,
-  recordName,
-}: {
-  userId: string
-  organizationId: string | null
-  performedBy: string
-  action: string
-  details?: string
-  ipAddress: string
-  userAgent: string
-  recordId?: string
-  recordName?: string
-}) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId,
-        organizationId,
-        performedBy,
-        action,
-        module: "Data Import",
-        recordId: recordId || null,
-        recordName: recordName || null,
-        details: details || null,
-        ipAddress,
-        userAgent,
-      },
-    })
-    console.log(`Audit log: ${action} by ${performedBy} (Import Job ${recordId})`)
-  } catch (error) {
-    console.error("Failed to create audit log for import:", error)
-    // Never break the main flow
-  }
-}
+import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[CREATE-JOB] POST handler invoked")
-
     // === 1. Authenticate user ===
-    const token = request.cookies.get("auth-token")?.value
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
-    }
-
-    const session = await validateSession(token)
-    if (!session || !session.user) {
-      return NextResponse.json({ success: false, error: "Invalid session" }, { status: 401 })
-    }
-
-    const userId = session.user.id
-
-    // Fetch user with organizationId and email
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, organizationId: true },
-    })
-
+    const user = await getAuthenticatedUser(request)
     if (!user) {
-      return NextResponse.json({ success: false, error: "User not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
     }
 
     if (!user.organizationId) {
@@ -81,14 +18,12 @@ export async function POST(request: NextRequest) {
     }
 
     // === 2. Capture request metadata ===
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     // === 3. Parse and validate body ===
     let body
     try {
       const bodyText = await request.text()
-      console.log("[CREATE-JOB] Request body text:", bodyText.substring(0, 200))
       body = JSON.parse(bodyText)
     } catch (parseError) {
       await logAudit({
@@ -96,6 +31,7 @@ export async function POST(request: NextRequest) {
         organizationId: user.organizationId,
         performedBy: user.email,
         action: "Import Create Failed",
+        module: "Data Import",
         details: "Invalid JSON in request body",
         ipAddress,
         userAgent,
@@ -122,6 +58,7 @@ export async function POST(request: NextRequest) {
         organizationId: user.organizationId,
         performedBy: user.email,
         action: "Import Create Failed",
+        module: "Data Import",
         details: "Missing required fields: moduleId, formId, or fileName",
         ipAddress,
         userAgent,
@@ -143,7 +80,6 @@ export async function POST(request: NextRequest) {
     const normalizedHandling = handlingMap[duplicateHandling.toLowerCase()] || "INSERT_ONLY"
 
     // === 5. Create the import job ===
-    console.log("[CREATE-JOB] Creating import job in database...")
     const job = await prisma.importJob.create({
       data: {
         moduleId,
@@ -158,14 +94,13 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    console.log("[CREATE-JOB] Job created successfully:", job.id)
-
     // === 6. Log successful audit entry ===
     await logAudit({
       userId: user.id,
       organizationId: user.organizationId,
       performedBy: user.email,
       action: "Import Started",
+      module: "Data Import",
       details: `Import job created for file "${fileName}" (${fileSize ? `${fileSize} bytes` : 'unknown size'}) | Handling: ${normalizedHandling} | Form ID: ${formId}`,
       ipAddress,
       userAgent,
@@ -185,36 +120,20 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("[CREATE-JOB] Unexpected error:", error)
 
-    // Best-effort audit log on failure
-    const ipAddress = request.headers.get("x-forwarded-for") || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
+    const user = await getAuthenticatedUser(request)
 
-    const token = request.cookies.get("auth-token")?.value
-    if (token) {
-      try {
-        const session = await validateSession(token)
-        if (session?.user?.id) {
-          const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
-            select: { email: true, organizationId: true },
-          })
-          if (user) {
-            await logAudit({
-              userId: session.user.id,
-              organizationId: user.organizationId,
-              performedBy: user.email,
-              action: "Import Create Failed",
-              details: `Server error: ${error.message}`,
-              ipAddress,
-              userAgent,
-              recordId: null,
-              recordName: null,
-            })
-          }
-        }
-      } catch (_) {
-        // Ignore secondary errors
-      }
+    if (user) {
+      await logAudit({
+        userId: user.id,
+        organizationId: user.organizationId,
+        performedBy: user.email,
+        action: "Import Create Failed",
+        module: "Data Import",
+        details: `Server error: ${error.message}`,
+        ipAddress,
+        userAgent,
+      })
     }
 
     return NextResponse.json(

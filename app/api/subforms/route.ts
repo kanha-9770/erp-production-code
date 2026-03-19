@@ -5,7 +5,6 @@ import { NextRequest, NextResponse } from "next/server";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log("[Subform API] Received POST request with body:", body);
 
     const {
       formId,
@@ -55,14 +54,6 @@ export async function POST(request: NextRequest) {
 
       // Inherit formId from parent subform (stored in sectionId field temporarily)
       targetFormId = parentSubform.sectionId || formId;
-      console.log(
-        "[Subform API] Parent subform found:",
-        parentSubform.id,
-        "formId:",
-        targetFormId,
-        "level:",
-        parentSubform.level,
-      );
     }
 
     // Validate that we have a formId (either provided or inherited)
@@ -91,7 +82,6 @@ export async function POST(request: NextRequest) {
         { status: 404 },
       );
     }
-    console.log("[Subform API] Form found:", form.id);
 
     // Calculate level and path for nested subforms
     let calculatedLevel = level || 0;
@@ -106,19 +96,12 @@ export async function POST(request: NextRequest) {
       calculatedPath = parentPath
         ? `${parentPath}.${siblingCount + 1}`
         : `${siblingCount + 1}`;
-      console.log(
-        "[Subform API] Calculated nested level:",
-        calculatedLevel,
-        "path:",
-        calculatedPath,
-      );
     } else {
       // Root level subform in form
       const siblingCount = await prisma.subform.count({
         where: { formId: targetFormId, parentSubformId: null },
       });
       calculatedPath = `${siblingCount + 1}`;
-      console.log("[Subform API] Calculated root level path:", calculatedPath);
     }
 
     // Calculate order if not provided
@@ -134,20 +117,6 @@ export async function POST(request: NextRequest) {
         });
       }
     }
-
-    console.log("[Subform API] Creating subform with calculated values:", {
-      formId: targetFormId,
-      parentSubformId: parentSubformId || undefined,
-      name,
-      description: description || "",
-      order: calculatedOrder,
-      level: calculatedLevel,
-      path: calculatedPath,
-      columns: columns || 1,
-      visible: visible !== undefined ? visible : true,
-      collapsible: collapsible !== undefined ? collapsible : true,
-      collapsed: collapsed !== undefined ? collapsed : false,
-    });
 
     // Create the subform
     const subform = await prisma.subform.create({
@@ -180,8 +149,6 @@ export async function POST(request: NextRequest) {
         },
       },
     });
-
-    console.log("[Subform API] Subform created successfully:", subform.id);
 
     return NextResponse.json({
       success: true,

@@ -172,20 +172,20 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
   const directFormUrl = getDirectFormUrl()
 
   const getPublicUrl = () => {
-    if (!settings.requireLogin) return directFormUrl
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const fullDirectUrl = /^https?:\/\//i.test(directFormUrl)
+      ? directFormUrl
+      : `${origin}${directFormUrl}`
+
+    if (!settings.requireLogin) return fullDirectUrl
 
     try {
-      // Wrap the direct form URL with the current origin's login route
-      if (/^https?:\/\//i.test(directFormUrl)) {
-        const parsed = new URL(directFormUrl)
-        const path = parsed.pathname + parsed.search + parsed.hash
-        return `${parsed.origin}/login?callbackUrl=${encodeURIComponent(path)}`
-      }
-
-      const origin = typeof window !== "undefined" ? window.location.origin : ""
-      return `${origin}/login?callbackUrl=${encodeURIComponent(directFormUrl)}`
+      const parsed = new URL(fullDirectUrl)
+      // Normalise pathname: collapse any double-leading slashes (e.g. //form/ → /form/)
+      const path = (parsed.pathname + parsed.search + parsed.hash).replace(/^\/\/+/, "/")
+      return `${parsed.origin}/login?callbackUrl=${encodeURIComponent(path)}`
     } catch (e) {
-      return directFormUrl
+      return fullDirectUrl
     }
   }
 

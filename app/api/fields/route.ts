@@ -5,8 +5,6 @@ import { DatabaseService } from "@/lib/database-service";
 export async function POST(request: NextRequest) {
   try {
     const data = await request.json();
-    console.log("[API] Creating field with data:", data);
-
     // Enhanced validation for lookup fields
     if (data.type === "lookup") {
       if (!data.lookup?.sourceId) {
@@ -36,7 +34,6 @@ export async function POST(request: NextRequest) {
 
     const field = await DatabaseService.createField(data);
 
-    console.log("[API] Field created successfully:", field.id);
     return NextResponse.json({ success: true, data: field });
   } catch (error: any) {
     console.error("Error creating field:", error);

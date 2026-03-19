@@ -20,6 +20,7 @@ import {
   ChevronLeft,
   Plus,
   Sliders,
+  X,
   Search,
   Folder,
   BarChart3,
@@ -104,18 +105,23 @@ const getModuleIcon = (iconName?: string, moduleType?: string) => {
   if (iconName && iconMap[iconName]) return iconMap[iconName];
 
   switch (moduleType) {
-    case "user": return Users;
-    case "form": return FileText;
-    case "data": return Database;
-    default: return Folder;
+    case "user":
+      return Users;
+    case "form":
+      return FileText;
+    case "data":
+      return Database;
+    default:
+      return Folder;
   }
 };
 
 interface CrmSidebarProps {
   onViewChange?: (view: ViewType) => void;
+  onMobileClose?: () => void;
 }
 
-export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
+export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
@@ -123,12 +129,12 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
   const { data: userData, isLoading: isUserLoading } = useGetUserQuery();
 
   // Now it's safe to use userData
-  const isAdmin = userData?.user?.unitAssignments?.some(
-    (ua: any) => ua.role?.name?.toUpperCase() === "ADMIN"
-  ) ?? false;
+  const isAdmin =
+    userData?.user?.unitAssignments?.some(
+      (ua: any) => ua.role?.name?.toUpperCase() === "ADMIN",
+    ) ?? false;
 
   const [organizationId, setOrganizationId] = useState<string | null>(null);
-
 
   useEffect(() => {
     const fetchOrg = async () => {
@@ -143,24 +149,24 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
       }
     };
     fetchOrg();
+    setMounted(true);
   }, []);
 
-
-  const {
-    modules,
-    isLoading,
-    error,
-    createModuleOptimistic,
-  } = useOptimisticModules(organizationId);
+  const { modules, isLoading, error, createModuleOptimistic } =
+    useOptimisticModules(organizationId);
 
   // Temporary placeholder - replace with real context when ready
-  const hasPermission = (_action: string, _id: string, _extra: any | null) => true;
+  const hasPermission = (_action: string, _id: string, _extra: any | null) =>
+    true;
 
   const [view, setView] = useState<ViewType>("modules");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
-  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
+  const [mounted, setMounted] = useState(false);
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(
+    new Set(),
+  );
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -196,7 +202,9 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
 
   useEffect(() => {
     document.body.style.userSelect = isResizing ? "none" : "";
-    return () => { document.body.style.userSelect = ""; };
+    return () => {
+      document.body.style.userSelect = "";
+    };
   }, [isResizing]);
 
   const generatePath = (module: FormModule): string => {
@@ -239,21 +247,25 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
             handleModuleClick(module);
           }}
           className={cn(
-            "group relative flex w-full items-center rounded-lg px-3 py-2 text-sm text-black hover:bg-black hover:text-white transition-colors"
+            "group relative flex w-full items-center rounded-lg px-3 py-2 text-sm text-black hover:bg-black hover:text-white transition-colors",
           )}
           style={{ paddingLeft: `${depth * 16 + 12}px` }}
         >
           <div className="flex min-w-0 flex-1 items-center">
             {hasChildren && (
               <div className="mr-2 flex-shrink-0">
-                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
               </div>
             )}
             <IconComponent className="mr-3 h-5 w-5 flex-shrink-0" />
-            <span className="truncate font-medium uppercase">{module.name.toUpperCase()}</span>
+            <span className="truncate font-medium uppercase">
+              {module.name.toUpperCase()}
+            </span>
           </div>
-
-
         </button>
 
         {hasChildren && isExpanded && (
@@ -266,7 +278,10 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
   };
 
   const moduleTree = useMemo(() => {
-    const moduleMap = new Map<string, FormModule & { children: FormModule[] }>();
+    const moduleMap = new Map<
+      string,
+      FormModule & { children: FormModule[] }
+    >();
 
     modules.forEach((m: FormModule) => {
       moduleMap.set(m.id, { ...m, children: m.children ?? [] }); // ← fix children undefined
@@ -343,7 +358,12 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
     }
   };
 
-  const iconButtons: { icon: any; view?: ViewType; route?: string; label: string }[] = [
+  const iconButtons: {
+    icon: any;
+    view?: ViewType;
+    route?: string;
+    label: string;
+  }[] = [
     { icon: Folder, view: "modules", label: "Modules" },
     { icon: BarChart3, view: "reports", label: "Reports" },
     { icon: Clock, view: "activities", label: "Activities" },
@@ -359,14 +379,29 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
   ];
 
   return (
-    <div className="flex h-screen bg-gray-200 text-black">
+    <div className="flex h-full md:h-screen bg-gray-200 text-black">
       {/* Left icon bar */}
-      <div className="flex w-12 flex-col items-center gap-4 py-4" style={{ backgroundColor: "black" }}>
-        <button onClick={() => router.push("/")} title="Home" className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-800">
+      <div
+        className="flex w-12 flex-col items-center gap-4 py-4"
+        style={{ backgroundColor: "black" }}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            router.push("/");
+            onMobileClose?.();
+          }}
+          title="Home"
+          className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-800"
+        >
           <Home className="h-5 w-5 text-white" />
         </button>
 
-        <button className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: "#5a4d96" }}>
+        <button
+          className="flex h-8 w-8 items-center justify-center rounded-lg"
+          style={{ backgroundColor: "#5a4d96" }}
+        >
           <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="black">
               <path d="M18 3a3 3 0 013 3v12a3 3 0 01-3 3H6a3 3 0 01-3-3V6a3 3 0 013-3h12z" />
@@ -376,24 +411,33 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
 
         {iconButtons.map((btn, i) => {
           const Icon = btn.icon;
-          const isActive = btn.route ? pathname === btn.route : view === btn.view;
+          const isActive = btn.route
+            ? pathname === btn.route
+            : view === btn.view;
 
           return (
             <button
               key={i}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+
                 if (btn.route) {
                   router.push(btn.route);
                 } else if (btn.view) {
                   setView(btn.view);
                   onViewChange?.(btn.view);
                 }
+
                 if (btn.view === "ai") setIsCollapsed(true);
                 else if (isCollapsed) setIsCollapsed(false);
+
+                onMobileClose?.();
               }}
+              
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-800 transition-colors",
-                isActive && "bg-[#5a4d96]"
+                isActive && "bg-[#5a4d96]",
               )}
               title={btn.label}
             >
@@ -417,39 +461,59 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
           width: isCollapsed ? 0 : sidebarWidth,
           minWidth: isCollapsed ? 0 : sidebarWidth,
           maxWidth: isCollapsed ? 0 : sidebarWidth,
-          overflow: "hidden",
+          overflow: "visible",
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "#5a4d96" }}>
+        <div
+          className="flex items-center justify-between border-b px-4 py-3"
+          style={{ borderColor: "#5a4d96" }}
+        >
           <div className="flex items-center gap-2">
             <h2 className="whitespace-nowrap text-base font-semibold">
-              {view === "modules" ? "Modules" : view.charAt(0).toUpperCase() + view.slice(1)}
+              {view === "modules"
+                ? "Modules"
+                : view.charAt(0).toUpperCase() + view.slice(1)}
             </h2>
             <Sliders className="h-4 w-4" />
           </div>
-          {isAdmin && (
-            <button
-              onClick={() => setIsCreateDialogOpen(true)}
-              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black hover:text-white transition-colors"
-              title="Create new module"
-              disabled={isUserLoading} // optional: disable while loading user
-            >
-              <Plus className="h-5 w-5" />
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {isAdmin && (
+              <button
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black hover:text-white transition-colors"
+                title="Create new module"
+                disabled={isUserLoading}
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+            )}
+            {/* Close button — only visible on mobile */}
+            {onMobileClose && (
+              <button
+                onClick={onMobileClose}
+                className="md:hidden flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black hover:text-white transition-colors"
+                title="Close menu"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search */}
         <div className="px-4 py-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black" />
-            <Input placeholder="Search modules..." className="h-9 border-0 pl-9 text-sm" />
+            <Input
+              placeholder="Search modules..."
+              className="h-9 border-0 pl-9 text-sm"
+            />
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-3 pb-3">
+        <div className="flex-1 overflow-y-auto px-3 pb-3 ">
           {view === "modules" ? (
             <>
               {isLoading ? (
@@ -457,15 +521,23 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
                   <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                 </div>
               ) : error ? (
-                <div className="rounded bg-red-100/30 p-4 text-sm text-red-800">Failed to load modules</div>
+                <div className="rounded bg-red-100/30 p-4 text-sm text-red-800">
+                  Failed to load modules
+                </div>
               ) : modules.length === 0 ? (
-                <div className="py-4 text-center text-sm text-gray-500">No modules yet</div>
+                <div className="py-4 text-center text-sm text-gray-500">
+                  No modules yet
+                </div>
               ) : (
-                <nav className="space-y-1">{moduleTree.map((m) => renderModule(m, 0))}</nav>
+                <nav className="space-y-1">
+                  {moduleTree.map((m) => renderModule(m, 0))}
+                </nav>
               )}
             </>
           ) : (
-            <div className="p-4 text-sm text-gray-500">{view} view coming soon...</div>
+            <div className="p-4 text-sm text-gray-500">
+              {view} view coming soon...
+            </div>
           )}
         </div>
 
@@ -483,11 +555,12 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
                 <span className="text-sm font-medium text-black group-hover:text-white">
                   {userData?.user
                     ? userData.user.first_name || userData.user.last_name
-                      ? `${userData.user.first_name ?? ""} ${userData.user.last_name ?? ""
+                      ? `${userData.user.first_name ?? ""} ${
+                          userData.user.last_name ?? ""
                         }`.trim()
-                      : userData.user.username ??
-                      userData.user.email ??
-                      "CRM Teamspace"
+                      : (userData.user.username ??
+                        userData.user.email ??
+                        "CRM Teamspace")
                     : "CRM Teamspace"}
                 </span>
               </div>
@@ -499,7 +572,7 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
           </div>
         </Link>
 
-        {/* Resize handle */}
+        {/* Resize handle — desktop only */}
         {!isCollapsed && (
           <div
             ref={resizeRef}
@@ -507,55 +580,121 @@ export function CrmSidebar({ onViewChange }: CrmSidebarProps) {
               e.preventDefault();
               setIsResizing(true);
             }}
-            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40"
+            className="hidden md:block absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/40"
           />
         )}
       </div>
 
-      {/* Collapse toggle */}
+      {/* Collapse toggle — desktop only */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute bottom-4 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
-        style={{ left: isCollapsed ? "48px" : `${48 + sidebarWidth - 3}px` }}
+        className="hidden md:flex fixed top-1/2 -translate-y-1/2 z-[99999] h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
+        style={{ 
+          left: isCollapsed ? "48px" : `${48 + (mounted ? sidebarWidth : 250)}px`, 
+        }}
       >
-        {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        {isCollapsed ? (
+          <ChevronRight className="h-4 w-4" />
+        ) : (
+          <ChevronLeft className="h-4 w-4" />
+        )}
       </button>
 
       {/* Create dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Module</DialogTitle>
-            <DialogDescription>Add a new module to your workspace.</DialogDescription>
+        <DialogContent
+          className={cn(
+            // Mobile-first: smaller & narrower on phones
+            "max-w-[90vw] sm:max-w-[420px] md:max-w-[480px] lg:max-w-[500px]",
+            "max-h-[92vh] overflow-y-auto",
+            "p-4 sm:p-5 md:p-6",
+            "bg-white border border-slate-200 shadow-xl rounded-lg sm:rounded-xl",
+            "transition-all duration-200",
+          )}
+        >
+          <DialogHeader className="mb-4 sm:mb-5">
+            <DialogTitle className="text-lg sm:text-xl md:text-2xl font-semibold text-slate-900">
+              Create New Module
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm text-slate-600 mt-1">
+              Add a new module to organize your workspace content.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Module Name</Label>
+
+          <div className="space-y-4 sm:space-y-5 py-1 sm:py-2">
+            {/* Module Name */}
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="module-name"
+                className="text-sm font-medium text-slate-700"
+              >
+                Module Name <span className="text-red-500">*</span>
+              </Label>
               <Input
+                id="module-name"
                 value={moduleData.name}
-                onChange={(e) => setModuleData({ ...moduleData, name: e.target.value })}
+                onChange={(e) =>
+                  setModuleData({ ...moduleData, name: e.target.value })
+                }
                 placeholder="e.g. Customers, Inventory"
+                className={cn(
+                  "h-9 sm:h-10 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all",
+                  !moduleData.name.trim() &&
+                    "border-red-400 focus:border-red-500 focus:ring-red-500",
+                )}
+                autoFocus
               />
+              {!moduleData.name.trim() && (
+                <p className="text-xs text-red-600 mt-1">
+                  Module name is required
+                </p>
+              )}
             </div>
-            <div>
-              <Label>Description (optional)</Label>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="module-description"
+                className="text-sm font-medium text-slate-700"
+              >
+                Description (optional)
+              </Label>
               <Textarea
+                id="module-description"
                 value={moduleData.description}
-                onChange={(e) => setModuleData({ ...moduleData, description: e.target.value })}
+                onChange={(e) =>
+                  setModuleData({ ...moduleData, description: e.target.value })
+                }
                 placeholder="Brief description..."
-                rows={3}
+                rows={2}
+                className="min-h-[70px] sm:min-h-[90px] text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y transition-all"
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+
+          <DialogFooter className="mt-5 sm:mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4 border-t border-slate-200">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsCreateDialogOpen(false)}
+              disabled={isSubmitting}
+              className="h-9 sm:h-10 px-4 sm:px-5 text-sm"
+            >
               Cancel
             </Button>
+
             <Button
               onClick={handleCreateModule}
               disabled={isSubmitting || !moduleData.name.trim()}
+              className={cn(
+                "h-9 sm:h-10 px-4 sm:px-6 text-sm font-medium",
+                "bg-indigo-600 hover:bg-indigo-700",
+                "shadow-sm hover:shadow transition-all",
+              )}
             >
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isSubmitting && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Create
             </Button>
           </DialogFooter>

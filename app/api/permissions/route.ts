@@ -4,9 +4,7 @@ import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    console.log("[v0] GET /api/permissions - Starting request");
     const permissions = await getPermissions();
-    console.log(`[v0] Retrieved ${permissions.length} permissions from database`);
     return NextResponse.json({
       success: true,
       data: permissions,

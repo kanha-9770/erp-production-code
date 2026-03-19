@@ -63,8 +63,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { userId, action } = body;
-    console.log("Attendance POST body:", body);
-
     if (!userId || !action) {
       return NextResponse.json(
         { success: false, error: "userId and action are required" },

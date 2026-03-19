@@ -20,6 +20,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/auth") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
+    pathname.startsWith("/form/") ||
     pathname.includes(".")
   ) {
     return NextResponse.next();

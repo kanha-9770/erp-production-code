@@ -3,38 +3,29 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import bcrypt from 'bcryptjs';
-
-function isAdmin(user: any) {
-  const hasAdminRole = user?.unitAssignments?.some(
-    (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
-  ) || false;
-  const isOrgOwner = !!user?.ownedOrganization;
-  return hasAdminRole || isOrgOwner;
-}
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const organizationId = session.user?.organizationId || session.user?.organization?.id;
+    const organizationId = authUser.organizationId;
 
     if (!organizationId) {
       return NextResponse.json({ error: "User is not associated with any organization" }, { status: 403 });
     }
 
-    const isUserAdmin = isAdmin(session.user);
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: true } }, ownedOrganization: { select: { id: true } } },
+    });
+    const isUserAdmin = !!(
+      userWithRoles?.unitAssignments?.some(
+        (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+      ) || userWithRoles?.ownedOrganization
+    );
 
     const user = await prisma.user.findUnique({
       where: { id: params.id },
@@ -63,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: "Unauthorized access to user" }, { status: 403 });
     }
 
-    if (!isUserAdmin && session.user.id !== params.id) {
+    if (!isUserAdmin && authUser.id !== params.id) {
       return NextResponse.json({ error: "Unauthorized: Only admins or self can view this user" }, { status: 403 });
     }
 
@@ -93,23 +84,24 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: true } }, ownedOrganization: { select: { id: true } } },
+    });
+    const isUserAdmin = !!(
+      userWithRoles?.unitAssignments?.some(
+        (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+      ) || userWithRoles?.ownedOrganization
+    );
 
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    if (!isAdmin(session.user)) {
+    if (!isUserAdmin) {
       return NextResponse.json({ error: "Unauthorized: Only admins can update users" }, { status: 403 });
     }
 
-    const organizationId = session.user?.organizationId || session.user?.organization?.id;
+    const organizationId = authUser.organizationId;
 
     const body = await request.json();
     const {
@@ -246,23 +238,24 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: true } }, ownedOrganization: { select: { id: true } } },
+    });
+    const isUserAdmin = !!(
+      userWithRoles?.unitAssignments?.some(
+        (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+      ) || userWithRoles?.ownedOrganization
+    );
 
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    if (!isAdmin(session.user)) {
+    if (!isUserAdmin) {
       return NextResponse.json({ error: "Unauthorized: Only admins can delete users" }, { status: 403 });
     }
 
-    const organizationId = session.user?.organizationId || session.user?.organization?.id;
+    const organizationId = authUser.organizationId;
 
     const user = await prisma.user.findUnique({
       where: { id: params.id },

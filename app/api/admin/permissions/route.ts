@@ -1,32 +1,22 @@
 // app/api/admin/permissions/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { getUserPermissions } from "@/lib/database"; // ← NEW IMPORT
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  console.log("[DEBUG] Starting GET /api/admin/permissions");
-
   try {
     // ─────────────────────────────────────────────────────────
     // STAGE 1: Auth / Session
     // ─────────────────────────────────────────────────────────
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const currentUser = session.user;
-    console.log("[DEBUG] Authenticated user ID:", currentUser.id);
-
-    if (!currentUser.organization?.id) {
+    if (!authUser.organizationId) {
       return NextResponse.json(
         { error: "User not part of any organization" },
         { status: 403 },
@@ -40,13 +30,11 @@ export async function GET(request: NextRequest) {
     const formId = searchParams.get("formId") || undefined;
     const moduleId = searchParams.get("moduleId") || undefined;
 
-    console.log("[DEBUG] Context → formId:", formId, "| moduleId:", moduleId);
-
     // ─────────────────────────────────────────────────────────
     // STAGE 2: Fetch user + role assignments (no more permissionOverrides here)
     // ─────────────────────────────────────────────────────────
     const user = await prisma.user.findUnique({
-      where: { id: currentUser.id },
+      where: { id: authUser.id },
       select: {
         id: true,
         email: true,
@@ -84,12 +72,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    console.log("[DEBUG] Unit assignments:", user.unitAssignments.length);
-
     // ─────────────────────────────────────────────────────────
     // NEW: Use the SAME function that your admin UI uses
     // ─────────────────────────────────────────────────────────
-    const allUserOverrides = await getUserPermissions(currentUser.id);
+    const allUserOverrides = await getUserPermissions(authUser.id);
 
     // Filter active + form/module specific
     const activeOverrides = allUserOverrides.filter((o) => {
@@ -102,23 +88,10 @@ export async function GET(request: NextRequest) {
     const grantedOverrides = activeOverrides.filter((o) => o.granted === true);
     const deniedOverrides = activeOverrides.filter((o) => o.granted === false);
 
-    console.log("[DEBUG] Overrides from getUserPermissions:", {
-      totalFetched: allUserOverrides.length,
-      activeAfterFilter: activeOverrides.length,
-      granted: grantedOverrides.length,
-      denied: deniedOverrides.length,
-      formIdUsed: !!formId,
-    });
-
-    if (grantedOverrides.length > 0) {
-      console.log("[DEBUG] Sample granted override:", grantedOverrides[0]);
-    }
-
     // ─────────────────────────────────────────────────────────
     // STAGE 3: Role-based permissions
     // ─────────────────────────────────────────────────────────
     const roleIds = user.unitAssignments.map((ua) => ua.role.id);
-    console.log("[DEBUG] Role IDs:", roleIds);
 
     const rolePermissions =
       roleIds.length > 0
@@ -141,11 +114,6 @@ export async function GET(request: NextRequest) {
             },
           })
         : [];
-
-    console.log(
-      "[DEBUG] Role-based permissions found:",
-      rolePermissions.length,
-    );
 
     // ─────────────────────────────────────────────────────────
     // STAGE 4: Prepare override permission details
@@ -216,7 +184,6 @@ export async function GET(request: NextRequest) {
     for (const override of grantedOverrides) {
       const perm = overridePermMap.get(override.permissionId);
       if (!perm) {
-        console.warn(`[WARN] Permission ${override.permissionId} not found`);
         continue;
       }
 
@@ -249,13 +216,6 @@ export async function GET(request: NextRequest) {
         permissions.push(overrideEntry);
       }
     }
-
-    console.log(
-      "[DEBUG] Final permissions → Role:",
-      permissions.filter((p) => p.source === "role").length,
-      "| User:",
-      permissions.filter((p) => p.source === "user").length,
-    );
 
     // ─────────────────────────────────────────────────────────
     // STAGE 6: isAdmin flag

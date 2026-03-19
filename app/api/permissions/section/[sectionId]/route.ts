@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -9,17 +9,19 @@ export async function GET(
   { params }: { params: { sectionId: string } }
 ) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    const session = await validateSession(token || "");
-    if (!session?.user?.organization?.id)
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { sectionId } = params;
 
+    const { protocol, host } = request.nextUrl;
+    const internalApiUrl = `${protocol}//${host}/api/permissions`;
+
     const [roles, assignments, permissionsRes] = await Promise.all([
       prisma.role.findMany({
         where: {
-          organizationId: session.user.organization.id,
+          organizationId: authUser.organizationId,
           isActive: true,
           isAdmin: false,
         },
@@ -29,9 +31,9 @@ export async function GET(
         // TARGET ONLY SECTION: formFieldId MUST be null
         where: { sectionId: sectionId, formFieldId: null, granted: true },
       }),
-      fetch("http://localhost:5001/api/permissions", {
+      fetch(internalApiUrl, {
         headers: {
-          cookie: `auth-token=${token}`,
+          cookie: request.headers.get("cookie") || "",
           "Content-Type": "application/json",
         },
         cache: "no-store",

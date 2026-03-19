@@ -17,8 +17,6 @@ export async function GET(request: NextRequest) {
     // Clean prefix if frontend sends prefixed ID (form_xxx → xxx)
     const formId = rawFormId.replace(/^form_/, "");
 
-    console.log(`[/api/lookup/sections] Fetching sections for formId: ${formId}`);
-
     // Fetch sections using your Prisma schema (FormSection model with title field)
     const sections = await prisma.formSection.findMany({
       where: {
@@ -34,8 +32,6 @@ export async function GET(request: NextRequest) {
         order: "asc",
       },
     });
-
-    console.log(`[/api/lookup/sections] Found ${sections.length} sections`);
 
     // Map title → name to match frontend FormSection type { id, name }
     const responseData = sections.map(s => ({

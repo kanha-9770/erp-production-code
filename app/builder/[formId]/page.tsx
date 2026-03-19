@@ -714,19 +714,87 @@ export default function FormBuilderPage() {
 
   const handleFormulaSave = async (config: FormulaConfig, fieldId: string) => {
     try {
-      await fetch(`/api/fields/${fieldId}`, {
+      const response = await fetch(`/api/fields/${fieldId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           label: config.fieldLabel,
           formula: {
             expression: config.expression,
             returnType: config.returnType,
             blankPreference: config.blankPreference,
+            decimalPlaces: config.decimalPlaces,
+            visibleInForm: config.visibleInForm ?? true,
           },
           decimalPlaces: config.decimalPlaces,
+          properties: {
+            formulaConfig: {
+              expression: config.expression,
+              returnType: config.returnType,
+              decimalPlaces: config.decimalPlaces,
+              blankPreference: config.blankPreference,
+              visibleInForm: config.visibleInForm ?? true,
+              sources: config.sources,
+            },
+          },
         }),
       });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to save formula");
+      }
+
+      // Update local form state so the builder reflects the saved formula immediately
+      if (form) {
+        const formulaData = {
+          expression: config.expression,
+          returnType: config.returnType,
+          blankPreference: config.blankPreference,
+        };
+        const updatedForm = JSON.parse(JSON.stringify(form));
+
+        const updateFieldInList = (fields: any[]) =>
+          fields.map((f: any) =>
+            f.id === fieldId
+              ? {
+                  ...f,
+                  label: config.fieldLabel,
+                  formula: formulaData,
+                  properties: {
+                    ...f.properties,
+                    formulaConfig: {
+                      expression: config.expression,
+                      returnType: config.returnType,
+                      decimalPlaces: config.decimalPlaces,
+                      blankPreference: config.blankPreference,
+                      visibleInForm: config.visibleInForm ?? true,
+                      sources: config.sources,
+                    },
+                  },
+                }
+              : f
+          );
+
+        updatedForm.sections = updatedForm.sections.map((s: any) => ({
+          ...s,
+          fields: updateFieldInList(s.fields),
+        }));
+
+        const updateSubforms = (subforms: any[]): any[] =>
+          subforms.map((sf: any) => ({
+            ...sf,
+            fields: updateFieldInList(sf.fields),
+            childSubforms: sf.childSubforms ? updateSubforms(sf.childSubforms) : [],
+          }));
+
+        if (updatedForm.subforms) {
+          updatedForm.subforms = updateSubforms(updatedForm.subforms);
+        }
+
+        optimisticFormUpdate(updatedForm);
+      }
 
       toast({
         title: "Success",
@@ -1408,40 +1476,88 @@ export default function FormBuilderPage() {
           onOpenChange={setIsUserFormSettingsOpen}
           onUpdate={handleUserFormSettingsUpdate}
         />
-        <FormulaConfigurationDialog
-          open={isFormulaDialogOpen}
-          onOpenChange={setIsFormulaDialogOpen}
-          formId={formId}
-          fieldId={pendingFormulaFieldId || ""}
-          fieldLabel={
-            (() => {
-              if (!pendingFormulaFieldId || !form) return "Formula";
-              const findField = (fields: FormField[]): string | null => {
-                for (const f of fields) {
-                  if (f.id === pendingFormulaFieldId) return f.label;
-                }
-                return null;
-              };
-              for (const s of form.sections) {
-                const label = findField(s.fields);
-                if (label) return label;
-              }
-              const searchSubforms = (subs: Subform[]): string | null => {
-                for (const sf of subs) {
-                  const label = findField(sf.fields);
-                  if (label) return label;
-                  if (sf.childSubforms) {
-                    const found = searchSubforms(sf.childSubforms);
-                    if (found) return found;
+        {pendingFormulaFieldId && (
+          <FormulaConfigurationDialog
+            open={isFormulaDialogOpen}
+            onOpenChange={(open) => {
+              setIsFormulaDialogOpen(open);
+              if (!open) setPendingFormulaFieldId(null);
+            }}
+            formId={formId}
+            fieldId={pendingFormulaFieldId}
+            fieldLabel={
+              (() => {
+                if (!form) return "Formula";
+                const findField = (fields: FormField[]): string | null => {
+                  for (const f of fields) {
+                    if (f.id === pendingFormulaFieldId) return f.label;
                   }
+                  return null;
+                };
+                for (const s of form.sections) {
+                  const label = findField(s.fields);
+                  if (label) return label;
                 }
-                return null;
-              };
-              return searchSubforms(form.subforms || []) || "Formula";
-            })()
-          }
-          onSave={handleFormulaSave}
-        />
+                const searchSubforms = (subs: Subform[]): string | null => {
+                  for (const sf of subs) {
+                    const label = findField(sf.fields);
+                    if (label) return label;
+                    if (sf.childSubforms) {
+                      const found = searchSubforms(sf.childSubforms);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                };
+                return searchSubforms(form.subforms || []) || "Formula";
+              })()
+            }
+            initialConfig={
+              (() => {
+                if (!form) return null;
+                const findField = (fields: FormField[]): FormField | null => {
+                  for (const f of fields) {
+                    if (f.id === pendingFormulaFieldId) return f;
+                  }
+                  return null;
+                };
+                let found: FormField | null = null;
+                for (const s of form.sections) {
+                  found = findField(s.fields);
+                  if (found) break;
+                }
+                if (!found) {
+                  const searchSubforms = (subs: Subform[]): FormField | null => {
+                    for (const sf of subs) {
+                      const f = findField(sf.fields);
+                      if (f) return f;
+                      if (sf.childSubforms) {
+                        const r = searchSubforms(sf.childSubforms);
+                        if (r) return r;
+                      }
+                    }
+                    return null;
+                  };
+                  found = searchSubforms(form.subforms || []);
+                }
+                if (!found) return null;
+                const fc = (found as any).properties?.formulaConfig;
+                const fRel = (found as any).formula;
+                if (!fRel && !fc) return null;
+                return {
+                  fieldLabel: found.label,
+                  expression: fRel?.expression ?? fc?.expression ?? "",
+                  returnType: (fRel?.returnType ?? fc?.returnType ?? "Number") as any,
+                  decimalPlaces: (found as any).decimalPlaces ?? fc?.decimalPlaces ?? 2,
+                  blankPreference: (fRel?.blankPreference ?? fc?.blankPreference ?? "Empty") as any,
+                  visibleInForm: fc?.visibleInForm ?? true,
+                  sources: fc?.sources,
+                };
+              })()
+            }
+            onSave={handleFormulaSave}
+          />
+        )}
         <ResourcePermissionDialog
           open={isPermissionDialogOpen}
           onOpenChange={setIsPermissionDialogOpen}

@@ -1,12 +1,14 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
+const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+
 export async function GET() {
   try {
     // Fetch payroll and attendance data
     const [payrollRes, attendanceRes] = await Promise.all([
-      fetch('http://localhost:3000/api/payroll'),
-      fetch('http://localhost:3000/api/forms/testing'),
+      fetch(`${baseUrl}/api/payroll`),
+      fetch(`${baseUrl}/api/forms/testing`),
     ]);
 
     const payrollData = (await payrollRes.json()) || { payrolls: [] };

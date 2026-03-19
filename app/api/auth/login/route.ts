@@ -5,61 +5,18 @@ import { prisma } from "@/lib/prisma"
 import { verifyPassword, createSession, generateOTP } from "@/lib/auth"
 import { sendOTPEmail } from "@/lib/email"
 import { LoginSchema } from "@/lib/validations"
-
-// Fixed audit log helper — now accepts organizationId explicitly
-async function logAudit({
-  userId,
-  organizationId,     // ← Added: passed from user
-  email,
-  action,
-  details,
-  ipAddress,
-  userAgent,
-}: {
-  userId?: string
-  organizationId?: string | null   // ← Critical for multi-tenant
-  email: string
-  action: string
-  details?: string
-  ipAddress: string
-  userAgent: string
-}) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        userId: userId || null,
-        organizationId: organizationId || null,  // ← Now correctly saved
-        performedBy: email,
-        action,
-        module: "Authentication",
-        details: details || null,
-        ipAddress,
-        userAgent,
-      },
-    })
-    console.log(`Audit log: ${action} by ${email}`)
-  } catch (error) {
-    console.error("Failed to create audit log:", error)
-    // Do not break login flow
-  }
-}
+import { getRequestMeta, logAudit } from "@/lib/api-helpers"
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("Login API called")
-
     const body = await request.json()
-    console.log("Request body:", body)
 
     // Capture early for consistent logging
-    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
+    const { ipAddress, userAgent } = getRequestMeta(request)
 
     // Validate input
     const validation = LoginSchema.safeParse(body)
     if (!validation.success) {
-      console.log("Validation failed:", validation.error)
-
       const email = body.email || "unknown"
 
       await prisma.loginHistory.create({
@@ -73,8 +30,9 @@ export async function POST(request: NextRequest) {
       })
 
       await logAudit({
-        email,
+        performedBy: email,
         action: "Login Failed",
+        module: "Authentication",
         details: "Invalid input data",
         ipAddress,
         userAgent,
@@ -87,7 +45,6 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, password } = validation.data
-    console.log("Validated data:", { email, hasPassword: !!password })
 
     // Find user — include organizationId for audit logging
     const user = await prisma.user.findUnique({
@@ -100,14 +57,12 @@ export async function POST(request: NextRequest) {
         first_name: true,
         last_name: true,
         avatar: true,
-        organizationId: true,  // ← Needed for correct audit logs
+        organizationId: true,
         login_attempts: true,
       },
     })
 
     if (!user) {
-      console.log("User not found:", email)
-
       await prisma.loginHistory.create({
         data: {
           email,
@@ -119,8 +74,9 @@ export async function POST(request: NextRequest) {
       })
 
       await logAudit({
-        email,
+        performedBy: email,
         action: "Login Failed",
+        module: "Authentication",
         details: "User not found",
         ipAddress,
         userAgent,
@@ -131,8 +87,6 @@ export async function POST(request: NextRequest) {
 
     // Email not verified
     if (!user.email_verified) {
-      console.log("Email not verified:", email)
-
       await prisma.loginHistory.create({
         data: {
           userId: user.id,
@@ -147,8 +101,9 @@ export async function POST(request: NextRequest) {
       await logAudit({
         userId: user.id,
         organizationId: user.organizationId,
-        email,
+        performedBy: email,
         action: "Login Failed",
+        module: "Authentication",
         details: "Email not verified",
         ipAddress,
         userAgent,
@@ -174,8 +129,9 @@ export async function POST(request: NextRequest) {
         await logAudit({
           userId: user.id,
           organizationId: user.organizationId,
-          email,
+          performedBy: email,
           action: "Login Failed",
+          module: "Authentication",
           details: "Password login not available (social account?)",
           ipAddress,
           userAgent,
@@ -189,8 +145,6 @@ export async function POST(request: NextRequest) {
 
       const isValidPassword = await verifyPassword(password, user.password)
       if (!isValidPassword) {
-        console.log("Invalid password for user:", email)
-
         await prisma.loginHistory.create({
           data: {
             userId: user.id,
@@ -205,8 +159,9 @@ export async function POST(request: NextRequest) {
         await logAudit({
           userId: user.id,
           organizationId: user.organizationId,
-          email,
+          performedBy: email,
           action: "Login Failed",
+          module: "Authentication",
           details: "Invalid password",
           ipAddress,
           userAgent,
@@ -236,8 +191,9 @@ export async function POST(request: NextRequest) {
       await logAudit({
         userId: user.id,
         organizationId: user.organizationId,
-        email,
+        performedBy: email,
         action: "Login",
+        module: "Authentication",
         details: "Successful password login",
         ipAddress,
         userAgent,
@@ -245,8 +201,6 @@ export async function POST(request: NextRequest) {
     } else {
       // Passwordless: Send OTP
       try {
-        console.log("Sending OTP for passwordless login:", email)
-
         const otp = generateOTP()
         const expiresAt = new Date()
         expiresAt.setMinutes(expiresAt.getMinutes() + 10)
@@ -270,13 +224,12 @@ export async function POST(request: NextRequest) {
         const emailResult = await sendOTPEmail(email, otp, "login")
 
         if (!emailResult.success) {
-          console.log("Failed to send OTP email:", emailResult.error)
-
           await logAudit({
             userId: user.id,
             organizationId: user.organizationId,
-            email,
+            performedBy: email,
             action: "OTP Send Failed",
+            module: "Authentication",
             details: "Failed to send login code email",
             ipAddress,
             userAgent,
@@ -287,8 +240,6 @@ export async function POST(request: NextRequest) {
 
         // CREATE TEMPORARY SESSION FOR OTP FLOW
         const tempSession = await createSession(user.id, ipAddress, userAgent)
-
-        console.log("OTP sent + temporary session created for user:", email)
 
         const response = NextResponse.json({
           success: true,
@@ -309,8 +260,9 @@ export async function POST(request: NextRequest) {
         await logAudit({
           userId: user.id,
           organizationId: user.organizationId,
-          email,
+          performedBy: email,
           action: "Login Code Sent",
+          module: "Authentication",
           details: "Passwordless login code sent + temporary auth-token issued",
           ipAddress,
           userAgent,
@@ -323,8 +275,9 @@ export async function POST(request: NextRequest) {
         await logAudit({
           userId: user.id,
           organizationId: user.organizationId,
-          email,
+          performedBy: email,
           action: "OTP Send Failed",
+          module: "Authentication",
           details: "Error during passwordless login",
           ipAddress,
           userAgent,
@@ -342,8 +295,6 @@ export async function POST(request: NextRequest) {
 
     // Create session
     const session = await createSession(user.id, ipAddress, userAgent)
-
-    console.log("Login successful for user:", email)
 
     const response = NextResponse.json({
       success: true,
@@ -370,14 +321,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Unexpected login error:", error)
 
+    const { ipAddress, userAgent } = getRequestMeta(request)
     const fallbackEmail = (await request.json().catch(() => ({}))).email || "unknown"
 
     await logAudit({
-      email: fallbackEmail,
+      performedBy: fallbackEmail,
       action: "Login Error",
+      module: "Authentication",
       details: "Unexpected server error during login",
-      ipAddress: request.headers.get("x-forwarded-for") || "unknown",
-      userAgent: request.headers.get("user-agent") || "unknown",
+      ipAddress,
+      userAgent,
     })
 
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

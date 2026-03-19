@@ -1,47 +1,32 @@
 import { getModulesWithForms } from "@/lib/database";
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
 
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const userId = session.user.id;
-
-    // Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-
-    if (!user?.organizationId) {
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 },
       );
     }
 
-    const organizationId = user.organizationId;
+    // Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
 
     let permittedModuleIds: number[] | undefined;
@@ -208,38 +193,20 @@ export async function GET(request: NextRequest) {
       permittedModuleIds = Array.from(allAccessibleIds);
     }
 
-    console.log(
-      "[v0] GET /api/modules-permission - Starting request for permitted modules with forms",
-    );
-
     const modules = await getModulesWithForms(
       organizationId,
       permittedModuleIds,
       directlyPermittedModuleIds,
     );
-    console.log(
-      `[v0] Retrieved permitted modules with forms from database: ${modules.length}`,
-    );
 
-    // Log form counts for debugging
     const totalForms = modules.reduce((total, module) => {
       const moduleForms = module.forms?.length || 0;
       const submoduleForms =
         module.children?.reduce((subTotal: number, child: any) => {
           return subTotal + (child.forms?.length || 0);
         }, 0) || 0;
-      console.log(
-        `[v0] Module ${module.name}: ${moduleForms} forms, ${submoduleForms} submodule forms`,
-      );
       return total + moduleForms + submoduleForms;
     }, 0);
-
-    console.log(`[v0] Total forms across all permitted modules: ${totalForms}`);
-    console.log(
-      "[v0] Successfully retrieved",
-      modules.length,
-      "permitted modules with forms",
-    );
 
     return NextResponse.json({
       success: true,

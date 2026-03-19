@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { DatabaseService } from "@/lib/database-service"
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -7,19 +8,18 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const { moduleId, sortOrder } = await request.json()
 
     if (!id) {
-      return NextResponse.json({ error: "Form ID required" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "Form ID required" }, { status: 400 })
     }
 
     // Validate form exists
-    const form = await prisma.form.findUnique({
-      where: { id },
-    })
+    const form = await DatabaseService.getForm(id)
 
     if (!form) {
-      return NextResponse.json({ error: "Form not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Form not found" }, { status: 404 })
     }
 
     // Update form with new module and sort order
+    // Raw prisma kept here to preserve the response shape with module include
     const updated = await prisma.form.update({
       where: { id },
       data: {

@@ -5,12 +5,8 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
   try {
     const { formId } = params
 
-    console.log("Fetching enhanced lookup sources for form:", formId)
-
     // Get enhanced lookup sources with detailed information
     const lookupSources = await DatabaseService.getLookupSources(formId)
-
-    console.log(`Found ${lookupSources.sources.length} lookup sources`)
 
     return NextResponse.json({
       success: true,

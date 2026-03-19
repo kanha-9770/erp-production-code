@@ -1,7 +1,7 @@
 "use client";
 import type React from "react";
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -84,6 +84,7 @@ const NESTING_COLORS = [
 
 export default function PublicFormPage() {
   const params = useParams();
+  const router = useRouter();
   const { toast } = useToast();
   const formId = params.formId as string;
 
@@ -124,6 +125,15 @@ export default function PublicFormPage() {
 
       if (!result.data.isPublished) {
         throw new Error("This form is not published");
+      }
+
+      // If login is required, verify the user is authenticated
+      if (result.data.requireLogin) {
+        const authRes = await fetch("/api/auth/me");
+        if (!authRes.ok) {
+          router.replace(`/login?callbackUrl=${encodeURIComponent(`/form/${formId}`)}`);
+          return;
+        }
       }
 
       setForm(result.data);

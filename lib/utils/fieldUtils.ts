@@ -4,6 +4,26 @@
 // recordsDisplay.tsx (isImageUrl, isImageField, formatDynamicRowValue).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Subform field collector ───────────────────────────────────────────────────
+
+/**
+ * Recursively collects all FormField entries from a subform tree.
+ * Works with both direct `subforms` arrays and nested `childSubforms`.
+ */
+export function getAllSubformFields<
+  S extends { fields: F[]; childSubforms?: S[] },
+  F,
+>(subforms: S[]): F[] {
+  let fields: F[] = [];
+  subforms.forEach((subform) => {
+    fields = [...fields, ...subform.fields];
+    if (subform.childSubforms?.length) {
+      fields = [...fields, ...getAllSubformFields(subform.childSubforms)];
+    }
+  });
+  return fields;
+}
+
 import {
   Type,
   Mail,

@@ -1,68 +1,6 @@
-// import { type NextRequest, NextResponse } from "next/server";
-// import { DatabaseService } from "@/lib/database-service";
-
-// export async function GET(
-//   request: NextRequest,
-//   { params }: { params: { formId: string } }
-// ) {
-//   try {
-//     console.log("API: Fetching form:", params.formId);
-//     const form = await DatabaseService.getForm(params.formId);
-//     console.log("API: Form fetched successfully:akash", form);
-//     if (!form) {
-//       return NextResponse.json(
-//         { success: false, error: "Form not found" },
-//         { status: 404 }
-//       );
-//     }
-//     console.log("API: Form fetched successfully:", form.name);
-//     return NextResponse.json({ success: true, data: form });
-//   } catch (error: any) {
-//     console.error("API: Error fetching form:", error);
-//     return NextResponse.json(
-//       { success: false, error: error.message },
-//       { status: 500 }
-//     );
-//   }
-// }
-
-// export async function PUT(
-//   request: NextRequest,
-//   { params }: { params: { formId: string } }
-// ) {
-//   try {
-//     const body = await request.json();
-//     const form = await DatabaseService.updateForm(params.formId, body);
-//     return NextResponse.json({ success: true, data: form });
-//   } catch (error: any) {
-//     console.error("API: Error updating form:", error);
-//     return NextResponse.json(
-//       { success: false, error: error.message },
-//       { status: 500 }
-//     );
-//   }
-// }
-
-// export async function DELETE(
-//   request: NextRequest,
-//   { params }: { params: { formId: string } }
-// ) {
-//   try {
-//     await DatabaseService.deleteForm(params.formId);
-//     return NextResponse.json({ success: true });
-//   } catch (error: any) {
-//     console.error("API: Error deleting form:", error);
-//     return NextResponse.json(
-//       { success: false, error: error.message },
-//       { status: 500 }
-//     );
-//   }
-// }
-
-
 import { type NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database-service";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 function makePublishedView(form: any) {
   if (!form) return form;
@@ -77,7 +15,6 @@ function makePublishedView(form: any) {
             .filter((f: any) => f.visible !== false)
             .map((f: any) => ({
               ...f,
-              // support readonly stored in different places (field.readonly, properties.readonly)
               readonly: !!(f.readonly || f.properties?.readonly || f.properties?.readOnly),
             }))
         : [];
@@ -103,11 +40,9 @@ function makePublishedView(form: any) {
     : [];
 
   if (clone.settings && typeof clone.settings === "object") {
-    // remove any draft-only notes
     delete clone.settings.draftNotes;
   }
 
-  // ensure published flag
   clone.isPublished = true;
   return clone;
 }
@@ -117,7 +52,6 @@ export async function GET(
   { params }: { params: { formId: string } }
 ) {
   try {
-    console.log("API: Fetching form:", params.formId);
     const form = await DatabaseService.getForm(params.formId);
     if (!form) {
       return NextResponse.json({ success: false, error: "Form not found" }, { status: 404 });
@@ -129,23 +63,27 @@ export async function GET(
       try {
         const published = makePublishedView(form);
 
-        // Determine if requester is admin; admins should see live/draft behavior
+        // Admins see live/draft behaviour; check session non-critically
         let isAdmin = false;
         try {
-          const token = request.cookies.get("auth-token")?.value;
-          if (token) {
-            const session = await validateSession(token as string);
-            if (session && session.user) {
-              const roles = session.user.unitAssignments || [];
-              isAdmin = roles.some((ua: any) => ua?.role?.isAdmin || ua?.role?.name === "ADMIN");
-            }
+          const currentUser = await getAuthenticatedUser(request);
+          if (currentUser) {
+            // isAdmin check still needs role info - re-fetch with unitAssignments
+            const { prisma } = await import("@/lib/prisma");
+            const userWithRoles = await prisma.user.findUnique({
+              where: { id: currentUser.id },
+              select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
+            });
+            const isAdminUser = userWithRoles?.unitAssignments.some(
+              (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+            ) ?? false;
+            isAdmin = isAdminUser;
           }
         } catch (err) {
           console.error("Error checking session in published view:", err);
         }
 
-        // If not admin, enforce public editability rules: only fields with
-        // `properties.publicEditable === true` remain editable; others become readonly.
+        // Non-admins: only publicEditable fields remain editable
         if (!isAdmin) {
           const markReadonly = (sections: any[]) => {
             if (!Array.isArray(sections)) return;
@@ -176,9 +114,10 @@ export async function GET(
           markReadonly(published.sections);
         }
 
-        // If debug requested, include a small debug payload showing first-section fields
         if (request.nextUrl.searchParams.get("debug") === "true") {
-          const debugFields = (published.sections?.[0]?.fields || []).map((f: any) => ({ id: f.id, label: f.label, visible: f.visible, readonly: f.readonly, properties: f.properties }));
+          const debugFields = (published.sections?.[0]?.fields || []).map((f: any) => ({
+            id: f.id, label: f.label, visible: f.visible, readonly: f.readonly, properties: f.properties,
+          }));
           return NextResponse.json({ success: true, data: published, debug: debugFields });
         }
 
@@ -189,7 +128,6 @@ export async function GET(
       }
     }
 
-    console.log("API: Form fetched successfully:", form.name);
     return NextResponse.json({ success: true, data: form });
   } catch (error: any) {
     console.error("API: Error fetching form:", error);
@@ -217,18 +155,14 @@ export async function PUT(
   }
 }
 
-// ────────────────────────────────────────────────
-// NEW: Add PATCH handler (used by your frontend toggle)
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { formId: string } }
 ) {
   try {
     const body = await request.json();
-    console.log("PATCH request received for form:", params.formId, body);
 
-    // Optional: validate allowed fields
-    const allowedFields = ["isEmployeeForm", "isUserForm", "name", "description" /* add others if needed */];
+    const allowedFields = ["isEmployeeForm", "isUserForm", "name", "description"];
     const updates: Record<string, any> = {};
     for (const key in body) {
       if (allowedFields.includes(key)) {
@@ -244,7 +178,6 @@ export async function PATCH(
     }
 
     const updatedForm = await DatabaseService.updateForm(params.formId, updates);
-
     return NextResponse.json({ success: true, data: updatedForm });
   } catch (error: any) {
     console.error("PATCH /api/forms/[formId] error:", error);

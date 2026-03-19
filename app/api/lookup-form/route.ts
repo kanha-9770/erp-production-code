@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { type NextRequest, NextResponse } from "next/server"
-import { validateSession } from "@/lib/auth"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 import { prisma } from "@/lib/prisma"
 
 /**
@@ -9,15 +9,8 @@ import { prisma } from "@/lib/prisma"
  */
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-    }
-
-    const session = await validateSession(token)
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
-    }
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     const permittedModules = await (prisma as any).permittedModule.findMany({
       include: {

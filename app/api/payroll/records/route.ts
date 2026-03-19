@@ -1,26 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Invalid session" },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
     const month = Number.parseInt(searchParams.get("month") || "0");
@@ -183,27 +168,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
 
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Invalid session" },
-        { status: 401 }
-      );
-    }
-
-    const isAdmin = session.user.unitAssignments?.some((ua) =>
-      ua.role.name.toLowerCase().includes("admin")
-    );
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
+    });
+    const isAdmin = userWithRoles?.unitAssignments.some(
+      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+    ) ?? false;
 
     if (!isAdmin) {
       return NextResponse.json(
@@ -265,7 +239,7 @@ export async function POST(request: NextRequest) {
           netSalary,
           status: status ?? existingRecord.status,
           baseSalary: grossSalary ?? existingRecord.baseSalary,
-          processedBy: session.user.id,
+          processedBy: authUser.id,
           processedAt: new Date(),
         },
       });
@@ -283,7 +257,7 @@ export async function POST(request: NextRequest) {
           netSalary,
           baseSalary: grossSalary || 0,
           status: status || "pending",
-          processedBy: session.user.id,
+          processedBy: authUser.id,
           processedAt: new Date(),
         },
       });

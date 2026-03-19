@@ -3,29 +3,18 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[GET /api/role-permissions] Starting request");
-
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    const organizationId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId;
+    const organizationId = authUser.organizationId;
 
     if (!organizationId) {
-      console.warn("[GET /api/role-permissions] No organizationId in session");
       return NextResponse.json(
         { error: "No organization context" },
         { status: 403 },
@@ -40,10 +29,6 @@ export async function GET(request: NextRequest) {
       formId = null;
     }
 
-    console.log(
-      `[GET] Query → roleId: ${roleId ?? "(any)"}, formId: ${formId ?? "(any / both module & form level)"}`,
-    );
-
     const whereClause: any = {
       role: {
         organizationId,
@@ -57,7 +42,6 @@ export async function GET(request: NextRequest) {
     // Only apply formId filter if explicitly provided
     if (formId !== null && formId !== undefined) {
       whereClause.formId = formId;
-      console.log("[GET] Filtering for specific formId:", formId);
     }
     // ── IMPORTANT CHANGE ──
     // If no formId is sent → do NOT force formId = null
@@ -101,22 +85,6 @@ export async function GET(request: NextRequest) {
       ],
     });
 
-    console.log(
-      `[GET /api/role-permissions] Found ${rolePermissions.length} records`,
-    );
-
-    if (rolePermissions.length > 0) {
-      console.log(
-        "[GET] First few:",
-        rolePermissions.slice(0, 3).map((p) => ({
-          perm: p.permission?.name || p.permissionId,
-          module: p.module?.name || p.moduleId || "—",
-          form: p.form?.name || p.formId || "—",
-          granted: p.granted,
-        })),
-      );
-    }
-
     return NextResponse.json({
       success: true,
       organizationId,
@@ -135,49 +103,29 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  console.log("[PATCH /api/role-permissions] Request received");
   return handleUpdate(request, "PATCH");
 }
 
 export async function PUT(request: NextRequest) {
-  console.log(
-    "[PUT /api/role-permissions] Request received - consider using PATCH instead",
-  );
   return handleUpdate(request, "PUT");
 }
 
 async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      console.log("[handleUpdate] No auth token");
-      return unauthorized();
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      console.log("[handleUpdate] Invalid session");
-      return unauthorized();
-    }
-
-    const organizationId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId;
+    const organizationId = authUser.organizationId;
 
     if (!organizationId) {
-      console.log("[handleUpdate] No organizationId");
-      return forbidden();
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
-    console.log(
-      `[${method} /api/role-permissions] Body:`,
-      JSON.stringify(body, null, 2),
-    );
 
     if (!Array.isArray(body) || body.length === 0) {
-      console.log(`[${method}] Invalid or empty body`);
       return NextResponse.json(
         { error: "Body must be a non-empty array" },
         { status: 400 },
@@ -188,11 +136,6 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
     const skipped = [];
 
     for (const [index, item] of body.entries()) {
-      console.log(
-        `[${method}] Processing item ${index + 1}/${body.length}:`,
-        item,
-      );
-
       const {
         roleId,
         permissionId,
@@ -203,9 +146,6 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
       } = item;
 
       if (!roleId || !permissionId) {
-        console.warn(
-          `[${method}] Skipping item ${index + 1} - missing roleId or permissionId`,
-        );
         skipped.push({ index, reason: "missing roleId or permissionId", item });
         continue;
       }
@@ -216,9 +156,6 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
       });
 
       if (!role) {
-        console.warn(
-          `[${method}] Skipping - role ${roleId} not in org ${organizationId}`,
-        );
         skipped.push({ index, reason: "role not in organization", roleId });
         continue;
       }
@@ -247,9 +184,6 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
           },
         });
 
-        console.log(
-          `[${method}] Upserted permission ${permissionId} for role ${roleId}`,
-        );
         updated.push(result);
       } catch (upsertError) {
         console.error(
@@ -267,10 +201,6 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
         });
       }
     }
-
-    console.log(
-      `[${method}] Finished. Updated: ${updated.length}, Skipped: ${skipped.length}`,
-    );
 
     return NextResponse.json({
       success: true,
@@ -292,10 +222,3 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
   }
 }
 
-function unauthorized() {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
-
-function forbidden() {
-  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-}

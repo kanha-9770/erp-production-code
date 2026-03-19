@@ -5,7 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { headers } from "next/headers";
 import crypto from "crypto";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 // ──────────────────────────────────────────────
 // Type definitions
@@ -132,33 +132,16 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
     const { formId } = params;
     const body = await request.json();
 
-    console.log("[FORM SUBMIT] API called", {
-      formId,
-      recordDataKeys: Object.keys(body.recordData || {}),
-    });
-
     // ─── 1. Authentication ──────────────────────────────────────
-    const token = request.cookies.get("auth-token")?.value;
-    let session = null;
+    const authUser = await getAuthenticatedUser(request);
     let currentUserId: string | undefined;
     let currentOrgId: string | undefined;
     let submittedByDisplay = "anonymous";
 
-    if (token) {
-      session = await validateSession(token);
-      if (session?.user) {
-        currentUserId = session.user.id;
-        currentOrgId = session.user.organization?.id || session.user.organizationId || undefined;
-        submittedByDisplay =
-          [session.user.first_name, session.user.last_name].filter(Boolean).join(" ") ||
-          session.user.email ||
-          "user";
-        console.log("[FORM SUBMIT] Authenticated user", { userId: currentUserId, orgId: currentOrgId });
-      } else {
-        console.log("[FORM SUBMIT] Invalid session for token");
-      }
-    } else {
-      console.log("[FORM SUBMIT] No auth token – anonymous submission");
+    if (authUser) {
+      currentUserId = authUser.id;
+      currentOrgId = authUser.organizationId ?? undefined;
+      submittedByDisplay = authUser.email || "user";
     }
 
     // ─── 2. Fetch form data ─────────────────────────────────────
@@ -172,7 +155,7 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       return NextResponse.json({ error: "Form is not published" }, { status: 403 });
     }
 
-    if (form.requireLogin && !session) {
+    if (form.requireLogin && !authUser) {
       return NextResponse.json(
         { error: "This form requires authentication" },
         { status: 401 }
@@ -193,7 +176,6 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
 
     // User forms (table 15) should have userId if possible
     if (tableName === "form_records_15" && !currentUserId) {
-      console.warn("[FORM SUBMIT] User form submitted without userId – allowing but may be incorrect");
       // Optional: return error if you want to enforce
       // return NextResponse.json({ error: "Cannot submit user form: no user context" }, { status: 400 });
     }
@@ -227,14 +209,6 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       organizationId,
       currentUserId
     );
-
-    console.log("[FORM SUBMIT] Success", {
-      recordId: record.id,
-      formId,
-      table: tableName,
-      userId: currentUserId || "anonymous",
-      organizationId: organizationId || "none",
-    });
 
     return NextResponse.json({
       success: true,
@@ -369,7 +343,6 @@ async function generateUniqueIds(form: Form, recordData: Record<string, any>): P
     }
 
     finalRecordData[fieldId] = generatedId;
-    console.log(`Generated unique ID for field ${fieldId}: ${generatedId}`);
   }
 
   return finalRecordData;
@@ -638,8 +611,6 @@ async function createFormRecord(
   }
 
   const finalData = { ...baseData, ...extra };
-
-  console.log("[FORM SUBMIT] Creating record in", tableName, "with userId:", userId, "orgId:", organizationId);
 
   switch (tableName) {
     case "form_records_1":  return prisma.formRecord1.create({ data: finalData });

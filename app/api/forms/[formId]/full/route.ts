@@ -11,8 +11,6 @@ export async function GET(
   try {
     const { formId } = params;   // ← now correctly destructured
 
-    console.log("API route hit — formId received:", formId);  // ← helpful debug log
-
     if (!formId) {
       return NextResponse.json(
         { success: false, error: "Form ID is required" },

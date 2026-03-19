@@ -1,23 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { PrismaClient } from "@prisma/client"
-import { validateSession } from "@/lib/auth"
-
-const prisma = new PrismaClient()
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 
 // GET - Fetch all leave types
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value
-
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
-    }
-
-    const session = await validateSession(token)
-
-    if (!session) {
-      return NextResponse.json({ success: false, error: "Invalid session" }, { status: 401 })
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
 
     const leaveTypes = await prisma.leaveType.findMany({
       where: { isActive: true },
@@ -34,21 +23,18 @@ export async function GET(request: NextRequest) {
 // POST - Create or update leave type (Admin only)
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
 
-    if (!token) {
-      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
-    }
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
+    });
+    const isAdmin = userWithRoles?.unitAssignments.some(
+      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
+    ) ?? false;
 
-    const session = await validateSession(token)
-
-    if (!session) {
-      return NextResponse.json({ success: false, error: "Invalid session" }, { status: 401 })
-    }
-
-    const hasAdminRole = session.user.unitAssignments.some((ua: any) => ua.role.name.toLowerCase().includes("admin"))
-
-    if (!hasAdminRole) {
+    if (!isAdmin) {
       return NextResponse.json(
         { success: false, error: "Unauthorized. Only admins can manage leave types." },
         { status: 403 },

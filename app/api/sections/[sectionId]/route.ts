@@ -27,12 +27,9 @@ export async function PUT(request: Request, { params }: { params: { sectionId: s
 
 export async function DELETE(request: Request, { params }: { params: { sectionId: string } }) {
   try {
-    console.log("[API] Deleting section with cleanup:", params.sectionId)
-
     // Delete section with complete cleanup (fields + records)
     await DatabaseService.deleteSectionWithCleanup(params.sectionId)
 
-    console.log("[API] Section deleted successfully with cleanup")
     return NextResponse.json({ success: true, message: "Section and associated data deleted successfully" })
   } catch (error: any) {
     console.error("Error deleting section:", error)

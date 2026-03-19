@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     });
     if (!organization) {
       return NextResponse.json(
-        { error: `Organization with id ${organizationId} not found` },
+        { success: false, error: `Organization with id ${organizationId} not found` },
         { status: 404 }
       );
     }
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json(hierarchicalUnits);
   } catch (error) {
     console.error("Error fetching organization units:", error);
-    return NextResponse.json({ error: "Failed to fetch organization units" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Failed to fetch organization units" }, { status: 500 });
   }
 }
 
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     });
     if (!organization) {
       return NextResponse.json(
-        { error: `Organization with id ${organizationId} not found` },
+        { success: false, error: `Organization with id ${organizationId} not found` },
         { status: 404 }
       );
     }
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       });
       if (!parent) {
         return NextResponse.json(
-          { error: `Parent unit with id ${parentId} not found` },
+          { success: false, error: `Parent unit with id ${parentId} not found` },
           { status: 404 }
         );
       }
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       });
       if (roles.length !== assignedRoles.length) {
         return NextResponse.json(
-          { error: "One or more role IDs are invalid" },
+          { success: false, error: "One or more role IDs are invalid" },
           { status: 400 }
         );
       }
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       });
       if (users.length !== userIds.length || roles.length !== roleIds.length) {
         return NextResponse.json(
-          { error: "One or more user or role IDs are invalid" },
+          { success: false, error: "One or more user or role IDs are invalid" },
           { status: 400 }
         );
       }
@@ -196,10 +196,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     console.error("Error creating organization unit:", error);
     if (error.code === "P2003") {
       return NextResponse.json(
-        { error: `Foreign key constraint failed: ${error.meta?.field_name || "unknown field"}` },
+        { success: false, error: `Foreign key constraint failed: ${error.meta?.field_name || "unknown field"}` },
         { status: 400 }
       );
     }
-    return NextResponse.json({ error: "Failed to create organization unit" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Failed to create organization unit" }, { status: 500 });
   }
 }

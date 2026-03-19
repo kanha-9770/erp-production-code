@@ -2767,6 +2767,7 @@ import {
 
 // ── Sidebar component ───────────────────────────────────────────
 import ModuleSidebar from "@/components/modules/moduleSidebar";
+import { PublicFormDialog } from "@/components/public-form-dialog";
 
 // ── Types ───────────────────────────────────────────────────────
 interface FormModule {
@@ -2869,6 +2870,9 @@ export default function ModuleDashboard() {
 
   // Mobile sidebar drawer
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // View/Fill form dialog
+  const [viewFormId, setViewFormId] = useState<string | null>(null);
 
   // ── Fetch organization ──────────────────────────────────────────
   useEffect(() => {
@@ -3402,7 +3406,7 @@ export default function ModuleDashboard() {
             </Tabs>
 
             <PermissionGate permission="create">
-              <Button size="sm" className="md:size-default">
+              <Button size="sm" className="md:size-default" onClick={() => setIsCreateDialogOpen(true)}>
                 <Plus className="mr-1 md:mr-2 h-4 w-4" /> New Module
               </Button>
             </PermissionGate>
@@ -3557,7 +3561,7 @@ export default function ModuleDashboard() {
                     permission="create"
                     moduleId={selectedModule.id}
                   >
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => openSubmodule(selectedModule)}>
                       <FolderPlus className="mr-1.5 h-4 w-4" /> Submodule
                     </Button>
                   </PermissionGate>
@@ -3566,7 +3570,7 @@ export default function ModuleDashboard() {
                     permission="update"
                     moduleId={selectedModule.id}
                   >
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => openEditModule(selectedModule)}>
                       <Edit className="mr-1.5 h-4 w-4" /> Edit
                     </Button>
                   </PermissionGate>
@@ -3575,7 +3579,7 @@ export default function ModuleDashboard() {
                     permission="delete"
                     moduleId={selectedModule.id}
                   >
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => openDeleteConfirmation("module", selectedModule.id, selectedModule.name)}>
                       <Trash2 className="mr-1.5 h-4 w-4" /> Delete
                     </Button>
                   </PermissionGate>
@@ -3604,7 +3608,7 @@ export default function ModuleDashboard() {
                     permission="create"
                     moduleId={selectedModule.id}
                   >
-                    <Button size="sm">
+                    <Button size="sm" onClick={() => setIsCreateFormDialogOpen(true)}>
                       <Plus className="mr-1.5 h-4 w-4" /> New Form
                     </Button>
                   </PermissionGate>
@@ -3676,6 +3680,7 @@ export default function ModuleDashboard() {
                                     size="icon"
                                     className="h-8 w-8"
                                     title="View / Fill"
+                                    onClick={() => setViewFormId(form.id)}
                                   >
                                     <Eye className="h-4 w-4 text-blue-600" />
                                   </Button>
@@ -4039,6 +4044,14 @@ export default function ModuleDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View / Fill Form Dialog */}
+      <PublicFormDialog
+        formId={viewFormId}
+        isOpen={!!viewFormId}
+        onClose={() => setViewFormId(null)}
+        allowAdminPreview
+      />
 
       <Dialog
         open={isConfirmDeleteOpen}

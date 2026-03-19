@@ -1,7 +1,7 @@
 // app/api/master-data/route.ts
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server"
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma"
 const extractValues = (staticData: any) => {
   if (!Array.isArray(staticData)) return []
@@ -239,35 +239,23 @@ async function getModulePath(moduleId: string) {
 }
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const userId = session.user.id;
-    // Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-    if (!user?.organizationId) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
-    const organizationId = user.organizationId;
+    // Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
     const permittedModules = await getPermittedModulesFlat(userId, organizationId, isAdmin);
     const permittedIds = permittedModules.map((m: any) => m.module_id);
@@ -292,35 +280,23 @@ export async function GET(request: NextRequest) {
 }
 export async function POST(req: NextRequest) {
   try {
-    const token = req.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const userId = session.user.id;
-    // Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-    if (!user?.organizationId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
-    const organizationId = user.organizationId;
+    // Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
     const body = await req.json()
     const { form_id, master_data_type_name, values } = body
@@ -385,35 +361,23 @@ export async function POST(req: NextRequest) {
 }
 export async function PUT(req: NextRequest) {
   try {
-    const token = req.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const userId = session.user.id;
-    // Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-    if (!user?.organizationId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
-    const organizationId = user.organizationId;
+    // Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
     const body = await req.json()
     const { id, master_data_type_name, values } = body
@@ -485,35 +449,23 @@ export async function PUT(req: NextRequest) {
 }
 export async function DELETE(req: NextRequest) {
   try {
-    const token = req.cookies.get("auth-token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
-    const session = await validateSession(token);
-    if (!session) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const userId = session.user.id;
-    // Fetch organizationId and roles in parallel
-    const [user, roles] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { organizationId: true },
-      }),
-      prisma.$queryRaw<{ role_name: string }[]>`
-        SELECT r.name AS role_name
-        FROM user_unit_assignments uua
-        JOIN roles r ON r.id = uua.role_id
-        WHERE uua.user_id = ${userId}
-      `,
-    ]);
-    if (!user?.organizationId) {
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const userId = authUser.id;
+    const organizationId = authUser.organizationId;
+    if (!organizationId) {
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
-    const organizationId = user.organizationId;
+    // Fetch roles
+    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
+      SELECT r.name AS role_name
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `;
     const isAdmin = roles.some((r) => r.role_name === "ADMIN");
     const { searchParams } = new URL(req.url)
     const id = searchParams.get("id")

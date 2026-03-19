@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkUserAdminRole, getUserActiveRoles } from '@/lib/auth-helpers';
-import { validateSession } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 interface Params {
   userId: string;
@@ -14,27 +14,12 @@ export async function GET(
     const { userId } = params;
     
     // Validate the session
-    const token = request.cookies.get('auth-token')?.value;
-    
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const session = await validateSession(token);
-    
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Invalid session' },
-        { status: 401 }
-      );
-    }
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
     // Check if the requesting user is an admin or requesting their own info
-    const isRequestingOwnInfo = session.user.id === userId;
-    const isRequestingUserAdmin = await checkUserAdminRole(session.user.id);
+    const isRequestingOwnInfo = authUser.id === userId;
+    const isRequestingUserAdmin = await checkUserAdminRole(authUser.id);
     
     if (!isRequestingOwnInfo && !isRequestingUserAdmin) {
       return NextResponse.json(

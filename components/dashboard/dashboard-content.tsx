@@ -77,17 +77,17 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
     .slice(0, 8);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-muted-foreground mt-1 text-sm sm:text-base">
           Overview of {setupMetrics.organizationName}
         </p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
         {kpiConfig.map((item) => {
           const Icon = item.icon;
           const value = kpis[item.key as keyof typeof kpis];
@@ -106,7 +106,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
       </div>
 
       {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Submission Trend */}
         <Card className="border shadow-sm">
           <CardHeader className="pb-2">
@@ -115,7 +115,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
           </CardHeader>
           <CardContent>
             {timeSeries.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={timeSeries} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="submGrad" x1="0" y1="0" x2="0" y2="1">
@@ -145,7 +145,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+              <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">
                 No submission data for this period
               </div>
             )}
@@ -160,7 +160,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
           </CardHeader>
           <CardContent>
             {topModules.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={220}>
                 <BarChart
                   data={topModules.map((m) => ({ name: m.name.length > 20 ? m.name.slice(0, 20) + '...' : m.name, records: m.totalRecords }))}
                   layout="vertical"
@@ -176,7 +176,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+              <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">
                 No modules found
               </div>
             )}
@@ -185,7 +185,7 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
       </div>
 
       {/* Modules Grid + Setup Progress */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Module List */}
         <div className="lg:col-span-2">
           <Card className="border shadow-sm">

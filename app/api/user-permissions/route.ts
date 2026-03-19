@@ -21,12 +21,9 @@ const WRITE_PERMISSIONS = [
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[GET /api/user-permissions] Starting request");
-
     const userId = request.nextUrl.searchParams.get("userId");
 
     if (userId && typeof userId !== "string") {
-      console.log("[GET] Invalid userId parameter:", userId);
       return NextResponse.json(
         { success: false, error: "Invalid userId parameter" },
         { status: 400 },
@@ -34,9 +31,6 @@ export async function GET(request: NextRequest) {
     }
 
     const userPermissions = await getUserPermissions(userId || undefined);
-    console.log(
-      `[GET] Retrieved ${userPermissions.length} permissions for userId: ${userId || "all"}`,
-    );
 
     return NextResponse.json({
       success: true,
@@ -61,10 +55,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    console.log("[PUT /api/user-permissions] Starting request");
-
     const body = await request.json();
-    console.log("[PUT] Raw body:", JSON.stringify(body, null, 2));
 
     if (!Array.isArray(body)) {
       return NextResponse.json(
@@ -89,10 +80,6 @@ export async function PUT(request: NextRequest) {
       } = raw;
 
       if (!userId || !permissionId) {
-        console.warn(
-          "[PUT] Skipping invalid update → missing userId/permissionId",
-          raw,
-        );
         continue;
       }
 
@@ -117,8 +104,6 @@ export async function PUT(request: NextRequest) {
     const finalUpdates: UserPermissionUpdate[] = [];
 
     for (const [scope, updates] of Object.entries(groupedUpdates)) {
-      console.log(`[PUT] Processing scope ${scope} (${updates.length} perms)`);
-
       // ───────────────────────────────────────
       // Previously here: VIEW + WRITE rejection
       // Now removed → VIEW + CREATE/EDIT/DELETE allowed
@@ -137,7 +122,6 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    console.log(`[PUT] Applying ${finalUpdates.length} validated updates`);
     const success = await updateUserPermissions(finalUpdates);
 
     return NextResponse.json({

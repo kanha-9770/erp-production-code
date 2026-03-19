@@ -1,53 +1,35 @@
-import { PrismaClient } from "@prisma/client"
 import { type NextRequest, NextResponse } from "next/server"
-
-const prisma = new PrismaClient()
+import { DatabaseModules } from "@/lib/DatabaseModules"
 
 export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
   try {
     const { formId } = params
 
-    // Fetch the form directly
-    const form = await prisma.form.findUnique({
-      where: { id: formId },
-    })
-
+    // 1. Get form to find moduleId
+    const form = await DatabaseModules.getForm(formId)
     if (!form) {
       return NextResponse.json({ error: "Form not found" }, { status: 404 })
     }
 
-    const actualFormId = formId
     const moduleId = form.moduleId
 
-    // Fetch all forms in the same module
-    const forms = await prisma.form.findMany({
-      where: { moduleId },
-      include: {
-        sections: {
-          include: {
-            fields: {
-              include: {
-                formula: true,
-              },
-            },
-          },
-        },
-      },
-    })
+    // 2. Get all forms in the same module (now includes formula data)
+    const forms = await DatabaseModules.getForms(moduleId)
 
     if (forms.length === 0) {
       return NextResponse.json({ error: "No forms found in module" }, { status: 404 })
     }
 
-    const allFields = forms.flatMap((form) =>
-      form.sections.flatMap((section) =>
-        section.fields.map((field) => ({
+    // 3. Flatten to editable fields preserving exact same response format
+    const allFields = forms.flatMap((f) =>
+      (f.sections ?? []).flatMap((section) =>
+        (section.fields ?? []).map((field: any) => ({
           id: field.id,
           label: field.label,
           type: field.type,
           databaseName: field.id,
-          formId: form.id,
-          formName: form.name,
+          formId: f.id,
+          formName: f.name,
           sectionId: section.id,
           sectionTitle: section.title,
           visible: field.visible,
@@ -69,7 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
 
     return NextResponse.json({
       success: true,
-      formId: actualFormId,
+      formId,
       moduleId,
       totalFields: editableFields.length,
       fields: editableFields,

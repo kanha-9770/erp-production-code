@@ -134,8 +134,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma'; // ← use your shared prisma instance (preferred)
-import { validateSession } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { parseEmployeeData, analyzeRecordDataStructure } from '@/lib/employeeDataParser';
 
 // Do NOT create new PrismaClient() here — use the shared instance from lib/prisma
@@ -143,36 +143,22 @@ import { parseEmployeeData, analyzeRecordDataStructure } from '@/lib/employeeDat
 
 export async function GET(request: NextRequest) {
   try {
-    console.log('Fetching employee records from FormRecord14...');
-
     // ──────────────────────────────────────────────────────────────
     // 1. Authentication & get current organization
     // ──────────────────────────────────────────────────────────────
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
-    }
-
-    // Extract organization ID — adjust path based on your session shape
-    const orgId = session.user?.organization?.id ||
-                  session.user?.organizationId ||
-                  session.user?.orgId ||
-                  session.user?.tenantId;
+    const orgId = authUser.organizationId;
 
     if (!orgId) {
-      console.warn("No organization context found in session", { userId: session.user.id });
       return NextResponse.json(
         { error: "No organization context available" },
         { status: 403 }
       );
     }
-
-    console.log(`Fetching records for organization: ${orgId}`);
 
     // ──────────────────────────────────────────────────────────────
     // 2. Fetch ONLY records belonging to this organization
@@ -196,8 +182,6 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    console.log(`Found ${records.length} records in FormRecord14 for org ${orgId}`);
-
     // ──────────────────────────────────────────────────────────────
     // 3. Process records (your original logic – unchanged)
     // ──────────────────────────────────────────────────────────────
@@ -207,23 +191,15 @@ export async function GET(request: NextRequest) {
     for (const record of records) {
       const parsedData = parseEmployeeData(record.recordData);
 
-      // Debug: Analyze structure for the first record
-      if (processedRecords.length === 0) {
-        const analysis = analyzeRecordDataStructure(record.recordData);
-        console.log('Record structure analysis:', JSON.stringify(analysis, null, 2));
-      }
-
       let status = 'valid';
       let reason = null;
 
       if (!parsedData.employeeName) {
         status = 'skipped';
         reason = 'Missing essential data: employeeName';
-        console.log(`Record ${record.id}: ${reason}`);
       } else if (!parsedData.email) {
         status = 'warning';
         reason = 'Missing email - can still create user but email recommended';
-        console.log(`Record ${record.id}: ${reason}`);
       } else {
         const existingUser = await prisma.user.findUnique({
           where: { email: parsedData.email }
@@ -232,7 +208,6 @@ export async function GET(request: NextRequest) {
         if (existingUser) {
           status = 'skipped';
           reason = `User already exists with email ${parsedData.email}`;
-          console.log(`Record ${record.id}: ${reason}`);
         }
       }
 
@@ -264,11 +239,6 @@ export async function GET(request: NextRequest) {
 
     const usableRecords = processedRecords.filter(r => 
       r.processStatus === 'valid' || r.processStatus === 'warning'
-    );
-
-    console.log(
-      `Returning ${usableRecords.length} usable records for user creation ` +
-      `(total processed: ${processedRecords.length})`
     );
 
     return NextResponse.json({

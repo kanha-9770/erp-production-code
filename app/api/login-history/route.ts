@@ -2,7 +2,6 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-// import { getCurrentUser } from "@/lib/auth" // Uncomment and use when adding auth
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,7 +33,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error fetching login history:", error)
     return NextResponse.json(
-      { error: "Failed to fetch login history" },
+      { success: false, error: "Failed to fetch login history" },
       { status: 500 }
     )
   }

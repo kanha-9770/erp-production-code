@@ -1,88 +1,29 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { validateSession } from "@/lib/auth";
+import { DatabaseRoles } from "@/lib/DatabaseRoles";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[GET /api/roles] Starting request");
-
     // 1. Authenticate user
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) {
-      console.warn("[GET /api/roles] No auth token provided");
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session || !session.user) {
-      console.warn("[GET /api/roles] Invalid session");
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
     // 2. Get current user's organization
-    const organizationId =
-      session.user?.organizationId ||
-      session.user?.organization?.id ||
-      session.user?.orgId ||
-      session.user?.tenantId;
-
-    console.log("[GET /api/roles] Session user:", {
-      userId: session.user.id,
-      email: session.user.email,
-      organizationId: organizationId || "MISSING"
-    });
+    const organizationId = authUser.organizationId;
 
     if (!organizationId) {
-      console.warn("[GET /api/roles] No organizationId found in session");
       return NextResponse.json(
         { error: "User is not associated with any organization" },
         { status: 403 }
       );
     }
 
-    // 3. Fetch ONLY roles from this organization
-    const roles = await prisma.role.findMany({
-      where: {
-        organizationId,           // ← This line fixes the leak
-        isActive: true,
-      },
-      include: {
-        userAssignments: {
-          select: {
-            userId: true,
-          },
-        },
-        children: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        parent: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-      orderBy: [
-        { level: "asc" },
-        { name: "asc" },
-      ],
-    });
-
-    // Optional: enrich with user count
-    const rolesWithCount = roles.map(role => ({
-      ...role,
-      userCount: role.userAssignments.length,
-    }));
-
-    console.log(
-      `[GET /api/roles] Successfully retrieved ${rolesWithCount.length} roles ` +
-      `for organization ${organizationId}`
-    );
+    // 3. Fetch roles for this organization
+    const rolesWithCount = await DatabaseRoles.getRolesForOrganization(organizationId);
 
     return NextResponse.json({
       success: true,

@@ -1,6 +1,6 @@
 // app/api/forms/records/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { validateSession } from "@/lib/auth";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { parseRecordData } from "@/lib/response-parser";
 // Import the unified parser (adjust path to your parsers file, e.g., if it's lib/unified_parser.ts)
@@ -10,13 +10,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     // 1. Auth
-    const token = request.cookies.get("auth-token")?.value;
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const session = await validateSession(token);
-    if (!session?.user?.id) return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-
-    const orgId = session.user.organization?.id;
+    const orgId = authUser.organizationId;
     if (!orgId) return NextResponse.json({ error: "No organization" }, { status: 400 });
 
     // 2. Get all user IDs in the organization (optimized: single query)

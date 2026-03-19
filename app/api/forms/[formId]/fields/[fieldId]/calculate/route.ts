@@ -1,8 +1,6 @@
-import { PrismaClient } from "@prisma/client"
 import { type NextRequest, NextResponse } from "next/server"
 import { getFormulaEvaluator } from "@/lib/formula/evaluator"
-
-const prisma = new PrismaClient()
+import { prisma } from "@/lib/prisma"
 
 export async function POST(request: NextRequest, { params }: { params: { formId: string; fieldId: string } }) {
   try {
