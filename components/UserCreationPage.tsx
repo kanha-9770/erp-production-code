@@ -672,6 +672,7 @@ interface CreateUserData {
 const UserCreationPage: React.FC = () => {
   const [employeeRecords, setEmployeeRecords] = useState<EmployeeRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<EmployeeRecord[]>([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRecord, setSelectedRecord] = useState<EmployeeRecord | null>(null); // for single mode
   const [bulkPassword, setBulkPassword] = useState("");
@@ -707,21 +708,24 @@ const UserCreationPage: React.FC = () => {
   }, [searchTerm, employeeRecords]);
 
   const fetchEmployeeRecords = async () => {
+    setLoadingRecords(true);
+    setMessage(null);
     try {
       const res = await fetch("/api/employee-records");
-      if (!res.ok) throw new Error();
-      const { records } = await res.json();
-      // Add status fields
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details ? `${data.error}: ${data.details}` : data.error || `HTTP ${res.status}`);
       setEmployeeRecords(
-        (records || []).map((r: EmployeeRecord) => ({
+        (data.records || []).map((r: EmployeeRecord) => ({
           ...r,
           selected: false,
           status: "idle",
           message: "",
         }))
       );
-    } catch {
-      setMessage({ type: "error", text: "Failed to load employee records" });
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "Failed to load employee records" });
+    } finally {
+      setLoadingRecords(false);
     }
   };
 
@@ -984,7 +988,16 @@ const UserCreationPage: React.FC = () => {
             </div>
 
             <div className="space-y-3 max-h-[60vh] sm:max-h-[70vh] overflow-y-auto">
-              {filteredRecords.map((record) => {
+              {loadingRecords ? (
+                <div className="flex items-center justify-center py-12 text-gray-500 gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Loading employee records…</span>
+                </div>
+              ) : filteredRecords.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 text-sm">
+                  {searchTerm ? "No records match your search." : "No submitted employee records found."}
+                </div>
+              ) : filteredRecords.map((record) => {
                 const isSelected = bulkMode ? record.selected : selectedRecord?.id === record.id;
 
                 return (

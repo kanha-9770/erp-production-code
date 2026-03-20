@@ -53,7 +53,7 @@ export const processRecordData = (
         icon: fieldType,
         order: formField?.order ?? 999,
         sectionId: formField?.sectionId || "other",
-        sectionTitle: formField?.sectionTitle || "Uncategorized",
+        sectionTitle: formField?.sectionTitle || "Sub Form",
         formId: record.formId,
         formName: formField?.formName || record.formName || "Form",
         lookup: formField?.lookup || {},

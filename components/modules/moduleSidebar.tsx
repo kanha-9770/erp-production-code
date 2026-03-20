@@ -292,7 +292,7 @@ export default function ModuleSidebar({
   return (
     <div
       ref={sidebarRef}
-      className="bg-white border-r flex flex-col h-full shadow-sm select-none relative"
+      className="bg-white border-r flex flex-col h-full shadow-sm select-none"
       style={{ width: `${width}px` }}
     >
       {/* Header */}

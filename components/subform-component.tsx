@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
   useSortable,
@@ -7,6 +7,8 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { DndContext, closestCenter } from "@dnd-kit/core";   // ← added DndContext & closestCenter
+import { arrayMove } from "@dnd-kit/sortable";               // ← added arrayMove
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -46,7 +48,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import FieldSettings from "@/components/field-settings";
-import type { FormField, Subform } from "@/types/item-types";
+import type { FormField, Subform } from "@/types/form-builder";
 import { useToast } from "@/hooks/use-toast";
 
 interface PermissionDefinition {
@@ -69,6 +71,94 @@ interface SubformComponentProps {
   onCopyField?: (field: FormField) => void;
   formId: string;
 }
+
+// ── Inline editable text component ──────────────────────────────────────────
+interface InlineEditProps {
+  value: string;
+  onSave: (newValue: string) => Promise<void> | void;
+  className?: string;
+  inputClassName?: string;
+  placeholder?: string;
+}
+
+function InlineEdit({ value, onSave, className = "", inputClassName = "", placeholder = "Enter name..." }: InlineEditProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Keep draft in sync if parent value changes while not editing
+  useEffect(() => {
+    if (!editing) {
+      setDraft(value);
+    }
+  }, [value, editing]);
+
+  const startEditing = () => {
+    setDraft(value);
+    setEditing(true);
+    // Focus after state update
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  const commit = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === value) {
+      cancel();
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(trimmed);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        autoFocus
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={handleKeyDown}
+        disabled={saving}
+        className={`bg-white border border-[#515ada] rounded px-2 py-0.5 outline-none focus:ring-2 focus:ring-[#515ada]/30 text-[#374151] ${saving ? "opacity-60" : ""} ${inputClassName}`}
+        style={{ minWidth: 80 }}
+      />
+    );
+  }
+
+  return (
+    <span
+      title="Click to edit"
+      onClick={startEditing}
+      className={`cursor-pointer hover:bg-slate-100 rounded px-1 -mx-1 transition-colors duration-150 ${className}`}
+    >
+      {value || <span className="text-muted-foreground italic">{placeholder}</span>}
+    </span>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 export default function SubformComponent({
   subform,
@@ -211,7 +301,53 @@ export default function SubformComponent({
     }
   };
 
+  // ── Save subform name inline ─────────────────────────────────────────────
+  const handleSaveSubformName = async (newName: string) => {
+    try {
+      const res = await fetch(`/api/subforms/${subform.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Server responded with status ${res.status}`);
+      }
+      onUpdateSubform({ name: newName });
+      toast({ title: "Subform renamed", description: `Renamed to "${newName}"` });
+    } catch (err: any) {
+      console.error("[Subform Rename]", err);
+      toast({
+        variant: "destructive",
+        title: "Rename failed",
+        description: err.message || "Could not rename subform. Please try again.",
+      });
+      throw err; // re-throw so InlineEdit knows to revert
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────
+
   const sortableIds = subform.fields.map((f) => f.id);
+
+  // ── Handle drag end → reorder fields and update parent ──────────────────────
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      const oldIndex = subform.fields.findIndex((f) => f.id === active.id);
+      const newIndex = subform.fields.findIndex((f) => f.id === over.id);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newFields = arrayMove(subform.fields, oldIndex, newIndex);
+
+        // Update parent component with new order
+        onUpdateSubform({ fields: newFields });
+
+        // Optional: you can also persist the order to backend here
+        // e.g. send PATCH request with new order indices
+      }
+    }
+  };
 
   return (
     <div className="mb-8">
@@ -225,7 +361,14 @@ export default function SubformComponent({
           >
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
-          <h3 className="text-base font-semibold">{subform.name}</h3>
+          {/* ── Inline-editable subform name ── */}
+          <InlineEdit
+            value={subform.name}
+            onSave={handleSaveSubformName}
+            className="text-base font-semibold text-[#374151]"
+            inputClassName="text-base font-semibold"
+            placeholder="Subform name"
+          />
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -258,47 +401,52 @@ export default function SubformComponent({
           className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? "border-blue-400 bg-blue-50/50 ring-2 ring-blue-200" : "border-slate-300 bg-white"
             }`}
         >
-          <div
-            ref={setDroppableRef}
-            className="overflow-x-auto overflow-y-hidden"
-            style={{ scrollbarWidth: "thin" }}
+          <DndContext
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
           >
-            <div className="inline-flex w-[20rem]">
-              <div className="flex border-b border-slate-200">
-                <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
-                  {subform.fields.map((field) => (
-                    <TabularFieldHeader
-                      key={field.id}
-                      field={field}
-                      onUpdate={onUpdateField}
-                      onDelete={() => onDeleteField(field.id)}
-                      onCopy={() => onCopyField?.(field)}
-                    />
+            <div
+              ref={setDroppableRef}
+              className="overflow-x-auto overflow-y-hidden"
+              style={{ scrollbarWidth: "thin" }}
+            >
+              <div className="inline-flex w-[20rem]">
+                <div className="flex border-b border-slate-200">
+                  <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
+                    {subform.fields.map((field) => (
+                      <TabularFieldHeader
+                        key={field.id}
+                        field={field}
+                        onUpdate={onUpdateField}
+                        onDelete={() => onDeleteField(field.id)}
+                        onCopy={() => onCopyField?.(field)}
+                      />
+                    ))}
+                  </SortableContext>
+                  <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">
+                          Add Field
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+                <div className="flex min-w-full h-12 bg-white">
+                  {subform.fields.map((f) => (
+                    <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
                   ))}
-                </SortableContext>
-                <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">
-                        Add Field
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                      <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="min-w-[140px]" />
                 </div>
               </div>
-              <div className="flex min-w-full h-12 bg-white">
-                {subform.fields.map((f) => (
-                  <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
-                ))}
-                <div className="min-w-[140px]" />
-              </div>
             </div>
-          </div>
+          </DndContext>
         </div>
       )}
 
@@ -357,7 +505,7 @@ export default function SubformComponent({
               <div className="space-y-0.5">
                 <Label className="text-base font-medium">Enable Conditional Visibility</Label>
                 <p className="text-sm text-muted-foreground">
-                  Control visibility based on another field’s value
+                  Control visibility based on another field's value
                 </p>
               </div>
               <Switch
@@ -660,6 +808,23 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
     }
   };
 
+  // ── Save field label inline ────────────────────────────────────────────────
+  const handleSaveFieldLabel = async (newLabel: string) => {
+    try {
+      await onUpdate(field.id, { label: newLabel });
+      toast({ title: "Field renamed", description: `Renamed to "${newLabel}"` });
+    } catch (err: any) {
+      console.error("[Field Rename]", err);
+      toast({
+        variant: "destructive",
+        title: "Rename failed",
+        description: err?.message || "Could not rename field. Please try again.",
+      });
+      throw err; // re-throw so InlineEdit knows to revert
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────────
+
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: field.id,
     data: {
@@ -681,7 +846,21 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
           }`}
       >
         <div className="flex justify-between items-start">
-          <span className="font-medium text-[#374151] text-[15px] truncate pr-2">{field.label}</span>
+          {/* ── Inline-editable field label ──
+              Stop drag listeners on the label area so clicking to edit
+              doesn't accidentally start a drag. */}
+          <span
+            className="font-medium text-[#374151] text-[15px] truncate pr-2 flex-1"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <InlineEdit
+              value={field.label}
+              onSave={handleSaveFieldLabel}
+              className="font-medium text-[#374151] text-[15px]"
+              inputClassName="text-[15px] font-medium w-full"
+              placeholder="Field label"
+            />
+          </span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

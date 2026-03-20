@@ -939,8 +939,11 @@ export function PublicFormDialog({
       if (!result.success) throw new Error(result.error);
       if (!result.data.isPublished && !allowAdminPreview)
         throw new Error("This form is not published");
-      const formulaResponse = await fetch("/api/testing");
-      const formulaResult = await formulaResponse.json();
+      let formulaResult: any = { success: false };
+      try {
+        const formulaResponse = await fetch("/api/testing");
+        if (formulaResponse.ok) formulaResult = await formulaResponse.json();
+      } catch { /* formula endpoint unavailable – skip enrichment */ }
       if (formulaResult.success && Array.isArray(formulaResult.data)) {
         const formulas = formulaResult.data;
         result.data.sections.forEach((section: any) => {
@@ -1453,6 +1456,7 @@ export function PublicFormDialog({
       if (formNameLower === "check-in" || formNameLower === "checkin") {
         const response = await fetch("/api/attendance", {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId, action: "checkin" }),
         });
@@ -1465,6 +1469,7 @@ export function PublicFormDialog({
       ) {
         const response = await fetch("/api/attendance", {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId, action: "checkout" }),
         });
@@ -1476,8 +1481,55 @@ export function PublicFormDialog({
         form?.sections.some((s) => s.fields.length > 0) ||
         form?.subforms?.length > 0 ||
         false;
+      if (form && !form.isPublished && !allowAdminPreview) {
+        toast({
+          title: "Form Unpublished",
+          description: "This form is not published and cannot be submitted.",
+          variant: "destructive",
+        });
+        setSubmitting(false);
+        return;
+      }
+
       if (hasFields || !attendanceHandled) {
         const dataToSubmit = { ...formData, ...formulaValues };
+
+        // Normalize address fields: convert stored JSON/object into a single formatted string
+        const addressFields = (allFields || []).filter((f) => (f.type || "").toLowerCase() === "address");
+        const formatAddress = (val: any, field?: FormField) => {
+          if (!val) return "";
+          let addr = val;
+          if (typeof val === "string") {
+            try {
+              addr = JSON.parse(val);
+            } catch {
+              // not JSON, return as-is
+              return String(val);
+            }
+          }
+          if (typeof addr !== "object") return String(addr);
+          const subfields = field?.properties?.subfields || [
+            { key: "line1" },
+            { key: "line2" },
+            { key: "city" },
+            { key: "state" },
+            { key: "postal" },
+            { key: "country" },
+          ];
+          const parts: string[] = [];
+          for (const s of subfields) {
+            const k = s.key;
+            const v = addr[k] ?? addr[k.toUpperCase()] ?? addr[k.toLowerCase()];
+            if (v !== undefined && v !== null && String(v).trim() !== "") parts.push(String(v).trim());
+          }
+          return parts.join(", ");
+        };
+        for (const f of addressFields) {
+          const id = f.id;
+          if (dataToSubmit[id] !== undefined && dataToSubmit[id] !== null) {
+            dataToSubmit[id] = formatAddress(dataToSubmit[id], f);
+          }
+        }
         const dynamicRowsData: Record<string, any> = {};
         Object.entries(dynamicSubformInstances).forEach(
           ([subformId, instances]) => {
@@ -1502,16 +1554,49 @@ export function PublicFormDialog({
         );
         const submitPayload = {
           recordData: { ...dataToSubmit, ...dynamicRowsData },
-          submittedBy: "anonymous",
+          submittedBy: userId || currentUser?.id || "anonymous",
           userAgent: navigator.userAgent,
         };
+        console.debug('[PublicForm] Submitting form', { formId, userId, currentUser });
+        try {
+          console.debug('[PublicForm] document.cookie', document.cookie);
+        } catch (e) {
+          console.debug('[PublicForm] document.cookie inaccessible', e?.message || e);
+        }
+
         const res = await fetch(`/api/forms/${formId}/submit`, {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(submitPayload),
         });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error);
+        console.debug('[PublicForm] submit response status', res.status, res.statusText);
+        try {
+          res.headers.forEach((v, k) => console.debug('[PublicForm] response header', k, v));
+        } catch (e) {
+          console.debug('[PublicForm] response headers inaccessible', e?.message || e);
+        }
+
+        let json: any = null;
+        try {
+          json = await res.json();
+        } catch (e) {
+          const text = await res.text().catch(() => "");
+          console.error('[PublicForm] submit non-json response', { status: res.status, text });
+          throw new Error(
+            `Submission failed: ${res.status} ${res.statusText} ${text}`,
+          );
+        }
+        if (!res.ok) {
+          const serverMsg = json?.error || json?.message || JSON.stringify(json);
+          console.error('[PublicForm] submit error body', json);
+          if (res.status === 403) {
+            throw new Error(
+              `Permission denied (403). ${serverMsg || "You may not belong to the required organization or lack permission."}`,
+            );
+          }
+          throw new Error(serverMsg || `Submission failed: ${res.status}`);
+        }
       }
       setSubmitted(true);
       toast({
@@ -1520,6 +1605,7 @@ export function PublicFormDialog({
       });
       await fetch(`/api/forms/${formId}/events`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventType: "submit",
@@ -1794,7 +1880,7 @@ export function PublicFormDialog({
               {selectOptions.map((opt: any) => (
                 <SelectItem
                   key={opt.value || opt.id}
-                  value={opt.value || opt.id}
+                  value={(opt.value || opt.id)?.toLowerCase().trim()}
                 >
                   {opt.label}
                 </SelectItem>
@@ -2307,6 +2393,15 @@ export function PublicFormDialog({
           validation: field.validation || { required: false },
           lookup: field.lookup ?? undefined,
         };
+        // Resolve parent value for dependency filtering
+        let lookupParentVal: string | undefined;
+        const depCfg = (field.lookup as any)?.dependency;
+        if (depCfg?.parentFieldLabel) {
+          const parentFld = allFields.find((f) => f.label === depCfg.parentFieldLabel);
+          if (parentFld && formData[parentFld.id] != null) {
+            lookupParentVal = String(formData[parentFld.id]);
+          }
+        }
         return (
           <LookupField
             field={lookupData}
@@ -2316,6 +2411,7 @@ export function PublicFormDialog({
             }
             disabled={submitting || submitted || isReadOnly}
             error={error}
+            parentValue={lookupParentVal}
           />
         );
       case "file":
@@ -3039,6 +3135,7 @@ export function PublicFormDialog({
         }}
         onPointerDownCapture={(e) => e.stopPropagation()}
       >
+        <DialogTitle className="sr-only">{form?.name || "Form"}</DialogTitle>
         {/* RESIZE HANDLES */}
         <div className="absolute inset-0 pointer-events-none z-10">
           <div

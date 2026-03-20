@@ -59,6 +59,10 @@ interface FormFieldRendererProps {
   getParentValue: (field: FormField) => string | string[] | undefined;
   errors: Record<string, string>;
   setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  /** All form data values — for resolving lookup dependency parent values */
+  formData?: Record<string, any>;
+  /** All fields in the form — for finding parent field by label */
+  allFields?: FormField[];
 }
 
 export function FormFieldRenderer({
@@ -78,6 +82,8 @@ export function FormFieldRenderer({
   getParentValue,
   errors,
   setErrors,
+  formData,
+  allFields,
 }: FormFieldRendererProps) {
   if (field.visible === false || field.properties?.hidden === true)
     return null;
@@ -547,6 +553,19 @@ export function FormFieldRenderer({
         validation: field.validation || { required: false },
         lookup: field.lookup ?? undefined,
       };
+      // Resolve parent value for dependency filtering
+      let lookupParentValue: string | undefined;
+      const lookupDep = field.lookup?.dependency;
+      if (lookupDep?.parentFieldLabel && formData && allFields) {
+        const parentField = allFields.find(
+          (f) => f.label === lookupDep.parentFieldLabel
+        );
+        if (parentField) {
+          lookupParentValue = formData[parentField.id] != null
+            ? String(formData[parentField.id])
+            : undefined;
+        }
+      }
       return (
         <LookupField
           field={lookupData}
@@ -556,6 +575,7 @@ export function FormFieldRenderer({
           }
           disabled={submitting || submitted || isReadOnly}
           error={error}
+          parentValue={lookupParentValue}
         />
       );
     }

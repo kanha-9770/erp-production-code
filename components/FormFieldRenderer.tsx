@@ -175,6 +175,10 @@ interface FormFieldRendererProps {
   locationStatus: Record<string, "idle" | "fetching" | "success" | "failed">;
   isDynamic: boolean;
   onFileClear: () => void;
+  /** All form data values — used for resolving lookup dependency parent values */
+  formData?: Record<string, any>;
+  /** All fields in the form — used for finding parent field by label */
+  allFields?: FormField[];
 }
 
 const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
@@ -189,6 +193,8 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
   locationStatus,
   isDynamic,
   onFileClear,
+  formData,
+  allFields,
 }) => {
   const fieldType = (field.type || "").toLowerCase();
   const isLocation = fieldType === "location" || fieldType === "newlocation";
@@ -443,7 +449,10 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
       return (
         <RadioGroup
           value={value || ""}
-          onValueChange={(v) => handleChange(v)}
+          onValueChange={(v) => {
+            const normalized = v?.toLowerCase().trim();
+            handleChange(normalized);
+          }}
           disabled={submitting || submitted || isReadOnly}
         >
           {options.map((opt: any) => (
@@ -460,7 +469,10 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
       return (
         <Select
           value={value || ""}
-          onValueChange={(v) => handleChange(v)}
+          onValueChange={(v) => {
+            const normalized = v?.toLowerCase().trim();
+            handleChange(normalized);
+          }}
           disabled={submitting || submitted || isReadOnly}
         >
           <SelectTrigger
@@ -470,7 +482,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
           </SelectTrigger>
           <SelectContent className="max-h-[320px] overflow-y-auto z-50" position="popper" sideOffset={4}>
             {options.map((opt: any) => (
-              <SelectItem key={opt.value || opt.id} value={opt.value || opt.id}>
+              <SelectItem key={opt.value || opt.id} value={(opt.value || opt.id)?.toLowerCase().trim()}>
                 {opt.label}
               </SelectItem>
             ))}
@@ -524,6 +536,19 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
         validation: field.validation || { required: false },
         lookup: field.lookup ?? undefined,
       };
+      // Resolve parent field value for dependency filtering
+      let parentValue: string | undefined;
+      const depConfig = field.lookup?.dependency;
+      if (depConfig?.parentFieldLabel && formData && allFields) {
+        const parentField = allFields.find(
+          (f) => f.label === depConfig.parentFieldLabel
+        );
+        if (parentField) {
+          parentValue = formData[parentField.id] != null
+            ? String(formData[parentField.id])
+            : undefined;
+        }
+      }
       return (
         <LookupField
           field={lookupData}
@@ -531,6 +556,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
           onChange={(v, fullOption) => handleChange(v, fullOption)}
           disabled={submitting || submitted || isReadOnly}
           error={error}
+          parentValue={parentValue}
         />
       );
     case "file":
@@ -855,6 +881,25 @@ export function PublicFormDialog({
     Record<string, string[]>
   >({});
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Memoized flat list of all fields (for lookup dependency resolution)
+  const allFormFields = useMemo(() => {
+    if (!form) return [];
+    const getSubformFields = (subforms: Subform[]): FormField[] => {
+      let fields: FormField[] = [];
+      subforms.forEach((sf) => {
+        fields = [...fields, ...sf.fields];
+        if (sf.childSubforms?.length) {
+          fields = [...fields, ...getSubformFields(sf.childSubforms)];
+        }
+      });
+      return fields;
+    };
+    return [
+      ...form.sections.flatMap((s) => s.fields),
+      ...getSubformFields(form.subforms || []),
+    ];
+  }, [form]);
 
   const startResize = (
     e: React.MouseEvent<HTMLDivElement>,
@@ -1201,8 +1246,11 @@ export function PublicFormDialog({
       if (!result.success) throw new Error(result.error);
       if (!result.data.isPublished)
         throw new Error("This form is not published");
-      const formulaResponse = await fetch("/api/testing");
-      const formulaResult = await formulaResponse.json();
+      let formulaResult: any = { success: false };
+      try {
+        const formulaResponse = await fetch("/api/testing");
+        if (formulaResponse.ok) formulaResult = await formulaResponse.json();
+      } catch { /* formula endpoint unavailable – skip enrichment */ }
       if (formulaResult.success && Array.isArray(formulaResult.data)) {
         const formulas = formulaResult.data;
         result.data.sections.forEach((section: any) => {
@@ -2108,6 +2156,8 @@ export function PublicFormDialog({
                         locationStatus={locationStatus}
                         isDynamic={false}
                         onFileClear={() => handleClearFile((item.item as FormField).id)}
+                        formData={formData}
+                        allFields={allFormFields}
                       />
                       {errors[(item.item as FormField).id] && (
                         <p className="text-sm text-red-500 flex items-center gap-1">
@@ -2224,6 +2274,8 @@ export function PublicFormDialog({
                                     locationStatus={locationStatus}
                                     isDynamic={true}
                                     onFileClear={() => handleClearFile(fieldKey)}
+                                    formData={formData}
+                                    allFields={allFormFields}
                                   />
                                   {error && (
                                     <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
@@ -2472,6 +2524,8 @@ export function PublicFormDialog({
                                   locationStatus={locationStatus}
                                   isDynamic={false}
                                   onFileClear={() => handleClearFile(field.id)}
+                                  formData={formData}
+                                  allFields={allFormFields}
                                 />
                                 {errors[field.id] &&
                                   field.type !== "phone" &&

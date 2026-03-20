@@ -369,7 +369,7 @@ export default function ModulePage({
             icon: change.fieldType,
             order: 999,
             sectionId: "other",
-            sectionTitle: "Uncategorized",
+            sectionTitle: "Sub Form",
             formId: record.formId || "",
             formName: record.formName || "",
             lookup: {},

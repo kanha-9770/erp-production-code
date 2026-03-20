@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { headers } from "next/headers";
 import crypto from "crypto";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { DatabaseTransforms } from "@/lib/DatabaseTransforms";
 
 // ──────────────────────────────────────────────
 // Type definitions
@@ -166,7 +167,7 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
     let organizationId = currentOrgId || form.module?.organizationId;
 
     // Employee forms strictly require organization
-    const tableName = await getFormRecordTable(formId);
+    const tableName = await DatabaseTransforms.getFormRecordTable(formId);
     if (tableName === "form_records_14" && !organizationId) {
       return NextResponse.json(
         { error: "Cannot submit employee form: no organization context available" },
@@ -507,71 +508,6 @@ function transformToStructuredData(
   structured.metadata.totalSubforms = subformCount;
 
   return structured;
-}
-
-async function getFormRecordTable(formId: string): Promise<string> {
-  try {
-    const mapping = await prisma.formTableMapping.findUnique({
-      where: { formId },
-    });
-
-    if (mapping) return mapping.storageTable;
-
-    const form = await prisma.form.findUnique({
-      where: { id: formId },
-      select: { isUserForm: true, isEmployeeForm: true },
-    });
-
-    if (form?.isUserForm) {
-      const name = "form_records_15";
-      await createTableMapping(formId, name);
-      return name;
-    }
-
-    if (form?.isEmployeeForm) {
-      const name = "form_records_14";
-      await createTableMapping(formId, name);
-      return name;
-    }
-
-    const counts = await Promise.all([
-      prisma.formRecord1.count(),
-      prisma.formRecord2.count(),
-      prisma.formRecord3.count(),
-      prisma.formRecord4.count(),
-      prisma.formRecord5.count(),
-      prisma.formRecord6.count(),
-      prisma.formRecord7.count(),
-      prisma.formRecord8.count(),
-      prisma.formRecord9.count(),
-      prisma.formRecord10.count(),
-      prisma.formRecord11.count(),
-      prisma.formRecord12.count(),
-      prisma.formRecord13.count(),
-    ]);
-
-    const min = Math.min(...counts);
-    const index = counts.indexOf(min) + 1;
-    const name = `form_records_${index}`;
-
-    await createTableMapping(formId, name);
-    return name;
-  } catch (err) {
-    console.error("Error selecting table:", err);
-    return "form_records_1";
-  }
-}
-
-async function createTableMapping(formId: string, tableName: string): Promise<void> {
-  try {
-    await prisma.formTableMapping.upsert({
-      where: { formId },
-      update: { storageTable: tableName },
-      create: { formId, storageTable: tableName },
-    });
-  } catch (err) {
-    console.error("Error creating table mapping:", err);
-  }
 }
 
 async function createFormRecord(

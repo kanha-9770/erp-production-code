@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, createContext, useContext } from "react";
+import { useEffect, useState, createContext, useContext, useCallback } from "react";
 import { useParams } from "next/navigation";
 import {
   DndContext,
@@ -25,7 +25,7 @@ import FieldPalette, {
 import PublishFormDialog from "@/components/publish-form-dialog";
 import LookupConfigurationDialog from "@/components/lookup-configuration-dialog";
 import UserFormSettingsDialog from "@/components/user-form-settings-dialog";
-import type { Form, FormField, Subform } from "@/types/item-types";
+import type { Form, FormField, Subform } from "@/types/form-builder";
 import {
   Save,
   ArrowLeft,
@@ -41,6 +41,14 @@ import { v4 as uuidv4 } from "uuid";
 import type { FormulaConfig } from "@/components/formula-builder";
 import FormulaConfigurationDialog from "@/components/FormulaConfigurationDialog";
 import ResourcePermissionDialog from "@/components/resource-permission-dialog";
+import {
+  useGetFormDetailQuery,
+  useCreateFieldMutation,
+  useUpdateFieldMutation,
+  useCreateSubformMutation,
+  useSaveFormMutation,
+  useUpdateSectionMutation,
+} from "@/lib/api/forms";
 
 // Enhanced interface for subform hierarchy tracking
 interface SubformHierarchy {
@@ -78,9 +86,23 @@ export default function FormBuilderPage() {
   const params = useParams();
   const formId = params.formId as string;
   const { toast } = useToast();
+
+  // RTK Query: fetch form data
+  const {
+    data: formQueryData,
+    isLoading: loading,
+    error: formError,
+    refetch: refetchForm,
+  } = useGetFormDetailQuery(formId, { skip: !formId });
+
+  // RTK Query: mutation hooks
+  const [createFieldMutation] = useCreateFieldMutation();
+  const [updateFieldMutation] = useUpdateFieldMutation();
+  const [createSubformMutation] = useCreateSubformMutation();
+  const [saveFormMutation, { isLoading: saving }] = useSaveFormMutation();
+  const [updateSectionMutation] = useUpdateSectionMutation();
+
   const [form, setForm] = useState<Form | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [isLookupDialogOpen, setIsLookupDialogOpen] = useState(false);
   const [isUserFormSettingsOpen, setIsUserFormSettingsOpen] = useState(false);
@@ -119,11 +141,14 @@ export default function FormBuilderPage() {
     setIsPermissionDialogOpen(true);
   };
 
+  // Sync RTK Query data into local state for optimistic updates
   useEffect(() => {
-    if (formId) {
-      fetchForm();
+    if (formQueryData?.success && formQueryData.data) {
+      setForm(formQueryData.data);
+      const hierarchyMap = buildSubformHierarchyMap(formQueryData.data);
+      setSubformHierarchyMap(hierarchyMap);
     }
-  }, [formId]);
+  }, [formQueryData]);
 
   // Build hierarchical path map for all top-level subforms in form
   const buildSubformHierarchyMap = (
@@ -220,30 +245,10 @@ export default function FormBuilderPage() {
     return ancestors;
   };
 
-  const fetchForm = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/forms/${formId}`);
-      if (!response.ok) throw new Error("Failed to fetch form");
-
-      const result = await response.json();
-      if (result.success) {
-        setForm(result.data);
-        const hierarchyMap = buildSubformHierarchyMap(result.data);
-        setSubformHierarchyMap(hierarchyMap);
-      } else {
-        throw new Error(result.error || "Failed to fetch form");
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Re-fetch form from server (used as fallback on errors)
+  const fetchForm = useCallback(() => {
+    refetchForm();
+  }, [refetchForm]);
 
   const optimisticFormUpdate = (updatedForm: Form) => {
     setForm(updatedForm);
@@ -266,18 +271,11 @@ export default function FormBuilderPage() {
     if (!form) return;
 
     try {
-      const response = await fetch(`/api/forms/${formId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          isUserForm,
-          isEmployeeForm,
-        }),
-      });
+      const result = await saveFormMutation({
+        formId,
+        body: { ...form, isUserForm, isEmployeeForm },
+      }).unwrap();
 
-      if (!response.ok) throw new Error("Failed to update form settings");
-      const result = await response.json();
       if (result.success) {
         optimisticFormUpdate(result.data);
         toast({
@@ -294,7 +292,7 @@ export default function FormBuilderPage() {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to update form settings",
         variant: "destructive",
       });
     }
@@ -632,16 +630,9 @@ export default function FormBuilderPage() {
 
       optimisticFormUpdate(updatedForm);
 
-      const fieldData = { ...newField, id: undefined };
-      const response = await fetch("/api/fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fieldData),
-      });
+      const { id: _tempId, ...fieldData } = newField;
+      const result = await createFieldMutation(fieldData as any).unwrap();
 
-      if (!response.ok) throw new Error("Failed to create field");
-
-      const result = await response.json();
       if (result.success) {
         const updateFields = (subforms: Subform[]): Subform[] =>
           subforms.map((sub) => {
@@ -714,11 +705,9 @@ export default function FormBuilderPage() {
 
   const handleFormulaSave = async (config: FormulaConfig, fieldId: string) => {
     try {
-      const response = await fetch(`/api/fields/${fieldId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
+      await updateFieldMutation({
+        fieldId,
+        body: {
           label: config.fieldLabel,
           formula: {
             expression: config.expression,
@@ -738,13 +727,8 @@ export default function FormBuilderPage() {
               sources: config.sources,
             },
           },
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to save formula");
-      }
+        },
+      }).unwrap();
 
       // Update local form state so the builder reflects the saved formula immediately
       if (form) {
@@ -898,16 +882,9 @@ export default function FormBuilderPage() {
 
       optimisticFormUpdate(updatedForm);
 
-      const subformData = { ...newSubform, id: undefined };
-      const response = await fetch("/api/subforms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(subformData),
-      });
+      const { id: _tempId, createdAt: _ca, updatedAt: _ua, ...subformData } = newSubform;
+      const result = await createSubformMutation(subformData as any).unwrap();
 
-      if (!response.ok) throw new Error("Failed to create subform");
-
-      const result = await response.json();
       if (result.success) {
         const updateSubforms = (subforms: Subform[]): Subform[] =>
           subforms.map((sub) => {
@@ -1010,11 +987,7 @@ export default function FormBuilderPage() {
     optimisticFormUpdate({ ...form, sections: updatedSections });
 
     newFields.forEach((f) =>
-      fetch(`/api/fields/${f.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order: f.order }),
-      })
+      updateFieldMutation({ fieldId: f.id, body: { order: f.order } })
     );
   };
 
@@ -1033,11 +1006,7 @@ export default function FormBuilderPage() {
     optimisticFormUpdate({ ...form, sections: newSections });
 
     newSections.forEach((s) =>
-      fetch(`/api/sections/${s.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order: s.order }),
-      })
+      updateSectionMutation({ sectionId: s.id, body: { order: s.order } })
     );
   };
 
@@ -1051,29 +1020,23 @@ export default function FormBuilderPage() {
       const createdFieldIds: string[] = [];
 
       for (const fieldData of lookupFields) {
-        const response = await fetch("/api/fields", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sectionId: pendingLookupSubformId ? undefined : pendingLookupSectionId,
-            subformId: pendingLookupSubformId,
-            type: fieldData.type,
-            label: fieldData.label,
-            placeholder: fieldData.placeholder,
-            description: fieldData.description,
-            defaultValue: fieldData.defaultValue,
-            options: fieldData.options,
-            validation: fieldData.validation,
-            visible: fieldData.visible,
-            readonly: fieldData.readonly,
-            width: fieldData.width,
-            order: fieldData.order,
-            lookup: fieldData.lookup,
-          }),
-        });
+        const result = await createFieldMutation({
+          sectionId: pendingLookupSubformId ? undefined : pendingLookupSectionId,
+          subformId: pendingLookupSubformId,
+          type: fieldData.type as string,
+          label: fieldData.label || "Untitled",
+          placeholder: fieldData.placeholder,
+          description: fieldData.description,
+          defaultValue: fieldData.defaultValue,
+          options: fieldData.options,
+          validation: fieldData.validation,
+          visible: fieldData.visible,
+          readonly: fieldData.readonly,
+          width: fieldData.width,
+          order: fieldData.order,
+          lookup: fieldData.lookup,
+        }).unwrap();
 
-        if (!response.ok) throw new Error("Failed to create lookup field");
-        const result = await response.json();
         if (!result.success)
           throw new Error(result.error || "Failed to create field");
 
@@ -1165,24 +1128,18 @@ export default function FormBuilderPage() {
 
   const saveForm = async () => {
     if (!form) return;
-    setSaving(true);
     try {
-      const formToSave = {
-        name: form.name,
-        description: form.description,
-        settings: form.settings,
-        isUserForm: form.isUserForm,
-        isEmployeeForm: form.isEmployeeForm,
-      };
-      const response = await fetch(`/api/forms/${formId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formToSave),
-      });
+      const result = await saveFormMutation({
+        formId,
+        body: {
+          name: form.name,
+          description: form.description,
+          settings: form.settings,
+          isUserForm: form.isUserForm,
+          isEmployeeForm: form.isEmployeeForm,
+        },
+      }).unwrap();
 
-      if (!response.ok) throw new Error("Failed to save form");
-
-      const result = await response.json();
       if (result.success) {
         toast({ title: "Success", description: "Form saved successfully" });
       } else {
@@ -1191,11 +1148,9 @@ export default function FormBuilderPage() {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || "Failed to save form",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -1297,17 +1252,14 @@ export default function FormBuilderPage() {
 
       optimisticFormUpdate(updatedForm);
 
-      const response = await fetch(`/api/fields/${field.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const result = await updateFieldMutation({
+        fieldId: field.id,
+        body: {
           sectionId: targetSubformId ? null : targetSectionId,
           subformId: targetSubformId || null,
           order: movedField.order,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Failed to move field");
+        },
+      }).unwrap();
 
       toast({
         title: "Success",
@@ -1331,7 +1283,7 @@ export default function FormBuilderPage() {
     );
   }
 
-  if (!form) {
+  if (!form || formError) {
     return (
       <div className="flex h-screen items-center justify-center text-center">
         <div>

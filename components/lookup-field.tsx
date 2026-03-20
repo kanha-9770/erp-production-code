@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Check, ChevronsUpDown, Loader2, Search, X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+
+interface LookupDependencyConfig {
+  parentFieldLabel: string;
+  valueMappings: {
+    parentValue: string;
+    allowedChildValues: string[];
+  }[];
+}
 
 interface LookupFieldProps {
   field: {
@@ -47,12 +55,15 @@ interface LookupFieldProps {
         store: string;
         description?: string | null;
       };
+      dependency?: LookupDependencyConfig;
     };
   };
   value?: any;
   onChange?: (value: any, fullOption?: any) => void;
   disabled?: boolean;
   error?: string;
+  /** Current value of the parent field (for dependency filtering) */
+  parentValue?: string;
 }
 
 interface LookupOption {
@@ -72,6 +83,7 @@ export function LookupField({
   onChange,
   disabled = false,
   error,
+  parentValue,
 }: LookupFieldProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -85,6 +97,49 @@ export function LookupField({
   const useIdField = field.lookup?.useIdField || false;
   const idFieldName = field.lookup?.idFieldName;
   const sourceId = field.lookup?.sourceId;
+  const dependency = field.lookup?.dependency;
+
+  // Filter options based on dependency when parent value changes
+  const filteredByDependency = useMemo(() => {
+    if (!dependency || !parentValue) return options;
+    const mapping = dependency.valueMappings.find(
+      (m) => m.parentValue === parentValue
+    );
+    if (!mapping) return options; // No mapping configured for this parent value — show all
+    return options.filter((opt) =>
+      mapping.allowedChildValues.includes(String(opt.storeValue)) ||
+      mapping.allowedChildValues.includes(String(opt.label))
+    );
+  }, [options, dependency, parentValue]);
+
+  // Clear child selection when parent value changes and current value is no longer allowed
+  const prevParentRef = useRef(parentValue);
+  useEffect(() => {
+    if (!dependency || prevParentRef.current === parentValue) {
+      prevParentRef.current = parentValue;
+      return;
+    }
+    prevParentRef.current = parentValue;
+    if (!parentValue || !value) return;
+
+    const mapping = dependency.valueMappings.find(
+      (m) => m.parentValue === parentValue
+    );
+    if (!mapping) return; // No mapping — don't auto-clear
+
+    if (isMultiple && Array.isArray(value)) {
+      const filtered = value.filter(
+        (v: any) => mapping.allowedChildValues.includes(String(v))
+      );
+      if (filtered.length !== value.length) {
+        onChange?.(filtered, null);
+      }
+    } else if (!isMultiple && value) {
+      if (!mapping.allowedChildValues.includes(String(value))) {
+        onChange?.(null, null);
+      }
+    }
+  }, [parentValue]);
 
   useEffect(() => {
     if (value && (options.length > 0 || allowCustomValues)) {
@@ -380,7 +435,10 @@ export function LookupField({
     return selectedOptions[0].storeValue;
   };
 
-  const searchMatchesExisting = options.some(
+  // Use dependency-filtered options for display
+  const displayOptions = filteredByDependency;
+
+  const searchMatchesExisting = displayOptions.some(
     (option) =>
       String(option.storeValue).toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -408,7 +466,7 @@ export function LookupField({
               !selectedOptions.length && "text-muted-foreground",
               error && "border-red-500"
             )}
-            disabled={disabled}
+            disabled={disabled || (!!dependency && !parentValue)}
           >
             <span className="truncate">{displayValue()}</span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -468,14 +526,16 @@ export function LookupField({
                       </CommandItem>
                     )}
 
-                    {options.length === 0 && !showCreateOption ? (
+                    {displayOptions.length === 0 && !showCreateOption ? (
                       <div className="p-4 text-center text-sm text-muted-foreground">
-                        {allowCustomValues
-                          ? "No options found. Type to create a custom value."
-                          : "No options found."}
+                        {dependency && !parentValue
+                          ? "Select the parent field first."
+                          : allowCustomValues
+                            ? "No options found. Type to create a custom value."
+                            : "No options found."}
                       </div>
                     ) : (
-                      options.map((option) => {
+                      displayOptions.map((option) => {
                         const isSelected = selectedOptions.some(
                           (selected) => selected.value === option.value
                         );

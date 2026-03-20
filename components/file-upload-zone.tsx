@@ -1,10 +1,19 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, X, CheckCircle, AlertCircle, Play, FileIcon, Loader2, ImageIcon, VideoIcon } from 'lucide-react';
+import {
+  Upload,
+  X,
+  CheckCircle,
+  Play,
+  FileIcon,
+  Loader2,
+  ImageIcon,
+  VideoIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FileUploadZoneProps {
@@ -29,6 +38,19 @@ export function FileUploadZone({
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Lock body scroll when lightbox is open
+  useEffect(() => {
+    if (isPreviewOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isPreviewOpen]);
 
   const getAcceptTypes = () => {
     switch (fieldType) {
@@ -45,14 +67,16 @@ export function FileUploadZone({
     }
   };
 
-  const getFileType = (file: File) => {
-    if (file.type.startsWith("image/")) return "image";
-    if (file.type.startsWith("video/")) return "video";
+  const getFileTypeFromUrl = (url?: string) => {
+    if (!url) return "file";
+    const path = url.split("?")[0].toLowerCase();
+    if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/)) return "image";
+    if (path.match(/\.(mp4|webm|ogg|mov|mkv)$/)) return "video";
+    if (path.match(/\.(pdf)$/)) return "pdf";
     return "file";
   };
 
   const handleFile = async (file: File) => {
-    // Validate file size
     const fileSizeMB = file.size / (1024 * 1024);
     if (fileSizeMB > maxSize) {
       toast({
@@ -63,7 +87,6 @@ export function FileUploadZone({
       return;
     }
 
-    // Validate file type for specific field types
     if (fieldType === "image" && !file.type.startsWith("image/")) {
       toast({
         title: "Invalid file type",
@@ -98,6 +121,7 @@ export function FileUploadZone({
       const formData = new FormData();
       formData.append("image", file);
       formData.append("type", fieldType);
+
       const xhr = new XMLHttpRequest();
 
       xhr.upload.addEventListener("progress", (e) => {
@@ -110,9 +134,6 @@ export function FileUploadZone({
       xhr.addEventListener("load", () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           const response = JSON.parse(xhr.responseText);
-          console.log("[v0] Upload response:", response);
-
-          // Your API returns { imageUrl }, not { success, url }
           if (response.imageUrl) {
             onUploadComplete(response.imageUrl);
             toast({
@@ -123,7 +144,7 @@ export function FileUploadZone({
             throw new Error(response.error || "No imageUrl in response");
           }
         } else {
-          throw new Error("Upload failed with status " + xhr.status);
+          throw new Error(`Upload failed with status ${xhr.status}`);
         }
       });
 
@@ -134,7 +155,7 @@ export function FileUploadZone({
       xhr.open("POST", "/api/upload");
       xhr.send(formData);
     } catch (error: any) {
-      console.error("[v0] Upload error:", error);
+      console.error("Upload error:", error);
       toast({
         title: "Upload failed",
         description: error.message || "Failed to upload file",
@@ -166,7 +187,6 @@ export function FileUploadZone({
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
     if (e.target.files && e.target.files.length > 0 && !disabled && !isUploading) {
       handleFile(e.target.files[0]);
     }
@@ -175,52 +195,61 @@ export function FileUploadZone({
   const renderPreview = () => {
     if (!currentValue) return null;
 
-    const fileType = getFileType(new File([], currentValue));
+    const fileType = getFileTypeFromUrl(currentValue);
+    const isImage = fileType === "image" || fieldType === "image";
+    const isVideo = fileType === "video" || fieldType === "video";
 
     return (
       <div className="relative rounded-lg overflow-hidden border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-blue-100">
-        {fileType === "image" || fieldType === "image" ? (
-          <div className="relative">
+        {/* Clickable preview area */}
+        <div
+          className="cursor-pointer"
+          onClick={() => setIsPreviewOpen(true)}
+        >
+          {isImage ? (
             <img
-              src={currentValue || "/placeholder.svg"}
+              src={currentValue}
               alt="Preview"
               className="w-full h-auto max-h-64 object-contain"
-              crossOrigin="anonymous"
             />
-          </div>
-        ) : fileType === "video" || fieldType === "video" ? (
-          <div className="relative aspect-video bg-black flex items-center justify-center">
-            <video
-              src={currentValue}
-              className="w-full h-full object-contain"
-              controls
-              crossOrigin="anonymous"
-            />
-          </div>
-        ) : (
-          <div className="p-6 flex flex-col items-center justify-center bg-white">
-            <FileIcon className="h-12 w-12 text-blue-500 mb-2" />
-            <p className="text-sm text-gray-600 text-center">
-              {currentValue.split("/").pop()}
-            </p>
-          </div>
-        )}
+          ) : isVideo ? (
+            <div className="relative aspect-video bg-black">
+              <video
+                src={currentValue}
+                className="w-full h-full object-contain"
+                muted
+                preload="metadata"
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                <Play className="h-20 w-20 text-white opacity-80" />
+              </div>
+            </div>
+          ) : (
+            <div className="p-10 flex flex-col items-center justify-center bg-white min-h-[200px]">
+              <FileIcon className="h-16 w-16 text-blue-500 mb-4" />
+              <p className="text-sm text-gray-700 font-medium text-center break-all px-4">
+                {currentValue.split("/").pop() || "Uploaded file"}
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Clear button */}
         <button
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             onClear?.();
             if (fileInputRef.current) fileInputRef.current.value = "";
           }}
           disabled={disabled}
-          className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white p-1 rounded-full shadow-lg transition-all"
+          className="absolute top-3 right-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white p-2 rounded-full shadow-lg transition-all z-10"
         >
-          <X className="h-4 w-4" />
+          <X className="h-5 w-5" />
         </button>
 
-        {/* Success checkmark */}
-        <div className="absolute top-2 left-2 bg-green-500 text-white p-1 rounded-full">
-          <CheckCircle className="h-4 w-4" />
+        {/* Success indicator */}
+        <div className="absolute top-3 left-3 bg-green-600 text-white p-2 rounded-full shadow z-10">
+          <CheckCircle className="h-5 w-5" />
         </div>
       </div>
     );
@@ -229,15 +258,15 @@ export function FileUploadZone({
   const renderUploadZone = () => {
     if (isUploading) {
       return (
-        <div className="space-y-3">
+        <div className="space-y-4 py-10">
           <div className="flex items-center justify-center">
-            <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+            <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
           </div>
-          <p className="text-sm text-gray-600 text-center font-medium">
-            Uploading to Hostinger...
+          <p className="text-base text-gray-700 text-center font-medium">
+            Uploading...
           </p>
-          <Progress value={uploadProgress} className="h-2" />
-          <p className="text-xs text-gray-500 text-center">
+          <Progress value={uploadProgress} className="h-2.5 max-w-xs mx-auto" />
+          <p className="text-sm text-gray-500 text-center">
             {uploadProgress.toFixed(0)}%
           </p>
         </div>
@@ -250,41 +279,39 @@ export function FileUploadZone({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          "border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 cursor-pointer",
+          "border-2 border-dashed rounded-xl p-10 text-center transition-all duration-300 cursor-pointer",
           isDragging
-            ? "border-blue-500 bg-blue-50 scale-105"
-            : "border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50/30",
-          disabled && "opacity-50 cursor-not-allowed"
+            ? "border-blue-500 bg-blue-50 scale-[1.02] shadow-lg"
+            : "border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50/40",
+          disabled && "opacity-50 cursor-not-allowed pointer-events-none"
         )}
       >
-        <div className="flex justify-center mb-3">
-          {fieldType === "image" && (
-            <ImageIcon className="h-8 w-8 text-blue-500" />
-          )}
-          {fieldType === "video" && <VideoIcon className="h-8 w-8 text-blue-500" />}
+        <div className="flex justify-center mb-4">
+          {fieldType === "image" && <ImageIcon className="h-10 w-10 text-blue-500" />}
+          {fieldType === "video" && <VideoIcon className="h-10 w-10 text-blue-500" />}
           {(fieldType === "file" || fieldType === "signature") && (
-            <Upload className="h-8 w-8 text-blue-500" />
+            <Upload className="h-10 w-10 text-blue-500" />
           )}
         </div>
 
-        <p className="font-semibold text-gray-900 mb-1">
-          Drop file here or click to browse
+        <p className="font-semibold text-gray-900 text-lg mb-2">
+          Drop your file here or click to browse
         </p>
-        <p className="text-sm text-gray-600 mb-4">
-          Uploads to Hostinger • Max {maxSize}MB
+        <p className="text-sm text-gray-600 mb-6">
+          Max size: {maxSize}MB • Uploaded to Hostinger
         </p>
 
         <Button
           type="button"
           onClick={(e) => {
-            e.preventDefault();      // Extra safety
+            e.preventDefault();
             e.stopPropagation();
             fileInputRef.current?.click();
           }}
           disabled={disabled || isUploading}
-          className="bg-blue-600 hover:bg-blue-700 text-white"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-5 text-base"
         >
-          <Upload className="h-4 w-4 mr-2" />
+          <Upload className="h-5 w-5 mr-2" />
           Select {fieldType === "image" ? "Image" : fieldType === "video" ? "Video" : "File"}
         </Button>
 
@@ -301,8 +328,62 @@ export function FileUploadZone({
   };
 
   return (
-    <div className="space-y-4">
-      {currentValue ? renderPreview() : renderUploadZone()}
-    </div>
+    <>
+      <div className="space-y-5">
+        {currentValue ? renderPreview() : renderUploadZone()}
+      </div>
+
+      {/* Lightbox / Popup */}
+      {isPreviewOpen && currentValue && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center"
+          onClick={() => setIsPreviewOpen(false)}
+        >
+          <div
+            className="relative max-w-[96vw] max-h-[96vh] mx-3 sm:mx-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setIsPreviewOpen(false)}
+              className="absolute -top-14 right-0 sm:-top-16 sm:-right-4 bg-white/95 hover:bg-white text-gray-900 rounded-full p-3 shadow-2xl transition-all z-20"
+              aria-label="Close preview"
+            >
+              <X className="h-7 w-7" />
+            </button>
+
+            {getFileTypeFromUrl(currentValue) === "image" || fieldType === "image" ? (
+              <img
+                src={currentValue}
+                alt="Full size preview"
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              />
+            ) : getFileTypeFromUrl(currentValue) === "video" || fieldType === "video" ? (
+              <video
+                src={currentValue}
+                controls
+                autoPlay
+                className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+              />
+            ) : (
+              <div className="bg-white rounded-xl p-10 max-w-lg text-center">
+                <FileIcon className="h-16 w-16 text-blue-500 mx-auto mb-6" />
+                <h3 className="text-xl font-semibold mb-3">Preview not supported</h3>
+                <p className="text-gray-600 mb-6">
+                  This file type cannot be previewed directly in the browser.
+                </p>
+                <a
+                  href={currentValue}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition"
+                >
+                  Open file in new tab
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

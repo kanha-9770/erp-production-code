@@ -76,6 +76,17 @@ interface SourceField {
   type: string;
 }
 
+interface ValueMapping {
+  parentValue: string;
+  allowedChildValues: string[];
+}
+
+interface FieldDependency {
+  childFieldName: string;
+  parentFieldName: string;
+  valueMappings: ValueMapping[];
+}
+
 interface SelectedField {
   fieldName: string;
   label: string;
@@ -123,6 +134,11 @@ export default function LookupConfigurationDialog({
 
   const [loading, setLoading] = useState(false);
   const [loadingFields, setLoadingFields] = useState(false);
+
+  // Dependency configuration
+  const [dependencies, setDependencies] = useState<FieldDependency[]>([]);
+  const [masterDataValues, setMasterDataValues] = useState<Record<string, string[]>>({});
+  const [loadingValues, setLoadingValues] = useState(false);
 
   /* ===================== COMPUTED DATA ===================== */
   const modules = useMemo(
@@ -280,6 +296,74 @@ export default function LookupConfigurationDialog({
     }
   };
 
+  /* ===================== FETCH VALUES FOR DEPENDENCY CONFIG ===================== */
+  const fetchFieldValues = async (field: SelectedField): Promise<string[]> => {
+    // Check cache first
+    if (masterDataValues[field.fieldName]?.length) {
+      return masterDataValues[field.fieldName];
+    }
+
+    if (field.isMaster) {
+      try {
+        // Master data API returns ALL dropdowns — find the matching one
+        const res = await fetch("/api/master-data");
+        const result = await res.json();
+        if (result.dropdowns) {
+          const dropdown = result.dropdowns.find((d: any) => d.id === field.fieldName);
+          if (dropdown?.values?.length) {
+            const vals = dropdown.values.map((v: any) => String(v.value || v.label || v));
+            setMasterDataValues((prev) => ({ ...prev, [field.fieldName]: vals }));
+            return vals;
+          }
+        }
+      } catch {
+        console.error("Failed to load master data values for", field.fieldName);
+      }
+      return [];
+    }
+
+    // Dynamic field — fetch unique values from lookup data
+    try {
+      const sourceId = selectedFormId && selectedFormId !== "none"
+        ? selectedFormId
+        : selectedModuleId;
+      if (!sourceId) return [];
+
+      const res = await fetch(`/api/lookup/data?sourceId=${sourceId}&limit=200`);
+      const result = await res.json();
+      if (result.success && Array.isArray(result.data)) {
+        const uniqueValues = new Set<string>();
+        for (const item of result.data) {
+          // Try matching by label or fieldName
+          const fieldData = item[field.label]
+            || Object.values(item).find((v: any) => v?.field_label === field.label)
+            || Object.values(item).find((v: any) => v?.field_label === field.fieldName);
+          const val = (fieldData as any)?.field_value;
+          if (val != null && String(val).trim()) {
+            uniqueValues.add(String(val));
+          }
+        }
+        const vals = Array.from(uniqueValues).sort();
+        if (vals.length > 0) {
+          setMasterDataValues((prev) => ({ ...prev, [field.fieldName]: vals }));
+        }
+        return vals;
+      }
+    } catch {
+      console.error("Failed to load field values for", field.fieldName);
+    }
+    return [];
+  };
+
+  const loadDependencyValues = async (fields: SelectedField[]) => {
+    setLoadingValues(true);
+    try {
+      await Promise.all(fields.map((f) => fetchFieldValues(f)));
+    } finally {
+      setLoadingValues(false);
+    }
+  };
+
   /* ===================== ACTIONS ===================== */
   const resetSelection = () => {
     setStep("selection");
@@ -288,6 +372,8 @@ export default function LookupConfigurationDialog({
     setSelectedSectionId("all");
     setSelectedFields([]);
     setFieldSearch("");
+    setDependencies([]);
+    setMasterDataValues({});
   };
 
   const handleFieldToggle = (field: SourceField) => {
@@ -343,6 +429,15 @@ export default function LookupConfigurationDialog({
   const onFinalConfirm = () => {
     const finalPayload: Partial<FormField>[] = selectedFields.map(
       (field, idx) => {
+        // Check if this field has a dependency configured
+        const dep = dependencies.find((d) => d.childFieldName === field.fieldName);
+        const dependencyConfig = dep
+          ? {
+              parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
+              valueMappings: dep.valueMappings,
+            }
+          : undefined;
+
         if (field.isMaster) {
           return {
             sectionId: subformId ? undefined : sectionId,
@@ -366,6 +461,7 @@ export default function LookupConfigurationDialog({
                 value: field.valueField,
                 store: field.fieldName,
               },
+              dependency: dependencyConfig,
             },
           };
         }
@@ -401,6 +497,7 @@ export default function LookupConfigurationDialog({
               value: field.valueField,
               store: field.fieldName,
             },
+            dependency: dependencyConfig,
           },
         };
       }
@@ -714,134 +811,185 @@ export default function LookupConfigurationDialog({
               </ScrollArea>
             </div>
           ) : (
-            /* MAPPING STEP */
+            /* MAPPING + DEPENDENCY STEP (combined) */
             <div className="h-full flex flex-col">
               <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 flex items-center gap-2 shrink-0">
                 <Info className="h-4 w-4 text-blue-600" />
                 <p className="text-xs text-blue-800">
-                  Configure how each field behaves. <b>Display Property</b> is
-                  what users see in the dropdown list.
+                  Configure field mapping.{selectedFields.length >= 2 && " Use <b>Depends On</b> to link fields — e.g. Machine depends on Category."}
                 </p>
               </div>
               <ScrollArea className="flex-1 min-h-0">
-                <div className="p-6">
+                <div className="p-6 space-y-6">
+                  {/* Mapping table */}
                   <div className="border rounded-xl overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-muted/50">
                         <TableRow>
-                          <TableHead className="w-[250px]">
-                            Target Field Name
-                          </TableHead>
-                          <TableHead>Display Property (Label)</TableHead>
-                          <TableHead>Value Property (Storage)</TableHead>
-                          <TableHead className="w-[80px] text-center">
-                            Multi
-                          </TableHead>
-                          <TableHead className="w-[80px] text-center">
-                            Search
-                          </TableHead>
+                          <TableHead className="w-[200px]">Field</TableHead>
+                          <TableHead>Display</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead className="w-[60px] text-center">Multi</TableHead>
+                          <TableHead className="w-[60px] text-center">Search</TableHead>
+                          {selectedFields.length >= 2 && (
+                            <TableHead className="w-[160px]">Depends On</TableHead>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {selectedFields.map((field) => (
-                          <TableRow key={field.fieldName}>
-                            <TableCell className="font-semibold">
-                              {field.label} {field.isMaster ? "(Master)" : ""}
-                            </TableCell>
-                            <TableCell>
-                              <Select
-                                value={field.displayField}
-                                onValueChange={(v) =>
-                                  setSelectedFields((prev) =>
-                                    prev.map((f) =>
-                                      f.fieldName === field.fieldName
-                                        ? { ...f, displayField: v }
-                                        : f
-                                    )
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {sourceFields.map((f) => (
-                                    <SelectItem key={f.name} value={f.name}>
-                                      {f.label}
-                                    </SelectItem>
-                                  ))}
-                                  {field.isMaster && (
-                                    <SelectItem value="value">
-                                      Value (default)
-                                    </SelectItem>
-                                  )}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell>
-                              <Select
-                                value={field.valueField}
-                                onValueChange={(v) =>
-                                  setSelectedFields((prev) =>
-                                    prev.map((f) =>
-                                      f.fieldName === field.fieldName
-                                        ? { ...f, valueField: v }
-                                        : f
-                                    )
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {sourceFields.map((f) => (
-                                    <SelectItem key={f.name} value={f.name}>
-                                      {f.label}
-                                    </SelectItem>
-                                  ))}
-                                  {field.isMaster && (
-                                    <SelectItem value="value">
-                                      Value (default)
-                                    </SelectItem>
-                                  )}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Checkbox
-                                checked={field.multiple}
-                                disabled={field.isMaster}
-                                onCheckedChange={(v) =>
-                                  setSelectedFields((prev) =>
-                                    prev.map((f) =>
-                                      f.fieldName === field.fieldName
-                                        ? { ...f, multiple: !!v }
-                                        : f
-                                    )
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Checkbox
-                                checked={field.searchable}
-                                onCheckedChange={(v) =>
-                                  setSelectedFields((prev) =>
-                                    prev.map((f) =>
-                                      f.fieldName === field.fieldName
-                                        ? { ...f, searchable: !!v }
-                                        : f
-                                    )
-                                  )
-                                }
-                              />
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {selectedFields.map((field) => {
+                          const dep = dependencies.find((d) => d.childFieldName === field.fieldName);
+                          return (
+                            <TableRow key={field.fieldName}>
+                              <TableCell className="font-semibold text-xs">
+                                {field.label} {field.isMaster ? <Badge variant="secondary" className="ml-1 text-[9px] px-1 py-0">Master</Badge> : null}
+                              </TableCell>
+                              <TableCell>
+                                <Select value={field.displayField} onValueChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, displayField: v } : f))}>
+                                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {sourceFields.map((f) => (<SelectItem key={f.name} value={f.name}>{f.label}</SelectItem>))}
+                                    {field.isMaster && <SelectItem value="value">Value (default)</SelectItem>}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell>
+                                <Select value={field.valueField} onValueChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, valueField: v } : f))}>
+                                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {sourceFields.map((f) => (<SelectItem key={f.name} value={f.name}>{f.label}</SelectItem>))}
+                                    {field.isMaster && <SelectItem value="value">Value (default)</SelectItem>}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Checkbox checked={field.multiple} disabled={field.isMaster} onCheckedChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, multiple: !!v } : f))} />
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Checkbox checked={field.searchable} onCheckedChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, searchable: !!v } : f))} />
+                              </TableCell>
+                              {selectedFields.length >= 2 && (
+                                <TableCell>
+                                  <Select
+                                    value={dep?.parentFieldName || "__none__"}
+                                    onValueChange={(v) => {
+                                      if (v === "__none__") {
+                                        setDependencies((prev) => prev.filter((d) => d.childFieldName !== field.fieldName));
+                                      } else {
+                                        const existing = dependencies.find((d) => d.childFieldName === field.fieldName);
+                                        if (existing) {
+                                          setDependencies((prev) => prev.map((d) => d.childFieldName === field.fieldName ? { ...d, parentFieldName: v, valueMappings: [] } : d));
+                                        } else {
+                                          setDependencies((prev) => [...prev, { childFieldName: field.fieldName, parentFieldName: v, valueMappings: [] }]);
+                                        }
+                                        // Fetch values for both parent and child
+                                        const parentField = selectedFields.find((f) => f.fieldName === v);
+                                        if (parentField) loadDependencyValues([parentField, field]);
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="None" /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">None</SelectItem>
+                                      {selectedFields.filter((f) => f.fieldName !== field.fieldName).map((f) => (
+                                        <SelectItem key={f.fieldName} value={f.fieldName}>{f.label}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
+
+                  {/* Inline dependency value mappings — shown for each configured dependency */}
+                  {dependencies.filter((d) => d.childFieldName && d.parentFieldName).map((dep, depIdx) => {
+                    const parentField = selectedFields.find((f) => f.fieldName === dep.parentFieldName);
+                    const childField = selectedFields.find((f) => f.fieldName === dep.childFieldName);
+                    const parentValues = masterDataValues[dep.parentFieldName] || [];
+                    const childValues = masterDataValues[dep.childFieldName] || [];
+                    const assignedChildValues = new Set<string>();
+                    dep.valueMappings.forEach((m) => m.allowedChildValues.forEach((v) => assignedChildValues.add(v)));
+
+                    return (
+                      <div key={depIdx} className="border rounded-xl p-4 space-y-3 bg-amber-50/50">
+                        <div className="flex items-center gap-2 text-xs font-medium">
+                          <span className="text-muted-foreground">When</span>
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{parentField?.label}</Badge>
+                          <span className="text-muted-foreground">changes, filter</span>
+                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">{childField?.label}</Badge>
+                        </div>
+
+                        {loadingValues ? (
+                          <div className="flex items-center gap-2 py-4 justify-center text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" /> Loading values...
+                          </div>
+                        ) : parentValues.length > 0 && childValues.length > 0 ? (
+                          <div className="border rounded-lg overflow-hidden bg-background">
+                            <Table>
+                              <TableHeader className="bg-muted/50">
+                                <TableRow>
+                                  <TableHead className="w-[180px] text-xs">When {parentField?.label} =</TableHead>
+                                  <TableHead className="text-xs">Show these {childField?.label}</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {parentValues.map((pVal) => {
+                                  const mapping = dep.valueMappings.find((m) => m.parentValue === pVal);
+                                  const currentAllowed = mapping?.allowedChildValues || [];
+                                  return (
+                                    <TableRow key={pVal}>
+                                      <TableCell className="font-medium text-xs align-top py-2">{pVal}</TableCell>
+                                      <TableCell className="py-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {childValues.map((cVal) => {
+                                            const isChecked = currentAllowed.includes(cVal);
+                                            const isAssignedElsewhere = !isChecked && assignedChildValues.has(cVal);
+                                            return (
+                                              <label key={cVal} className={cn(
+                                                "flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] cursor-pointer transition-colors",
+                                                isChecked ? "bg-primary/10 border-primary text-primary font-medium"
+                                                  : isAssignedElsewhere ? "opacity-40 cursor-not-allowed"
+                                                  : "hover:bg-muted/30"
+                                              )}>
+                                                <Checkbox checked={isChecked} disabled={isAssignedElsewhere} className="h-3 w-3"
+                                                  onCheckedChange={(checked) => {
+                                                    setDependencies((prev) => prev.map((d, i) => {
+                                                      if (i !== depIdx) return d;
+                                                      const existing = d.valueMappings.find((m) => m.parentValue === pVal);
+                                                      let newMappings: ValueMapping[];
+                                                      if (checked) {
+                                                        newMappings = existing
+                                                          ? d.valueMappings.map((m) => m.parentValue === pVal ? { ...m, allowedChildValues: [...m.allowedChildValues, cVal] } : m)
+                                                          : [...d.valueMappings, { parentValue: pVal, allowedChildValues: [cVal] }];
+                                                      } else {
+                                                        newMappings = d.valueMappings.map((m) => m.parentValue === pVal ? { ...m, allowedChildValues: m.allowedChildValues.filter((v) => v !== cVal) } : m).filter((m) => m.allowedChildValues.length > 0);
+                                                      }
+                                                      return { ...d, valueMappings: newMappings };
+                                                    }));
+                                                  }}
+                                                />
+                                                {cVal}
+                                              </label>
+                                            );
+                                          })}
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground py-2">No values found. Make sure the source data has records.</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </ScrollArea>
             </div>
@@ -858,7 +1006,7 @@ export default function LookupConfigurationDialog({
             <div className="flex gap-3">
               {step === "mapping" && (
                 <Button variant="outline" onClick={() => setStep("selection")}>
-                  <ChevronLeft className="h-4 w-4 mr-2" /> Back to Fields
+                  <ChevronLeft className="h-4 w-4 mr-2" /> Back
                 </Button>
               )}
 
@@ -868,7 +1016,7 @@ export default function LookupConfigurationDialog({
                   onClick={() => setStep("mapping")}
                   className="px-8"
                 >
-                  Configure Mapping <ChevronRight className="h-4 w-4 ml-2" />
+                  Configure <ChevronRight className="h-4 w-4 ml-2" />
                 </Button>
               ) : (
                 <Button

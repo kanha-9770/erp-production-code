@@ -316,7 +316,7 @@ export function FormRenderer({
           </SelectTrigger>
           <SelectContent>
             {options.map((opt: any) => (
-              <SelectItem key={opt.value || opt.id} value={opt.value || opt.id}>
+              <SelectItem key={opt.value || opt.id} value={(opt.value || opt.id)?.toLowerCase().trim()}>
                 {opt.label}
               </SelectItem>
             ))}

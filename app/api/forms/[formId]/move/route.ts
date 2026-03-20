@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { DatabaseService } from "@/lib/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function PATCH(
@@ -12,10 +12,7 @@ export async function PATCH(
 
     const { newModuleId } = await request.json();
 
-    const updatedForm = await prisma.form.update({
-      where: { id: params.formId },
-      data: { moduleId: newModuleId },
-    });
+    const updatedForm = await DatabaseService.updateForm(params.formId, { moduleId: newModuleId });
 
     return NextResponse.json({ success: true, data: updatedForm });
   } catch (error: any) {

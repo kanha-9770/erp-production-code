@@ -73,7 +73,7 @@ import {
 import FieldComponent from "./field-component";
 import SectionSettings from "./section-settings";
 
-import type { FormSection, FormField } from "@/types/item-types";
+import type { FormSection, FormField } from "@/types/form-builder";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";

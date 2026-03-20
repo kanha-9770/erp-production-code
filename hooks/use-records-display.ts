@@ -452,10 +452,25 @@ export function useRecordsDisplay({
         : formFieldsWithSections.filter((f) => f.formId === selectedFormFilter);
       relevant.forEach((f) => {
         if (f.label === "Unknown Field") return;
-        const key = isMerged ? `${f.formId}-${f.id}` : f.id;
+        // Use originalId (raw field id) so keys match the processedData-derived entries.
+        // formFieldsWithSections stores compound ids (formId_fieldId) in f.id but
+        // processedData uses the raw fieldId — using originalId keeps them in sync.
+        const rawId = f.originalId || f.id;
+        const key = isMerged ? `${f.formId}-${rawId}` : rawId;
         if (!fieldMap.has(key)) fieldMap.set(key, f);
       });
-      return Array.from(fieldMap.values()).sort((a, b) => a.order - b.order);
+      // Final dedup: by originalId (raw field id) to catch any remaining duplicates
+      // where one entry used compound id and another used raw id for the same field.
+      const seenRawIds = new Set<string>();
+      return Array.from(fieldMap.values())
+        .sort((a, b) => a.order - b.order)
+        .filter((f) => {
+          const rawId = (f.originalId || f.id);
+          const dedupKey = isMerged ? `${f.formId}-${rawId}` : rawId;
+          if (seenRawIds.has(dedupKey)) return false;
+          seenRawIds.add(dedupKey);
+          return true;
+        });
     },
     [formFieldsWithSections],
   );
@@ -677,6 +692,16 @@ export function useRecordsDisplay({
       s.has(fieldId) ? s.delete(fieldId) : s.add(fieldId);
       return s;
     });
+  };
+
+  const allFieldsVisible = orderedFields.length > 0 && orderedFields.every((f) => visibleFields.has(f.id));
+
+  const toggleAllFieldsVisibility = () => {
+    if (allFieldsVisible) {
+      setVisibleFields(new Set());
+    } else {
+      setVisibleFields(new Set(orderedFields.map((f) => f.id)));
+    }
   };
 
   // ── Advanced filter opener ───────────────────────────────────────────────────
@@ -936,7 +961,7 @@ export function useRecordsDisplay({
     getFieldData, getConditionalStyle, recalculateFormulasForRecord,
     sortRecords, applyFieldFilters,
     // Handlers
-    handleResizeStart, toggleCellExpansion, toggleFieldVisibility,
+    handleResizeStart, toggleCellExpansion, toggleFieldVisibility, toggleAllFieldsVisibility, allFieldsVisible,
     handleCellPointerDown, handleOpenAdvancedFilterForColumn,
     handleOpenDeleteConfirm, handleConfirmDelete, handleViewDetails,
     addComment, requestDeleteComment, cancelDeleteComment,

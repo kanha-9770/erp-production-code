@@ -1,137 +1,97 @@
 "use client"
 
-import { useState } from "react"
-import { Download, FileSpreadsheet } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Download, FileSpreadsheet, Loader2, ArrowLeft, FileText, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { FieldSelector } from "@/components/data-migration/field-selector"
-import { useRouter } from "next/navigation"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/hooks/use-toast"
+import { useGetPermittedModulesQuery } from "@/lib/api/modules"
+import { useGetFormDetailQuery } from "@/lib/api/forms"
+import { exportToCSV, exportToXLSX, exportToPDF } from "@/lib/export-utils"
+import Link from "next/link"
 
 export default function ExportPage() {
-  const router = useRouter()
-  const [selectedModuleId, setSelectedModuleId] = useState<string>("")
-  const [selectedFormId, setSelectedFormId] = useState<string>("")
-  const [selectedFields, setSelectedFields] = useState<string[]>([])
-  const [exportFormat, setExportFormat] = useState<"CSV" | "XLSX">("CSV")
+  const { toast } = useToast()
+  const [selectedModuleId, setSelectedModuleId] = useState("")
+  const [selectedFormId, setSelectedFormId] = useState("")
+  const [selectedFieldIds, setSelectedFieldIds] = useState<string[]>([])
+  const [exportFormat, setExportFormat] = useState<"csv" | "xlsx" | "pdf">("csv")
   const [isExporting, setIsExporting] = useState(false)
 
-  // Mock data - in production, fetch from API
-  const modules = [
-    { id: "1", name: "china_vendors", label: "China Vendors" },
-    { id: "2", name: "accounts", label: "Accounts" },
-    { id: "3", name: "agents", label: "Agents" },
-  ]
+  // RTK Query: fetch real modules
+  const { data: modulesData, isLoading: loadingModules } = useGetPermittedModulesQuery()
 
-  const mockSections = [
-    {
-      id: "s1",
-      label: "Basic Information",
-      order: 1,
-      fields: [
-        {
-          id: "f1",
-          name: "name",
-          label: "Vendor Name",
-          fieldType: "TEXT" as const,
-          isRequired: true,
-          isImportable: true,
-          isExportable: true,
-          isUnique: false,
-          lookupDisplayFields: [],
-        },
-        {
-          id: "f2",
-          name: "email",
-          label: "Email",
-          fieldType: "EMAIL" as const,
-          isRequired: true,
-          isImportable: true,
-          isExportable: true,
-          isUnique: true,
-          lookupDisplayFields: [],
-        },
-        {
-          id: "f3",
-          name: "phone",
-          label: "Phone",
-          fieldType: "PHONE" as const,
-          isRequired: false,
-          isImportable: true,
-          isExportable: true,
-          isUnique: false,
-          lookupDisplayFields: [],
-        },
-      ],
-    },
-    {
-      id: "s2",
-      label: "Additional Details",
-      order: 2,
-      fields: [
-        {
-          id: "f4",
-          name: "location",
-          label: "Location",
-          fieldType: "TEXT" as const,
-          isRequired: false,
-          isImportable: true,
-          isExportable: true,
-          isUnique: false,
-          lookupDisplayFields: [],
-        },
-        {
-          id: "f5",
-          name: "job",
-          label: "Job Title",
-          fieldType: "TEXT" as const,
-          isRequired: false,
-          isImportable: true,
-          isExportable: true,
-          isUnique: false,
-          lookupDisplayFields: [],
-        },
-        {
-          id: "f6",
-          name: "company",
-          label: "Company",
-          fieldType: "TEXT" as const,
-          isRequired: false,
-          isImportable: true,
-          isExportable: true,
-          isUnique: false,
-          lookupDisplayFields: [],
-        },
-      ],
-    },
-  ]
+  // RTK Query: fetch form detail when a form is selected
+  const { data: formDetail, isLoading: loadingForm } = useGetFormDetailQuery(selectedFormId, {
+    skip: !selectedFormId,
+  })
+
+  const modules = modulesData?.modules || []
+
+  // Get forms for selected module
+  const moduleForms = useMemo(() => {
+    if (!selectedModuleId) return []
+    const mod = modules.find((m) => m.module_id === selectedModuleId)
+    return mod?.forms?.filter((f) => f.isPublished) || []
+  }, [modules, selectedModuleId])
+
+  // Get all fields from the form
+  const formFields = useMemo(() => {
+    if (!formDetail?.data?.sections) return []
+    return formDetail.data.sections.flatMap((s: any) =>
+      (s.fields || []).map((f: any) => ({ ...f, sectionTitle: s.title }))
+    )
+  }, [formDetail])
+
+  // Auto-select all fields when form loads
+  const handleFormChange = (formId: string) => {
+    setSelectedFormId(formId)
+    setSelectedFieldIds([]) // Reset — will auto-populate when formDetail loads
+  }
+
+  // Select/deselect all fields
+  const toggleAllFields = () => {
+    if (selectedFieldIds.length === formFields.length) {
+      setSelectedFieldIds([])
+    } else {
+      setSelectedFieldIds(formFields.map((f: any) => f.id))
+    }
+  }
 
   const handleExport = async () => {
+    if (!selectedFormId || selectedFieldIds.length === 0) return
     setIsExporting(true)
 
     try {
-      const response = await fetch("/api/export/create-job", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          moduleId: selectedModuleId,
-          formId: selectedFormId,
-          selectedFields,
-          format: exportFormat,
-        }),
-      })
+      // Fetch export data from API
+      const fieldsParam = selectedFieldIds.join(",")
+      const res = await fetch(`/api/forms/${selectedFormId}/export?format=json&fields=${fieldsParam}`)
+      const result = await res.json()
 
-      const data = await response.json()
-
-      if (data.success) {
-        // In production, trigger download or redirect to download page
-        alert(`Export job created! Job ID: ${data.exportJobId}`)
+      if (!result.records || result.records.length === 0) {
+        toast({ title: "No Data", description: "No records found to export", variant: "destructive" })
+        return
       }
-    } catch (error) {
-      console.error("Export failed:", error)
-      alert("Export failed. Please try again.")
+
+      const formName = result.form?.name || "export"
+      const data = result.records
+
+      if (exportFormat === "csv") {
+        exportToCSV({ filename: `${formName}_export.csv`, data, columns: result.headers })
+      } else if (exportFormat === "xlsx") {
+        await exportToXLSX({ filename: `${formName}_export`, data, columns: result.headers })
+      } else {
+        await exportToPDF({ filename: `${formName}_export`, data, columns: result.headers, title: `${formName} Export` })
+      }
+
+      toast({ title: "Export Complete", description: `${result.totalRecords} records exported as ${exportFormat.toUpperCase()}` })
+    } catch (error: any) {
+      toast({ title: "Export Failed", description: error.message || "Something went wrong", variant: "destructive" })
     } finally {
       setIsExporting(false)
     }
@@ -140,52 +100,49 @@ export default function ExportPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b bg-white">
-        <div className="container mx-auto px-6 py-6">
+        <div className="container mx-auto px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
-              <Download className="w-6 h-6 text-green-600" />
+            <Link href="/">
+              <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
+            </Link>
+            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+              <Download className="w-5 h-5 text-green-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Export Data</h1>
-              <p className="text-sm text-muted-foreground">Export your module data to CSV or Excel format</p>
+              <h1 className="text-xl font-bold">Export Data</h1>
+              <p className="text-xs text-muted-foreground">Export your form records to CSV, Excel, or PDF</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="container mx-auto px-6 py-8 max-w-5xl space-y-6">
+      <div className="container mx-auto px-6 py-6 max-w-4xl space-y-5">
+        {/* Step 1: Module & Form */}
         <Card>
-          <CardHeader>
-            <CardTitle>Select Module & Form</CardTitle>
-            <CardDescription>Choose which module and form you want to export data from</CardDescription>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">1. Select Module & Form</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
             <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="module">Module</Label>
-                <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-                  <SelectTrigger id="module">
-                    <SelectValue placeholder="Select a module" />
-                  </SelectTrigger>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Module</Label>
+                <Select value={selectedModuleId} onValueChange={(v) => { setSelectedModuleId(v); setSelectedFormId(""); setSelectedFieldIds([]) }}>
+                  <SelectTrigger><SelectValue placeholder={loadingModules ? "Loading..." : "Select module"} /></SelectTrigger>
                   <SelectContent>
-                    {modules.map((module) => (
-                      <SelectItem key={module.id} value={module.id}>
-                        {module.label}
-                      </SelectItem>
+                    {modules.map((m) => (
+                      <SelectItem key={m.module_id} value={m.module_id}>{m.module_name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="form">Form</Label>
-                <Select value={selectedFormId} onValueChange={setSelectedFormId} disabled={!selectedModuleId}>
-                  <SelectTrigger id="form">
-                    <SelectValue placeholder="Select a form" />
-                  </SelectTrigger>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Form</Label>
+                <Select value={selectedFormId} onValueChange={handleFormChange} disabled={!selectedModuleId}>
+                  <SelectTrigger><SelectValue placeholder={!selectedModuleId ? "Select module first" : "Select form"} /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="form1">Main Form</SelectItem>
-                    <SelectItem value="form2">Secondary Form</SelectItem>
+                    {moduleForms.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -193,65 +150,91 @@ export default function ExportPage() {
           </CardContent>
         </Card>
 
-        {selectedModuleId && selectedFormId && (
-          <>
-            <FieldSelector sections={mockSections} selectedFields={selectedFields} onFieldsChange={setSelectedFields} />
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Export Format</CardTitle>
-                <CardDescription>Choose the file format for your export</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RadioGroup value={exportFormat} onValueChange={(v: any) => setExportFormat(v)}>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="CSV" id="csv" />
-                    <Label htmlFor="csv" className="cursor-pointer flex items-center gap-2">
-                      <FileSpreadsheet className="w-4 h-4" />
-                      CSV (Comma Separated Values)
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="XLSX" id="xlsx" />
-                    <Label htmlFor="xlsx" className="cursor-pointer flex items-center gap-2">
-                      <FileSpreadsheet className="w-4 h-4" />
-                      XLSX (Microsoft Excel)
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Export Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Selected Module:</span>
-                  <span className="font-medium">{modules.find((m) => m.id === selectedModuleId)?.label || "-"}</span>
+        {/* Step 2: Field Selection */}
+        {selectedFormId && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">2. Select Fields</CardTitle>
+                {formFields.length > 0 && (
+                  <Button variant="outline" size="sm" className="text-xs h-7" onClick={toggleAllFields}>
+                    {selectedFieldIds.length === formFields.length ? "Deselect All" : "Select All"}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingForm ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading form fields...
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Selected Fields:</span>
-                  <span className="font-medium">{selectedFields.length} fields</span>
+              ) : formFields.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-2">No fields found in this form.</p>
+              ) : (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {formFields.map((field: any) => {
+                    const checked = selectedFieldIds.includes(field.id)
+                    return (
+                      <label
+                        key={field.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${checked ? "bg-primary/5 border-primary" : "hover:bg-muted/30"}`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) => {
+                            setSelectedFieldIds((prev) =>
+                              v ? [...prev, field.id] : prev.filter((id) => id !== field.id)
+                            )
+                          }}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="truncate">{field.label}</span>
+                        <Badge variant="secondary" className="ml-auto text-[9px] px-1 py-0">{field.type}</Badge>
+                      </label>
+                    )
+                  })}
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Export Format:</span>
-                  <span className="font-medium">{exportFormat}</span>
-                </div>
-              </CardContent>
-            </Card>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => router.push("/")}>
-                Cancel
-              </Button>
-              <Button onClick={handleExport} disabled={selectedFields.length === 0 || isExporting} size="lg">
-                <Download className="w-4 h-4 mr-2" />
-                {isExporting ? "Exporting..." : "Export Data"}
-              </Button>
-            </div>
-          </>
+        {/* Step 3: Format & Export */}
+        {selectedFieldIds.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">3. Export Format</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <RadioGroup value={exportFormat} onValueChange={(v: any) => setExportFormat(v)} className="flex gap-4">
+                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors ${exportFormat === "csv" ? "bg-primary/5 border-primary" : "hover:bg-muted/30"}`}>
+                  <RadioGroupItem value="csv" id="csv" />
+                  <FileText className="w-4 h-4" />
+                  <span className="text-sm">CSV</span>
+                </label>
+                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors ${exportFormat === "xlsx" ? "bg-primary/5 border-primary" : "hover:bg-muted/30"}`}>
+                  <RadioGroupItem value="xlsx" id="xlsx" />
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span className="text-sm">Excel</span>
+                </label>
+                <label className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors ${exportFormat === "pdf" ? "bg-primary/5 border-primary" : "hover:bg-muted/30"}`}>
+                  <RadioGroupItem value="pdf" id="pdf" />
+                  <FileText className="w-4 h-4" />
+                  <span className="text-sm">PDF</span>
+                </label>
+              </RadioGroup>
+
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-medium">{selectedFieldIds.length}</span> fields selected
+                </div>
+                <Button onClick={handleExport} disabled={isExporting} size="sm">
+                  {isExporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                  {isExporting ? "Exporting..." : `Export as ${exportFormat.toUpperCase()}`}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

@@ -1,7 +1,7 @@
 import UserCreationPage from '@/components/UserCreationPage';
 import React from 'react';
 
-const AkashPage = () => {
+const EmployeeToUserCreation = () => {
     return (
         <main>
             <UserCreationPage/>
@@ -9,4 +9,4 @@ const AkashPage = () => {
     );
 };
 
-export default AkashPage;
+export default EmployeeToUserCreation;
