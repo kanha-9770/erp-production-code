@@ -41,6 +41,8 @@ export const baseApi = createApi({
     "AdminUsers",
     // Settings
     "MasterData",
+    // Chat
+    "Conversations",
   ],
   endpoints: () => ({}),
 })

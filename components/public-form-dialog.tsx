@@ -1043,7 +1043,7 @@ export function PublicFormDialog({
     await Promise.all(
       allIds.map(async (id) => {
         try {
-          const data = await triggerSectionPerms(id).unwrap();
+          const data: any = await triggerSectionPerms(id).unwrap();
           if (data.error) {
             sectionPerms[id] = "VIEW";
             return;

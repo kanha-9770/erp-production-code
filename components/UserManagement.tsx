@@ -454,8 +454,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useGetUserQuery } from "@/lib/api/auth";
-import { useGetUsersQuery, useDeleteUserMutation } from "@/lib/api/users";
+import { useGetUsersQuery, useDeleteUserMutation, useCreateUserMutation, useUpdateUserMutation } from "@/lib/api/users";
 import { useGetRolesQuery } from "@/lib/api/permissions";
+import { useGetOrganizationUnitsQuery } from "@/lib/api/organization";
 
 // --- Types ---
 export interface Unit {
@@ -539,6 +540,9 @@ const UserManagement: React.FC = () => {
   const [roles, setRoles] = useState<Role[]>([]);
 
   const [deleteUser] = useDeleteUserMutation();
+  const [createUser] = useCreateUserMutation();
+  const [updateUser] = useUpdateUserMutation();
+  const { data: orgUnitsData } = useGetOrganizationUnitsQuery();
 
   // RTK Query hooks for initial data
   const { data: sessionData } = useGetUserQuery();
@@ -575,22 +579,13 @@ const UserManagement: React.FC = () => {
     }
   }, [rolesData]);
 
-  // Fetch organization units (no RTK hook available, keep fetch)
+  // Fetch organization units via RTK Query
   useEffect(() => {
-    const fetchUnits = async () => {
-      try {
-        const unitsRes = await fetch('/api/organization-units', { credentials: 'include' });
-        if (unitsRes.ok) {
-          const payload = await unitsRes.json();
-          const fetchedUnits = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
-          setUnits(fetchedUnits);
-        }
-      } catch (err) {
-        console.warn("Org units error:", err);
-      }
-    };
-    fetchUnits();
-  }, []);
+    if (orgUnitsData) {
+      const fetchedUnits = (orgUnitsData as any)?.success ? (orgUnitsData as any).data : (Array.isArray(orgUnitsData) ? orgUnitsData : []);
+      setUnits(fetchedUnits);
+    }
+  }, [orgUnitsData]);
 
   // Process users data
   useEffect(() => {
@@ -635,26 +630,18 @@ const UserManagement: React.FC = () => {
 
     try {
       const payload = { ...formData, organizationId };
-      const url = isEditing && editId ? `/api/users/${editId}` : '/api/users';
-      const method = isEditing && editId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Failed (${res.status})`);
+      if (isEditing && editId) {
+        await updateUser({ userId: editId, body: payload }).unwrap();
+      } else {
+        await createUser(payload).unwrap();
       }
 
       setFormData({});
       setIsEditing(false);
       setEditId(null);
       setShowForm(false);
-      refetchUsers(); // refresh filtered list
+      refetchUsers();
     } catch (err: any) {
       console.error("User save error:", err);
       alert("Could not save user: " + (err.message || "Unknown error"));

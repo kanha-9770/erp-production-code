@@ -73,6 +73,26 @@ export const usersApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["AdminUsers"],
     }),
+
+    // Create user
+    createUser: builder.mutation<{ success: boolean; data: any }, Record<string, any>>({
+      query: (body) => ({
+        url: "/users",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["AdminUsers"],
+    }),
+
+    // Update user
+    updateUser: builder.mutation<{ success: boolean; data: any }, { userId: string; body: Record<string, any> }>({
+      query: ({ userId, body }) => ({
+        url: `/users/${userId}`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["AdminUsers"],
+    }),
   }),
 })
 
@@ -86,4 +106,6 @@ export const {
   useGetUserPermissionsWithHeadersQuery,
   useLazyGetUserPermissionsWithHeadersQuery,
   useCreateUserFromEmployeeMutation,
+  useCreateUserMutation,
+  useUpdateUserMutation,
 } = usersApi

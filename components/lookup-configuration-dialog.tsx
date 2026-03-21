@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type { FormField } from "@/types/form-builder";
-import { useLazyGetLookupSourcesQuery, useLazyGetLookupSectionsQuery, useLazyGetLookupDataQuery } from "@/lib/api/lookup";
+import { useLazyGetLookupSourcesQuery, useLazyGetLookupSectionsQuery, useLazyGetLookupDataQuery, useLazyGetLookupFieldsWithSectionQuery } from "@/lib/api/lookup";
 import { useLazyGetMasterDataQuery, useLazyGetMasterDataByModuleQuery } from "@/lib/api/settings";
 
 /* ===================== TYPES ===================== */
@@ -147,6 +147,7 @@ export default function LookupConfigurationDialog({
   const [triggerGetLookupData] = useLazyGetLookupDataQuery();
   const [triggerGetMasterData] = useLazyGetMasterDataQuery();
   const [triggerGetMasterDataByModule] = useLazyGetMasterDataByModuleQuery();
+  const [triggerGetLookupFieldsWithSection] = useLazyGetLookupFieldsWithSectionQuery();
 
   /* ===================== COMPUTED DATA ===================== */
   const modules = useMemo(
@@ -256,9 +257,7 @@ export default function LookupConfigurationDialog({
   const fetchFields = async (sourceId: string, sectId: string) => {
     setLoadingFields(true);
     try {
-      const url = `/api/lookup/fields?sourceId=${sourceId}&sectionId=${sectId}`;
-      const res = await fetch(url);
-      const result = await res.json();
+      const result = await triggerGetLookupFieldsWithSection({ sourceId, sectionId: sectId }).unwrap();
       if (result.success) {
         const rawFields = Array.isArray(result.data)
           ? result.data

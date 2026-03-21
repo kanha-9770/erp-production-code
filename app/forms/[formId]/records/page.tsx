@@ -101,7 +101,8 @@ import {
 import { cn } from "@/lib/utils"
 import type { Form, FormRecord, FormModule, FormField } from "@/types/form-builder"
 import { formsApi } from "@/lib/api/forms"
-import { useUpdateRecordMutation, useDeleteRecordMutation } from "@/lib/api/records"
+import { useUpdateRecordMutation, useDeleteRecordMutation, useLazyGetFormRecordsWithParamsQuery, useCreateRecordMutation } from "@/lib/api/records"
+import { useLazyExportFormRecordsBlobQuery } from "@/lib/api/forms"
 import { modulesApi } from "@/lib/api/modules"
 
 interface StatsData {
@@ -201,6 +202,9 @@ export default function RecordsPage() {
   const [triggerLinkedRecords] = formsApi.useLazyGetFormLinkedRecordsQuery()
   const [updateRecordMutation] = useUpdateRecordMutation()
   const [deleteRecordMutation] = useDeleteRecordMutation()
+  const [triggerGetRecords] = useLazyGetFormRecordsWithParamsQuery()
+  const [createRecordMutation] = useCreateRecordMutation()
+  const [triggerExportBlob] = useLazyExportFormRecordsBlobQuery()
 
   // State management
   const [module, setModule] = useState<FormModule | null>(null)
@@ -1006,11 +1010,7 @@ export default function RecordsPage() {
       if (searchTerm) params.append("search", searchTerm)
       if (statusFilter !== "all") params.append("status", statusFilter)
 
-      const response = await fetch(`/api/forms/${formId}/records?${params}`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch records: ${response.status}`)
-      }
-      const data = await response.json()
+      const data = await triggerGetRecords({ formId, params: Object.fromEntries(params) }).unwrap()
       if (!data.success) {
         throw new Error(data.error || "Failed to fetch records")
       }
@@ -1136,14 +1136,8 @@ export default function RecordsPage() {
           throw new Error(result.error)
         }
       } else {
-        // Create new record (no matching RTK endpoint for POST /records)
-        const response = await fetch(`/api/forms/${formId}/records`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        })
-
-        const result = await response.json()
+        // Create new record
+        const result = await createRecordMutation({ formId, body }).unwrap()
 
         if (!result.success) {
           throw new Error(result.error)
@@ -1358,9 +1352,7 @@ export default function RecordsPage() {
 
   const handleExport = async (format: "csv" | "json") => {
     try {
-      const response = await fetch(`/api/forms/${formId}/export?format=${format}`)
-      if (!response.ok) throw new Error("Export failed")
-      const blob = await response.blob()
+      const blob = await triggerExportBlob({ formId, format }).unwrap()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url

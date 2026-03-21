@@ -13,16 +13,18 @@ import {
   Loader2,
   ImageIcon,
   VideoIcon,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FileUploadZoneProps {
   fieldType: "image" | "file" | "signature" | "video";
-  onUploadComplete: (url: string) => void;
-  onClear?: () => void;
+  onUploadComplete: (url: string | string[]) => void;
+  onClear?: (url?: string) => void;
   disabled?: boolean;
-  currentValue?: string;
+  currentValue?: string | string[];
   maxSize?: number; // in MB
+  allowMultiple?: boolean;
 }
 
 export function FileUploadZone({
@@ -32,6 +34,7 @@ export function FileUploadZone({
   disabled = false,
   currentValue,
   maxSize = 10,
+  allowMultiple = true,
 }: FileUploadZoneProps) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -39,6 +42,7 @@ export function FileUploadZone({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [selectedPreviewUrl, setSelectedPreviewUrl] = useState<string | null>(null);
 
   // Lock body scroll when lightbox is open
   useEffect(() => {
@@ -76,48 +80,8 @@ export function FileUploadZone({
     return "file";
   };
 
-  const handleFile = async (file: File) => {
-    const fileSizeMB = file.size / (1024 * 1024);
-    if (fileSizeMB > maxSize) {
-      toast({
-        title: "File too large",
-        description: `Maximum file size is ${maxSize}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (fieldType === "image" && !file.type.startsWith("image/")) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload an image file.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (fieldType === "video" && !file.type.startsWith("video/")) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload a video file.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (fieldType === "signature" && !["image/png", "image/jpeg"].includes(file.type)) {
-      toast({
-        title: "Invalid file type",
-        description: "Signature must be PNG or JPEG.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadProgress(0);
-
-    try {
+  const uploadFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
       const formData = new FormData();
       formData.append("image", file);
       formData.append("type", fieldType);
@@ -133,37 +97,106 @@ export function FileUploadZone({
 
       xhr.addEventListener("load", () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          const response = JSON.parse(xhr.responseText);
-          if (response.imageUrl) {
-            onUploadComplete(response.imageUrl);
-            toast({
-              title: "Success",
-              description: "File uploaded successfully!",
-            });
-          } else {
-            throw new Error(response.error || "No imageUrl in response");
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.imageUrl) {
+              resolve(response.imageUrl);
+            } else {
+              reject(new Error(response.error || "No imageUrl in response"));
+            }
+          } catch (e) {
+            reject(new Error("Failed to parse response"));
           }
         } else {
-          throw new Error(`Upload failed with status ${xhr.status}`);
+          reject(new Error(`Upload failed with status ${xhr.status}`));
         }
       });
 
       xhr.addEventListener("error", () => {
-        throw new Error("Network error during upload");
+        reject(new Error("Network error during upload"));
       });
 
       xhr.open("POST", "/api/upload");
       xhr.send(formData);
+    });
+  };
+
+  const handleFiles = async (files: FileList | File[]) => {
+    const validFiles: File[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileSizeMB = file.size / (1024 * 1024);
+
+      if (fileSizeMB > maxSize) {
+        toast({
+          title: "File too large",
+          description: `${file.name} is too large. Maximum size is ${maxSize}MB.`,
+          variant: "destructive",
+        });
+        continue;
+      }
+
+      if (fieldType === "image" && !file.type.startsWith("image/")) {
+        toast({
+          title: "Invalid file type",
+          description: `${file.name} is not an image.`,
+          variant: "destructive",
+        });
+        continue;
+      }
+
+      if (fieldType === "video" && !file.type.startsWith("video/")) {
+        toast({
+          title: "Invalid file type",
+          description: `${file.name} is not a video.`,
+          variant: "destructive",
+        });
+        continue;
+      }
+
+      validFiles.push(file);
+    }
+
+    if (validFiles.length === 0) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    const uploadedUrls: string[] = [];
+    const currentList = Array.isArray(currentValue) ? [...currentValue] : currentValue ? [currentValue] : [];
+
+    try {
+      for (let i = 0; i < validFiles.length; i++) {
+        // Update progress context if multiple
+        const url = await uploadFile(validFiles[i]);
+        uploadedUrls.push(url);
+        
+        if (!allowMultiple) {
+          onUploadComplete(url);
+          break; // Only one if not multiple
+        }
+      }
+
+      if (allowMultiple && uploadedUrls.length > 0) {
+        onUploadComplete([...currentList, ...uploadedUrls]);
+      }
+      
+      toast({
+        title: "Success",
+        description: `${uploadedUrls.length} file(s) uploaded successfully!`,
+      });
     } catch (error: any) {
       console.error("Upload error:", error);
       toast({
         title: "Upload failed",
-        description: error.message || "Failed to upload file",
+        description: error.message || "Failed to upload file(s)",
         variant: "destructive",
       });
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -182,75 +215,107 @@ export function FileUploadZone({
     e.stopPropagation();
     setIsDragging(false);
     if (e.dataTransfer.files.length > 0 && !disabled && !isUploading) {
-      handleFile(e.dataTransfer.files[0]);
+      handleFiles(e.dataTransfer.files);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0 && !disabled && !isUploading) {
-      handleFile(e.target.files[0]);
+      handleFiles(e.target.files);
     }
   };
 
-  const renderPreview = () => {
-    if (!currentValue) return null;
+  const removeFile = (urlToRemove: string) => {
+    if (Array.isArray(currentValue)) {
+      onUploadComplete(currentValue.filter(url => url !== urlToRemove));
+    } else {
+      onClear?.();
+    }
+  };
 
-    const fileType = getFileTypeFromUrl(currentValue);
+  const renderSinglePreview = (url: string, index?: number) => {
+    const fileType = getFileTypeFromUrl(url);
     const isImage = fileType === "image" || fieldType === "image";
     const isVideo = fileType === "video" || fieldType === "video";
 
     return (
-      <div className="relative rounded-lg overflow-hidden border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-blue-100">
+      <div key={url} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col items-center justify-center min-h-[150px]">
         {/* Clickable preview area */}
         <div
-          className="cursor-pointer"
-          onClick={() => setIsPreviewOpen(true)}
+          className="cursor-pointer w-full h-full flex items-center justify-center"
+          onClick={() => {
+            setSelectedPreviewUrl(url);
+            setIsPreviewOpen(true);
+          }}
         >
           {isImage ? (
             <img
-              src={currentValue}
-              alt="Preview"
-              className="w-full h-auto max-h-64 object-contain"
+              src={url}
+              alt={`Preview ${index}`}
+              className="w-full h-full object-cover aspect-square hover:scale-105 transition-transform duration-300"
             />
           ) : isVideo ? (
-            <div className="relative aspect-video bg-black">
+            <div className="relative w-full h-full aspect-square bg-black">
               <video
-                src={currentValue}
-                className="w-full h-full object-contain"
+                src={url}
+                className="w-full h-full object-cover"
                 muted
-                preload="metadata"
               />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                <Play className="h-20 w-20 text-white opacity-80" />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/50 transition-colors">
+                <Play className="h-10 w-10 text-white opacity-80" />
               </div>
             </div>
           ) : (
-            <div className="p-10 flex flex-col items-center justify-center bg-white min-h-[200px]">
-              <FileIcon className="h-16 w-16 text-blue-500 mb-4" />
-              <p className="text-sm text-gray-700 font-medium text-center break-all px-4">
-                {currentValue.split("/").pop() || "Uploaded file"}
+            <div className="p-4 flex flex-col items-center justify-center w-full h-full">
+              <FileIcon className="h-10 w-10 text-blue-500 mb-2" />
+              <p className="text-[10px] text-gray-500 font-medium text-center break-all line-clamp-2 px-2">
+                {url.split("/").pop() || "File"}
               </p>
             </div>
           )}
         </div>
 
-        {/* Clear button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onClear?.();
-            if (fileInputRef.current) fileInputRef.current.value = "";
-          }}
-          disabled={disabled}
-          className="absolute top-3 right-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white p-2 rounded-full shadow-lg transition-all z-10"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        {/* Action Overlay */}
+        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              removeFile(url);
+            }}
+            disabled={disabled}
+            className="bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-full shadow-md transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
 
         {/* Success indicator */}
-        <div className="absolute top-3 left-3 bg-green-600 text-white p-2 rounded-full shadow z-10">
-          <CheckCircle className="h-5 w-5" />
+        <div className="absolute top-1 left-1 bg-green-500 text-white p-1 rounded-full shadow-sm z-10 pointer-events-none">
+          <CheckCircle className="h-3 w-3" />
         </div>
+      </div>
+    );
+  };
+
+  const renderPreviews = () => {
+    if (!currentValue) return null;
+    
+    const urls = Array.isArray(currentValue) ? currentValue : [currentValue];
+    if (urls.length === 0) return null;
+
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-4">
+        {urls.map((url, idx) => renderSinglePreview(url, idx))}
+        
+        {allowMultiple && !disabled && !isUploading && (
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center aspect-square cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
+          >
+            <Plus className="h-8 w-8 text-gray-400 group-hover:text-blue-500 mb-1" />
+            <span className="text-xs text-gray-500 group-hover:text-blue-600">Add More</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -258,16 +323,47 @@ export function FileUploadZone({
   const renderUploadZone = () => {
     if (isUploading) {
       return (
-        <div className="space-y-4 py-10">
+        <div className="space-y-4 py-8 bg-gray-50 rounded-xl border-2 border-dashed border-blue-200">
           <div className="flex items-center justify-center">
             <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
           </div>
-          <p className="text-base text-gray-700 text-center font-medium">
-            Uploading...
+          <p className="text-sm text-gray-700 text-center font-medium">
+            Uploading files...
           </p>
-          <Progress value={uploadProgress} className="h-2.5 max-w-xs mx-auto" />
-          <p className="text-sm text-gray-500 text-center">
-            {uploadProgress.toFixed(0)}%
+          <div className="max-w-xs mx-auto space-y-2">
+            <Progress value={uploadProgress} className="h-2" />
+            <p className="text-[10px] text-gray-500 text-center">
+              Current file: {uploadProgress.toFixed(0)}%
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // If not multiple and has value, don't show zone (preview handles it)
+    if (!allowMultiple && currentValue) return null;
+
+    // If multiple and has values, show smaller upload zone or just the "Add More" in grid
+    // For now, if we have values, the "Add More" box in the grid is enough, but a small drop zone might be nice.
+    const hasValues = Array.isArray(currentValue) ? currentValue.length > 0 : !!currentValue;
+    
+    if (hasValues && allowMultiple) {
+      return (
+         <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            "border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer mt-4",
+            isDragging
+              ? "border-blue-500 bg-blue-50"
+              : "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/20",
+            disabled && "opacity-50 cursor-not-allowed pointer-events-none"
+          )}
+        >
+          <p className="text-sm text-gray-500">
+            <span className="font-medium text-blue-600">Drop more files</span> or click to upload
           </p>
         </div>
       );
@@ -278,10 +374,11 @@ export function FileUploadZone({
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
         className={cn(
           "border-2 border-dashed rounded-xl p-10 text-center transition-all duration-300 cursor-pointer",
           isDragging
-            ? "border-blue-500 bg-blue-50 scale-[1.02] shadow-lg"
+            ? "border-blue-500 bg-blue-50 scale-[1.01] shadow-md"
             : "border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50/40",
           disabled && "opacity-50 cursor-not-allowed pointer-events-none"
         )}
@@ -294,11 +391,11 @@ export function FileUploadZone({
           )}
         </div>
 
-        <p className="font-semibold text-gray-900 text-lg mb-2">
-          Drop your file here or click to browse
+        <p className="font-bold text-gray-900 text-lg mb-1">
+          {allowMultiple ? "Upload many photos" : "Upload a photo"}
         </p>
-        <p className="text-sm text-gray-600 mb-6">
-          Max size: {maxSize}MB • Uploaded to Hostinger
+        <p className="text-sm text-gray-500 mb-6">
+          Drag and drop here or click to browse
         </p>
 
         <Button
@@ -309,17 +406,22 @@ export function FileUploadZone({
             fileInputRef.current?.click();
           }}
           disabled={disabled || isUploading}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-5 text-base"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-8 h-12"
         >
           <Upload className="h-5 w-5 mr-2" />
-          Select {fieldType === "image" ? "Image" : fieldType === "video" ? "Video" : "File"}
+          Select {allowMultiple ? "Files" : (fieldType === "image" ? "Image" : fieldType === "video" ? "Video" : "File")}
         </Button>
+
+        <p className="text-[11px] text-gray-400 mt-4 uppercase tracking-wider font-semibold">
+          Max size: {maxSize}MB • Supported: {getAcceptTypes()}
+        </p>
 
         <input
           ref={fileInputRef}
           type="file"
           accept={getAcceptTypes()}
           onChange={handleFileSelect}
+          multiple={allowMultiple}
           disabled={disabled}
           className="hidden"
         />
@@ -329,58 +431,71 @@ export function FileUploadZone({
 
   return (
     <>
-      <div className="space-y-5">
-        {currentValue ? renderPreview() : renderUploadZone()}
+      <div className="w-full">
+        {renderPreviews()}
+        {renderUploadZone()}
+        
+        {/* Hidden input for multiple uploads if not already shown */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={getAcceptTypes()}
+          onChange={handleFileSelect}
+          multiple={allowMultiple}
+          disabled={disabled}
+          className="hidden"
+        />
       </div>
 
       {/* Lightbox / Popup */}
-      {isPreviewOpen && currentValue && (
+      {isPreviewOpen && selectedPreviewUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center"
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setIsPreviewOpen(false)}
         >
           <div
-            className="relative max-w-[96vw] max-h-[96vh] mx-3 sm:mx-6"
+            className="relative max-w-full max-h-full"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => setIsPreviewOpen(false)}
-              className="absolute -top-14 right-0 sm:-top-16 sm:-right-4 bg-white/95 hover:bg-white text-gray-900 rounded-full p-3 shadow-2xl transition-all z-20"
-              aria-label="Close preview"
+              className="absolute -top-12 right-0 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-all"
+              aria-label="Close"
             >
-              <X className="h-7 w-7" />
+              <X className="h-6 w-6" />
             </button>
 
-            {getFileTypeFromUrl(currentValue) === "image" || fieldType === "image" ? (
+            {getFileTypeFromUrl(selectedPreviewUrl) === "image" || fieldType === "image" ? (
               <img
-                src={currentValue}
+                src={selectedPreviewUrl}
                 alt="Full size preview"
-                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                className="max-w-[95vw] max-h-[85vh] object-contain rounded shadow-2xl"
               />
-            ) : getFileTypeFromUrl(currentValue) === "video" || fieldType === "video" ? (
+            ) : getFileTypeFromUrl(selectedPreviewUrl) === "video" || fieldType === "video" ? (
               <video
-                src={currentValue}
+                src={selectedPreviewUrl}
                 controls
                 autoPlay
-                className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+                className="max-w-[95vw] max-h-[85vh] object-contain rounded shadow-2xl"
               />
             ) : (
-              <div className="bg-white rounded-xl p-10 max-w-lg text-center">
+              <div className="bg-white rounded-xl p-10 max-w-lg text-center shadow-2xl">
                 <FileIcon className="h-16 w-16 text-blue-500 mx-auto mb-6" />
                 <h3 className="text-xl font-semibold mb-3">Preview not supported</h3>
-                <p className="text-gray-600 mb-6">
-                  This file type cannot be previewed directly in the browser.
-                </p>
                 <a
-                  href={currentValue}
+                  href={selectedPreviewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition"
+                  className="inline-block bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition"
                 >
-                  Open file in new tab
+                  Download File
                 </a>
               </div>
             )}
+            
+            <p className="text-white/60 text-center mt-4 text-xs break-all px-10">
+              {selectedPreviewUrl}
+            </p>
           </div>
         </div>
       )}

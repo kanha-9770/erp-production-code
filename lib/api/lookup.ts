@@ -23,6 +23,10 @@ export const lookupApi = baseApi.injectEndpoints({
     getLookupSections: builder.query<ApiResponse, string>({
       query: (formId) => `/lookup/sections?formId=${formId}`,
     }),
+
+    getLookupFieldsWithSection: builder.query<ApiResponse, { sourceId: string; sectionId: string }>({
+      query: ({ sourceId, sectionId }) => `/lookup/fields?sourceId=${sourceId}&sectionId=${sectionId}`,
+    }),
   }),
 })
 
@@ -35,4 +39,6 @@ export const {
   useLazyGetLookupDataQuery,
   useGetLookupSectionsQuery,
   useLazyGetLookupSectionsQuery,
+  useGetLookupFieldsWithSectionQuery,
+  useLazyGetLookupFieldsWithSectionQuery,
 } = lookupApi

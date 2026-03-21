@@ -333,6 +333,19 @@ export const formsApi = baseApi.injectEndpoints({
       query: () => "/testing",
     }),
 
+    // Forms testing endpoint (employee-manager)
+    getFormsTestingData: builder.query<ApiResponse, void>({
+      query: () => "/forms/testing",
+    }),
+
+    // Export with blob response
+    exportFormRecordsBlob: builder.query<Blob, { formId: string; format: string }>({
+      query: ({ formId, format }) => ({
+        url: `/forms/${formId}/export?format=${format}`,
+        responseHandler: (response: Response) => response.blob(),
+      }),
+    }),
+
     // Section permission (singular route used by resource-permission-dialog)
     getSectionPermissionDetail: builder.query<ApiResponse, string>({
       query: (sectionId) => `/permissions/section/${sectionId}`,
@@ -350,6 +363,7 @@ export const formsApi = baseApi.injectEndpoints({
 
 export const {
   useGetFormDetailQuery,
+  useLazyGetFormDetailQuery,
   useGetFormFieldsWithSectionsQuery,
   useCreateFieldMutation,
   useUpdateFieldMutation,
@@ -394,4 +408,8 @@ export const {
   useCheckAttendanceMutation,
   useGetTestingDataQuery,
   useLazyGetTestingDataQuery,
+  useGetFormsTestingDataQuery,
+  useLazyGetFormsTestingDataQuery,
+  useExportFormRecordsBlobQuery,
+  useLazyExportFormRecordsBlobQuery,
 } = formsApi

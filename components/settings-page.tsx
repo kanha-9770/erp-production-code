@@ -208,6 +208,7 @@ const settingsData: SettingCategory[] = [
       { name: "Users", href: "/settings/users" },
       { name: "User Management", href: "/settings/users/user-management" },
       { name: "Company Settings", href: "/settings/company" },
+      { name: "Role Creation", href: "/settings/company" },
       { name: "Masters", href: "/settings/masters" },
       { name: "Motivator", href: "/settings/motivator" },
     ],

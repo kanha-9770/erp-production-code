@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Users, Clock, MapPin } from 'lucide-react';
 import { parseApiResponse, calculateDailyPayroll } from '@/lib/payroll-utils';
-import { useGetFormDetailQuery } from '@/lib/api/forms';
+import { useLazyGetFormsTestingDataQuery } from '@/lib/api/forms';
 
 interface DailyRecord {
   employeeName: string;
@@ -30,6 +30,7 @@ export default function EmployeeManager() {
   const [employees, setEmployees] = useState<Map<string, DailyRecord[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [expandedEmployee, setExpandedEmployee] = useState<string | null>(null);
+  const [triggerFormsTestingData] = useLazyGetFormsTestingDataQuery();
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
@@ -40,13 +41,7 @@ export default function EmployeeManager() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/forms/testing');
-
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await triggerFormsTestingData().unwrap();
       const dailyAttendance = parseApiResponse(data);
       const dailyPayrolls = calculateDailyPayroll(dailyAttendance);
 

@@ -13,6 +13,7 @@ import "./api/lookup"
 import "./api/settings"
 import "./api/upload"
 import "./api/payroll"
+import "./api/chat"
 
 export const store = configureStore({
   reducer: {

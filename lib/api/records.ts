@@ -135,6 +135,31 @@ export const recordsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["Records"],
     }),
+
+    // Delete dynamic record
+    deleteDynamicRecord: builder.mutation<any, string>({
+      query: (recordId) => ({
+        url: `/dynamic-records/${recordId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["Records"],
+    }),
+
+    // Get records with pagination/filter params
+    getFormRecordsWithParams: builder.query<any, { formId: string; params: Record<string, string> }>({
+      query: ({ formId, params }) => `/forms/${formId}/records?${new URLSearchParams(params).toString()}`,
+      providesTags: (result, error, { formId }) => [{ type: "Records", id: formId }],
+    }),
+
+    // Create a new record
+    createRecord: builder.mutation<any, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/records`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, error, { formId }) => [{ type: "Records", id: formId }, "Records"],
+    }),
   }),
 })
 
@@ -146,4 +171,8 @@ export const {
   useBatchUpdateRecordsMutation,
   useDeleteRecordMutation,
   useUpdateDynamicRecordMutation,
+  useDeleteDynamicRecordMutation,
+  useGetFormRecordsWithParamsQuery,
+  useLazyGetFormRecordsWithParamsQuery,
+  useCreateRecordMutation,
 } = recordsApi

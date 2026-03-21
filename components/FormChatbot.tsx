@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Send, Plus, Trash2, MessageSquare } from "lucide-react";
+import { useGetConversationsQuery, useCreateConversationMutation, useDeleteConversationMutation } from "@/lib/api/chat";
 
 interface Conversation {
   id: string;
@@ -41,26 +42,18 @@ export function FormChatbot({ userId }: FormChatbotProps) {
     setIsMounted(true);
   }, []);
 
-  // Load conversations
+  // Load conversations via RTK Query
+  const { data: conversationsData, isLoading: isLoadingConvs } = useGetConversationsQuery(undefined, { skip: !isMounted });
+
   useEffect(() => {
-    if (!isMounted) return;
-
-    const loadConversations = async () => {
-      try {
-        const response = await fetch("/api/chat/conversations");
-        if (response.ok) {
-          const data = await response.json();
-          setConversations(data);
-        }
-      } catch (error) {
-        console.error("Failed to load conversations:", error);
-      } finally {
-        setIsLoadingConversations(false);
-      }
-    };
-
-    loadConversations();
-  }, [isMounted]);
+    if (conversationsData) {
+      setConversations(conversationsData);
+      setIsLoadingConversations(false);
+    }
+    if (!isLoadingConvs && !conversationsData) {
+      setIsLoadingConversations(false);
+    }
+  }, [conversationsData, isLoadingConvs]);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -69,20 +62,16 @@ export function FormChatbot({ userId }: FormChatbotProps) {
     }
   }, [messages]);
 
+  const [createConversationMut] = useCreateConversationMutation();
+  const [deleteConversationMut] = useDeleteConversationMutation();
+
   const createNewConversation = async () => {
     try {
-      const response = await fetch("/api/chat/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `Chat ${new Date().toLocaleString()}`,
-        }),
-      });
-      if (response.ok) {
-        const newConversation = await response.json();
-        setConversations((prev) => [newConversation, ...prev]);
-        setCurrentConversationId(newConversation.id);
-      }
+      const newConversation = await createConversationMut({
+        title: `Chat ${new Date().toLocaleString()}`,
+      }).unwrap();
+      setConversations((prev) => [newConversation, ...prev]);
+      setCurrentConversationId(newConversation.id);
     } catch (error) {
       console.error("Failed to create conversation:", error);
     }
@@ -90,9 +79,7 @@ export function FormChatbot({ userId }: FormChatbotProps) {
 
   const deleteConversation = async (conversationId: string) => {
     try {
-      await fetch(`/api/chat/conversations/${conversationId}`, {
-        method: "DELETE",
-      });
+      await deleteConversationMut(conversationId).unwrap();
 
       setConversations((prev) =>
         prev.filter((conv) => conv.id !== conversationId),
