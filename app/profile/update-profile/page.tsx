@@ -17,6 +17,12 @@ import {
   isPossiblePhoneNumber,
   isValidPhoneNumber,
 } from "react-phone-number-input";
+import {
+  useGetUserQuery,
+  useUploadAvatarMutation,
+  useRemoveAvatarMutation,
+  useUpdateProfileMutation,
+} from "@/lib/api/auth";
 
 interface UserProfile {
   first_name: string | null;
@@ -33,9 +39,12 @@ interface UserProfile {
 export default function UpdateProfilePage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  // RTK Query hooks
+  const { data: userData, isLoading, isError, error: userError } = useGetUserQuery();
+  const [uploadAvatar, { isLoading: isUploadingAvatar }] = useUploadAvatarMutation();
+  const [removeAvatarMutation] = useRemoveAvatarMutation();
+  const [updateProfile, { isLoading: isSaving }] = useUpdateProfileMutation();
 
   const [profile, setProfile] = useState<UserProfile>({
     first_name: "",
@@ -51,50 +60,43 @@ export default function UpdateProfilePage() {
 
   const [phoneError, setPhoneError] = useState("");
   const [mobileError, setMobileError] = useState("");
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
+  // Populate profile from query data
   useEffect(() => {
-    const fetchUserProfile = async () => {
-      try {
-        const res = await fetch("/api/auth/me", {
-          credentials: "include",
-        });
+    if (userData?.user && !profileLoaded) {
+      const user = userData.user;
+      setProfile({
+        first_name: user.first_name || "",
+        last_name: user.last_name || "",
+        username: user.username || "",
+        phone: user.phone || "",
+        mobile: user.mobile || "",
+        location: user.location || "",
+        department: user.department || "",
+        email: user.email || "",
+        avatar: user.avatar || null,
+      });
+      setProfileLoaded(true);
+    }
+  }, [userData, profileLoaded]);
 
-        if (!res.ok) {
-          if (res.status === 401) {
-            router.push("/login");
-            return;
-          }
-          throw new Error("Failed to load profile");
-        }
-
-        const data = await res.json();
-        const user = data.user;
-
-        setProfile({
-          first_name: user.first_name || "",
-          last_name: user.last_name || "",
-          username: user.username || "",
-          phone: user.phone || "",
-          mobile: user.mobile || "",
-          location: user.location || "",
-          department: user.department || "",
-          email: user.email || "",
-          avatar: user.avatar || null,
-        });
-      } catch (err) {
+  // Handle auth error
+  useEffect(() => {
+    if (isError) {
+      const status = (userError as any)?.status;
+      if (status === 401) {
+        router.push("/login");
+      } else {
         toast({
           title: "Error",
           description: "Unable to load profile. Please log in again.",
           variant: "destructive",
         });
         router.push("/login");
-      } finally {
-        setIsLoading(false);
       }
-    };
-
-    fetchUserProfile();
-  }, [router, toast]);
+    }
+  }, [isError, userError, router, toast]);
 
   // Validate phone number in real-time
   const validatePhone = (value: string | undefined) => {
@@ -141,22 +143,13 @@ export default function UpdateProfilePage() {
     };
     reader.readAsDataURL(file);
 
-    setIsUploadingAvatar(true);
     try {
       const formData = new FormData();
       formData.append("avatar", file);
 
-      const res = await fetch("/api/auth/upload-avatar", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+      const result = await uploadAvatar(formData).unwrap();
 
-      const result = await res.json();
-
-      if (!res.ok) throw new Error(result.error || "Failed to upload avatar");
-
-      setProfile({ ...profile, avatar: result.avatarUrl });
+      setProfile({ ...profile, avatar: (result as any).avatarUrl || (result as any).url });
 
       toast({
         title: "Avatar Updated",
@@ -165,11 +158,9 @@ export default function UpdateProfilePage() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to upload image",
+        description: err.data?.error || err.message || "Failed to upload image",
         variant: "destructive",
       });
-    } finally {
-      setIsUploadingAvatar(false);
     }
   };
 
@@ -177,15 +168,7 @@ export default function UpdateProfilePage() {
     if (!profile.avatar) return;
 
     try {
-      const res = await fetch("/api/auth/remove-avatar", {
-        method: "POST",
-        credentials: "include",
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Failed to remove avatar");
-      }
+      await removeAvatarMutation().unwrap();
 
       setProfile({ ...profile, avatar: null });
 
@@ -198,7 +181,7 @@ export default function UpdateProfilePage() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to remove avatar",
+        description: err.data?.error || err.message || "Failed to remove avatar",
         variant: "destructive",
       });
     }
@@ -218,27 +201,16 @@ export default function UpdateProfilePage() {
       return;
     }
 
-    setIsSaving(true);
     try {
-      const res = await fetch("/api/auth/update-profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          first_name: profile.first_name,
-          last_name: profile.last_name,
-          username: profile.username,
-          phone: profile.phone || null,
-          mobile: profile.mobile || null,
-          location: profile.location,
-          department: profile.department,
-        }),
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Failed to update profile");
-      }
+      await updateProfile({
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        username: profile.username,
+        phone: profile.phone || null,
+        mobile: profile.mobile || null,
+        location: profile.location,
+        department: profile.department,
+      }).unwrap();
 
       toast({
         title: "Profile Updated",
@@ -249,11 +221,9 @@ export default function UpdateProfilePage() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to save changes",
+        description: err.data?.error || err.message || "Failed to save changes",
         variant: "destructive",
       });
-    } finally {
-      setIsSaving(false);
     }
   };
 

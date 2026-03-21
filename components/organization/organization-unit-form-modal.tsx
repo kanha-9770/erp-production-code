@@ -393,6 +393,7 @@ import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import type { OrganizationUnitFormData, User } from "@/types/role"
 import { flattenRoles, flattenUnits, getUserDisplayName, getUserInitials } from "@/lib/organization-utils"
+import { useCreateOrgUnitMutation, useUpdateOrgUnitMutation } from "@/lib/api/organization"
 import {
   Dialog,
   DialogContent,
@@ -416,6 +417,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
+import { useGetUsersQuery } from "@/lib/api/users"
 
 const EMPTY_FORM: OrganizationUnitFormData = {
   name: "",
@@ -430,6 +432,9 @@ export function OrganizationUnitFormModal() {
   const [formData, setFormData] = useState<OrganizationUnitFormData>(EMPTY_FORM)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
+  const { data: usersApiData } = useGetUsersQuery()
+  const [createOrgUnit] = useCreateOrgUnitMutation()
+  const [updateOrgUnit] = useUpdateOrgUnitMutation()
 
   const isOpen = state.isOrgFormOpen
   const isEditing =
@@ -453,11 +458,11 @@ export function OrganizationUnitFormModal() {
 
   useEffect(() => {
     if (!isOpen) return
-    fetch("/api/users")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setUsers)
-      .catch(() => {/* silently ignore fetch errors */})
-  }, [isOpen])
+    if (usersApiData) {
+      const userData = Array.isArray(usersApiData) ? usersApiData : (usersApiData as any)?.data ?? [];
+      setUsers(userData);
+    }
+  }, [isOpen, usersApiData])
 
   const handleClose = () => {
     dispatch({ type: "CLOSE_ORG_FORM" })
@@ -474,19 +479,15 @@ export function OrganizationUnitFormModal() {
     setLoading(true)
     try {
       if (state.selectedOrgUnit?.id === "new") {
-        const response = await fetch(`/api/organizations/${state.organizationId}/units`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...formData, parentId: state.selectedOrgUnit.parentId }),
-        })
-        if (!response.ok) throw new Error("Failed to create unit")
+        await createOrgUnit({
+          organizationId: state.organizationId,
+          body: { ...formData, parentId: state.selectedOrgUnit.parentId },
+        }).unwrap()
       } else if (state.selectedOrgUnit) {
-        const response = await fetch(`/api/units/${state.selectedOrgUnit.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        })
-        if (!response.ok) throw new Error("Failed to update unit")
+        await updateOrgUnit({
+          unitId: state.selectedOrgUnit.id,
+          body: formData,
+        }).unwrap()
       }
 
       await refreshData()

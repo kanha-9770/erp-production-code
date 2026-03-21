@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import { useCreatePayrollMutation } from '@/lib/api/payroll';
 
 interface PayrollFormProps {
   formRecordId: string;
@@ -19,6 +20,7 @@ export default function PayrollForm({
   onSuccess 
 }: PayrollFormProps) {
   const [loading, setLoading] = useState(false);
+  const [createPayroll] = useCreatePayrollMutation();
   const currentDate = new Date();
   
   const [formData, setFormData] = useState({
@@ -65,18 +67,7 @@ export default function PayrollForm({
     
     try {
       setLoading(true);
-      const response = await fetch('/api/payroll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create payroll record');
-      }
-
-      const result = await response.json();
+      const result = await createPayroll(formData).unwrap();
       console.log("[v0] Payroll record created for", employeeName);
       
       const monthName = new Date(2000, formData.month - 1).toLocaleString('en-US', { month: 'long' });

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { useSubmitSubmoduleDataMutation } from "@/lib/api/modules"
 
 interface Module {
   id: number
@@ -30,23 +31,15 @@ interface DynamicFormProps {
 export function DynamicForm({ module, submodule, onClose, onSuccess }: DynamicFormProps) {
   const [formData, setFormData] = useState<any>({})
   const [loading, setLoading] = useState(false)
+  const [submitSubmoduleData] = useSubmitSubmoduleDataMutation()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      const response = await fetch(`/api/modules/${module.id}/submodules/${submodule.id}/data`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      })
-
-      if (response.ok) {
-        onSuccess()
-      }
+      await submitSubmoduleData({ moduleId: module.id, submoduleId: submodule.id, body: formData }).unwrap()
+      onSuccess()
     } catch (error) {
       console.error("Error submitting form:", error)
     } finally {

@@ -639,6 +639,7 @@ import {
   Users,
   Loader2,
 } from "lucide-react";
+import { useGetEmployeeRecordsQuery, useCreateUserFromEmployeeMutation } from "@/lib/api/users";
 
 interface EmployeeRecord {
   id: string;
@@ -672,7 +673,6 @@ interface CreateUserData {
 const UserCreationPage: React.FC = () => {
   const [employeeRecords, setEmployeeRecords] = useState<EmployeeRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<EmployeeRecord[]>([]);
-  const [loadingRecords, setLoadingRecords] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRecord, setSelectedRecord] = useState<EmployeeRecord | null>(null); // for single mode
   const [bulkPassword, setBulkPassword] = useState("");
@@ -692,9 +692,28 @@ const UserCreationPage: React.FC = () => {
     confirmPassword: "",
   });
 
+  const { data: employeeRecordsData, isLoading: loadingRecords, error: employeeRecordsError, refetch: refetchEmployeeRecords } = useGetEmployeeRecordsQuery();
+  const [createUserFromEmployee] = useCreateUserFromEmployeeMutation();
+
   useEffect(() => {
-    fetchEmployeeRecords();
-  }, []);
+    if (employeeRecordsError) {
+      setMessage({ type: "error", text: "Failed to load employee records" });
+    }
+  }, [employeeRecordsError]);
+
+  useEffect(() => {
+    if (employeeRecordsData) {
+      const records = (employeeRecordsData as any).records || (employeeRecordsData as any).data || [];
+      setEmployeeRecords(
+        records.map((r: EmployeeRecord) => ({
+          ...r,
+          selected: false,
+          status: "idle",
+          message: "",
+        }))
+      );
+    }
+  }, [employeeRecordsData]);
 
   useEffect(() => {
     setFilteredRecords(
@@ -706,28 +725,6 @@ const UserCreationPage: React.FC = () => {
       )
     );
   }, [searchTerm, employeeRecords]);
-
-  const fetchEmployeeRecords = async () => {
-    setLoadingRecords(true);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/employee-records");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.details ? `${data.error}: ${data.details}` : data.error || `HTTP ${res.status}`);
-      setEmployeeRecords(
-        (data.records || []).map((r: EmployeeRecord) => ({
-          ...r,
-          selected: false,
-          status: "idle",
-          message: "",
-        }))
-      );
-    } catch (err: any) {
-      setMessage({ type: "error", text: err.message || "Failed to load employee records" });
-    } finally {
-      setLoadingRecords(false);
-    }
-  };
 
   const toggleSelect = (id: string) => {
     setEmployeeRecords((prev) =>
@@ -788,25 +785,15 @@ const UserCreationPage: React.FC = () => {
     try {
       const pass = formData.password.trim();
       const conf = formData.confirmPassword.trim();
-      const res = await fetch("/api/create-user-from-employee", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...formData,
-          password: pass,
-          confirmPassword: conf,
-        }),
-      });
+      await createUserFromEmployee({
+        ...formData,
+        password: pass,
+        confirmPassword: conf,
+      }).unwrap();
 
-      const data = await res.json();
-
-      if (res.ok) {
-        setMessage({ type: "success", text: "User created successfully" });
-        setFormData({ ...formData, password: "", confirmPassword: "" });
-        fetchEmployeeRecords();
-      } else {
-        setMessage({ type: "error", text: data.error || "Creation failed" });
-      }
+      setMessage({ type: "success", text: "User created successfully" });
+      setFormData({ ...formData, password: "", confirmPassword: "" });
+      refetchEmployeeRecords();
     } catch {
       setMessage({ type: "error", text: "Network/server error" });
     } finally {
@@ -855,33 +842,15 @@ const UserCreationPage: React.FC = () => {
           confirmPassword: password,
         };
 
-        const res = await fetch("/api/create-user-from-employee", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        const data = await res.json();
-
-        if (res.ok) {
-          successCount++;
-          setEmployeeRecords((prev) =>
-            prev.map((r) =>
-              r.id === record.id
-                ? { ...r, status: "success", message: "Created", selected: false }
-                : r
-            )
-          );
-        } else {
-          failCount++;
-          setEmployeeRecords((prev) =>
-            prev.map((r) =>
-              r.id === record.id
-                ? { ...r, status: "error", message: data.error || "Failed", selected: false }
-                : r
-            )
-          );
-        }
+        await createUserFromEmployee(payload).unwrap();
+        successCount++;
+        setEmployeeRecords((prev) =>
+          prev.map((r) =>
+            r.id === record.id
+              ? { ...r, status: "success", message: "Created", selected: false }
+              : r
+          )
+        );
       } catch {
         failCount++;
         setEmployeeRecords((prev) =>
@@ -902,7 +871,7 @@ const UserCreationPage: React.FC = () => {
       text: `Bulk creation finished: ${successCount} succeeded, ${failCount} failed`,
     });
 
-    if (successCount > 0) fetchEmployeeRecords();
+    if (successCount > 0) refetchEmployeeRecords();
   };
 
   const selectAll = () => {

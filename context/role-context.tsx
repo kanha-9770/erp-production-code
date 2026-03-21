@@ -6,6 +6,7 @@ import {
   useContext,
   useReducer,
   useEffect,
+  useCallback,
   type ReactNode,
 } from "react";
 import type {
@@ -15,6 +16,12 @@ import type {
   OrganizationUnitFormData,
 } from "@/types/role";
 import { useToast } from "@/hooks/use-toast";
+import { useGetUserQuery } from "@/lib/api/auth";
+import {
+  useEnsureOrganizationMutation,
+  useGetOrgRolesQuery,
+  useGetOrgUnitsQuery,
+} from "@/lib/api/organization";
 
 interface RoleState {
   roles: Role[];
@@ -140,12 +147,9 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
     case "SET_ORGANIZATION_ID":
       return { ...state, organizationId: action.payload };
 
-    // === OPTIMISTIC DELETE (used in RoleChartNode before API call) ===
     case "DELETE_ROLE": {
       const { roleId } = action.payload;
       const newRoles = removeRoleAndDescendants(state.roles, roleId);
-
-      // Also clean up expanded nodes and selection
       const newExpanded = new Set(state.expandedNodes);
       newExpanded.delete(roleId);
 
@@ -160,7 +164,6 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
 
     case "ADD_ROLE":
     case "UPDATE_ROLE":
-      // These are handled by API + refreshData()
       return state;
 
     case "TOGGLE_EXPAND": {
@@ -190,22 +193,19 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
       return { ...state, expandedNodes: new Set(allIds) };
     }
 
-    case "COLLAPSE_ALL": {
+    case "COLLAPSE_ALL":
       return { ...state, expandedNodes: new Set() };
-    }
 
-    case "EXPAND_ALL_ORG": {
+    case "EXPAND_ALL_ORG":
       return { ...state, expandedOrgNodes: new Set() };
-    }
 
     case "COLLAPSE_ALL_ORG": {
       const allIds = getAllOrgIds(state.organizationUnits);
       return { ...state, expandedOrgNodes: new Set(allIds) };
     }
 
-    case "SELECT_ROLE": {
+    case "SELECT_ROLE":
       return { ...state, selectedRole: action.payload.role };
-    }
 
     case "TOGGLE_ROLE_SHEET":
       return { ...state, isRoleSheetOpen: !state.isRoleSheetOpen };
@@ -246,13 +246,12 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
       };
     }
 
-    case "CLOSE_ORG_FORM": {
+    case "CLOSE_ORG_FORM":
       return {
         ...state,
         selectedOrgUnit: null,
         isOrgFormOpen: false,
       };
-    }
 
     case "OPEN_USER_MANAGEMENT_SHEET":
       return { ...state, showUserManagementSheet: true };
@@ -265,7 +264,6 @@ function roleReducer(state: RoleState, action: RoleAction): RoleState {
   }
 }
 
-// Helper functions
 function getAllRoleIds(roles: Role[]): string[] {
   const ids: string[] = [];
   roles.forEach((role) => {
@@ -288,70 +286,75 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(roleReducer, initialState);
   const { toast } = useToast();
 
-  const fetchUserOrganization = async () => {
-    try {
-      dispatch({ type: "SET_LOADING", payload: true });
-      const response = await fetch("/api/auth/me");
-      if (!response.ok) throw new Error("Failed to fetch user data");
-      const result = await response.json();
+  // Get organization ID from the authenticated user via RTK Query
+  const { data: userData, isLoading: userLoading } = useGetUserQuery();
 
-      if (result.user?.organization?.id) {
-        dispatch({
-          type: "SET_ORGANIZATION_ID",
-          payload: result.user.organization.id,
-        });
-      } else {
-        throw new Error("Organization ID not found");
-      }
-    } catch (error) {
-      console.error("Error fetching organization ID:", error);
-      dispatch({
-        type: "SET_ERROR",
-        payload: "Failed to load organization data",
-      });
-      toast({
-        title: "Error",
-        description: "Failed to load organization data",
-        variant: "destructive",
-      });
-    } finally {
-      dispatch({ type: "SET_LOADING", payload: false });
+  const organizationId = userData?.user?.organization?.id ?? null;
+
+  // Set organization ID when user data loads
+  useEffect(() => {
+    if (userLoading) return;
+    if (organizationId) {
+      dispatch({ type: "SET_ORGANIZATION_ID", payload: organizationId });
+    } else if (!userLoading && !organizationId) {
+      dispatch({ type: "SET_ERROR", payload: "Failed to load organization data" });
     }
-  };
+  }, [organizationId, userLoading]);
 
-  const refreshData = async () => {
+  // Ensure organization exists
+  const [ensureOrg] = useEnsureOrganizationMutation();
+
+  // Fetch roles and units via RTK Query (skip if no org ID)
+  const {
+    data: rolesData,
+    isLoading: rolesLoading,
+    refetch: refetchRoles,
+  } = useGetOrgRolesQuery(state.organizationId!, {
+    skip: !state.organizationId,
+  });
+
+  const {
+    data: unitsData,
+    isLoading: unitsLoading,
+    refetch: refetchUnits,
+  } = useGetOrgUnitsQuery(state.organizationId!, {
+    skip: !state.organizationId,
+  });
+
+  // Sync RTK Query data into reducer state
+  useEffect(() => {
+    if (rolesData) {
+      dispatch({ type: "SET_ROLES", payload: rolesData });
+    }
+  }, [rolesData]);
+
+  useEffect(() => {
+    if (unitsData) {
+      dispatch({ type: "SET_ORGANIZATION_UNITS", payload: unitsData });
+    }
+  }, [unitsData]);
+
+  // Sync loading state
+  useEffect(() => {
+    dispatch({ type: "SET_LOADING", payload: userLoading || rolesLoading || unitsLoading });
+  }, [userLoading, rolesLoading, unitsLoading]);
+
+  // Ensure org on first load
+  useEffect(() => {
+    if (state.organizationId) {
+      ensureOrg({ id: state.organizationId, name: "Default Organization" }).catch(() => {});
+    }
+  }, [state.organizationId, ensureOrg]);
+
+  const refreshData = useCallback(async () => {
     if (!state.organizationId) return;
 
     try {
       dispatch({ type: "SET_LOADING", payload: true });
-
-      await fetch("/api/organizations/ensure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: state.organizationId,
-          name: "Default Organization",
-        }),
-      });
-
-      const [rolesRes, unitsRes] = await Promise.all([
-        fetch(`/api/organizations/${state.organizationId}/roles`),
-        fetch(`/api/organizations/${state.organizationId}/units`),
-      ]);
-
-      if (rolesRes.ok) {
-        const roles = await rolesRes.json();
-        dispatch({ type: "SET_ROLES", payload: roles });
-      }
-
-      if (unitsRes.ok) {
-        const units = await unitsRes.json();
-        dispatch({ type: "SET_ORGANIZATION_UNITS", payload: units });
-      }
-
+      await ensureOrg({ id: state.organizationId, name: "Default Organization" }).unwrap();
+      await Promise.all([refetchRoles(), refetchUnits()]);
       dispatch({ type: "SET_ERROR", payload: null });
-    } catch (error) {
-      console.error("Error refreshing data:", error);
+    } catch {
       dispatch({ type: "SET_ERROR", payload: "Failed to load data" });
       toast({
         title: "Error",
@@ -361,17 +364,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
-  };
-
-  useEffect(() => {
-    fetchUserOrganization();
-  }, []);
-
-  useEffect(() => {
-    if (state.organizationId) {
-      refreshData();
-    }
-  }, [state.organizationId]);
+  }, [state.organizationId, ensureOrg, refetchRoles, refetchUnits, toast]);
 
   return (
     <RoleContext.Provider value={{ state, dispatch, refreshData }}>

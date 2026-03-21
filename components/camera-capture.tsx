@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Camera, X, RotateCcw, ImageIcon, Loader2 } from "lucide-react"
 import { Card } from "@/components/ui/card"
+import { useUploadFileMutation } from "@/lib/api/upload"
 
 interface CameraCaptureProps {
   onCapture: (imageData: string) => void
@@ -20,6 +21,7 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadFile] = useUploadFileMutation()
 
   // Open camera with live preview
   const openCamera = async () => {
@@ -135,18 +137,9 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
             formData.append("image", blob, `camera_${Date.now()}.jpg`);
             formData.append("type", "camera");
 
-            const response = await fetch("/api/upload", {
-              method: "POST",
-              body: formData,
-            });
-
-            if (!response.ok) {
-              throw new Error("Upload failed");
-            }
-
-            const { imageUrl } = await response.json();
-            console.log("[CameraCapture] Upload successful:", imageUrl);
-            onCapture(imageUrl);
+            const result = await uploadFile(formData).unwrap();
+            console.log("[CameraCapture] Upload successful:", result.url);
+            onCapture(result.url!);
           } catch (err) {
             console.error("[CameraCapture] Upload error:", err);
             setError("Failed to upload image. Please try again.");
@@ -175,18 +168,9 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
         formData.append("image", file);
         formData.append("type", "gallery");
 
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          throw new Error("Upload failed");
-        }
-
-        const { imageUrl } = await response.json();
-        console.log("[CameraCapture] Upload successful:", imageUrl);
-        onCapture(imageUrl);
+        const result = await uploadFile(formData).unwrap();
+        console.log("[CameraCapture] Upload successful:", result.url);
+        onCapture(result.url!);
       } catch (err) {
         console.error("[CameraCapture] Upload error:", err);
         setError("Failed to upload image. Please try again.");

@@ -512,6 +512,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { Clock, MapPin, Smartphone, CheckCircle2, XCircle, Loader2, CalendarDays } from 'lucide-react'
 import { cn } from "@/lib/utils"
+import { useSubmitAttendanceCheckinMutation, useSubmitAttendanceCheckoutMutation, useLazyGetAttendanceStatusQuery } from "@/lib/api/forms"
 
 interface AttendanceFormDialogProps {
   formId: string | null
@@ -546,6 +547,10 @@ export function AttendanceFormDialog({
     hasCheckedInToday: false,
     hasCheckedOutToday: false,
   })
+
+  const [submitCheckin] = useSubmitAttendanceCheckinMutation()
+  const [submitCheckout] = useSubmitAttendanceCheckoutMutation()
+  const [triggerGetAttendanceStatus] = useLazyGetAttendanceStatusQuery()
 
   const getCurrentLocation = (): Promise<{ latitude: number; longitude: number }> => {
     return new Promise((resolve, reject) => {
@@ -585,30 +590,18 @@ export function AttendanceFormDialog({
       setLoading(true)
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      
-      const response = await fetch(
-        `/api/forms/${formId}/attendance/status?employeeId=${employeeId}&date=${today}&t=${Date.now()}`,
-        {
-          cache: "no-store",
-          next: { revalidate: 0 }
-        }
-      )
-      
-      if (!response.ok) {
-        throw new Error("Failed to fetch attendance status")
-      }
 
-      const data = await response.json()
-      
+      const data = await triggerGetAttendanceStatus({ formId, employeeId, date: today }).unwrap()
+
       if (data.success) {
         setAttendanceStatus({
-          hasCheckedInToday: data.hasCheckedIn,
-          hasCheckedOutToday: data.hasCheckedOut,
-          todayCheckIn: data.checkInTime,
-          todayCheckOut: data.checkOutTime,
-          workingHours: data.workingHours,
-          location: data.location,
-          deviceInfo: data.deviceInfo,
+          hasCheckedInToday: data.hasCheckedIn ?? data.data?.hasCheckedIn,
+          hasCheckedOutToday: data.hasCheckedOut ?? data.data?.hasCheckedOut,
+          todayCheckIn: data.checkInTime ?? data.data?.checkInTime,
+          todayCheckOut: data.checkOutTime ?? data.data?.checkOutTime,
+          workingHours: data.workingHours ?? data.data?.workingHours,
+          location: data.location ?? data.data?.location,
+          deviceInfo: data.deviceInfo ?? data.data?.deviceInfo,
         })
       }
     } catch (error) {
@@ -652,25 +645,17 @@ export function AttendanceFormDialog({
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-      const response = await fetch(`/api/forms/${formId}/attendance/checkin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const result = await submitCheckin({
+        formId,
+        body: {
           employeeId,
           employeeName,
           checkInTime,
           date: today,
           location,
           deviceInfo,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to check in")
-      }
-
-      const result = await response.json()
+        },
+      }).unwrap()
 
       if (result.success) {
         toast({
@@ -740,25 +725,17 @@ export function AttendanceFormDialog({
       const checkOut = new Date(checkOutTime)
       const workingHoursCalculated = (checkOut.getTime() - checkInTime.getTime()) / (1000 * 60 * 60)
 
-      const response = await fetch(`/api/forms/${formId}/attendance/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const result = await submitCheckout({
+        formId,
+        body: {
           employeeId,
           checkOutTime,
           date: today,
           location,
           deviceInfo,
           workingHours: workingHoursCalculated,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to check out")
-      }
-
-      const result = await response.json()
+        },
+      }).unwrap()
 
       if (result.success) {
         toast({

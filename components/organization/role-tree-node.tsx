@@ -5,6 +5,7 @@ import { Shield, Plus, Settings2, Trash2, ChevronDown, ChevronUp } from "lucide-
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
+import { useDeleteRoleMutation } from "@/lib/api/organization"
 import { TreeConnectors } from "./tree-connectors"
 
 type RoleChartNodeProps = {
@@ -17,6 +18,7 @@ type RoleChartNodeProps = {
 export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodeProps) {
   const { state, dispatch, refreshData } = useRoles()
   const { toast } = useToast()
+  const [deleteRoleMutation] = useDeleteRoleMutation()
 
   const hasChildren = Boolean(role?.children?.length)
   // Node is visible (expanded) when its ID is NOT in the collapsed set
@@ -36,20 +38,7 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
     dispatch({ type: "DELETE_ROLE", payload: { roleId: role.id } })
 
     try {
-      const response = await fetch(`/api/roles/${role.id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      })
-
-      if (!response.ok) {
-        let message = "Failed to delete role"
-        try {
-          const data = await response.json()
-          message = data.error || message
-        } catch { /* ignore */ }
-        throw new Error(message)
-      }
-
+      await deleteRoleMutation(role.id).unwrap()
       toast({ title: "Role deleted", description: roleName })
       await refreshData()
     } catch (err: any) {

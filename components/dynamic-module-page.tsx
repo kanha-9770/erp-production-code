@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Eye, Settings } from "lucide-react"
 import { DynamicDataTable } from "@/components/dynamic-data-table"
 import { DynamicForm } from "@/components/dynamic-form"
+import { useLazyGetSubmoduleDataQuery } from "@/lib/api/modules"
 
 interface Module {
   id: number
@@ -59,6 +60,7 @@ export function DynamicModulePage({ module, submodule, permissions, user }: Dyna
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [triggerSubmoduleData] = useLazyGetSubmoduleDataQuery()
 
   useEffect(() => {
     fetchModuleData()
@@ -67,12 +69,8 @@ export function DynamicModulePage({ module, submodule, permissions, user }: Dyna
   const fetchModuleData = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/modules/${module.id}/submodules/${submodule.id}/data`)
-      const result = await response.json()
-
-      if (result.success) {
-        setData(result.data || [])
-      }
+      const result = await triggerSubmoduleData({ moduleId: module.id, submoduleId: submodule.id }).unwrap()
+      setData(result.data || [])
     } catch (error) {
       console.error("Error fetching module data:", error)
     } finally {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import PayrollForm from './payroll-form';
 import PayrollRecordsList from './payroll-records-list';
 import { useToast } from '@/hooks/use-toast';
+import { useLazyGetPayrollQuery } from '@/lib/api/payroll';
 
 interface EmployeeData {
   employeeName: string;
@@ -37,6 +38,7 @@ export default function PayrollDashboard() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const { toast } = useToast();
+  const [triggerGetPayroll] = useLazyGetPayrollQuery();
 
   useEffect(() => {
     fetchPayrollData();
@@ -45,16 +47,9 @@ export default function PayrollDashboard() {
   const fetchPayrollData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/payroll');
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || errorData.error || 'Failed to fetch payroll data');
-      }
-
-      const result = await response.json();
-      setData(result);
-      console.log("[v0] Payroll data loaded for:", result.employee?.employeeName);
+      const result = await triggerGetPayroll().unwrap();
+      setData(result as unknown as PayrollResponse);
+      console.log("[v0] Payroll data loaded for:", (result as any).employee?.employeeName);
     } catch (error) {
       console.error('Error:', error);
       toast({

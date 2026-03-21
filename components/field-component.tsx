@@ -55,6 +55,7 @@ import FieldSettings from "@/components/field-settings";
 import FormulaConfigurationDialog from "@/components/FormulaConfigurationDialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useLazyGetFieldPermissionQuery, useUpdateFieldPermissionMutation } from "@/lib/api/forms";
 
 // --- PERMISSION TYPES ---
 interface PermissionDefinition {
@@ -109,6 +110,8 @@ export default function FieldComponent({
 
   const labelInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [triggerGetFieldPermission] = useLazyGetFieldPermissionQuery();
+  const [updateFieldPermission] = useUpdateFieldPermissionMutation();
 
   // ==================== FORM ID: PROP FIRST → URL FALLBACK ====================
   const params = useParams();
@@ -195,9 +198,7 @@ export default function FieldComponent({
       const fetchPermissions = async () => {
         setPermissionsLoading(true);
         try {
-          const res = await fetch(`/api/permissions/field/${field.id}`);
-          if (!res.ok) throw new Error("Failed to load permissions");
-          const data = await res.json();
+          const data = await triggerGetFieldPermission(field.id).unwrap();
 
           setPermissions(data.profiles ?? []);
           setAvailablePermissions(data.availablePermissions ?? []);
@@ -222,19 +223,10 @@ export default function FieldComponent({
     permissionId: string,
   ) => {
     try {
-      const res = await fetch(`/api/permissions/field/${field.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roleId,
-          permissionId,
-        }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || "Failed to save permission");
-      }
+      await updateFieldPermission({
+        fieldId: field.id,
+        body: { roleId, permissionId },
+      }).unwrap();
 
       setPermissions((prev) =>
         prev.map((p) =>

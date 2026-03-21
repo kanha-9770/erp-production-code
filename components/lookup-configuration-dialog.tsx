@@ -47,6 +47,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type { FormField } from "@/types/form-builder";
+import { useLazyGetLookupSourcesQuery, useLazyGetLookupSectionsQuery, useLazyGetLookupDataQuery } from "@/lib/api/lookup";
+import { useLazyGetMasterDataQuery, useLazyGetMasterDataByModuleQuery } from "@/lib/api/settings";
 
 /* ===================== TYPES ===================== */
 interface LookupSource {
@@ -140,6 +142,12 @@ export default function LookupConfigurationDialog({
   const [masterDataValues, setMasterDataValues] = useState<Record<string, string[]>>({});
   const [loadingValues, setLoadingValues] = useState(false);
 
+  const [triggerGetLookupSources] = useLazyGetLookupSourcesQuery();
+  const [triggerGetLookupSections] = useLazyGetLookupSectionsQuery();
+  const [triggerGetLookupData] = useLazyGetLookupDataQuery();
+  const [triggerGetMasterData] = useLazyGetMasterDataQuery();
+  const [triggerGetMasterDataByModule] = useLazyGetMasterDataByModuleQuery();
+
   /* ===================== COMPUTED DATA ===================== */
   const modules = useMemo(
     () => sources.filter((s) => s.type === "module"),
@@ -212,13 +220,11 @@ export default function LookupConfigurationDialog({
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/lookup/sources");
-      const result = await res.json();
+      const result = await triggerGetLookupSources().unwrap();
       if (result.success) setSources(result.data || []);
 
       // Load all masters (or filter later if needed)
-      const mastersRes = await fetch("/api/master-data");
-      const mastersResult = await mastersRes.json();
+      const mastersResult = await triggerGetMasterData().unwrap();
       if (mastersResult.dropdowns) {
         setMasterDropdowns(
           mastersResult.dropdowns.map((d: any) => ({
@@ -240,8 +246,7 @@ export default function LookupConfigurationDialog({
 
   const fetchSections = async (formId: string) => {
     try {
-      const res = await fetch(`/api/lookup/sections?formId=${formId}`);
-      const result = await res.json();
+      const result = await triggerGetLookupSections(formId).unwrap();
       if (result.success) setSections(result.data || []);
     } catch (e) {
       console.error("Failed to load sections");
@@ -278,8 +283,7 @@ export default function LookupConfigurationDialog({
   const fetchMasterDropdowns = async (moduleId: string) => {
     try {
       // Optional: filter masters by module if your API supports it
-      const res = await fetch(`/api/master-data?moduleId=${moduleId}`);
-      const result = await res.json();
+      const result = await triggerGetMasterDataByModule(moduleId).unwrap();
       if (result.dropdowns) {
         setMasterDropdowns(
           result.dropdowns.map((d: any) => ({
@@ -306,8 +310,7 @@ export default function LookupConfigurationDialog({
     if (field.isMaster) {
       try {
         // Master data API returns ALL dropdowns — find the matching one
-        const res = await fetch("/api/master-data");
-        const result = await res.json();
+        const result = await triggerGetMasterData().unwrap();
         if (result.dropdowns) {
           const dropdown = result.dropdowns.find((d: any) => d.id === field.fieldName);
           if (dropdown?.values?.length) {
@@ -329,8 +332,7 @@ export default function LookupConfigurationDialog({
         : selectedModuleId;
       if (!sourceId) return [];
 
-      const res = await fetch(`/api/lookup/data?sourceId=${sourceId}&limit=200`);
-      const result = await res.json();
+      const result = await triggerGetLookupData({ sourceId, limit: "200" }).unwrap();
       if (result.success && Array.isArray(result.data)) {
         const uniqueValues = new Set<string>();
         for (const item of result.data) {

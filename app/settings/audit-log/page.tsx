@@ -787,7 +787,8 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
+import { useGetAuditLogQuery } from "@/lib/api/settings"
 import { format, parseISO } from "date-fns"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -849,66 +850,43 @@ interface AuditLogEntry {
 }
 
 export default function AuditLogPage() {
-  const [data, setData] = useState<AuditLogEntry[]>([])
-  const [filteredData, setFilteredData] = useState<AuditLogEntry[]>([])
+  const { data: rawResult, isLoading: loading, error: queryError } = useGetAuditLogQuery()
   const [searchQuery, setSearchQuery] = useState("")
   const [actionFilter, setActionFilter] = useState<string>("all")
   const [moduleFilter, setModuleFilter] = useState<string>("all")
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
   const [currentPage, setCurrentPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [availableModules, setAvailableModules] = useState<string[]>([])
+
+  const error = queryError ? ((queryError as any)?.data?.message || "Failed to load audit logs") : null
 
   const itemsPerPage = 25
   const actions = ["all", "Created", "Updated", "Deleted", "Viewed", "Exported", "Imported", "Login", "Logout", "Approved", "Rejected", "Shared"]
 
-  useEffect(() => {
-    const fetchAuditLogs = async () => {
-      try {
-        setLoading(true)
-        setError(null)
+  const data = useMemo(() => {
+    const result = rawResult as any
+    const logs: AuditLogEntry[] = Array.isArray(result) ? result : (result?.data ?? [])
 
-        const res = await fetch("/api/audit-log")
-        if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`)
+    const normalized = logs.map(log => ({
+      ...log,
+      details: log.details || "No additional details",
+      record: log.record || "-",
+      ipAddress: log.ipAddress || "-",
+      userAgent: log.userAgent || "-",
+      userFullName: log.userFullName || log.performedBy,
+    }))
 
-        const result = await res.json()
-        const logs: AuditLogEntry[] = Array.isArray(result) ? result : []
+    return normalized.sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+  }, [rawResult])
 
-        const normalized = logs.map(log => ({
-          ...log,
-          details: log.details || "No additional details",
-          record: log.record || "-",
-          ipAddress: log.ipAddress || "-",
-          userAgent: log.userAgent || "-",
-          userFullName: log.userFullName || log.performedBy,
-        }))
+  const availableModules = useMemo(() => {
+    return Array.from(new Set(data.map(log => log.module)))
+      .filter(Boolean)
+      .sort()
+  }, [data])
 
-        const sorted = normalized.sort((a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        )
-
-        setData(sorted)
-        setFilteredData(sorted)
-
-        const uniqueModules = Array.from(new Set(sorted.map(log => log.module)))
-          .filter(Boolean)
-          .sort()
-        setAvailableModules(uniqueModules)
-      } catch (err: any) {
-        setError(err.message || "Failed to load audit logs")
-        setData([])
-        setFilteredData([])
-        setAvailableModules([])
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchAuditLogs()
-  }, [])
-
-  useEffect(() => {
+  const filteredData = useMemo(() => {
     let filtered = [...data]
 
     if (searchQuery.trim()) {
@@ -936,9 +914,8 @@ export default function AuditLogPage() {
       })
     }
 
-    setFilteredData(filtered)
-    setCurrentPage(1)
-  }, [searchQuery, actionFilter, moduleFilter, dateRange, data])
+    return filtered
+  }, [data, searchQuery, actionFilter, moduleFilter, dateRange])
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage)
   const paginatedData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)

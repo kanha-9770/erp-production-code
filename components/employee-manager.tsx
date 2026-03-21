@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users, Clock, MapPin } from 'lucide-react';
 import { parseApiResponse, calculateDailyPayroll } from '@/lib/payroll-utils';
+import { useGetFormDetailQuery } from '@/lib/api/forms';
 
 interface DailyRecord {
   employeeName: string;
@@ -39,8 +40,7 @@ export default function EmployeeManager() {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('http://localhost:3000/api/forms/testing');
-            console.log('Fetching attendance data for stats calculation',response);
+      const response = await fetch('/api/forms/testing');
 
       if (!response.ok) {
         throw new Error(`API Error: ${response.status}`);

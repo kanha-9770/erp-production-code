@@ -1,7 +1,16 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useToast } from "@/hooks/use-toast"
+import {
+  useGetRolesQuery,
+  useGetPermissionsQuery,
+  useGetRolePermissionsQuery,
+  useGetUserPermissionsQuery,
+  useUpdateRolePermissionsMutation,
+  useUpdateUserPermissionsMutation,
+} from "@/lib/api/permissions"
+import { useGetAdminUsersQuery } from "@/lib/api/users"
 import type {
   PermissionRole,
   PermissionUser,
@@ -12,18 +21,14 @@ import type {
 } from "@/types/permissions"
 import { STANDARD_PERMISSIONS } from "@/types/permissions"
 
-// change-map key: "role-{roleId}-{formId}-{permId}" or "user-{userId}-{formId}-{permId}"
 type ChangeKey = string
 
-interface PermissionMatrixData {
+interface UsePermissionMatrixResult {
   roles: PermissionRole[]
   users: PermissionUser[]
   permissions: Permission[]
   rolePermissions: RolePermission[]
   userPermissions: UserPermission[]
-}
-
-interface UsePermissionMatrixResult extends PermissionMatrixData {
   loading: boolean
   error: string | null
   changes: Map<ChangeKey, boolean>
@@ -39,61 +44,66 @@ interface UsePermissionMatrixResult extends PermissionMatrixData {
   filteredRoles: PermissionRole[]
 }
 
-/**
- * Encapsulates all permission data fetching, optimistic change tracking, and save logic
- * for the FormsPermissionMatrix. Accepts selectedForm as a trigger for data loading.
- */
 export function usePermissionMatrix(selectedForm: string | null): UsePermissionMatrixResult {
   const { toast } = useToast()
-
-  const [data, setData] = useState<PermissionMatrixData>({
-    roles: [],
-    users: [],
-    permissions: STANDARD_PERMISSIONS,
-    rolePermissions: [],
-    userPermissions: [],
-  })
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [changes, setChanges] = useState<Map<ChangeKey, boolean>>(new Map())
   const [saving, setSaving] = useState(false)
 
-  const fetchData = useCallback(async (formId: string) => {
-    setLoading(true)
-    setError(null)
-    setChanges(new Map())
+  // RTK Query hooks — skip when no form is selected
+  const {
+    data: rolesData,
+    isLoading: rolesLoading,
+    error: rolesError,
+  } = useGetRolesQuery(undefined, { skip: !selectedForm })
 
-    try {
-      const [rRes, uRes, pRes, rpRes, upRes] = await Promise.all([
-        fetch("/api/role").then((r) => r.json()),
-        fetch("/api/admin/users").then((r) => r.json()),
-        fetch("/api/permissions").then((r) => r.json()),
-        fetch(`/api/role-permissions?formId=${formId}`).then((r) => r.json()),
-        fetch("/api/user-permissions").then((r) => r.json()),
-      ])
+  const {
+    data: usersData,
+    isLoading: usersLoading,
+    error: usersError,
+  } = useGetAdminUsersQuery(undefined, { skip: !selectedForm })
 
-      setData({
-        roles: rRes.success ? rRes.data : [],
-        users: uRes.success ? uRes.data : [],
-        permissions: pRes.success && pRes.data?.length ? pRes.data : STANDARD_PERMISSIONS,
-        rolePermissions: rpRes.success ? rpRes.data : [],
-        userPermissions: upRes.success ? upRes.data : [],
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load permission data")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const {
+    data: permsData,
+    isLoading: permsLoading,
+  } = useGetPermissionsQuery(undefined, { skip: !selectedForm })
 
+  const {
+    data: rpData,
+    isLoading: rpLoading,
+    refetch: refetchRolePerms,
+  } = useGetRolePermissionsQuery(
+    { formId: selectedForm! },
+    { skip: !selectedForm }
+  )
+
+  const {
+    data: upData,
+    isLoading: upLoading,
+    refetch: refetchUserPerms,
+  } = useGetUserPermissionsQuery(undefined, { skip: !selectedForm })
+
+  const [updateRolePerms] = useUpdateRolePermissionsMutation()
+  const [updateUserPerms] = useUpdateUserPermissionsMutation()
+
+  // Derive data from RTK Query responses
+  const roles: PermissionRole[] = rolesData?.success ? rolesData.data : []
+  const users: PermissionUser[] = useMemo(() => {
+    if (!usersData?.success) return []
+    return usersData.data as unknown as PermissionUser[]
+  }, [usersData])
+  const permissions: Permission[] = permsData?.success && permsData.data?.length ? permsData.data : STANDARD_PERMISSIONS
+  const rolePermissions: RolePermission[] = rpData?.success ? rpData.data : []
+  const userPermissions: UserPermission[] = upData?.success ? upData.data : []
+
+  const loading = rolesLoading || usersLoading || permsLoading || rpLoading || upLoading
+  const error = rolesError || usersError
+    ? "Failed to load permission data"
+    : null
+
+  // Reset changes when selectedForm changes
   useEffect(() => {
-    if (!selectedForm) {
-      setLoading(false)
-      setError(null)
-      return
-    }
-    fetchData(selectedForm)
-  }, [selectedForm, fetchData])
+    setChanges(new Map())
+  }, [selectedForm])
 
   // ─── Permission lookup helpers ────────────────────────────────────────────
 
@@ -101,15 +111,15 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
     (roleId: string, formId: string, permId: string): boolean => {
       const key: ChangeKey = `role-${roleId}-${formId}-${permId}`
       if (changes.has(key)) return changes.get(key)!
-      return data.rolePermissions.some(
+      return rolePermissions.some(
         (rp) =>
           rp.roleId === roleId &&
           rp.permissionId === permId &&
           (rp.formId ?? null) === (formId ?? null) &&
-          rp.granted,
+          rp.granted
       )
     },
-    [changes, data.rolePermissions],
+    [changes, rolePermissions]
   )
 
   const hasUserPermission = useCallback(
@@ -117,20 +127,19 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
       const key: ChangeKey = `user-${userId}-${formId}-${permId}`
       if (changes.has(key)) return changes.get(key)!
 
-      const direct = data.userPermissions.find(
+      const direct = userPermissions.find(
         (up) =>
           up.userId === userId &&
           up.formId === formId &&
           up.permissionId === permId &&
-          up.isActive,
+          up.isActive
       )
       if (direct) return direct.granted
 
-      // Fall back to the user's role permission
-      const roleId = data.users.find((u) => u.id === userId)?.unitAssignments?.[0]?.roleId
+      const roleId = users.find((u) => u.id === userId)?.unitAssignments?.[0]?.roleId
       return roleId ? hasRolePermission(roleId, formId, permId) : false
     },
-    [changes, data.userPermissions, data.users, hasRolePermission],
+    [changes, userPermissions, users, hasRolePermission]
   )
 
   const togglePermission = useCallback(
@@ -142,7 +151,7 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
           : hasUserPermission(id, formId, permId)
       setChanges((prev) => new Map(prev).set(key, !current))
     },
-    [hasRolePermission, hasUserPermission],
+    [hasRolePermission, hasUserPermission]
   )
 
   const resetChanges = useCallback(() => setChanges(new Map()), [])
@@ -155,7 +164,6 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
       setSaving(true)
 
       try {
-        // Resolve moduleId from the selected form
         let moduleId: string | null = null
         outer: for (const mod of modules) {
           if (mod.forms?.some((f) => f.id === selectedFormId)) {
@@ -192,38 +200,16 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
           }
         })
 
-        const requests: Promise<Response>[] = []
+        const promises: Promise<any>[] = []
+        if (roleUpdates.length) promises.push(updateRolePerms(roleUpdates).unwrap())
+        if (userUpdates.length) promises.push(updateUserPerms(userUpdates).unwrap())
 
-        if (roleUpdates.length) {
-          requests.push(
-            fetch("/api/role-permissions", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(roleUpdates),
-            }).then((res) => {
-              if (!res.ok) throw new Error(`Role permissions update failed: ${res.status}`)
-              return res
-            }),
-          )
-        }
+        await Promise.all(promises)
 
-        if (userUpdates.length) {
-          requests.push(
-            fetch("/api/user-permissions", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(userUpdates),
-            }).then((res) => {
-              if (!res.ok) throw new Error(`User permissions update failed: ${res.status}`)
-              return res
-            }),
-          )
-        }
-
-        await Promise.all(requests)
-
-        // Refresh data from server so UI reflects saved state
-        await fetchData(selectedFormId)
+        // Refetch to reflect saved state
+        refetchRolePerms()
+        refetchUserPerms()
+        setChanges(new Map())
 
         toast({ title: "Permissions saved", description: `${changes.size} change(s) applied.` })
       } catch (err) {
@@ -236,28 +222,31 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
         setSaving(false)
       }
     },
-    [changes, fetchData, toast],
+    [changes, updateRolePerms, updateUserPerms, refetchRolePerms, refetchUserPerms, toast]
   )
 
   // ─── Derived helpers ──────────────────────────────────────────────────────
 
   const getUsersForRole = useCallback(
     (roleId: string): PermissionUser[] =>
-      data.users.filter((u) => u.unitAssignments?.some((a) => a.roleId === roleId)),
-    [data.users],
+      users.filter((u) => u.unitAssignments?.some((a) => a.roleId === roleId)),
+    [users]
   )
 
   const getGrantedCountForRole = useCallback(
     (roleId: string, formId: string): number =>
-      data.permissions.filter((p) => hasRolePermission(roleId, formId, p.id)).length,
-    [data.permissions, hasRolePermission],
+      permissions.filter((p) => hasRolePermission(roleId, formId, p.id)).length,
+    [permissions, hasRolePermission]
   )
 
-  // Exclude admin role — it always has full access
-  const filteredRoles = data.roles.filter((r) => r.name.toLowerCase() !== "admin")
+  const filteredRoles = roles.filter((r) => r.name.toLowerCase() !== "admin")
 
   return {
-    ...data,
+    roles,
+    users,
+    permissions,
+    rolePermissions,
+    userPermissions,
     loading,
     error,
     changes,

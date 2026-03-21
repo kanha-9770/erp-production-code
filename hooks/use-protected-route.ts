@@ -22,7 +22,7 @@ interface ProtectedRouteResult {
 }
 
 export function useProtectedRoute(options: UseProtectedRouteOptions = {}): ProtectedRouteResult {
-  const { user, permissions, isLoading, error, isSystemAdmin, hasModuleAccess, hasFormAccess, getAccessibleActions } =
+  const { user, isLoading, error, isSystemAdmin, hasModuleAccess, hasFormAccess, getAccessibleActions } =
     usePermissions()
 
   const {
@@ -78,18 +78,20 @@ export function useProtectedRoute(options: UseProtectedRouteOptions = {}): Prote
       for (const formId of formIds) {
         if (!isSystemAdmin && !hasFormAccess(formId)) return false
 
-        // Check action permissions for forms
+        // Check action permissions for forms using the module context
         if (checkOptions.requireAction && checkOptions.requireAction !== "view" && !isSystemAdmin) {
-          const formPermission = permissions.find((p) => p.resourceType === "form" && p.resourceId === formId)
-          const moduleId = formPermission?.resource?.moduleId
+          // Use requireModuleAccess if provided, otherwise skip granular action check
+          const moduleIds = checkOptions.requireModuleAccess
+            ? (Array.isArray(checkOptions.requireModuleAccess) ? checkOptions.requireModuleAccess : [checkOptions.requireModuleAccess])
+            : []
 
-          if (moduleId) {
+          for (const moduleId of moduleIds) {
             const actions = getAccessibleActions(moduleId, formId)
             const hasActionPermission =
               (checkOptions.requireAction === "create" && actions.canAdd) ||
               (checkOptions.requireAction === "edit" && actions.canEdit) ||
               (checkOptions.requireAction === "delete" && actions.canDelete)
-              
+
             if (!hasActionPermission) return false
           }
         }

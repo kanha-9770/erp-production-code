@@ -1,5 +1,7 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react"
+import { baseApi } from "./baseApi"
 import { Form, FormField, FormSection, FormFieldWithMeta } from "./types"
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface FormDetailResponse {
   success: boolean
@@ -12,8 +14,6 @@ interface ApiResponse<T = any> {
   data: T
   error?: string
 }
-
-// --- Mutation arg types ---
 
 interface CreateFieldArgs {
   sectionId?: string | null
@@ -63,13 +63,9 @@ interface UpdateSectionArgs {
   body: Record<string, any>
 }
 
-export const formsApi = createApi({
-  reducerPath: "formsApi",
-  baseQuery: fetchBaseQuery({
-    baseUrl: "/api",
-    credentials: "include",
-  }),
-  tagTypes: ["Form", "FormDetail", "Records"],
+// ─── Inject form endpoints ───────────────────────────────────────────────────
+
+export const formsApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // ─── Queries ───────────────────────────────────────────────
 
@@ -80,7 +76,7 @@ export const formsApi = createApi({
     }),
 
     getFormFieldsWithSections: builder.query<FormFieldWithMeta[], string>({
-      queryFn: async (formId, { extra, getState }, options, baseQuery) => {
+      queryFn: async (formId, _queryApi, _options, baseQuery) => {
         const result = await baseQuery(`/forms/${formId}`)
 
         if (result.error) {
@@ -120,10 +116,7 @@ export const formsApi = createApi({
         method: "POST",
         body: fieldData,
       }),
-      invalidatesTags: (result, error, arg) => {
-        // Don't invalidate cache — form builder manages its own optimistic state
-        return []
-      },
+      invalidatesTags: () => [],
     }),
 
     updateField: builder.mutation<ApiResponse, UpdateFieldArgs>({
@@ -190,6 +183,168 @@ export const formsApi = createApi({
       }),
       invalidatesTags: ["Records"],
     }),
+
+    // ─── Form submission ──────────────────────────────────────────
+
+    submitForm: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/submit`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, error, { formId }) => [{ type: "Records", id: formId }],
+    }),
+
+    trackFormEvent: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/events`,
+        method: "POST",
+        body,
+      }),
+    }),
+
+    getPublishedForm: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}?published=true`,
+      providesTags: (result, error, formId) => [{ type: "FormDetail", id: formId }],
+    }),
+
+    exportFormRecords: builder.query<any, { formId: string; format: string; fields?: string }>({
+      query: ({ formId, format, fields }) => {
+        const params = new URLSearchParams({ format })
+        if (fields) params.set("fields", fields)
+        return `/forms/${formId}/export?${params.toString()}`
+      },
+    }),
+
+    getFormLookupSources: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}/lookup-sources`,
+    }),
+
+    getFormLinkedRecords: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}/linked-records`,
+    }),
+
+    getFormFields: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}/fields`,
+    }),
+
+    getFormFull: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}/full`,
+      providesTags: (result, error, formId) => [{ type: "FormDetail", id: formId }],
+    }),
+
+    getFormTotal: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/total`,
+        method: "POST",
+        body,
+      }),
+    }),
+
+    lookupFormData: builder.query<ApiResponse, Record<string, string>>({
+      query: (params) => `/forms/lookup?${new URLSearchParams(params).toString()}`,
+    }),
+
+    // ─── Attendance ──────────────────────────────────────────────
+
+    getAttendanceStatus: builder.query<ApiResponse, { formId: string; employeeId: string; date: string }>({
+      query: ({ formId, employeeId, date }) =>
+        `/forms/${formId}/attendance/status?employeeId=${employeeId}&date=${date}&t=${Date.now()}`,
+    }),
+
+    submitAttendanceCheckin: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/attendance/checkin`,
+        method: "POST",
+        body,
+      }),
+    }),
+
+    submitAttendanceCheckout: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/attendance/checkout`,
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // ─── Builder: Sections ────────────────────────────────────────
+
+    createSection: builder.mutation<ApiResponse, Record<string, any>>({
+      query: (body) => ({ url: "/sections", method: "POST", body }),
+    }),
+
+    deleteSection: builder.mutation<ApiResponse, string>({
+      query: (sectionId) => ({ url: `/sections/${sectionId}`, method: "DELETE" }),
+    }),
+
+    // ─── Builder: Fields ──────────────────────────────────────────
+
+    deleteField: builder.mutation<ApiResponse, string>({
+      query: (fieldId) => ({ url: `/fields/${fieldId}`, method: "DELETE" }),
+    }),
+
+    // ─── Builder: Subforms ────────────────────────────────────────
+
+    updateSubform: builder.mutation<ApiResponse, { subformId: string; body: Record<string, any> }>({
+      query: ({ subformId, body }) => ({ url: `/subforms/${subformId}`, method: "PUT", body }),
+    }),
+
+    deleteSubform: builder.mutation<ApiResponse, string>({
+      query: (subformId) => ({ url: `/subforms/${subformId}`, method: "DELETE" }),
+    }),
+
+    // ─── Publish ──────────────────────────────────────────────────
+
+    publishFormDirect: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
+      query: ({ formId, body }) => ({
+        url: `/forms/${formId}/publish`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, error, { formId }) => [{ type: "Form", id: formId }, "Module", "OrgModules"],
+    }),
+
+    // ─── Field/Section permissions ────────────────────────────────
+
+    getFieldPermission: builder.query<ApiResponse, string>({
+      query: (fieldId) => `/permissions/field/${fieldId}`,
+    }),
+
+    updateFieldPermission: builder.mutation<ApiResponse, { fieldId: string; body: Record<string, any> }>({
+      query: ({ fieldId, body }) => ({ url: `/permissions/field/${fieldId}`, method: "PUT", body }),
+    }),
+
+    getSectionPermissions: builder.query<ApiResponse, string>({
+      query: (sectionId) => `/permissions/sections/${sectionId}`,
+    }),
+
+    // Attendance status check (generic /api/attendance)
+    checkAttendance: builder.mutation<ApiResponse, Record<string, any>>({
+      query: (body) => ({
+        url: "/attendance",
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // Testing endpoint
+    getTestingData: builder.query<ApiResponse, void>({
+      query: () => "/testing",
+    }),
+
+    // Section permission (singular route used by resource-permission-dialog)
+    getSectionPermissionDetail: builder.query<ApiResponse, string>({
+      query: (sectionId) => `/permissions/section/${sectionId}`,
+    }),
+
+    updateSectionPermission: builder.mutation<ApiResponse, { sectionId: string; body: Record<string, any> }>({
+      query: ({ sectionId, body }) => ({
+        url: `/permissions/section/${sectionId}`,
+        method: "POST",
+        body,
+      }),
+    }),
   }),
 })
 
@@ -204,4 +359,39 @@ export const {
   useCreateImportJobMutation,
   useAddImportMappingMutation,
   useProcessImportMutation,
+  useSubmitFormMutation,
+  useTrackFormEventMutation,
+  useGetPublishedFormQuery,
+  useExportFormRecordsQuery,
+  useLazyExportFormRecordsQuery,
+  useGetFormLookupSourcesQuery,
+  useGetFormLinkedRecordsQuery,
+  useGetFormFieldsQuery,
+  useLazyGetFormFieldsQuery,
+  useGetFormFullQuery,
+  useLazyGetFormFullQuery,
+  useGetFormTotalMutation,
+  useLookupFormDataQuery,
+  useLazyLookupFormDataQuery,
+  useGetAttendanceStatusQuery,
+  useLazyGetAttendanceStatusQuery,
+  useSubmitAttendanceCheckinMutation,
+  useSubmitAttendanceCheckoutMutation,
+  useCreateSectionMutation,
+  useDeleteSectionMutation,
+  useDeleteFieldMutation,
+  useUpdateSubformMutation,
+  useDeleteSubformMutation,
+  usePublishFormDirectMutation,
+  useGetFieldPermissionQuery,
+  useLazyGetFieldPermissionQuery,
+  useUpdateFieldPermissionMutation,
+  useGetSectionPermissionsQuery,
+  useLazyGetSectionPermissionsQuery,
+  useGetSectionPermissionDetailQuery,
+  useLazyGetSectionPermissionDetailQuery,
+  useUpdateSectionPermissionMutation,
+  useCheckAttendanceMutation,
+  useGetTestingDataQuery,
+  useLazyGetTestingDataQuery,
 } = formsApi

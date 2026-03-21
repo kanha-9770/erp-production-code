@@ -1,6 +1,7 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react"
+import { baseApi } from "./baseApi"
 
-// Type definitions for request/response
+// ─── Type definitions ────────────────────────────────────────────────────────
+
 export interface RegisterRequest {
   name: string
   email: string
@@ -147,81 +148,161 @@ export interface LogoutResponse {
   message: string
 }
 
-export const authApi = createApi({
-  reducerPath: "authApi",
-  baseQuery: fetchBaseQuery({
-    baseUrl: "/api/auth",
-    credentials: "include",
-  }),
-  tagTypes: ["User", "Auth"],
+export interface CurrentUserResponse {
+  success: boolean
+  user: {
+    id: string
+    username: string
+    first_name: string | null
+    last_name: string | null
+    email: string
+  } | null
+}
+
+// ─── Inject auth endpoints into the base API ─────────────────────────────────
+
+export const authApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    // Register endpoint
     register: builder.mutation<RegisterResponse, RegisterRequest>({
       query: (body) => ({
-        url: "/register",
+        url: "/auth/register",
         method: "POST",
         body,
       }),
       invalidatesTags: ["Auth"],
     }),
 
-    // Login endpoint
     login: builder.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({
-        url: "/login",
+        url: "/auth/login",
         method: "POST",
         body,
       }),
       invalidatesTags: ["Auth"],
     }),
 
-    // Verify OTP endpoint
     verifyOTP: builder.mutation<VerifyOTPResponse, VerifyOTPRequest>({
       query: (body) => ({
-        url: "/verify-otp",
+        url: "/auth/verify-otp",
         method: "POST",
         body,
       }),
       invalidatesTags: ["Auth", "User"],
     }),
 
-    // Resend OTP endpoint
     resendOTP: builder.mutation<ResendOTPResponse, ResendOTPRequest>({
       query: (body) => ({
-        url: "/resend-otp",
+        url: "/auth/resend-otp",
         method: "POST",
         body,
       }),
     }),
 
-    // Reset password endpoint
     resetPassword: builder.mutation<ResetPasswordResponse, ResetPasswordRequest>({
       query: (body) => ({
-        url: "/reset-password",
+        url: "/auth/reset-password",
         method: "POST",
         body,
       }),
       invalidatesTags: ["Auth", "User"],
     }),
 
-    // Get current user
     getUser: builder.query<GetUserResponse, void>({
-      query: () => "/me",
+      query: () => "/auth/me",
       providesTags: ["User"],
     }),
 
-    // Logout endpoint
+    getCurrentUser: builder.query<CurrentUserResponse, void>({
+      query: () => "/user",
+      providesTags: ["User"],
+      keepUnusedDataFor: 600,
+    }),
+
     logout: builder.mutation<LogoutResponse, void>({
       query: () => ({
-        url: "/logout",
+        url: "/auth/logout",
         method: "POST",
       }),
       invalidatesTags: ["Auth", "User"],
+    }),
+
+    // Forgot password
+    forgotPassword: builder.mutation<{ success: boolean; message: string }, { email: string }>({
+      query: (body) => ({
+        url: "/auth/forgot-password",
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // Change password (authenticated)
+    changePassword: builder.mutation<{ success: boolean; message: string }, { currentPassword: string; newPassword: string; confirmPassword: string }>({
+      query: (body) => ({
+        url: "/auth/change-password",
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // Toggle 2FA
+    toggle2FA: builder.mutation<{ success: boolean; message: string }, { enabled: boolean }>({
+      query: (body) => ({
+        url: "/auth/toggle-2fa",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["User"],
+    }),
+
+    // Get active sessions
+    getSessions: builder.query<{ success: boolean; sessions: any[] }, void>({
+      query: () => "/auth/sessions",
+    }),
+
+    // Delete a session
+    deleteSession: builder.mutation<{ success: boolean }, string>({
+      query: (sessionId) => ({
+        url: `/auth/sessions/${sessionId}`,
+        method: "DELETE",
+      }),
+    }),
+
+    // Upload avatar (FormData)
+    uploadAvatar: builder.mutation<{ success: boolean; url: string }, FormData>({
+      query: (formData) => ({
+        url: "/auth/upload-avatar",
+        method: "POST",
+        body: formData,
+      }),
+      invalidatesTags: ["User"],
+    }),
+
+    // Remove avatar
+    removeAvatar: builder.mutation<{ success: boolean }, void>({
+      query: () => ({
+        url: "/auth/remove-avatar",
+        method: "POST",
+      }),
+      invalidatesTags: ["User"],
+    }),
+
+    // Update profile
+    updateProfile: builder.mutation<{ success: boolean }, Record<string, any>>({
+      query: (body) => ({
+        url: "/auth/update-profile",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["User"],
+    }),
+
+    // Get user by ID (for OTP verification flow)
+    getUserById: builder.query<{ success: boolean; user: any }, string>({
+      query: (userId) => `/auth/user?userId=${userId}`,
     }),
   }),
 })
 
-// Export hooks for components
 export const {
   useRegisterMutation,
   useLoginMutation,
@@ -229,5 +310,15 @@ export const {
   useResendOTPMutation,
   useResetPasswordMutation,
   useGetUserQuery,
+  useGetCurrentUserQuery,
   useLogoutMutation,
+  useForgotPasswordMutation,
+  useChangePasswordMutation,
+  useToggle2FAMutation,
+  useGetSessionsQuery,
+  useDeleteSessionMutation,
+  useUploadAvatarMutation,
+  useRemoveAvatarMutation,
+  useUpdateProfileMutation,
+  useGetUserByIdQuery,
 } = authApi

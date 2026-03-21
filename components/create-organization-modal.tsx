@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -10,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, Building2 } from "lucide-react"
+import { useCreateOrganizationMutation } from "@/lib/api/organization"
 
 const CreateOrganizationSchema = z.object({
   name: z.string().min(2, "Organization name must be at least 2 characters"),
@@ -23,8 +23,8 @@ interface CreateOrganizationModalProps {
 }
 
 export function CreateOrganizationModal({ open, onSuccess }: CreateOrganizationModalProps) {
-  const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+  const [createOrganization, { isLoading }] = useCreateOrganizationMutation()
 
   const form = useForm<CreateOrganizationFormData>({
     resolver: zodResolver(CreateOrganizationSchema),
@@ -34,23 +34,13 @@ export function CreateOrganizationModal({ open, onSuccess }: CreateOrganizationM
   })
 
   const onSubmit = async (data: CreateOrganizationFormData) => {
-    setIsLoading(true)
-
     try {
-      const response = await fetch("/api/organizations/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      })
+      const result = await createOrganization(data).unwrap()
 
-      const result = await response.json()
-
-      if (!response.ok) {
+      if (!result.success) {
         toast({
           title: "Failed to Create Organization",
-          description: result.error || "Something went wrong",
+          description: "Something went wrong",
           variant: "destructive",
         })
         return
@@ -62,14 +52,12 @@ export function CreateOrganizationModal({ open, onSuccess }: CreateOrganizationM
       })
 
       onSuccess()
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Network error. Please try again.",
+        description: error?.data?.error || "Network error. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setIsLoading(false)
     }
   }
 

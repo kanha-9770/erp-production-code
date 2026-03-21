@@ -7,6 +7,7 @@ import { AlertCircle, Download, Zap, TrendingUp, Users } from 'lucide-react';
 import PayrollTable from './payroll-table';
 import PayslipPreview from './payslip-preview';
 import PayrollAnalytics from './payroll-analytics';
+import { useAutoGeneratePayrollMutation } from '@/lib/api/payroll';
 
 interface PayrollRecord {
   employeeId: string;
@@ -37,25 +38,16 @@ export default function PayrollEngine() {
   const [processingMonth, setProcessingMonth] = useState(new Date().toISOString().slice(0, 7));
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'table' | 'analytics'>('table');
+  const [autoGeneratePayroll] = useAutoGeneratePayrollMutation();
 
   const generatePayrollForMonth = async () => {
     setLoading(true);
     setMessage(null);
     try {
       console.log('[v0] Starting auto-generate payroll for:', processingMonth);
-      
-      const response = await fetch('/api/payroll/auto-generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: processingMonth }),
-      });
 
-      const data = await response.json();
+      const data = await autoGeneratePayroll({ month: processingMonth }).unwrap();
       console.log('[v0] Response data:', data);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate payroll');
-      }
 
       if (data.payrolls && data.payrolls.length > 0) {
         setPayrolls(data.payrolls);

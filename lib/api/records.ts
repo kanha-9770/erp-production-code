@@ -1,52 +1,50 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import { FormRecord } from "./types";
+import { baseApi } from "./baseApi"
+import { FormRecord } from "./types"
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface RecordsResponse {
-  success: boolean;
-  records: FormRecord[];
-  error?: string;
+  success: boolean
+  records: FormRecord[]
+  error?: string
 }
 
 interface UpdateRecordRequest {
-  recordData: Record<string, any>;
-  submittedBy: string;
-  status: "pending" | "approved" | "rejected" | "submitted";
+  recordData: Record<string, any>
+  submittedBy: string
+  status: "pending" | "approved" | "rejected" | "submitted"
 }
 
 interface UpdateRecordResponse {
-  success: boolean;
-  data?: FormRecord;
-  error?: string;
+  success: boolean
+  data?: FormRecord
+  error?: string
 }
 
 interface BatchUpdateRecordsRequest {
   updates: Array<{
-    recordId: string;
-    recordData: Record<string, any>;
-  }>;
+    recordId: string
+    recordData: Record<string, any>
+  }>
 }
 
 interface BatchUpdateRecordsResponse {
-  success: boolean;
-  data: FormRecord[];
-  error?: string;
+  success: boolean
+  data: FormRecord[]
+  error?: string
 }
 
 interface DeleteRecordResponse {
-  success: boolean;
-  error?: string;
+  success: boolean
+  error?: string
 }
 
-export const recordsApi = createApi({
-  reducerPath: "recordsApi",
-  baseQuery: fetchBaseQuery({
-    baseUrl: "/api/forms",
-    credentials: "include",
-  }),
-  tagTypes: ["Records", "Record"],
+// ─── Inject record endpoints ─────────────────────────────────────────────────
+
+export const recordsApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getFormRecords: builder.query<RecordsResponse, string>({
-      query: (formId) => `/${formId}/records`,
+      query: (formId) => `/forms/${formId}/records`,
       providesTags: (result, error, formId) => [
         { type: "Records", id: formId },
       ],
@@ -54,31 +52,31 @@ export const recordsApi = createApi({
     }),
 
     getModuleRecords: builder.query<FormRecord[], string[]>({
-      queryFn: async (formIds, { extra, getState }, options, baseQuery) => {
+      queryFn: async (formIds, _queryApi, _options, baseQuery) => {
         try {
-          const allRecords: FormRecord[] = [];
+          const allRecords: FormRecord[] = []
           for (const formId of formIds) {
-            const result = await baseQuery(`/${formId}/records`);
+            const result = await baseQuery(`/forms/${formId}/records`)
             if (result.error) {
-              return { error: result.error };
+              return { error: result.error }
             }
-            const data = (result.data as RecordsResponse).records || [];
-            allRecords.push(...data.map((record) => ({ ...record, formId })));
+            const data = (result.data as RecordsResponse).records || []
+            allRecords.push(...data.map((record) => ({ ...record, formId })))
           }
-          return { data: allRecords };
+          return { data: allRecords }
         } catch (error) {
-          return { error };
+          return { error: { status: "CUSTOM_ERROR", error: String(error) } as any }
         }
       },
       providesTags: (result) =>
         result
           ? [
-            ...result.map((record) => ({
-              type: "Record" as const,
-              id: record.id,
-            })),
-            "Records",
-          ]
+              ...result.map((record) => ({
+                type: "Record" as const,
+                id: record.id,
+              })),
+              "Records",
+            ]
           : ["Records"],
       keepUnusedDataFor: 30,
     }),
@@ -88,7 +86,7 @@ export const recordsApi = createApi({
       { formId: string; recordId: string; body: UpdateRecordRequest }
     >({
       query: ({ formId, recordId, body }) => ({
-        url: `/${formId}/records/${recordId}`,
+        url: `/forms/${formId}/records/${recordId}`,
         method: "PUT",
         body,
       }),
@@ -103,7 +101,7 @@ export const recordsApi = createApi({
       { formId: string; body: BatchUpdateRecordsRequest }
     >({
       query: ({ formId, body }) => ({
-        url: `/${formId}/records/batch-update`,
+        url: `/forms/${formId}/records/batch-update`,
         method: "PUT",
         body,
       }),
@@ -118,7 +116,7 @@ export const recordsApi = createApi({
       { formId: string; recordId: string }
     >({
       query: ({ formId, recordId }) => ({
-        url: `/${formId}/records/${recordId}`,
+        url: `/forms/${formId}/records/${recordId}`,
         method: "DELETE",
       }),
       invalidatesTags: (result, error, { formId, recordId }) => [
@@ -127,13 +125,25 @@ export const recordsApi = createApi({
         "Records",
       ],
     }),
+
+    // Update dynamic record (module-records-table)
+    updateDynamicRecord: builder.mutation<any, { recordId: string; body: Record<string, any> }>({
+      query: ({ recordId, body }) => ({
+        url: `/dynamic-records/${recordId}`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["Records"],
+    }),
   }),
-});
+})
 
 export const {
   useGetFormRecordsQuery,
+  useLazyGetFormRecordsQuery,
   useGetModuleRecordsQuery,
   useUpdateRecordMutation,
   useBatchUpdateRecordsMutation,
   useDeleteRecordMutation,
-} = recordsApi;
+  useUpdateDynamicRecordMutation,
+} = recordsApi

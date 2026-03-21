@@ -67,6 +67,8 @@ import type {
   BlankPreference,
   FormFieldInfo,
 } from "@/lib/formula/types";
+import { useGetFormTotalMutation } from "@/lib/api/forms";
+import { useLazyGetMasterDataQuery } from "@/lib/api/settings";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MultiSelect – Extracted OUTSIDE the FormulaBuilder so React treats it as a
@@ -201,14 +203,14 @@ export function FormulaBuilder({
   >({});
 
   const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false);
+  const [getFormTotal] = useGetFormTotalMutation();
+  const [triggerGetMasterData] = useLazyGetMasterDataQuery();
 
   // Load master data
   useEffect(() => {
     async function loadMasterData() {
       try {
-        const res = await fetch("/api/master-data", { credentials: "include" });
-        if (!res.ok) throw new Error("Failed to load master data");
-        const json = await res.json();
+        const json = await triggerGetMasterData().unwrap();
         setModules(json.modules || []);
         setAllForms(json.forms || []);
       } catch (err) {
@@ -299,11 +301,7 @@ export function FormulaBuilder({
 
         const results = await Promise.all(
           selectedFormIds.map(async (fid) => {
-            const res = await fetch(`/api/forms/${fid}/total`, {
-              credentials: "include",
-            });
-            if (!res.ok) throw new Error(`Failed to load form ${fid}`);
-            const json = await res.json();
+            const json = await getFormTotal({ formId: fid, body: {} }).unwrap();
             if (!json.success || !json.data) throw new Error("Invalid response");
 
             const data = json.data;

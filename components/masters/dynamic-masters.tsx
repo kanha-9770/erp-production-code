@@ -1330,6 +1330,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
+import { useLazyGetMasterDataQuery, useCreateMasterDataMutation, useDeleteMasterDataMutation } from "@/lib/api/settings"
 import {
   Dialog,
   DialogContent,
@@ -1406,6 +1407,9 @@ export function DynamicMasters() {
   const [modules, setModules] = useState<any[]>([])
   const [forms, setForms] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [triggerGetMasterData] = useLazyGetMasterDataQuery()
+  const [createMasterData] = useCreateMasterDataMutation()
+  const [deleteMasterData] = useDeleteMasterDataMutation()
   const [processingRows, setProcessingRows] = useState<Set<string>>(new Set())
   const [recordSearchQuery, setRecordSearchQuery] = useState("")
   const [selectedModuleFilter, setSelectedModuleFilter] = useState("all")
@@ -1441,9 +1445,7 @@ export function DynamicMasters() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/master-data")
-      if (!res.ok) throw new Error()
-      const data = await res.json()
+      const data = await triggerGetMasterData().unwrap()
       setRows(data.dropdowns || [])
       setModules(data.modules || [])
       setForms(data.forms || [])
@@ -1599,23 +1601,13 @@ export function DynamicMasters() {
       master_data_type_name: row.master_data_type_name.trim(),
       values: row.values.map((v) => v.value.trim()).filter(Boolean),
     }
-    const method = row.isNew ? "POST" : "PUT"
     try {
-      const res = await fetch("/api/master-data", {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (res.ok) {
-        toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
-        await fetchData()
-        setCurrentPage(1)
-      } else {
-        const err = await res.json()
-        toast({ title: "Error", description: err.error || "Save failed", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "Error", description: "Network error - could not save", variant: "destructive" })
+      await createMasterData(payload).unwrap()
+      toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
+      await fetchData()
+      setCurrentPage(1)
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.data?.error || "Save failed", variant: "destructive" })
     } finally {
       setProcessingRows(prev => {
         const next = new Set(prev)
@@ -1628,16 +1620,12 @@ export function DynamicMasters() {
   const handleConfirmDelete = useCallback(async (id: string) => {
     setProcessingRows(prev => new Set([...prev, id]))
     try {
-      const res = await fetch(`/api/master-data?id=${id}`, { method: "DELETE" })
-      if (res.ok) {
-        toast({ title: "Deleted", description: "Dropdown removed" })
-        await fetchData()
-        setCurrentPage(1)
-      } else {
-        toast({ title: "Error", description: "Delete failed", variant: "destructive" })
-      }
+      await deleteMasterData(id).unwrap()
+      toast({ title: "Deleted", description: "Dropdown removed" })
+      await fetchData()
+      setCurrentPage(1)
     } catch {
-      toast({ title: "Error", description: "Network error - could not delete", variant: "destructive" })
+      toast({ title: "Error", description: "Delete failed", variant: "destructive" })
     } finally {
       setProcessingRows(prev => {
         const next = new Set(prev)

@@ -1,0 +1,140 @@
+import { baseApi } from "./baseApi"
+import type { Role, OrganizationUnit } from "@/types/role"
+
+// ─── Inject organization endpoints ──────────────────────────────────────────
+
+export const organizationApi = baseApi.injectEndpoints({
+  endpoints: (builder) => ({
+    // Ensure organization exists (idempotent)
+    ensureOrganization: builder.mutation<{ success: boolean }, { id: string; name: string }>({
+      query: (body) => ({
+        url: "/organizations/ensure",
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // Fetch roles for an organization
+    getOrgRoles: builder.query<Role[], string>({
+      query: (organizationId) => `/organizations/${organizationId}/roles`,
+      providesTags: ["OrgRoles"],
+      keepUnusedDataFor: 120,
+    }),
+
+    // Create organization
+    createOrganization: builder.mutation<{ success: boolean; data: any }, Record<string, any>>({
+      query: (body) => ({
+        url: "/organizations/create",
+        method: "POST",
+        body,
+      }),
+    }),
+
+    // Fetch organization units
+    getOrgUnits: builder.query<OrganizationUnit[], string>({
+      query: (organizationId) => `/organizations/${organizationId}/units`,
+      providesTags: ["OrgUnits"],
+      keepUnusedDataFor: 120,
+    }),
+
+    // Create organization unit
+    createOrgUnit: builder.mutation<{ success: boolean; data: any }, { organizationId: string; body: Record<string, any> }>({
+      query: ({ organizationId, body }) => ({
+        url: `/organizations/${organizationId}/units`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["OrgUnits"],
+    }),
+
+    // Update organization unit
+    updateOrgUnit: builder.mutation<{ success: boolean; data: any }, { unitId: string; body: Record<string, any> }>({
+      query: ({ unitId, body }) => ({
+        url: `/units/${unitId}`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["OrgUnits"],
+    }),
+
+    // Delete organization unit
+    deleteOrgUnit: builder.mutation<{ success: boolean }, { organizationId: string; unitId: string }>({
+      query: ({ organizationId, unitId }) => ({
+        url: `/organizations/${organizationId}/units/${unitId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["OrgUnits"],
+    }),
+
+    // Create organization role
+    createOrgRole: builder.mutation<{ success: boolean; data: any }, { organizationId: string; body: Record<string, any> }>({
+      query: ({ organizationId, body }) => ({
+        url: `/organizations/${organizationId}/roles`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
+    // Update role
+    updateRole: builder.mutation<{ success: boolean; data: any }, { roleId: string; body: Record<string, any> }>({
+      query: ({ roleId, body }) => ({
+        url: `/roles/${roleId}`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
+    // Get organization units (flat list)
+    getOrganizationUnits: builder.query<{ success: boolean; data: any[] }, void>({
+      query: () => "/organization-units",
+      providesTags: ["OrgUnits"],
+    }),
+
+    // Delete role
+    deleteRole: builder.mutation<{ success: boolean }, string>({
+      query: (roleId) => ({
+        url: `/roles/${roleId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
+    // User assignment to unit
+    assignUserToUnit: builder.mutation<{ success: boolean }, { userId: string; body: Record<string, any> }>({
+      query: ({ userId, body }) => ({
+        url: `/users/${userId}/assignments`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["OrgUnits", "AdminUsers"],
+    }),
+
+    // Remove user assignment
+    removeUserAssignment: builder.mutation<{ success: boolean }, { userId: string; unitId: string }>({
+      query: ({ userId, unitId }) => ({
+        url: `/users/${userId}/assignments?unitId=${unitId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["OrgUnits", "AdminUsers"],
+    }),
+  }),
+})
+
+export const {
+  useEnsureOrganizationMutation,
+  useGetOrgRolesQuery,
+  useGetOrgUnitsQuery,
+  useCreateOrganizationMutation,
+  useCreateOrgUnitMutation,
+  useUpdateOrgUnitMutation,
+  useDeleteOrgUnitMutation,
+  useCreateOrgRoleMutation,
+  useUpdateRoleMutation,
+  useGetOrganizationUnitsQuery,
+  useLazyGetOrganizationUnitsQuery,
+  useDeleteRoleMutation,
+  useAssignUserToUnitMutation,
+  useRemoveUserAssignmentMutation,
+} = organizationApi

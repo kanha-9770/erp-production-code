@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
+import { useCreateFieldMutation, useDeleteSubformMutation } from "@/lib/api/forms"
 import { useSortable } from "@dnd-kit/sortable"
 import { useDroppable } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
@@ -117,6 +118,8 @@ export default function NestedSubformComponent({
   const [isExpanded, setIsExpanded] = useState(!subform.collapsed)
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const [createFieldMutation] = useCreateFieldMutation()
+  const [deleteSubformMutation] = useDeleteSubformMutation()
 
   const level = subform.level || 0
   const colorScheme = DEEP_NESTING_COLORS[level % DEEP_NESTING_COLORS.length]
@@ -230,40 +233,25 @@ export default function NestedSubformComponent({
       }
 
       console.log("Adding field to nested subform:", newFieldData)
-      const response = await fetch("/api/fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newFieldData),
+      const result = await createFieldMutation(newFieldData).unwrap()
+
+      const newField: FormField = {
+        ...result.data,
+        conditional: null,
+        styling: null,
+        properties: null,
+        rollup: null,
+        lookup: null,
+        formula: null,
+      }
+
+      onUpdateSubform({
+        fields: [...subform.fields, newField],
       })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to create field: ${response.status} ${errorText}`)
-      }
-
-      const result = await response.json()
-      if (result.success) {
-        const newField: FormField = {
-          ...result.data,
-          conditional: null,
-          styling: null,
-          properties: null,
-          rollup: null,
-          lookup: null,
-          formula: null,
-        }
-
-        // Update the subform with the new field
-        onUpdateSubform({
-          fields: [...subform.fields, newField],
-        })
-        toast({
-          title: "Success",
-          description: `Field added to nested subform successfully`
-        })
-      } else {
-        throw new Error(result.error || "Failed to create field")
-      }
+      toast({
+        title: "Success",
+        description: `Field added to nested subform successfully`
+      })
     } catch (error: any) {
       console.error("Error adding field to nested subform:", error)
       toast({ title: "Error", description: error.message, variant: "destructive" })
@@ -543,18 +531,13 @@ export default function NestedSubformComponent({
                             }}
                             onDeleteSubform={async () => {
                               try {
-                                const response = await fetch(`/api/subforms/${item.id}`, {
-                                  method: "DELETE",
-                                })
-                                if (!response.ok) {
-                                  throw new Error("Failed to delete deeply nested subform")
-                                }
+                                await deleteSubformMutation(item.id).unwrap()
                                 const updatedChildSubforms = (subform.childSubforms || []).filter((child: Subform) => child.id !== item.id)
                                 onUpdateSubform({ childSubforms: updatedChildSubforms })
                                 toast({ title: "Success", description: "Deeply nested subform deleted successfully" })
                               } catch (error: any) {
                                 console.error("Error deleting deeply nested subform:", error)
-                                toast({ title: "Error", description: error.message, variant: "destructive" })
+                                toast({ title: "Error", description: error?.data?.error || error.message, variant: "destructive" })
                               }
                             }}
                             onUpdateField={onUpdateField}

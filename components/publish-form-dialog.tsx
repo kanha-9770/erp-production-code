@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Copy, ExternalLink, Loader2, Eye } from "lucide-react"
 import { PublicFormDialog } from "@/components/public-form-dialog"
 import type { Form } from "@/types/form-builder"
+import { usePublishFormDirectMutation } from "@/lib/api/forms"
 
 export interface PublishFormDialogProps {
   form: Form
@@ -37,33 +38,23 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
     submissionMessage: form.submissionMessage || "Thank you for your submission!",
   })
 
+  const [publishForm] = usePublishFormDirectMutation()
+
   const handlePublish = async () => {
     setPublishing(true)
     try {
-      const response = await fetch(`/api/forms/${form.id}/publish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+      const result = await publishForm({ formId: form.id, body: settings }).unwrap()
+      toast({
+        title: "Success",
+        description: "Form published successfully!",
       })
-
-      if (!response.ok) throw new Error("Failed to publish form")
-
-      const result = await response.json()
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: "Form published successfully!",
-        })
-        onFormPublished?.(result.data)
-        onOpenChange(false)
-      } else {
-        throw new Error(result.error || "Failed to publish form")
-      }
+      onFormPublished?.(result.data)
+      onOpenChange(false)
     } catch (error: any) {
       console.error("Publish error:", error)
       toast({
         title: "Error",
-        description: error.message,
+        description: error?.data?.error || error.message || "Failed to publish form",
         variant: "destructive",
       })
     } finally {
@@ -74,28 +65,18 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
   const handleUnpublish = async () => {
     setPublishing(true)
     try {
-      const response = await fetch(`/api/forms/${form.id}/publish`, {
-        method: "DELETE",
+      const result = await publishForm({ formId: form.id, body: { unpublish: true } }).unwrap()
+      toast({
+        title: "Success",
+        description: "Form unpublished successfully!",
       })
-
-      if (!response.ok) throw new Error("Failed to unpublish form")
-
-      const result = await response.json()
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: "Form unpublished successfully!",
-        })
-        onFormPublished?.(result.data)
-        onOpenChange(false)
-      } else {
-        throw new Error(result.error || "Failed to unpublish form")
-      }
+      onFormPublished?.(result.data)
+      onOpenChange(false)
     } catch (error: any) {
       console.error("Unpublish error:", error)
       toast({
         title: "Error",
-        description: error.message,
+        description: error?.data?.error || error.message || "Failed to unpublish form",
         variant: "destructive",
       })
     } finally {

@@ -6,10 +6,12 @@ import { cn } from "@/lib/utils"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import { TreeConnectors } from "./tree-connectors"
+import { useDeleteOrgUnitMutation } from "@/lib/api/organization"
 
 export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = false }: any) {
   const { state, dispatch, refreshData } = useRoles()
   const { toast } = useToast()
+  const [deleteOrgUnit] = useDeleteOrgUnitMutation()
 
   const hasChildren = unit.children && unit.children.length > 0
   // Node is visible (expanded) when its ID is NOT in the collapsed set
@@ -26,13 +28,7 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
 
     try {
       const wasSelected = state.selectedOrgUnit?.id === unit.id
-      const response = await fetch(`/api/organizations/${state.organizationId}/units/${unit.id}`, {
-        method: "DELETE",
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || "Failed to delete unit")
-      }
+      await deleteOrgUnit({ organizationId: state.organizationId, unitId: unit.id }).unwrap()
       await refreshData()
       toast({ title: "Success", description: "Organization unit deleted successfully" })
       if (wasSelected) {

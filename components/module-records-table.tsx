@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,9 +24,11 @@ import {
   Hash,
   FileText,
   Settings,
+  X,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import type { FormModule } from "@/types/form-builder"
+import { useLazyGetModuleRecordsListQuery } from "@/lib/api/modules"
 
 interface DynamicRecord {
   id: string
@@ -67,7 +69,10 @@ export default function ModuleRecordsTable({
   const [totalRecords, setTotalRecords] = useState(initialTotalRecords)
   const [selectedRecord, setSelectedRecord] = useState<DynamicRecord | null>(null)
   const [viewMode, setViewMode] = useState<"table" | "cards">("table") // Keep view mode local to this component
+  const [selectedImage, setSelectedImage] = useState<string | null>(null) // State for image modal
+  const [imageModal, setImageModal] = useState(false) // State for image modal visibility
   const { toast } = useToast()
+  const [triggerGetModuleRecordsList] = useLazyGetModuleRecordsListQuery()
 
   // Effect to update local state when parent props change
   useEffect(() => {
@@ -92,15 +97,14 @@ export default function ModuleRecordsTable({
   const loadRecordsInternal = async () => {
     try {
       setLoading(true)
-      const params = new URLSearchParams({
+      const params: Record<string, string> = {
         page: page.toString(),
         limit: "20",
         search,
         status,
-      })
+      }
 
-      const response = await fetch(`/api/modules/${moduleId}/records?${params}`)
-      const result = await response.json()
+      const result = await triggerGetModuleRecordsList({ moduleId, params }).unwrap()
 
       if (result.success) {
         setRecords(result.data.records)
@@ -123,6 +127,20 @@ export default function ModuleRecordsTable({
     } finally {
       setLoading(false)
     }
+  }
+
+  // Function to detect if a value is an image URL
+  const isImageURL = (value: any): boolean => {
+    if (typeof value !== "string") return false
+    const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"]
+    const url = value.toLowerCase()
+    return imageExtensions.some((ext) => url.includes(ext)) || url.startsWith("data:image/")
+  }
+
+  // Function to detect if a field is likely an image field
+  const isImageField = (fieldName: string): boolean => {
+    const imageKeywords = ["image", "photo", "picture", "img", "file", "attachment", "upload"]
+    return imageKeywords.some((keyword) => fieldName.toLowerCase().includes(keyword))
   }
 
   const getRecordTitle = (record: DynamicRecord) => {
@@ -162,10 +180,141 @@ export default function ModuleRecordsTable({
     if (value === null || value === undefined) return "-"
     if (typeof value === "object") {
       if (value.label) return value.label
-      if (Array.isArray(value)) return value.map((v) => v.label || v).join(", ")
+      if (Array.isArray(value)) {
+        // Handle subform rows
+        if (fieldName.startsWith("_dynamicRows_")) {
+          return `${value.length} row(s)`
+        }
+        return value.map((v) => v.label || (typeof v === 'object' ? JSON.stringify(v) : v)).join(", ")
+      }
       return JSON.stringify(value)
     }
     return String(value)
+  }
+
+  // Memoized map of field IDs to labels for quick lookup
+  const fieldLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    if (!module) return labels
+
+    // Helper to process sections and fields
+    module.sections?.forEach((section) => {
+      section.fields?.forEach((field) => {
+        labels[field.id] = field.label
+      })
+    })
+
+    // Helper to process subforms
+    const processSubform = (subform: any) => {
+      labels[`_dynamicRows_${subform.id}`] = subform.name || "Subform"
+      subform.fields?.forEach((field: any) => {
+        labels[field.id] = field.label
+      })
+      subform.childSubforms?.forEach((child: any) => {
+        processSubform(child)
+      })
+    }
+
+    module.subforms?.forEach((subform) => {
+      processSubform(subform)
+    })
+
+    return labels
+  }, [module])
+
+  // Component to render field values with image and subform support
+  const RenderFieldValue = ({ data, fieldName }: { data: any; fieldName: string }) => {
+    const value = data[fieldName]
+
+    // Handle null or undefined
+    if (value === null || value === undefined) {
+      return <span>-</span>
+    }
+
+    // Handle subform rows (starting with _dynamicRows_)
+    if (fieldName.startsWith("_dynamicRows_") && Array.isArray(value)) {
+      return (
+        <div className="space-y-1 mt-1">
+          {value.map((row: any, idx: number) => (
+            <div key={idx} className="text-[11px] p-1.5 border rounded bg-slate-50/50 mb-1 last:mb-0">
+              <div className="font-semibold text-slate-500 mb-1 border-b pb-0.5">Row {idx + 1}</div>
+              <div className="grid grid-cols-1 gap-0.5">
+                {Object.entries(row)
+                  .filter(([k]) => !k.startsWith("_")) // Skip metadata keys like _rowIndex, _instanceId
+                  .map(([subFieldId, subValue]) => (
+                    <div key={subFieldId} className="flex gap-1 overflow-hidden">
+                      <span className="font-medium text-slate-700 whitespace-nowrap">{fieldLabels[subFieldId] || subFieldId}:</span>
+                      <span className="text-slate-600 truncate">{String(subValue)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    // Handle image URLs
+    if (isImageURL(value)) {
+      return (
+        <button
+          onClick={() => {
+            setSelectedImage(value)
+            setImageModal(true)
+          }}
+          className="hover:opacity-80 transition-opacity"
+          title="Click to view larger image"
+        >
+          <img
+            src={value}
+            alt={fieldName}
+            className="h-16 w-16 object-cover rounded border cursor-pointer hover:shadow-md transition-shadow"
+            onError={(e) => {
+              e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect fill='%23f0f0f0' width='64' height='64'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='12' fill='%23999' text-anchor='middle' dy='.3em'%3ENo Image%3C/text%3E%3C/svg%3E"
+            }}
+          />
+        </button>
+      )
+    }
+
+    // Handle objects
+    if (typeof value === "object") {
+      if (value.label) return <span>{value.label}</span>
+      if (Array.isArray(value)) {
+        return (
+          <div className="space-y-1">
+            {value.map((v, idx) => (
+              <div key={idx}>
+                {isImageURL(v) ? (
+                  <button
+                    onClick={() => {
+                      setSelectedImage(v)
+                      setImageModal(true)
+                    }}
+                    className="hover:opacity-80 transition-opacity"
+                  >
+                    <img
+                      src={v}
+                      alt={`${fieldName}-${idx}`}
+                      className="h-12 w-12 object-cover rounded border cursor-pointer hover:shadow-md"
+                      onError={(e) => {
+                        e.currentTarget.src =
+                          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%23f0f0f0' width='48' height='48'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='10' fill='%23999' text-anchor='middle' dy='.3em'%3ENo Image%3C/text%3E%3C/svg%3E"
+                      }}
+                    />
+                  </button>
+                ) : (
+                  <span>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      }
+      return <span>{JSON.stringify(value)}</span>
+    }
+
+    return <span>{String(value)}</span>
   }
 
   const getTableColumns = () => {
@@ -181,6 +330,9 @@ export default function ModuleRecordsTable({
   }
 
   const formatFieldName = (fieldName: string) => {
+    // If we have a label for this field ID, use it
+    if (fieldLabels[fieldName]) return fieldLabels[fieldName]
+
     return fieldName
       .replace(/([A-Z])/g, " $1")
       .replace(/^./, (str) => str.toUpperCase())
@@ -189,8 +341,10 @@ export default function ModuleRecordsTable({
 
   const exportRecords = async () => {
     try {
-      const allRecords = await fetch(`/api/modules/${moduleId}/records?limit=1000&status=all`)
-      const result = await allRecords.json()
+      const result = await triggerGetModuleRecordsList({
+        moduleId,
+        params: { limit: "1000", status: "all" },
+      }).unwrap()
 
       if (result.success) {
         const csvContent = convertToCSV(result.data.records)
@@ -270,6 +424,28 @@ export default function ModuleRecordsTable({
 
   return (
     <div className="space-y-6">
+      {/* Image Viewer Modal */}
+      {imageModal && selectedImage && (
+        <Dialog open={imageModal} onOpenChange={setImageModal}>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Image Viewer</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 flex items-center justify-center overflow-hidden">
+              <img
+                src={selectedImage}
+                alt="Full size view"
+                className="max-w-full max-h-[80vh] object-contain"
+                onError={(e) => {
+                  e.currentTarget.src =
+                    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23f0f0f0' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='16' fill='%23999' text-anchor='middle' dy='.3em'%3EImage failed to load%3C/text%3E%3C/svg%3E"
+                }}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -443,8 +619,8 @@ export default function ModuleRecordsTable({
                       </TableCell>
                       {tableColumns.map((column) => (
                         <TableCell key={column} className="max-w-48">
-                          <div className="truncate" title={getFieldValue(record.recordData, column)}>
-                            {getFieldValue(record.recordData, column)}
+                          <div className="truncate">
+                            <RenderFieldValue data={record.recordData} fieldName={column} />
                           </div>
                         </TableCell>
                       ))}
@@ -486,7 +662,7 @@ export default function ModuleRecordsTable({
                                 </DialogTitle>
                               </DialogHeader>
                               <ScrollArea className="max-h-[60vh]">
-                                <div className="space-y-4">
+                                <div className="space-y-4 p-4">
                                   <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
                                     <div>
                                       <p className="text-sm font-medium text-gray-600">Record ID</p>
@@ -517,7 +693,7 @@ export default function ModuleRecordsTable({
                                         <div key={key} className="grid grid-cols-3 gap-4 p-3 border rounded-lg">
                                           <div className="font-medium text-gray-700">{formatFieldName(key)}</div>
                                           <div className="col-span-2 text-gray-900">
-                                            {getFieldValue(record.recordData, key)}
+                                            <RenderFieldValue data={record.recordData} fieldName={key} />
                                           </div>
                                         </div>
                                       ))}
@@ -573,7 +749,9 @@ export default function ModuleRecordsTable({
                         .map(([key, value]) => (
                           <div key={key} className="text-sm">
                             <div className="font-medium text-gray-700">{formatFieldName(key)}</div>
-                            <div className="text-gray-600 truncate">{getFieldValue(record.recordData, key)}</div>
+                            <div className="text-gray-600">
+                              <RenderFieldValue data={record.recordData} fieldName={key} />
+                            </div>
                           </div>
                         ))}
                     </div>
@@ -597,16 +775,18 @@ export default function ModuleRecordsTable({
                           <Eye className="w-4 h-4" />
                         </Button>
                       </DialogTrigger>
-                      <DialogContent className="max-w-2xl">
+                      <DialogContent className="max-w-2xl max-h-[80vh]">
                         <DialogHeader>
                           <DialogTitle>Record Details - {record.recordId}</DialogTitle>
                         </DialogHeader>
-                        <ScrollArea className="max-h-96">
-                          <div className="space-y-4">
+                        <ScrollArea className="max-h-[60vh]">
+                          <div className="space-y-4 p-4">
                             {Object.entries(record.recordData).map(([key, value]) => (
-                              <div key={key} className="grid grid-cols-3 gap-4">
+                              <div key={key} className="grid grid-cols-3 gap-4 p-3 border rounded-lg">
                                 <div className="font-medium">{formatFieldName(key)}</div>
-                                <div className="col-span-2">{getFieldValue(record.recordData, key)}</div>
+                                <div className="col-span-2">
+                                  <RenderFieldValue data={record.recordData} fieldName={key} />
+                                </div>
                               </div>
                             ))}
                           </div>

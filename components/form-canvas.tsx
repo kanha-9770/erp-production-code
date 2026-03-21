@@ -657,6 +657,17 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import FieldSettings from "./field-settings"
+import {
+  useCreateSectionMutation,
+  useUpdateSectionMutation,
+  useDeleteSectionMutation,
+  useUpdateFieldMutation,
+  useDeleteFieldMutation,
+  useUpdateSubformMutation,
+  useDeleteSubformMutation,
+  useCreateSubformMutation,
+  useSaveFormMutation,
+} from "@/lib/api/forms"
 
 interface FormCanvasProps {
   form: Form & {
@@ -682,6 +693,17 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
   const [showEmployeeConfirm, setShowEmployeeConfirm] = useState(false)
   const [isTogglingEmployee, setIsTogglingEmployee] = useState(false)
   const isEmployeeForm = form?.isEmployeeForm || false
+
+  // RTK Query mutations
+  const [createSectionMut] = useCreateSectionMutation()
+  const [updateSectionMut] = useUpdateSectionMutation()
+  const [deleteSectionMut] = useDeleteSectionMutation()
+  const [updateFieldMut] = useUpdateFieldMutation()
+  const [deleteFieldMut] = useDeleteFieldMutation()
+  const [updateSubformMut] = useUpdateSubformMutation()
+  const [deleteSubformMut] = useDeleteSubformMutation()
+  const [createSubformMut] = useCreateSubformMutation()
+  const [saveFormMut] = useSaveFormMutation()
 
   // Group subforms by parentSectionId
   const subformsByParentSection = useMemo(() => {
@@ -729,19 +751,13 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
     }
     onFormUpdate(optimisticForm)
     try {
-      const res = await fetch(`/api/forms/${form.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
+      await saveFormMut({
+        formId: form.id,
+        body: {
           isEmployeeForm: makeEmployee,
           isUserForm: false,
-        }),
-      })
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "Unknown error")
-        throw new Error(`Failed to update form type: ${res.status} - ${errorText}`)
-      }
+        },
+      }).unwrap()
       toast({
         title: makeEmployee ? "Employee Form Activated" : "Employee Form Deactivated",
         description: makeEmployee
@@ -800,13 +816,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         order: maxOrder + 1,
         columns: 1,
       }
-      const response = await fetch("/api/sections", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSectionData),
-      })
-      if (!response.ok) throw new Error("Failed to create section")
-      const result = await response.json()
+      const result = await createSectionMut(newSectionData).unwrap()
       if (result.success) {
         const newSection: FormSection & { fields: FormField[] } = {
           ...result.data,
@@ -840,15 +850,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         section.id === sectionId ? { ...section, ...updates, updatedAt: new Date() } : section,
       )
       onFormUpdate({ ...form, sections: updatedSections })
-      const response = await fetch(`/api/sections/${sectionId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
-      if (!response.ok) {
-        onFormUpdate(form)
-        throw new Error("Failed to update section")
-      }
+      await updateSectionMut({ sectionId, body: updates }).unwrap()
     } catch (error) {
       console.error("Error updating section:", error)
       toast({ title: "Error", description: "Failed to update section", variant: "destructive" })
@@ -864,12 +866,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
       .map((section, index) => ({ ...section, order: index }))
     onFormUpdate({ ...form, sections: updatedSections })
     try {
-      const response = await fetch(`/api/sections/${sectionId}`, { method: "DELETE" })
-      if (response.status === 404) {
-        toast({ title: "Success", description: "Section removed successfully" })
-        return
-      }
-      if (!response.ok) throw new Error("Failed to delete section from database")
+      await deleteSectionMut(sectionId).unwrap()
       toast({ title: "Success", description: "Section deleted successfully" })
     } catch (error: any) {
       onFormUpdate({ ...form, sections: previousSections })
@@ -906,16 +903,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
     const previousForm = { ...form }
     onFormUpdate({ ...form, sections: updatedSections, subforms: updatedSubforms })
     try {
-      const response = await fetch(`/api/fields/${fieldId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(updates),
-      })
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error")
-        throw new Error(`Field update failed: ${response.status} - ${errorText}`)
-      }
+      await updateFieldMut({ fieldId, body: updates }).unwrap()
       toast({
         title: "Saved",
         description: "Field settings saved successfully",
@@ -946,9 +934,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         fields: subform.fields.filter((field) => field.id !== fieldId),
       }))
       onFormUpdate({ ...form, sections: updatedSections, subforms: updatedSubforms })
-      const response = await fetch(`/api/fields/${fieldId}`, { method: "DELETE" })
-      if (response.status === 404) return
-      if (!response.ok) throw new Error("Failed to delete field")
+      await deleteFieldMut(fieldId).unwrap()
       toast({ title: "Success", description: "Field deleted successfully" })
     } catch (error) {
       onFormUpdate({ ...form, sections: previousSections, subforms: previousSubforms })
@@ -970,15 +956,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         )
       const updated = updateRecursively(subforms)
       onFormUpdate({ ...form, subforms: updated })
-      const response = await fetch(`/api/subforms/${subformId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
-      if (!response.ok) {
-        onFormUpdate(form)
-        throw new Error("Failed to update subform")
-      }
+      await updateSubformMut({ subformId, body: updates }).unwrap()
     } catch (error) {
       toast({ title: "Error", description: "Failed to update subform", variant: "destructive" })
     }
@@ -997,9 +975,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
             childSubforms: sf.childSubforms ? removeRecursively(sf.childSubforms) : [],
           }))
       onFormUpdate({ ...form, subforms: removeRecursively(subforms) })
-      const response = await fetch(`/api/subforms/${subformId}`, { method: "DELETE" })
-      if (response.status === 404) return
-      if (!response.ok) throw new Error("Failed to delete subform")
+      await deleteSubformMut(subformId).unwrap()
       toast({ title: "Success", description: "Subform deleted successfully" })
     } catch (error) {
       onFormUpdate({ ...form, subforms: previousSubforms })
@@ -1030,13 +1006,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         parentSectionId: null,
         parentSubformId: null,
       }
-      const response = await fetch("/api/subforms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSubformData),
-      })
-      if (!response.ok) throw new Error("Failed to create subform")
-      const result = await response.json()
+      const result = await createSubformMut(newSubformData).unwrap()
       if (result.success) {
         const newSubform = { ...result.data, fields: [], childSubforms: [] }
         onFormUpdate({ ...form, subforms: [...subforms, newSubform] })
@@ -1067,16 +1037,7 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
         parentSectionId: sectionId,
         parentSubformId: null,
       }
-      const response = await fetch("/api/subforms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSubformData),
-      })
-      if (!response.ok) {
-        const errText = await response.text()
-        throw new Error(`Failed to create subform: ${errText}`)
-      }
-      const result = await response.json()
+      const result = await createSubformMut(newSubformData).unwrap()
       if (result.success) {
         const newSubform = { ...result.data, fields: [], childSubforms: [] }
         onFormUpdate({

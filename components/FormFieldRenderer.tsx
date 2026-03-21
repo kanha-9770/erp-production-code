@@ -44,6 +44,15 @@ import { FileUploadZone } from "./file-upload-zone";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
+import { useGetCurrentUserQuery } from "@/lib/api/auth";
+import {
+  useLazyGetFormDetailQuery,
+  useSubmitFormMutation,
+  useTrackFormEventMutation,
+  useLazyGetSectionPermissionsQuery,
+  useCheckAttendanceMutation,
+  useLazyGetTestingDataQuery,
+} from "@/lib/api/forms";
 // ── PHONE INPUT IMPORTS ───────────────────────────────────────────────────────
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -837,6 +846,16 @@ export function PublicFormDialog({
   onClose,
 }: PublicFormDialogProps) {
   const { toast } = useToast();
+
+  // RTK Query hooks
+  const { data: currentUserData } = useGetCurrentUserQuery(undefined, { skip: !isOpen });
+  const [triggerFormDetail] = useLazyGetFormDetailQuery();
+  const [submitForm] = useSubmitFormMutation();
+  const [trackFormEvent] = useTrackFormEventMutation();
+  const [triggerSectionPerms] = useLazyGetSectionPermissionsQuery();
+  const [checkAttendance] = useCheckAttendanceMutation();
+  const [triggerTestingData] = useLazyGetTestingDataQuery();
+
   const [form, setForm] = useState<Form | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -987,34 +1006,22 @@ export function PublicFormDialog({
   }, [isOpen]);
 
   useEffect(() => {
-    const fetchCurrentUser = async () => {
-      try {
-        const response = await fetch("/api/user");
-        if (!response.ok) return;
-        const result = await response.json();
-        if (result.success && result.user) {
-          const user = result.user;
-          const fullName =
-            [user.first_name, user.last_name].filter(Boolean).join(" ") ||
-            user.name ||
-            user.username ||
-            "Current User";
-          setCurrentUser({
-            id: user.id,
-            name: fullName,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            email: user.email,
-          });
-        }
-      } catch (err) {
-        console.error("Failed to fetch current user:", err);
-      }
-    };
-    if (isOpen) {
-      fetchCurrentUser();
+    if (currentUserData?.success && currentUserData.user) {
+      const user = currentUserData.user;
+      const fullName =
+        [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+        (user as any).name ||
+        user.username ||
+        "Current User";
+      setCurrentUser({
+        id: user.id,
+        name: fullName,
+        first_name: user.first_name ?? undefined,
+        last_name: user.last_name ?? undefined,
+        email: user.email,
+      });
     }
-  }, [isOpen]);
+  }, [currentUserData]);
 
   useEffect(() => {
     if (formId && isOpen) {
@@ -1241,15 +1248,13 @@ export function PublicFormDialog({
     if (!formId) return;
     try {
       setLoading(true);
-      const response = await fetch(`/api/forms/${formId}`);
-      const result = await response.json();
+      const result = await triggerFormDetail(formId).unwrap();
       if (!result.success) throw new Error(result.error);
       if (!result.data.isPublished)
         throw new Error("This form is not published");
       let formulaResult: any = { success: false };
       try {
-        const formulaResponse = await fetch("/api/testing");
-        if (formulaResponse.ok) formulaResult = await formulaResponse.json();
+        formulaResult = await triggerTestingData().unwrap();
       } catch { /* formula endpoint unavailable – skip enrichment */ }
       if (formulaResult.success && Array.isArray(formulaResult.data)) {
         const formulas = formulaResult.data;
@@ -1365,16 +1370,7 @@ export function PublicFormDialog({
         console.groupCollapsed(`ID: ${id}`);
         try {
           console.log(`📡 Fetching: /api/permissions/sections/${id}`);
-          const res = await fetch(`/api/permissions/sections/${id}`);
-          if (!res.ok) {
-            console.warn(
-              `⚠️ API Error [${res.status}] for id ${id}. Setting to NONE.`,
-            );
-            sectionPerms[id] = "READ";
-            console.groupEnd();
-            return;
-          }
-          const data = await res.json();
+          const data = await triggerSectionPerms(id).unwrap();
           console.log("📦 Received Data:", data);
           if (data.error) {
             console.error(
@@ -1446,11 +1442,7 @@ export function PublicFormDialog({
           timestamp: new Date().toISOString(),
         },
       };
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      await trackFormEvent({ formId, body: payload }).unwrap();
     } catch (error) {
       console.error("Track view failed:", error);
     }
@@ -1800,13 +1792,7 @@ export function PublicFormDialog({
       console.log("formNameLower:", formNameLower);
       if (formNameLower === "check-in" || formNameLower === "checkin") {
         console.log("Handling check-in");
-        const response = await fetch("/api/attendance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkin" }),
-        });
-        console.log("Check-in fetch response status:", response.status);
-        const data = await response.json();
+        const data = await checkAttendance({ userId, action: "checkin" }).unwrap();
         console.log("Check-in response data:", data);
         if (!data.success) throw new Error(data.error || "Check-In failed");
         attendanceHandled = true;
@@ -1816,13 +1802,7 @@ export function PublicFormDialog({
         formNameLower === "checkout"
       ) {
         console.log("Handling check-out");
-        const response = await fetch("/api/attendance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkout" }),
-        });
-        console.log("Check-out fetch response status:", response.status);
-        const data = await response.json();
+        const data = await checkAttendance({ userId, action: "checkout" }).unwrap();
         console.log("Check-out response data:", data);
         if (!data.success) throw new Error(data.error || "Check-Out failed");
         attendanceHandled = true;
@@ -1872,13 +1852,7 @@ export function PublicFormDialog({
           userAgent: navigator.userAgent,
         };
         console.log("submitPayload", submitPayload);
-        const res = await fetch(`/api/forms/${formId}/submit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(submitPayload),
-        });
-        console.log("Form submit fetch response status:", res.status);
-        const json = await res.json();
+        const json = await submitForm({ formId: formId!, body: submitPayload }).unwrap();
         console.log("Form submit response json:", json);
         if (!json.success) throw new Error(json.error);
         console.log("Form submit successful");
@@ -1890,17 +1864,16 @@ export function PublicFormDialog({
         description: form?.submissionMessage || "Form submitted successfully!",
       });
       console.log("Success toast shown");
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await trackFormEvent({
+        formId: formId!,
+        body: {
           eventType: "submit",
           payload: {
             recordId: attendanceHandled ? "attendance" : "form",
             timestamp: new Date().toISOString(),
           },
-        }),
-      });
+        },
+      }).unwrap();
       console.log("Events API called");
       if ((window as any).__handleFormSubmitted) {
         await (window as any).__handleFormSubmitted(form?.name || "");

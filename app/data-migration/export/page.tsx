@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
-import { useGetFormDetailQuery } from "@/lib/api/forms"
+import { useGetFormDetailQuery, useLazyExportFormRecordsQuery } from "@/lib/api/forms"
 import { exportToCSV, exportToXLSX, exportToPDF } from "@/lib/export-utils"
 import Link from "next/link"
 
@@ -63,6 +63,8 @@ export default function ExportPage() {
     }
   }
 
+  const [triggerExport] = useLazyExportFormRecordsQuery()
+
   const handleExport = async () => {
     if (!selectedFormId || selectedFieldIds.length === 0) return
     setIsExporting(true)
@@ -70,8 +72,7 @@ export default function ExportPage() {
     try {
       // Fetch export data from API
       const fieldsParam = selectedFieldIds.join(",")
-      const res = await fetch(`/api/forms/${selectedFormId}/export?format=json&fields=${fieldsParam}`)
-      const result = await res.json()
+      const result = await triggerExport({ formId: selectedFormId, format: "json", fields: fieldsParam }).unwrap()
 
       if (!result.records || result.records.length === 0) {
         toast({ title: "No Data", description: "No records found to export", variant: "destructive" })

@@ -18,6 +18,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useLazyGetLookupDataQuery } from "@/lib/api/lookup";
 
 interface LookupDependencyConfig {
   parentFieldLabel: string;
@@ -98,6 +99,7 @@ export function LookupField({
   const idFieldName = field.lookup?.idFieldName;
   const sourceId = field.lookup?.sourceId;
   const dependency = field.lookup?.dependency;
+  const [triggerGetLookupData] = useLazyGetLookupDataQuery();
 
   // Filter options based on dependency when parent value changes
   const filteredByDependency = useMemo(() => {
@@ -223,14 +225,11 @@ export function LookupField({
 
     setLoading(true);
     try {
-      const params = new URLSearchParams({
+      const result = await triggerGetLookupData({
         sourceId,
         search,
         limit: "50",
-      });
-
-      const response = await fetch(`/api/lookup/data?${params}`);
-      const result = await response.json();
+      }).unwrap();
 
       if (result.success) {
         const transformedOptions: LookupOption[] = result.data.map(

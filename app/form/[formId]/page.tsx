@@ -32,6 +32,8 @@ import { CheckCircle, AlertCircle, Loader2, Send, Eye, Calendar, Star, Layers, C
 import type { Form, FormField, Subform } from "@/types/form-builder";
 import { LookupField } from "@/components/lookup-field";
 import CameraCapture from "@/components/camera-capture";
+import { useGetPublishedFormQuery, useSubmitFormMutation, useTrackFormEventMutation } from "@/lib/api/forms";
+import { useGetUserQuery } from "@/lib/api/auth";
 
 // Interface for the field entries in fullOption.data
 interface LookupFieldData {
@@ -91,18 +93,120 @@ export default function PublicFormPage() {
   const [form, setForm] = useState<Form | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [completionPercentage, setCompletionPercentage] = useState(0);
   const [collapsedSubforms, setCollapsedSubforms] = useState<Record<string, boolean>>({});
+  const [formInitialized, setFormInitialized] = useState(false);
 
+  // RTK Query hooks
+  const { data: publishedFormData, isLoading: loading, error: formError } = useGetPublishedFormQuery(formId, {
+    skip: !formId,
+  });
+  const { data: userData, error: userError } = useGetUserQuery(undefined, {
+    skip: !publishedFormData?.data?.requireLogin,
+  });
+  const [submitFormMutation] = useSubmitFormMutation();
+  const [trackFormEvent] = useTrackFormEventMutation();
+
+  // Initialize form data when published form data loads
+  useEffect(() => {
+    if (!publishedFormData?.data || formInitialized) return;
+
+    const formData = publishedFormData.data;
+
+    if (!formData.isPublished) {
+      toast({
+        title: "Error",
+        description: "This form is not published",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // If login is required and user is not authenticated, redirect
+    if (formData.requireLogin && userError) {
+      router.replace(`/login?callbackUrl=${encodeURIComponent(`/form/${formId}`)}`);
+      return;
+    }
+
+    // Wait for user data if login is required
+    if (formData.requireLogin && !userData) return;
+
+    setForm(formData);
+
+    // Initialize form data with default values from all fields (including subform fields)
+    const initialData: Record<string, any> = {};
+    const initialCollapsed: Record<string, boolean> = {};
+
+    formData.sections.forEach((section: any) => {
+      // Process section fields
+      section.fields.forEach((field: FormField) => {
+        if (field.defaultValue) {
+          initialData[field.id] = field.defaultValue;
+        }
+      });
+
+      // Process subform fields recursively
+      const processSubforms = (subforms: Subform[]) => {
+        subforms.forEach((subform) => {
+          // Set initial collapsed state
+          initialCollapsed[subform.id] = subform.collapsed || false;
+
+          // Process subform fields
+          subform.fields.forEach((field: FormField) => {
+            if (field.defaultValue) {
+              initialData[field.id] = field.defaultValue;
+            }
+          });
+
+          // Process nested subforms
+          if (subform.childSubforms && subform.childSubforms.length > 0) {
+            processSubforms(subform.childSubforms);
+          }
+        });
+      };
+
+      if (section.subforms && section.subforms.length > 0) {
+        processSubforms(section.subforms);
+      }
+    });
+
+    setFormData(initialData);
+    setCollapsedSubforms(initialCollapsed);
+    setFormInitialized(true);
+    console.log("Initial form data:", initialData);
+    console.log("Initial collapsed subforms:", initialCollapsed);
+  }, [publishedFormData, userData, userError, formId, formInitialized, router, toast]);
+
+  // Track form view on mount
   useEffect(() => {
     if (formId) {
-      fetchForm();
-      trackFormView();
+      trackFormEvent({
+        formId,
+        body: {
+          eventType: "view",
+          payload: {
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      }).catch((error) => {
+        console.error("Error tracking form view:", error);
+      });
     }
-  }, [formId]);
+  }, [formId, trackFormEvent]);
+
+  // Show error from RTK Query
+  useEffect(() => {
+    if (formError) {
+      toast({
+        title: "Error",
+        description: "error" in formError ? (formError as any).error : "Failed to load form",
+        variant: "destructive",
+      });
+    }
+  }, [formError, toast]);
 
   useEffect(() => {
     calculateCompletion();
@@ -111,102 +215,6 @@ export default function PublicFormPage() {
   useEffect(() => {
     console.log("Form data changed:", formData);
   }, [formData]);
-
-  const fetchForm = async () => {
-    try {
-      setLoading(true);
-      // Always request the published snapshot for public page
-      const response = await fetch(`/api/forms/${formId}?published=true`);
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      if (!result.data.isPublished) {
-        throw new Error("This form is not published");
-      }
-
-      // If login is required, verify the user is authenticated
-      if (result.data.requireLogin) {
-        const authRes = await fetch("/api/auth/me");
-        if (!authRes.ok) {
-          router.replace(`/login?callbackUrl=${encodeURIComponent(`/form/${formId}`)}`);
-          return;
-        }
-      }
-
-      setForm(result.data);
-
-      // Initialize form data with default values from all fields (including subform fields)
-      const initialData: Record<string, any> = {};
-      const initialCollapsed: Record<string, boolean> = {};
-
-      result.data.sections.forEach((section: any) => {
-        // Process section fields
-        section.fields.forEach((field: FormField) => {
-          if (field.defaultValue) {
-            initialData[field.id] = field.defaultValue;
-          }
-        });
-
-        // Process subform fields recursively
-        const processSubforms = (subforms: Subform[]) => {
-          subforms.forEach((subform) => {
-            // Set initial collapsed state
-            initialCollapsed[subform.id] = subform.collapsed || false;
-
-            // Process subform fields
-            subform.fields.forEach((field: FormField) => {
-              if (field.defaultValue) {
-                initialData[field.id] = field.defaultValue;
-              }
-            });
-
-            // Process nested subforms
-            if (subform.childSubforms && subform.childSubforms.length > 0) {
-              processSubforms(subform.childSubforms);
-            }
-          });
-        };
-
-        if (section.subforms && section.subforms.length > 0) {
-          processSubforms(section.subforms);
-        }
-      });
-
-      setFormData(initialData);
-      setCollapsedSubforms(initialCollapsed);
-      console.log("Initial form data:", initialData);
-      console.log("Initial collapsed subforms:", initialCollapsed);
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const trackFormView = async () => {
-    try {
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          eventType: "view",
-          payload: {
-            userAgent: navigator.userAgent,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      });
-    } catch (error) {
-      console.error("Error tracking form view:", error);
-    }
-  };
 
   const calculateCompletion = () => {
     if (!form) return;
@@ -494,17 +502,15 @@ export default function PublicFormPage() {
 
     try {
       console.log("Sending form submission with field IDs as keys...");
-      const response = await fetch(`/api/forms/${formId}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const result = await submitFormMutation({
+        formId,
+        body: {
           recordData: formData,
           submittedBy: "anonymous",
           userAgent: navigator.userAgent,
-        }),
-      });
+        },
+      }).unwrap();
 
-      const result = await response.json();
       console.log("Submission response:", result);
 
       if (!result.success) {
@@ -517,10 +523,9 @@ export default function PublicFormPage() {
         description: form?.submissionMessage || "Form submitted successfully",
       });
 
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await trackFormEvent({
+        formId,
+        body: {
           eventType: "submit",
           payload: {
             recordId: result.data.id,
@@ -530,7 +535,7 @@ export default function PublicFormPage() {
                 s.fields.map((f: any) => f.label)
               ) || [],
           },
-        }),
+        },
       });
 
       console.log(

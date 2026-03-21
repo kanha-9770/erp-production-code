@@ -134,22 +134,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       (ua: any) => ua.role?.name?.toUpperCase() === "ADMIN",
     ) ?? false;
 
-  const [organizationId, setOrganizationId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchOrg = async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        const data = await res.json();
-        if (data?.success && data.user?.organization?.id) {
-          setOrganizationId(data.user.organization.id);
-        }
-      } catch (err) {
-        console.error("Failed to load organization", err);
-      }
-    };
-    fetchOrg();
-  }, []);
+  const organizationId = userData?.user?.organization?.id ?? null;
 
   const { modules, isLoading, error, createModuleOptimistic } =
     useOptimisticModules(organizationId);

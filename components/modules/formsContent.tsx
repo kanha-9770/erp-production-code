@@ -234,6 +234,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Filter } from "lucide-react"
 import { getAttendanceStatus } from "@/lib/attendance"
+import { useGetUserQuery } from "@/lib/api/auth"
 
 interface Form {
   id: string
@@ -267,31 +268,19 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
     canCheckOut: false,
   })
 
-  // Fetch current user
+  const { data: authData, isLoading: authLoading } = useGetUserQuery()
+
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        setLoading(true)
-        const response = await fetch("/api/auth/me")
-        const data = await response.json()
-
-        if (data.success && data.user?.id) {
-          console.log("[FormsContent] User authenticated:", data.user.id)
-          setUserId(data.user.id)
-        } else {
-          console.log("[FormsContent] User not authenticated")
-          setUserId(null)
-        }
-      } catch (error) {
-        console.error("[FormsContent] Failed to fetch user:", error)
-        setUserId(null)
-      } finally {
-        setLoading(false)
-      }
+    if (authLoading) return
+    if (authData?.success && authData?.user?.id) {
+      console.log("[FormsContent] User authenticated:", authData.user.id)
+      setUserId(authData.user.id)
+    } else {
+      console.log("[FormsContent] User not authenticated")
+      setUserId(null)
     }
-
-    fetchUser()
-  }, [])
+    setLoading(false)
+  }, [authData, authLoading])
 
   // Update attendance status
   const updateAttendanceStatus = async () => {

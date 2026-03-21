@@ -333,7 +333,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -342,6 +342,13 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield, Lock, Globe, CheckCircle, LogOut } from "lucide-react";
 import Link from "next/link";
+import {
+  useGetUserQuery,
+  useGetSessionsQuery,
+  useChangePasswordMutation,
+  useToggle2FAMutation,
+  useDeleteSessionMutation,
+} from "@/lib/api/auth";
 
 interface Session {
   id: string;
@@ -354,11 +361,7 @@ interface Session {
 export default function SecuritySettingsPage() {
   const { toast } = useToast();
 
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
-  const [isLoading2FA, setIsLoading2FA] = useState(true);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -366,39 +369,20 @@ export default function SecuritySettingsPage() {
     confirmPassword: "",
   });
 
-  useEffect(() => {
-    const loadSecurityData = async () => {
-      try {
-        const userRes = await fetch("/api/auth/me");
-        if (userRes.ok) {
-          const userData = await userRes.json();
-          setTwoFactorEnabled(userData.twoFactorEnabled || false);
-        }
-      } catch (err) {
-        console.error("Failed to load 2FA status");
-      } finally {
-        setIsLoading2FA(false);
-      }
+  // RTK Query hooks for data fetching
+  const { data: userData, isLoading: isLoading2FA } = useGetUserQuery();
+  const { data: sessionsData, isLoading: isLoadingSessions } = useGetSessionsQuery();
 
-      try {
-        const sessionsRes = await fetch("/api/auth/sessions");
-        if (sessionsRes.ok) {
-          const data = await sessionsRes.json();
-          setSessions(data.sessions || []);
-        }
-      } catch (err) {
-        toast({
-          title: "Error",
-          description: "Could not load active sessions",
-          variant: "destructive",
-        });
-      } finally {
-        setIsLoadingSessions(false);
-      }
-    };
+  // RTK Query mutation hooks
+  const [changePassword, { isLoading: isChangingPassword }] = useChangePasswordMutation();
+  const [toggle2FA] = useToggle2FAMutation();
+  const [deleteSession] = useDeleteSessionMutation();
 
-    loadSecurityData();
-  }, [toast]);
+  // Derive sessions from query data
+  const sessions = sessionsData?.sessions || [];
+
+  // Sync 2FA state from server data
+  const twoFactorFromServer = (userData as any)?.twoFactorEnabled || false;
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -421,23 +405,12 @@ export default function SecuritySettingsPage() {
       return;
     }
 
-    setIsChangingPassword(true);
-
     try {
-      const res = await fetch("/api/auth/change-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentPassword: passwordForm.currentPassword,
-          newPassword: passwordForm.newPassword,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to change password");
-      }
+      await changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+        confirmPassword: passwordForm.confirmPassword,
+      }).unwrap();
 
       // Success: Password changed successfully
       toast({
@@ -453,11 +426,9 @@ export default function SecuritySettingsPage() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to update password",
+        description: err.data?.error || err.message || "Failed to update password",
         variant: "destructive",
       });
-    } finally {
-      setIsChangingPassword(false);
     }
   };
 
@@ -466,16 +437,7 @@ export default function SecuritySettingsPage() {
     setTwoFactorEnabled(enabled);
 
     try {
-      const res = await fetch("/api/auth/toggle-2fa", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to update 2FA");
-      }
+      await toggle2FA({ enabled }).unwrap();
 
       toast({
         title: enabled ? "2FA Enabled" : "2FA Disabled",
@@ -487,7 +449,7 @@ export default function SecuritySettingsPage() {
       setTwoFactorEnabled(previousState);
       toast({
         title: "Error",
-        description: err.message || "Failed to update 2FA settings",
+        description: err.data?.error || err.message || "Failed to update 2FA settings",
         variant: "destructive",
       });
     }
@@ -504,8 +466,7 @@ export default function SecuritySettingsPage() {
     }
 
     try {
-      await fetch(`/api/auth/sessions/${sessionId}`, { method: "DELETE" });
-      setSessions(sessions.filter((s) => s.id !== sessionId));
+      await deleteSession(sessionId).unwrap();
       toast({ title: "Success", description: "Session revoked" });
     } catch {
       toast({ title: "Error", description: "Failed to revoke session", variant: "destructive" });

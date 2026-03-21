@@ -100,6 +100,9 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Form, FormRecord, FormModule, FormField } from "@/types/form-builder"
+import { formsApi } from "@/lib/api/forms"
+import { useUpdateRecordMutation, useDeleteRecordMutation } from "@/lib/api/records"
+import { modulesApi } from "@/lib/api/modules"
 
 interface StatsData {
   totalRecords: number
@@ -190,6 +193,14 @@ export default function RecordsPage() {
   const params = useParams()
   const formId = params.formId as string
   const { toast } = useToast()
+
+  // RTK Query hooks
+  const [triggerFormDetail] = formsApi.useLazyGetFormDetailQuery()
+  const [triggerModuleById] = modulesApi.useLazyGetModuleByIdQuery()
+  const [triggerLookupSources] = formsApi.useLazyGetFormLookupSourcesQuery()
+  const [triggerLinkedRecords] = formsApi.useLazyGetFormLinkedRecordsQuery()
+  const [updateRecordMutation] = useUpdateRecordMutation()
+  const [deleteRecordMutation] = useDeleteRecordMutation()
 
   // State management
   const [module, setModule] = useState<FormModule | null>(null)
@@ -614,18 +625,16 @@ export default function RecordsPage() {
           }
         })
 
-        // Save to API
-        const response = await fetch(`/api/forms/${formId}/records/${recordId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        // Save to API via RTK Query mutation
+        const result = await updateRecordMutation({
+          formId,
+          recordId,
+          body: {
             recordData: updatedRecordData,
             submittedBy: "admin",
-            status: record.status || "submitted",
-          }),
-        })
-
-        const result = await response.json()
+            status: (record.status as "pending" | "approved" | "rejected" | "submitted") || "submitted",
+          },
+        }).unwrap()
         if (!result.success) {
           throw new Error(`Failed to save record ${recordId}: ${result.error}`)
         }
@@ -937,11 +946,7 @@ export default function RecordsPage() {
   // Fetch form data with module information
   const fetchForm = async () => {
     try {
-      const response = await fetch(`/api/forms/${formId}`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch form: ${response.status}`)
-      }
-      const data = await response.json()
+      const data = await triggerFormDetail(formId).unwrap()
       if (!data.success || !data.data) {
         throw new Error("Invalid form data received")
       }
@@ -974,12 +979,9 @@ export default function RecordsPage() {
       // Fetch module information if moduleId exists
       if (data.data.moduleId) {
         try {
-          const moduleResponse = await fetch(`/api/modules/${data.data.moduleId}`)
-          if (moduleResponse.ok) {
-            const moduleData = await moduleResponse.json()
-            if (moduleData.success && moduleData.data) {
-              setModule(moduleData.data)
-            }
+          const moduleData = await triggerModuleById(data.data.moduleId).unwrap()
+          if (moduleData.success && moduleData.data) {
+            setModule(moduleData.data)
           }
         } catch (moduleError) {
           console.error("Error fetching module:", moduleError)
@@ -1043,11 +1045,8 @@ export default function RecordsPage() {
   // Fetch enhanced lookup sources
   const fetchLookupSources = async () => {
     try {
-      const response = await fetch(`/api/forms/${formId}/lookup-sources`)
-      if (response.ok) {
-        const data = await response.json()
-        setLookupSources(data.sources || [])
-      }
+      const data = await triggerLookupSources(formId).unwrap()
+      setLookupSources((data as any).sources || [])
     } catch (err) {
       console.error("Error fetching lookup sources:", err)
       setLookupSources([])
@@ -1057,11 +1056,8 @@ export default function RecordsPage() {
   // Fetch enhanced linked records
   const fetchLinkedRecords = async () => {
     try {
-      const response = await fetch(`/api/forms/${formId}/linked-records`)
-      if (response.ok) {
-        const data = await response.json()
-        setLinkedForms(data.linkedForms || [])
-      }
+      const data = await triggerLinkedRecords(formId).unwrap()
+      setLinkedForms((data as any).linkedForms || [])
     } catch (err) {
       console.error("Error fetching linked records:", err)
       setLinkedForms([])
@@ -1103,9 +1099,6 @@ export default function RecordsPage() {
 
     setSaving(true)
     try {
-      const url = editingRecord ? `/api/forms/${formId}/records/${editingRecord.id}` : `/api/forms/${formId}/records`
-      const method = editingRecord ? "PUT" : "POST"
-
       // Transform form data to match the expected structure
       const structuredData: Record<string, any> = {}
 
@@ -1125,20 +1118,36 @@ export default function RecordsPage() {
         })
       })
 
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recordData: structuredData,
-          submittedBy: "admin",
-          status: "submitted",
-        }),
-      })
+      const body = {
+        recordData: structuredData,
+        submittedBy: "admin",
+        status: "submitted" as const,
+      }
 
-      const result = await response.json()
+      if (editingRecord) {
+        // Update existing record via RTK Query mutation
+        const result = await updateRecordMutation({
+          formId,
+          recordId: editingRecord.id,
+          body,
+        }).unwrap()
 
-      if (!result.success) {
-        throw new Error(result.error)
+        if (!result.success) {
+          throw new Error(result.error)
+        }
+      } else {
+        // Create new record (no matching RTK endpoint for POST /records)
+        const response = await fetch(`/api/forms/${formId}/records`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+
+        const result = await response.json()
+
+        if (!result.success) {
+          throw new Error(result.error)
+        }
       }
 
       toast({
@@ -1165,11 +1174,10 @@ export default function RecordsPage() {
 
     setDeleting(true)
     try {
-      const response = await fetch(`/api/forms/${formId}/records/${deleteRecord.id}`, {
-        method: "DELETE",
-      })
-
-      const result = await response.json()
+      const result = await deleteRecordMutation({
+        formId,
+        recordId: deleteRecord.id,
+      }).unwrap()
 
       if (!result.success) {
         throw new Error(result.error)

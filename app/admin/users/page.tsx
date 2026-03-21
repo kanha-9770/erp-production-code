@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Search, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import useSWR from "swr";
+import { useGetAdminUsersQuery } from "@/lib/api/users";
 import AdvancedFilterSidebar from "@/components/modules/AdvancedFilterSidebar";
 
 interface User {
@@ -38,8 +38,6 @@ interface FieldFilter {
   value2?: any;
 }
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
-
 const getInitials = (name: string) => name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
 
 const ExcelCell: React.FC<{
@@ -64,7 +62,7 @@ const ExcelCell: React.FC<{
 };
 
 export default function AdminUsersTable() {
-  const { data, isLoading, error } = useSWR<{ success: boolean; data: User[]; count: number }>("/api/api-test", fetcher);
+  const { data, isLoading, error } = useGetAdminUsersQuery();
   const users = data?.success ? data.data : [];
 
   const [searchQuery, setSearchQuery] = React.useState("");

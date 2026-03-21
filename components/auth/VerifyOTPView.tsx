@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Loader2, Shield, ArrowLeft, RefreshCw } from "lucide-react"
 import type { z } from "zod"
 import { CreateOrganizationModal } from "@/components/create-organization-modal"
-import { useVerifyOTPMutation, useResendOTPMutation } from "@/lib/api/auth"
+import { useVerifyOTPMutation, useResendOTPMutation, useGetUserByIdQuery } from "@/lib/api/auth"
 import type { AuthViewProps } from "./types"
 
 type VerifyOTPFormData = z.infer<typeof VerifyOTPSchema>
@@ -41,12 +41,15 @@ export default function VerifyOTPView({ userId, otpType = "registration", onSwit
   const [showOrgModal, setShowOrgModal] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
   const [infoMessage, setInfoMessage] = useState("")
-  const [maskedEmail, setMaskedEmail] = useState<string | null>(null)
   const { toast } = useToast()
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const [verifyOTP, { isLoading: isVerifying }] = useVerifyOTPMutation()
   const [resendOTP, { isLoading: isResending }] = useResendOTPMutation()
+
+  // Fetch masked email via RTK Query (skip if no userId)
+  const { data: userByIdData } = useGetUserByIdQuery(userId!, { skip: !userId })
+  const maskedEmail = (userByIdData as any)?.maskedEmail || null
 
   const form = useForm<VerifyOTPFormData>({
     resolver: zodResolver(VerifyOTPSchema),
@@ -58,21 +61,6 @@ export default function VerifyOTPView({ userId, otpType = "registration", onSwit
       onSwitchView("register")
     }
   }, [userId, onSwitchView])
-
-  useEffect(() => {
-    if (!userId) return
-    const fetchMaskedEmail = async () => {
-      try {
-        const res = await fetch(`/api/auth/user?userId=${userId}`)
-        if (!res.ok) return
-        const json = await res.json()
-        if (json?.maskedEmail) setMaskedEmail(json.maskedEmail)
-      } catch {
-        // ignore
-      }
-    }
-    fetchMaskedEmail()
-  }, [userId])
 
   useEffect(() => {
     if (timeLeft > 0) {

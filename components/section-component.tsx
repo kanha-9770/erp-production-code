@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useMemo } from "react";
+import { useLazyGetSectionPermissionDetailQuery, useUpdateSectionPermissionMutation, useCreateFieldMutation } from "@/lib/api/forms";
 import { useDroppable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import {
@@ -133,6 +134,9 @@ export default function SectionComponent({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [triggerGetSectionPerms] = useLazyGetSectionPermissionDetailQuery();
+  const [updateSectionPerm] = useUpdateSectionPermissionMutation();
+  const [createFieldMutation] = useCreateFieldMutation();
 
   const {
     attributes,
@@ -182,9 +186,7 @@ export default function SectionComponent({
       const fetchPermissions = async () => {
         setPermissionsLoading(true);
         try {
-          const res = await fetch(`/api/permissions/section/${section.id}`);
-          if (!res.ok) throw new Error("Failed to load permissions");
-          const data = await res.json();
+          const data = await triggerGetSectionPerms(section.id).unwrap();
           setPermissions(data.profiles ?? []);
           setAvailablePermissions(data.availablePermissions ?? []);
           setHasLoadedPermissions(true);
@@ -207,13 +209,7 @@ export default function SectionComponent({
     permissionId: string,
   ) => {
     try {
-      const res = await fetch(`/api/permissions/section/${section.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roleId, permissionId }),
-      });
-
-      if (!res.ok) throw new Error("Failed to save");
+      await updateSectionPerm({ sectionId: section.id, body: { roleId, permissionId } }).unwrap();
 
       setPermissions((prev) =>
         prev.map((p) =>
@@ -253,17 +249,10 @@ export default function SectionComponent({
         order,
       };
 
-      const res = await fetch("/api/fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const result = await createFieldMutation(payload).unwrap();
 
-      if (!res.ok) throw new Error("Create field failed");
-
-      const { data } = await res.json();
       const newField: FormField = {
-        ...data,
+        ...result.data,
         conditional: null,
         styling: null,
         properties: null,
@@ -306,37 +295,30 @@ export default function SectionComponent({
         fields: [...section.fields, duplicated],
       });
 
-      const res = await fetch("/api/fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId: section.id,
-          type: original.type,
-          label: newLabel,
-          placeholder: original.placeholder,
-          description: original.description,
-          defaultValue: original.defaultValue,
-          options: original.options,
-          validation: original.validation,
-          visible: original.visible,
-          readonly: original.readonly,
-          width: original.width,
-          order: newOrder,
-          lookup: original.lookup,
-          formula: original.formula,
-          conditional: original.conditional,
-          styling: original.styling,
-          properties: original.properties,
-          rollup: original.rollup,
-        }),
-      });
-
-      if (!res.ok) throw new Error("Failed to duplicate field");
-      const { data } = await res.json();
+      const res = await createFieldMutation({
+        sectionId: section.id,
+        type: original.type,
+        label: newLabel,
+        placeholder: original.placeholder,
+        description: original.description,
+        defaultValue: original.defaultValue,
+        options: original.options,
+        validation: original.validation,
+        visible: original.visible,
+        readonly: original.readonly,
+        width: original.width,
+        order: newOrder,
+        lookup: original.lookup,
+        formula: original.formula,
+        conditional: original.conditional,
+        styling: original.styling,
+        properties: original.properties,
+        rollup: original.rollup,
+      }).unwrap();
 
       onUpdateSection({
         fields: section.fields.map((f) =>
-          f.id === tempId ? { ...f, id: data.id } : f,
+          f.id === tempId ? { ...f, id: res.data?.id ?? f.id } : f,
         ),
       });
       toast({ title: "Success", description: `Duplicated: ${newLabel}` });

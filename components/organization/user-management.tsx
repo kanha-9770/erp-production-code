@@ -37,6 +37,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import type { User, OrganizationUnit, Role } from "@/types/role";
+import { useGetUsersQuery } from "@/lib/api/users";
+import { useAssignUserToUnitMutation, useRemoveUserAssignmentMutation } from "@/lib/api/organization";
 
 interface ExtendedUser extends User {
   phone?: string;
@@ -62,19 +64,15 @@ export function UserManagement() {
     notes: "",
   });
 
-  // Fetch users on component mount
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const { data: usersApiData, refetch: refetchUsers } = useGetUsersQuery();
+  const [assignUserToUnit] = useAssignUserToUnitMutation();
+  const [removeUserAssignment] = useRemoveUserAssignmentMutation();
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch("/api/users");
-      if (response.ok) {
-        const userData = await response.json();
-        // Transform user data to match ExtendedUser interface
-        const extendedUsers: ExtendedUser[] = userData.map((user: any) => ({
+  // Process users data from RTK Query
+  useEffect(() => {
+    if (usersApiData) {
+      const userData = Array.isArray(usersApiData) ? usersApiData : (usersApiData as any)?.data ?? [];
+      const extendedUsers: ExtendedUser[] = userData.map((user: any) => ({
           ...user,
           phone:
             user.phone || `+1-555-${Math.floor(Math.random() * 9000) + 1000}`,
@@ -101,13 +99,9 @@ export function UserManagement() {
           permissions: [],
         }));
         setUsers(extendedUsers);
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Error fetching users:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [usersApiData]);
 
   // Get all organizational units and roles
   const getAllUnits = (units: OrganizationUnit[]): OrganizationUnit[] => {
@@ -180,28 +174,18 @@ export function UserManagement() {
       return;
 
     try {
-      const response = await fetch(
-        `/api/users/${selectedUser.id}/assignments`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            unitId: assignmentForm.unitId,
-            roleId: assignmentForm.roleId,
-            notes: assignmentForm.notes,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to assign user");
-      }
+      await assignUserToUnit({
+        userId: selectedUser.id,
+        body: {
+          unitId: assignmentForm.unitId,
+          roleId: assignmentForm.roleId,
+          notes: assignmentForm.notes,
+        },
+      }).unwrap();
 
       // Refresh data
       await refreshData();
-      await fetchUsers();
+      await refetchUsers();
 
       setIsAssignDialogOpen(false);
       setAssignmentForm({ unitId: "", roleId: "", notes: "" });
@@ -214,20 +198,11 @@ export function UserManagement() {
 
   const handleRemoveAssignment = async (userId: string, unitId: string) => {
     try {
-      const response = await fetch(
-        `/api/users/${userId}/assignments?unitId=${unitId}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to remove assignment");
-      }
+      await removeUserAssignment({ userId, unitId }).unwrap();
 
       // Refresh data
       await refreshData();
-      await fetchUsers();
+      await refetchUsers();
     } catch (error) {
       console.error("Error removing assignment:", error);
       alert("Failed to remove assignment. Please try again.");

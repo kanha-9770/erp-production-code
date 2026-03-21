@@ -1,500 +1,379 @@
-import useSWR from "swr";
-import { useCallback } from "react";
+"use client"
+
+import { useCallback } from "react"
+import {
+  useGetOrgModulesQuery,
+  useMoveFormMutation,
+  useMoveModuleMutation,
+  usePublishFormMutation,
+  useDeleteFormMutation,
+  useCreateModuleFormMutation,
+  useUpdateFormMetaMutation,
+  useCreateModuleMutation,
+  useUpdateModuleMutation,
+  useDeleteModuleMutation,
+} from "@/lib/api/modules"
+import { baseApi } from "@/lib/api/baseApi"
+import { useAppDispatch } from "@/lib/hooks/redux"
 
 interface Form {
-  id: string;
-  name: string;
-  isPublished: boolean;
+  id: string
+  name: string
+  isPublished: boolean
 }
 
 interface Module {
-  id: string;
-  name: string;
-  parentId: string | null;
-  children?: Module[];
-  forms?: Form[];
+  id: string
+  name: string
+  parentId: string | null
+  children?: Module[]
+  forms?: Form[]
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
-
 export function useOptimisticModules(organizationId: string | null) {
-  const { data, error, isLoading, mutate } = useSWR(
-    organizationId ? `/api/modules?organizationId=${organizationId}` : null,
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      dedupingInterval: 60000,
+  const dispatch = useAppDispatch()
+
+  const { data, error, isLoading, refetch } = useGetOrgModulesQuery(
+    organizationId!,
+    { skip: !organizationId }
+  )
+
+  const modules: Module[] = data?.data || []
+
+  const [moveFormApi] = useMoveFormMutation()
+  const [moveModuleApi] = useMoveModuleMutation()
+  const [publishFormApi] = usePublishFormMutation()
+  const [deleteFormApi] = useDeleteFormMutation()
+  const [createFormApi] = useCreateModuleFormMutation()
+  const [updateFormApi] = useUpdateFormMetaMutation()
+  const [createModuleApi] = useCreateModuleMutation()
+  const [updateModuleApi] = useUpdateModuleMutation()
+  const [deleteModuleApi] = useDeleteModuleMutation()
+
+  // Helper: optimistically patch the cached org-modules query
+  const patchModules = useCallback(
+    (updater: (draft: Module[]) => void) => {
+      if (!organizationId) return { undo: () => {} }
+      const patchResult = dispatch(
+        baseApi.util.updateQueryData("getOrgModules", organizationId, (draft: any) => {
+          if (draft?.data) updater(draft.data)
+        })
+      )
+      return patchResult
     },
-  );
+    [dispatch, organizationId]
+  )
 
-  const modules = data?.data || [];
+  // ── Move form ──────────────────────────────────────────────────────────────
 
-  // Optimistic update for moving form
   const moveFormOptimistic = useCallback(
     async (formId: string, targetModuleId: string | null) => {
-      const backup = JSON.parse(JSON.stringify(modules)); // Deep clone
+      let movedForm: Form | undefined
+
+      const patch = patchModules((mods) => {
+        for (const mod of mods) {
+          const idx = mod.forms?.findIndex((f: Form) => f.id === formId) ?? -1
+          if (idx >= 0) {
+            movedForm = mod.forms![idx]
+            mod.forms!.splice(idx, 1)
+            break
+          }
+        }
+        if (movedForm && targetModuleId) {
+          const target = mods.find((m: Module) => m.id === targetModuleId)
+          if (target) {
+            if (!target.forms) target.forms = []
+            target.forms.push(movedForm)
+          }
+        }
+      })
 
       try {
-        // Update UI immediately
-        const updatedModules = modules.map((mod: Module) => {
-          const newMod = { ...mod };
-          if (newMod.forms?.some((f: Form) => f.id === formId)) {
-            newMod.forms = newMod.forms.filter((f: Form) => f.id !== formId);
-          }
-          if (
-            newMod.id === targetModuleId &&
-            !newMod.forms?.some((f: Form) => f.id === formId)
-          ) {
-            const form = backup
-              .flatMap((m: Module) => m.forms || [])
-              .find((f: Form) => f.id === formId);
-            if (form) {
-              newMod.forms = [...(newMod.forms || []), form];
-            }
-          }
-          return newMod;
-        });
-
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/forms/${formId}/move`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ newModuleId: targetModuleId }),
-        });
-
-        if (!res.ok) throw new Error("Move failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await moveFormApi({ formId, newModuleId: targetModuleId }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Move failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, moveFormApi, refetch]
+  )
 
-  // Optimistic update for moving module
+  // ── Move module ────────────────────────────────────────────────────────────
+
   const moveModuleOptimistic = useCallback(
     async (moduleId: string, newParentId: string | null) => {
-      if (newParentId === moduleId) return;
+      if (newParentId === moduleId) return
 
-      const backup = JSON.parse(JSON.stringify(modules));
+      const patch = patchModules((mods) => {
+        let moved: Module | undefined
+
+        // Remove from current position
+        const removeFromTree = (items: Module[]): Module[] => {
+          return items.filter((item) => {
+            if (item.id === moduleId) {
+              moved = { ...item, parentId: newParentId }
+              return false
+            }
+            if (item.children) {
+              item.children = removeFromTree(item.children)
+            }
+            return true
+          })
+        }
+
+        const remaining = removeFromTree(mods)
+        mods.length = 0
+        mods.push(...remaining)
+
+        if (!moved) return
+
+        if (newParentId === null) {
+          mods.push(moved)
+        } else {
+          const insertIntoTree = (items: Module[]) => {
+            for (const item of items) {
+              if (item.id === newParentId) {
+                if (!item.children) item.children = []
+                item.children.push(moved!)
+                return true
+              }
+              if (item.children && insertIntoTree(item.children)) return true
+            }
+            return false
+          }
+          insertIntoTree(mods)
+        }
+      })
 
       try {
-        // Implement optimistic move
-        const moveInTree = (mods: Module[]): Module[] => {
-          let moved: Module | undefined;
-          const removed = mods.filter((m) => {
-            if (m.id === moduleId) {
-              moved = { ...m, parentId: newParentId };
-              return false;
-            }
-            if (m.children) {
-              m.children = removeFromTree(m.children);
-            }
-            return true;
-          });
-
-          const removeFromTree = (items: Module[]): Module[] => {
-            let found: Module | undefined;
-            const result = items.filter((item) => {
-              if (item.id === moduleId) {
-                moved = { ...item, parentId: newParentId };
-                return false;
-              }
-              if (item.children) {
-                item.children = removeFromTree(item.children);
-              }
-              return true;
-            });
-            return result;
-          };
-
-          if (!moved) return mods;
-
-          if (newParentId === null) {
-            return [...removed, moved];
-          }
-
-          const insertIntoTree = (items: Module[]): Module[] => {
-            return items.map((item) => {
-              if (item.id === newParentId) {
-                return {
-                  ...item,
-                  children: [...(item.children || []), moved!],
-                };
-              }
-              if (item.children) {
-                return { ...item, children: insertIntoTree(item.children) };
-              }
-              return item;
-            });
-          };
-
-          return insertIntoTree(removed);
-        };
-
-        const updatedModules = moveInTree(JSON.parse(JSON.stringify(modules)));
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/modules/${moduleId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ parentId: newParentId }),
-        });
-
-        if (!res.ok) throw new Error("Move failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await moveModuleApi({ moduleId, parentId: newParentId }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Move failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, moveModuleApi, refetch]
+  )
 
-  // Optimistic update for publishing form
+  // ── Publish form ───────────────────────────────────────────────────────────
+
   const publishFormOptimistic = useCallback(
     async (formId: string, isPublished: boolean) => {
-      const backup = JSON.parse(JSON.stringify(modules));
+      const patch = patchModules((mods) => {
+        for (const mod of mods) {
+          if (mod.forms) {
+            const form = mod.forms.find((f: Form) => f.id === formId)
+            if (form) {
+              form.isPublished = !isPublished
+              break
+            }
+          }
+        }
+      })
 
       try {
-        // Update UI immediately
-        const updatedModules = modules.map((mod: Module) => {
-          const newMod = { ...mod };
-          if (newMod.forms) {
-            newMod.forms = newMod.forms.map((f: Form) =>
-              f.id === formId ? { ...f, isPublished: !isPublished } : f,
-            );
-          }
-          return newMod;
-        });
-
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/forms/${formId}/publish`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isPublished: !isPublished }),
-        });
-
-        if (!res.ok) throw new Error("Publish failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await publishFormApi({ formId, isPublished: !isPublished }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Publish failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, publishFormApi, refetch]
+  )
 
-  // Optimistic update for deleting form
+  // ── Delete form ────────────────────────────────────────────────────────────
+
   const deleteFormOptimistic = useCallback(
     async (formId: string) => {
-      const backup = JSON.parse(JSON.stringify(modules));
+      const patch = patchModules((mods) => {
+        for (const mod of mods) {
+          if (mod.forms) {
+            mod.forms = mod.forms.filter((f: Form) => f.id !== formId)
+          }
+        }
+      })
 
       try {
-        // Update UI immediately
-        const updatedModules = modules.map((mod: Module) => {
-          const newMod = { ...mod };
-          if (newMod.forms) {
-            newMod.forms = newMod.forms.filter((f: Form) => f.id !== formId);
-          }
-          return newMod;
-        });
-
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/forms/${formId}`, {
-          method: "DELETE",
-        });
-
-        if (!res.ok) throw new Error("Delete failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await deleteFormApi(formId).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Delete failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, deleteFormApi, refetch]
+  )
 
-  // Optimistic update for creating form
+  // ── Create form ────────────────────────────────────────────────────────────
+
   const createFormOptimistic = useCallback(
-    async (
-      moduleId: string,
-      formData: { name: string; description: string },
-    ) => {
-      const backup = JSON.parse(JSON.stringify(modules));
-      const tempId = `temp-${Date.now()}`;
+    async (moduleId: string, formData: { name: string; description: string }) => {
+      const tempId = `temp-${Date.now()}`
+
+      const patch = patchModules((mods) => {
+        const mod = mods.find((m: Module) => m.id === moduleId)
+        if (mod) {
+          if (!mod.forms) mod.forms = []
+          mod.forms.push({ id: tempId, name: formData.name, isPublished: false })
+        }
+      })
 
       try {
-        // Update UI immediately with temp form
-        const updatedModules = modules.map((mod: Module) => {
-          if (mod.id === moduleId) {
-            return {
-              ...mod,
-              forms: [
-                ...(mod.forms || []),
-                {
-                  id: tempId,
-                  name: formData.name,
-                  isPublished: false,
-                },
-              ],
-            };
-          }
-          return mod;
-        });
-
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/modules/${moduleId}/forms`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        });
-
-        if (!res.ok) throw new Error("Create failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await createFormApi({ moduleId, body: formData }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Create failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, createFormApi, refetch]
+  )
 
-  // Optimistic update for updating form
+  // ── Update form ────────────────────────────────────────────────────────────
+
   const updateFormOptimistic = useCallback(
-    async (
-      formId: string,
-      moduleId: string,
-      formData: { name: string; description: string },
-    ) => {
-      const backup = JSON.parse(JSON.stringify(modules));
+    async (formId: string, _moduleId: string, formData: { name: string; description: string }) => {
+      const patch = patchModules((mods) => {
+        for (const mod of mods) {
+          if (mod.forms) {
+            const form = mod.forms.find((f: Form) => f.id === formId)
+            if (form) {
+              form.name = formData.name
+              break
+            }
+          }
+        }
+      })
 
       try {
-        // Update UI immediately
-        const updatedModules = modules.map((mod: Module) => {
-          const newMod = { ...mod };
-          if (newMod.forms) {
-            newMod.forms = newMod.forms.map((f: Form) =>
-              f.id === formId
-                ? {
-                    ...f,
-                    name: formData.name,
-                  }
-                : f,
-            );
-          }
-          return newMod;
-        });
-
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/forms/${formId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        });
-
-        if (!res.ok) throw new Error("Update failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await updateFormApi({ formId, body: formData }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Update failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, updateFormApi, refetch]
+  )
 
-  // Optimistic update for creating module
+  // ── Create module ──────────────────────────────────────────────────────────
+
   const createModuleOptimistic = useCallback(
     async (moduleData: {
-      name: string;
-      description: string;
-      parentId: string | null;
-      organizationId: string;
+      name: string
+      description: string
+      parentId: string | null
+      organizationId: string
     }) => {
-      const backup = JSON.parse(JSON.stringify(modules));
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${Date.now()}`
 
-      try {
-        // Update UI immediately
+      const patch = patchModules((mods) => {
         const newModule: Module = {
           id: tempId,
           name: moduleData.name,
           parentId: moduleData.parentId,
           children: [],
           forms: [],
-        };
-
-        let updatedModules: Module[];
-        if (moduleData.parentId === null) {
-          updatedModules = [...modules, newModule];
-        } else {
-          const insertModule = (items: Module[]): Module[] => {
-            return items.map((item) => {
-              if (item.id === moduleData.parentId) {
-                return {
-                  ...item,
-                  children: [...(item.children || []), newModule],
-                };
-              }
-              if (item.children) {
-                return { ...item, children: insertModule(item.children) };
-              }
-              return item;
-            });
-          };
-          updatedModules = insertModule(modules);
         }
 
-        mutate({ data: updatedModules }, false);
+        if (moduleData.parentId === null) {
+          mods.push(newModule)
+        } else {
+          const insertIntoTree = (items: Module[]): boolean => {
+            for (const item of items) {
+              if (item.id === moduleData.parentId) {
+                if (!item.children) item.children = []
+                item.children.push(newModule)
+                return true
+              }
+              if (item.children && insertIntoTree(item.children)) return true
+            }
+            return false
+          }
+          insertIntoTree(mods)
+        }
+      })
 
-        // Make API call
-        const res = await fetch("/api/modules", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(moduleData),
-        });
-
-        if (!res.ok) throw new Error("Create failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+      try {
+        await createModuleApi(moduleData).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Create failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, createModuleApi, refetch]
+  )
 
-  // Optimistic update for updating module
+  // ── Update module ──────────────────────────────────────────────────────────
+
   const updateModuleOptimistic = useCallback(
     async (
       moduleId: string,
-      moduleData: {
-        name: string;
-        description: string;
-        parentId: string | null;
-      },
+      moduleData: { name: string; description: string; parentId: string | null }
     ) => {
-      const backup = JSON.parse(JSON.stringify(modules));
+      const patch = patchModules((mods) => {
+        const updateInTree = (items: Module[]) => {
+          for (const item of items) {
+            if (item.id === moduleId) {
+              item.name = moduleData.name
+              return
+            }
+            if (item.children) updateInTree(item.children)
+          }
+        }
+        updateInTree(mods)
+      })
 
       try {
-        // Simple update if parent doesn't change
-        const updateInTree = (items: Module[]): Module[] => {
-          return items.map((item) => {
-            if (item.id === moduleId) {
-              return {
-                ...item,
-                name: moduleData.name,
-                description: moduleData.description,
-              };
-            }
-            if (item.children) {
-              return { ...item, children: updateInTree(item.children) };
-            }
-            return item;
-          });
-        };
-
-        const updatedModules = updateInTree(modules);
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/modules/${moduleId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(moduleData),
-        });
-
-        if (!res.ok) throw new Error("Update failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await updateModuleApi({ moduleId, body: moduleData }).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Update failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, updateModuleApi, refetch]
+  )
 
-  // Optimistic update for deleting module
+  // ── Delete module ──────────────────────────────────────────────────────────
+
   const deleteModuleOptimistic = useCallback(
     async (moduleId: string) => {
-      const backup = JSON.parse(JSON.stringify(modules));
+      const patch = patchModules((mods) => {
+        const removeFromTree = (items: Module[]): Module[] => {
+          return items.filter((item) => {
+            if (item.id === moduleId) return false
+            if (item.children) {
+              item.children = removeFromTree(item.children)
+            }
+            return true
+          })
+        }
+        const remaining = removeFromTree(mods)
+        mods.length = 0
+        mods.push(...remaining)
+      })
 
       try {
-        // Update UI immediately
-        const removeFromTree = (items: Module[]): Module[] => {
-          return items
-            .filter((item) => item.id !== moduleId)
-            .map((item) => {
-              if (item.children) {
-                return { ...item, children: removeFromTree(item.children) };
-              }
-              return item;
-            });
-        };
-
-        const updatedModules = removeFromTree(modules);
-        mutate({ data: updatedModules }, false);
-
-        // Make API call
-        const res = await fetch(`/api/modules/${moduleId}`, {
-          method: "DELETE",
-        });
-
-        if (!res.ok) throw new Error("Delete failed");
-
-        // Revalidate from server
-        mutate();
-      } catch (err) {
-        // Rollback on error
-        mutate({ data: backup }, false);
-        throw err;
+        await deleteModuleApi(moduleId).unwrap()
+        refetch()
+      } catch {
+        patch.undo()
+        throw new Error("Delete failed")
       }
     },
-    [modules, mutate],
-  );
+    [patchModules, deleteModuleApi, refetch]
+  )
 
   return {
     modules,
     isLoading,
     error,
-    mutate,
+    mutate: refetch,
     moveFormOptimistic,
     moveModuleOptimistic,
     publishFormOptimistic,
@@ -504,5 +383,5 @@ export function useOptimisticModules(organizationId: string | null) {
     createModuleOptimistic,
     updateModuleOptimistic,
     deleteModuleOptimistic,
-  };
+  }
 }

@@ -6,6 +6,7 @@ import { Loader2, Lock, Edit3, MousePointer2 } from "lucide-react";
 import FormsContent from "@/components/dynamicSubmodule/formsContent";
 import { PublicFormDialog } from "@/components/public-form-dialog";
 import { useGetModuleByIdQuery } from "@/lib/api/modules";
+import { useLazyGetAdminPermissionsQuery } from "@/lib/api/permissions";
 import {
   useDeleteRecordMutation,
   useGetModuleRecordsQuery,
@@ -19,12 +20,8 @@ import RecordsDisplay from "@/components/modules/recordsDisplay";
 import type {
   FormModule,
   Form,
-  FormSection,
-  FormField,
-  FormRecord,
 } from "@/types/forms";
 import type {
-  ProcessedFieldData,
   EnhancedFormRecord,
   FormFieldWithSection,
   EditingCell,
@@ -52,7 +49,6 @@ export default function ModulePage({
   const { module_name, module_Id, slug } = params;
 
   const moduleId = module_Id;
-  const moduleName = module_name;
 
   // ── Core state ──────────────────────────────────────────────────────────────
   const [selectedModule, setSelectedModule] = useState<FormModule | null>(null);
@@ -101,6 +97,7 @@ export default function ModulePage({
 
   const [updateRecord] = useUpdateRecordMutation();
   const [deleteRecord] = useDeleteRecordMutation();
+  const [triggerAdminPerms] = useLazyGetAdminPermissionsQuery();
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Fetch permissions — uses isAdmin flag returned directly from the new endpoint
@@ -109,24 +106,9 @@ export default function ModulePage({
   useEffect(() => {
     const fetchPermissions = async () => {
       try {
-        // Build URL with formId if a form is selected
-        let url = "/api/admin/permissions";
-        if (selectedForm?.id) {
-          url += `?formId=${selectedForm.id}`;
-        }
+        console.log("[Permissions] Fetching from admin/permissions");
 
-        console.log("[Permissions] Fetching from:", url);
-
-        const response = await fetch(url, {
-          credentials: "include", // important for cookies/auth
-          cache: "no-store",      // prevent stale data in dev
-        });
-
-        if (!response.ok) {
-          throw new Error(`Permissions fetch failed: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await triggerAdminPerms({ formId: selectedForm?.id }).unwrap();
         console.log("[Permissions] Raw response:", data);
 
         if (!data.success || !data.data) {
@@ -148,8 +130,8 @@ export default function ModulePage({
 
         console.log("[Permissions] Loaded successfully", {
           total: allPermissions.length,
-          roleBased: allPermissions.filter((p) => p.source === "role").length,
-          userBased: allPermissions.filter((p) => p.source === "user").length,
+          roleBased: allPermissions.filter((p: any) => p.source === "role").length,
+          userBased: allPermissions.filter((p: any) => p.source === "user").length,
           isAdmin: apiData.isAdmin,
           formSpecific: !!selectedForm?.id,
         });
@@ -369,7 +351,7 @@ export default function ModulePage({
             icon: change.fieldType,
             order: 999,
             sectionId: "other",
-            sectionTitle: "Sub Form",
+            sectionTitle: "unauthorized",
             formId: record.formId || "",
             formName: record.formName || "",
             lookup: {},

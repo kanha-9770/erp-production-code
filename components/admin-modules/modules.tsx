@@ -2768,6 +2768,7 @@ import {
 // ── Sidebar component ───────────────────────────────────────────
 import ModuleSidebar from "@/components/modules/moduleSidebar";
 import { PublicFormDialog } from "@/components/public-form-dialog";
+import { useGetUserQuery } from "@/lib/api/auth";
 
 // ── Types ───────────────────────────────────────────────────────
 interface FormModule {
@@ -2874,31 +2875,29 @@ export default function ModuleDashboard() {
   // View/Fill form dialog
   const [viewFormId, setViewFormId] = useState<string | null>(null);
 
-  // ── Fetch organization ──────────────────────────────────────────
+  // ── Fetch organization via RTK Query ──────────────────────────────
+  const { data: authMeData, error: authMeError } = useGetUserQuery();
+
   useEffect(() => {
-    const fetchOrg = async () => {
-      try {
-        const res = await fetch("/api/auth/me");
-        const data = await res.json();
-        if (data.success && data.user?.organization?.id) {
-          setOrganizationId(data.user.organization.id);
-        } else {
-          toast({
-            title: "Error",
-            description: "Failed to load organization",
-            variant: "destructive",
-          });
-        }
-      } catch {
+    if (authMeData) {
+      if (authMeData.success && authMeData.user?.organization?.id) {
+        setOrganizationId(authMeData.user.organization.id);
+      } else {
         toast({
           title: "Error",
-          description: "Network error while loading organization",
+          description: "Failed to load organization",
           variant: "destructive",
         });
       }
-    };
-    fetchOrg();
-  }, []);
+    }
+    if (authMeError) {
+      toast({
+        title: "Error",
+        description: "Network error while loading organization",
+        variant: "destructive",
+      });
+    }
+  }, [authMeData, authMeError]);
 
   // ── Auto-select newly created module (instant visibility in main view + forms become active)
   useEffect(() => {

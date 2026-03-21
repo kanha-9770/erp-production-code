@@ -50,6 +50,14 @@ import {
 import FieldSettings from "@/components/field-settings";
 import type { FormField, Subform } from "@/types/form-builder";
 import { useToast } from "@/hooks/use-toast";
+import {
+  useCreateFieldMutation,
+  useDeleteSubformMutation,
+  useUpdateSubformMutation,
+  useLazyGetFormFieldsQuery,
+  useLazyGetFieldPermissionQuery,
+  useUpdateFieldPermissionMutation,
+} from "@/lib/api/forms";
 
 interface PermissionDefinition {
   id: string;
@@ -184,6 +192,11 @@ export default function SubformComponent({
 
   const { toast } = useToast();
 
+  const [createField] = useCreateFieldMutation();
+  const [deleteSubform] = useDeleteSubformMutation();
+  const [updateSubform] = useUpdateSubformMutation();
+  const [triggerGetFormFields] = useLazyGetFormFieldsQuery();
+
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: `subform-dropzone-${subform.id}`,
     data: {
@@ -213,9 +226,8 @@ export default function SubformComponent({
         setFieldsLoading(true);
         setFieldsError(null);
         try {
-          const res = await fetch(`/api/forms/${formId}/fields`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
+          const result = await triggerGetFormFields(formId).unwrap();
+          const data = result;
           const fields = Array.isArray(data) ? data : data.data || data.fields || [];
           console.log("[Subform Visibility] Loaded parent form fields", {
             count: fields.length,
@@ -236,7 +248,7 @@ export default function SubformComponent({
       };
       fetchFormFields();
     }
-  }, [showSubformSettings, formId, toast]);
+  }, [showSubformSettings, formId, toast, triggerGetFormFields]);
 
   // Sync local conditional state when dialog visibility changes
   useEffect(() => {
@@ -258,14 +270,8 @@ export default function SubformComponent({
         label: `${type === 'textarea' ? 'Multi-Line' : 'Single Line'} ${subform.fields.length + 1}`,
         order: subform.fields.length,
       };
-      const res = await fetch("/api/fields", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error();
-      const { data } = await res.json();
-      onUpdateSubform({ fields: [...subform.fields, data] });
+      const result = await createField(payload).unwrap();
+      onUpdateSubform({ fields: [...subform.fields, result.data] });
       toast({ title: "Field added" });
     } catch (err) {
       toast({ variant: "destructive", title: "Error", description: "Failed to add field" });
@@ -275,14 +281,7 @@ export default function SubformComponent({
   const handleDeleteSubform = async () => {
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/subforms/${subform.id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Failed to delete subform");
-      }
+      await deleteSubform(subform.id).unwrap();
       toast({
         title: "Subform deleted",
         description: "The subform and all nested content have been removed.",
@@ -293,7 +292,7 @@ export default function SubformComponent({
       toast({
         variant: "destructive",
         title: "Deletion failed",
-        description: err.message || "Could not delete subform. Please try again.",
+        description: err.data?.error || err.message || "Could not delete subform. Please try again.",
       });
     } finally {
       setIsDeleting(false);
@@ -304,15 +303,7 @@ export default function SubformComponent({
   // ── Save subform name inline ─────────────────────────────────────────────
   const handleSaveSubformName = async (newName: string) => {
     try {
-      const res = await fetch(`/api/subforms/${subform.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `Server responded with status ${res.status}`);
-      }
+      await updateSubform({ subformId: subform.id, body: { name: newName } }).unwrap();
       onUpdateSubform({ name: newName });
       toast({ title: "Subform renamed", description: `Renamed to "${newName}"` });
     } catch (err: any) {
@@ -320,7 +311,7 @@ export default function SubformComponent({
       toast({
         variant: "destructive",
         title: "Rename failed",
-        description: err.message || "Could not rename subform. Please try again.",
+        description: err.data?.error || err.message || "Could not rename subform. Please try again.",
       });
       throw err; // re-throw so InlineEdit knows to revert
     }
@@ -690,22 +681,10 @@ export default function SubformComponent({
                 });
 
                 try {
-                  const response = await fetch(`/api/subforms/${subform.id}`, {
-                    method: "PATCH",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      conditional: localConditional ?? null,
-                    }),
-                  });
-
-                  if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `Server responded with status ${response.status}`);
-                  }
-
-                  const result = await response.json();
+                  const result = await updateSubform({
+                    subformId: subform.id,
+                    body: { conditional: localConditional ?? null },
+                  }).unwrap();
                   console.log("[Subform Visibility] API save successful → server returned:", result);
 
                   // Update parent component state (optimistic / sync)
@@ -770,16 +749,16 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
 
+  const [triggerGetFieldPermission] = useLazyGetFieldPermissionQuery();
+
   useEffect(() => {
     if (showPermissions && !hasLoadedPermissions) {
       const fetchPermissions = async () => {
         setPermissionsLoading(true);
         try {
-          const res = await fetch(`/api/permissions/field/${field.id}`);
-          if (!res.ok) throw new Error();
-          const data = await res.json();
-          setPermissions(data.profiles ?? []);
-          setAvailablePermissions(data.availablePermissions ?? []);
+          const data = await triggerGetFieldPermission(field.id).unwrap();
+          setPermissions(data.data?.profiles ?? data.profiles ?? []);
+          setAvailablePermissions(data.data?.availablePermissions ?? data.availablePermissions ?? []);
           setHasLoadedPermissions(true);
         } catch (err) {
           toast({ variant: "destructive", title: "Error", description: "Failed to load permissions" });
@@ -789,16 +768,13 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
       };
       fetchPermissions();
     }
-  }, [showPermissions, hasLoadedPermissions, field.id, toast]);
+  }, [showPermissions, hasLoadedPermissions, field.id, toast, triggerGetFieldPermission]);
+
+  const [updateFieldPermission] = useUpdateFieldPermissionMutation();
 
   const handlePermissionChange = async (roleId: string, permissionId: string) => {
     try {
-      const res = await fetch(`/api/permissions/field/${field.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roleId, permissionId }),
-      });
-      if (!res.ok) throw new Error();
+      await updateFieldPermission({ fieldId: field.id, body: { roleId, permissionId } }).unwrap();
       setPermissions((prev) =>
         prev.map((p) => (p.id === roleId ? { ...p, permission: permissionId } : p)),
       );

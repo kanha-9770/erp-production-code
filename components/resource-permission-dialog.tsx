@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useLazyGetSectionPermissionDetailQuery, useUpdateSectionPermissionMutation } from "@/lib/api/forms";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,8 @@ export default function SectionPermissionDialog({
     RolePermissionDisplay[]
   >([]);
   const { toast } = useToast();
+  const [triggerGetPerms] = useLazyGetSectionPermissionDetailQuery();
+  const [updateSectionPerm] = useUpdateSectionPermissionMutation();
 
   useEffect(() => {
     if (!open || !sectionId) return;
@@ -52,17 +55,8 @@ export default function SectionPermissionDialog({
     const fetchActualPermissions = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/permissions/section/${sectionId}`, {
-          credentials: "include", // important - sends cookies
-        });
+        const data = await triggerGetPerms(sectionId).unwrap();
 
-        if (!res.ok) {
-          throw new Error(`Failed to fetch permissions: ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Expecting { profiles: [...] } from API
         if (!data.profiles || !Array.isArray(data.profiles)) {
           throw new Error("Invalid response format");
         }
@@ -92,16 +86,7 @@ export default function SectionPermissionDialog({
 
     setSaving(true);
     try {
-      const res = await fetch(`/api/permissions/section/${sectionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // send auth cookie
-        body: JSON.stringify({ roleId, permission: newLevel }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Update failed: ${res.status}`);
-      }
+      await updateSectionPerm({ sectionId, body: { roleId, permission: newLevel } }).unwrap();
 
       // Optimistic UI update
       setRolePermissions((prev) =>

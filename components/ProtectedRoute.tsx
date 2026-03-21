@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle, Lock } from "lucide-react";
+import { useLazyGetUserPermissionsWithHeadersQuery } from "@/lib/api/users";
 import {
   Card,
   CardContent,
@@ -58,6 +59,7 @@ export function ProtectedRoute({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const [triggerGetPermissions] = useLazyGetUserPermissionsWithHeadersQuery();
 
   useEffect(() => {
     checkAuth();
@@ -68,7 +70,6 @@ export function ProtectedRoute({
       setLoading(true);
       setError(null);
 
-      // Get user credentials from localStorage (in production, use secure storage)
       const userId = localStorage.getItem("auth_user_id");
       const userEmail = localStorage.getItem("auth_user_email");
 
@@ -82,28 +83,16 @@ export function ProtectedRoute({
         }
       }
 
-      // Fetch user permissions
-      const response = await fetch("/api/users/permissions", {
-        headers: {
-          "x-user-id": userId,
-          "x-user-email": userEmail,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await triggerGetPermissions({ userId, userEmail }).unwrap();
 
       if (!data.success) {
-        throw new Error(data.error || "Failed to fetch user permissions");
+        throw new Error("Failed to fetch user permissions");
       }
 
       setUser(data.user);
     } catch (error: any) {
       console.error("Auth check failed:", error);
-      setError(error.message || "Authentication failed");
+      setError(error?.data?.error || error.message || "Authentication failed");
     } finally {
       setLoading(false);
     }

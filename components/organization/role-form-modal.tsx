@@ -221,6 +221,7 @@ import {
 } from "@/components/ui/select"
 import { Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useCreateOrgRoleMutation, useUpdateRoleMutation } from "@/lib/api/organization"
 
 const EMPTY_FORM: RoleFormData = { name: "", description: "", shareDataWithPeers: false }
 
@@ -235,6 +236,8 @@ export function RoleFormModal() {
   const { toast } = useToast()
   const [formData, setFormData] = useState<RoleFormData>(EMPTY_FORM)
   const [loading, setLoading] = useState(false)
+  const [createOrgRole] = useCreateOrgRoleMutation()
+  const [updateRole] = useUpdateRoleMutation()
 
   const isOpen = state.selectedRole !== null
   const creating = isCreating(state.selectedRole)
@@ -267,19 +270,15 @@ export function RoleFormModal() {
     setLoading(true)
     try {
       if (creating) {
-        const response = await fetch(`/api/organizations/${state.organizationId}/roles`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...formData, parentId: state.selectedRole?.parentId }),
-        })
-        if (!response.ok) throw new Error("Failed to create role")
+        await createOrgRole({
+          organizationId: state.organizationId,
+          body: { ...formData, parentId: state.selectedRole?.parentId },
+        }).unwrap()
       } else if (state.selectedRole) {
-        const response = await fetch(`/api/roles/${state.selectedRole.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
-        })
-        if (!response.ok) throw new Error("Failed to update role")
+        await updateRole({
+          roleId: state.selectedRole.id,
+          body: formData,
+        }).unwrap()
       }
 
       await refreshData()

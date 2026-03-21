@@ -1,6 +1,6 @@
 "use client";
-import React, { memo } from "react";
-import { ChevronDown, ChevronUp, MessageSquare, Layers } from "lucide-react";
+import React, { memo, useState, useEffect } from "react";
+import { ChevronDown, ChevronUp, MessageSquare, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isImageUrl, isImageField } from "@/lib/utils/fieldUtils";
 import type {
@@ -90,139 +90,201 @@ export const RecordCell = memo(function RecordCell({
   const isDynamicRows =
     fieldDef.id.startsWith("_dynamicRows_") && Array.isArray(actualValue);
 
+  // ── State for image preview popup ──
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Close on ESC key
+  useEffect(() => {
+    if (!previewUrl) return;
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPreviewUrl(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [previewUrl]);
+
   return (
-    <div
-      key={cellKey}
-      className={cn(
-        "bg-white px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200 relative",
-        isWrapTextEnabled || isExpanded
-          ? "h-auto min-h-[36px] py-2 items-start"
-          : "h-9 items-center",
-        selectedCell === cellKey &&
-        "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
-        isEditing &&
-        "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
-        pendingChange &&
-        !isEditing &&
-        "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
-        editMode !== "locked" &&
-        !isEditing &&
-        !isImageColumn &&
-        "cursor-pointer hover:bg-gray-50",
-        focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
-      )}
-      style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
-      onClick={() => {
-        if (!isEditing && editMode !== "locked" && !isImageColumn) {
-          onCellClick(cellKey);
-        }
-      }}
-      onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
-      onContextMenu={(e) => {
-        if (!isImageColumn) {
-          e.preventDefault();
-          onContextMenu(cellKey);
-        }
-      }}
-    >
-      <div
-        className={cn(
-          "w-full h-full flex items-center",
-          isWrapTextEnabled || isExpanded ? "items-start py-2" : "",
-        )}
-      >
-        {isEditing ? (
-          renderFieldEditor(record, fieldDef, actualValue, displayText)
-        ) : isImageColumn ? (
-          <div className="flex items-center gap-2 flex-wrap py-1">
-            {Array.isArray(actualValue) ? (
-              actualValue
-                .filter(isImageUrl)
-                .slice(0, 3)
-                .map((url: string, idx: number) => (
-                  <img
-                    key={idx}
-                    src={url || "/placeholder.svg"}
-                    alt="Field data"
-                    className="h-7 w-7 object-cover rounded border border-gray-300"
-                    onError={(e) => (e.currentTarget.style.display = "none")}
-                  />
-                ))
-            ) : isImageUrl(actualValue) ? (
-              <img
-                src={actualValue || "/placeholder.svg"}
-                alt="Field data"
-                className="h-7 w-7 object-cover rounded border border-gray-300"
-                onError={(e) => (e.currentTarget.style.display = "none")}
-              />
-            ) : (
-              <span className="text-xs text-gray-400">No image</span>
-            )}
-          </div>
-        ) : isDynamicRows ? (
+    <>
+      {/* ── Image Preview Popup ── */}
+      {previewUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setPreviewUrl(null)}
+        >
           <div
-            className="flex items-center gap-2 cursor-pointer hover:text-blue-600"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPreviewClick(
-                actualValue,
-                fieldDef.label,
-                fieldData?.fieldDefinitions,
-              );
-            }}
+            className="relative max-w-[95vw] max-h-[95vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-              <Layers className="h-3 w-3" /> {actualValue.length}
-            </div>
-            <span className="text-gray-400 text-xs truncate max-w-[120px] italic">
-              {displayText || "Click to view"}
-            </span>
-          </div>
-        ) : (
-          <div className="relative group w-full h-full">
-            <div
-              className={cn(
-                "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
-                isWrapTextEnabled || isExpanded
-                  ? "whitespace-normal break-words"
-                  : "whitespace-nowrap overflow-hidden text-ellipsis",
-              )}
-              style={getConditionalStyle(fieldDef, actualValue, displayText)}
-              title={displayText}
+            <button
+              className="absolute -top-12 right-0 bg-gray-900/70 hover:bg-gray-800 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-1 shadow-md"
+              onClick={() => setPreviewUrl(null)}
             >
-              {(displayText ?? "") === "" ? "NaN" : displayText}
+              <X className="h-4 w-4" /> Close
+            </button>
+
+            <img
+              src={previewUrl}
+              alt={fieldDef.label || "Enlarged image"}
+              className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white/5 backdrop-blur-sm"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = "/placeholder.svg";
+                (e.currentTarget as HTMLImageElement).alt = "Image failed to load";
+              }}
+            />
+
+            <div className="text-center text-white mt-3 text-sm opacity-80">
+              {fieldDef.label || "Image Preview"}
             </div>
-            {!isWrapTextEnabled && displayText && displayText.length > 40 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleCellExpansion(cellKey);
-                }}
-                className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
-              >
-                {isExpanded ? (
-                  <ChevronUp className="h-3 w-3" />
-                ) : (
-                  <ChevronDown className="h-3 w-3" />
+          </div>
+        </div>
+      )}
+
+      {/* ── Main cell content ── */}
+      <div
+        key={cellKey}
+        className={cn(
+          "bg-white px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200 relative",
+          isWrapTextEnabled || isExpanded
+            ? "h-auto min-h-[36px] py-2 items-start"
+            : "h-9 items-center",
+          selectedCell === cellKey &&
+            "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
+          isEditing &&
+            "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
+          pendingChange &&
+            !isEditing &&
+            "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
+          editMode !== "locked" &&
+            !isEditing &&
+            !isImageColumn &&
+            "cursor-pointer hover:bg-gray-50",
+          focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
+        )}
+        style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
+        onClick={() => {
+          if (!isEditing && editMode !== "locked" && !isImageColumn) {
+            onCellClick(cellKey);
+          }
+        }}
+        onPointerDown={(e) => handleCellPointerDown(e, record, fieldDef)}
+        onContextMenu={(e) => {
+          if (!isImageColumn) {
+            e.preventDefault();
+            onContextMenu(cellKey);
+          }
+        }}
+      >
+        <div
+          className={cn(
+            "w-full h-full flex items-center",
+            isWrapTextEnabled || isExpanded ? "items-start py-2" : "",
+          )}
+        >
+          {isEditing ? (
+            renderFieldEditor(record, fieldDef, actualValue, displayText)
+          ) : isImageColumn ? (
+            <div className="flex items-center gap-2 flex-wrap py-1">
+              {Array.isArray(actualValue) ? (
+                actualValue
+                  .filter(isImageUrl)
+                  .slice(0, 3)
+                  .map((url: string, idx: number) => (
+                    <img
+                      key={idx}
+                      src={url || "/placeholder.svg"}
+                      alt={`Image ${idx + 1} - ${fieldDef.label || "Uploaded image"}`}
+                      className="h-7 w-7 object-cover rounded border border-gray-300 cursor-pointer hover:opacity-90 hover:scale-110 transition-all duration-200 shadow-sm"
+                      onError={(e) => (e.currentTarget.style.display = "none")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (url) setPreviewUrl(url);
+                      }}
+                    />
+                  ))
+              ) : isImageUrl(actualValue) ? (
+                <img
+                  src={actualValue || "/placeholder.svg"}
+                  alt={fieldDef.label || "Uploaded image"}
+                  className="h-7 w-7 object-cover rounded border border-gray-300 cursor-pointer hover:opacity-90 hover:scale-110 transition-all duration-200 shadow-sm"
+                  onError={(e) => (e.currentTarget.style.display = "none")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (actualValue) setPreviewUrl(actualValue);
+                  }}
+                />
+              ) : (
+                <span className="text-xs text-gray-400">No image</span>
+              )}
+            </div>
+          ) : isDynamicRows ? (
+            <div
+              className="flex items-center gap-2 cursor-pointer hover:text-blue-600"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreviewClick(
+                  actualValue,
+                  fieldDef.label,
+                  fieldData?.fieldDefinitions,
+                );
+              }}
+            >
+              <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                <Layers className="h-3 w-3" /> {actualValue.length}
+              </div>
+              <span className="text-gray-400 text-xs truncate max-w-[120px] italic">
+                {displayText || "Click to view"}
+              </span>
+            </div>
+          ) : (
+            <div className="relative group w-full h-full">
+              <div
+                className={cn(
+                  "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
+                  isWrapTextEnabled || isExpanded
+                    ? "whitespace-normal break-words"
+                    : "whitespace-nowrap overflow-hidden text-ellipsis",
                 )}
-              </button>
-            )}
+                style={getConditionalStyle(fieldDef, actualValue, displayText)}
+                title={displayText}
+              >
+                {(displayText ?? "") === "" ? "N/A" : displayText}
+              </div>
+              {!isWrapTextEnabled && displayText && displayText.length > 40 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleCellExpansion(cellKey);
+                  }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
+                >
+                  {isExpanded ? (
+                    <ChevronUp className="h-3 w-3" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3" />
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {hasComments && (
+          <div className="absolute top-0 right-0 group z-10">
+            <button
+              className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCommentClick(cellKey);
+              }}
+            >
+              <MessageSquare className="h-3 w-3" />
+            </button>
           </div>
         )}
       </div>
-      {hasComments && (
-        <div className="absolute top-0 right-0 group z-10">
-          <button
-            className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCommentClick(cellKey);
-            }}
-          >
-            <MessageSquare className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-    </div>
+    </>
   );
 });

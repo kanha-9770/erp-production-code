@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Filter } from "lucide-react"
 import { getAttendanceStatus } from "@/lib/attendance"
+import { useGetUserQuery } from "@/lib/api/auth"
 
 interface Form {
   id: string
@@ -39,28 +40,17 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
     canCheckOut: false,
   })
 
+  const { data: authData, isLoading: authLoading } = useGetUserQuery()
+
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        setLoading(true)
-        const response = await fetch("/api/auth/me", { cache: "no-store" })
-        const data = await response.json()
-
-        if (data.success && data.user?.id) {
-          setUserId(data.user.id)
-        } else {
-          setUserId(null)
-        }
-      } catch (error) {
-        console.error("[FormsContent] Failed to fetch user:", error)
-        setUserId(null)
-      } finally {
-        setLoading(false)
-      }
+    if (authLoading) return
+    if (authData?.success && authData?.user?.id) {
+      setUserId(authData.user.id)
+    } else {
+      setUserId(null)
     }
-
-    fetchUser()
-  }, [])
+    setLoading(false)
+  }, [authData, authLoading])
 
   const updateAttendanceStatus = async () => {
     if (!userId) return

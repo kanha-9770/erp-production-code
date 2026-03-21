@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Eye, EyeOff, KeyRound, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { z } from "zod";
+import { useResetPasswordMutation } from "@/lib/api/auth";
 
 const ResetPasswordSchema = z
   .object({
@@ -44,12 +45,12 @@ interface ResetPasswordFormProps {
 }
 
 export default function ResetPasswordForm({ userId }: ResetPasswordFormProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [resetPassword, { isLoading }] = useResetPasswordMutation();
 
   const form = useForm<ResetPasswordFormData>({
     resolver: zodResolver(ResetPasswordSchema),
@@ -92,46 +93,21 @@ export default function ResetPasswordForm({ userId }: ResetPasswordFormProps) {
       return;
     }
 
-    setIsLoading(true);
-
     try {
-      const response = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...data,
-          userId,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        toast({
-          title: "Reset Failed",
-          description: result.error || "Invalid reset code",
-          variant: "destructive",
-        });
-        return;
-      }
+      await resetPassword({ ...data, userId }).unwrap();
 
       toast({
         title: "Success!",
         description: "Password reset successfully. You are now logged in.",
       });
 
-      // Force redirect to dashboard with replace and refresh
       window.location.href = "/profile";
-    } catch (error) {
+    } catch (error: any) {
       toast({
-        title: "Error",
-        description: "Network error. Please try again.",
+        title: "Reset Failed",
+        description: error?.data?.error || "Invalid reset code",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 

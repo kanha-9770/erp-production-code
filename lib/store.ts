@@ -1,24 +1,27 @@
 import { configureStore } from "@reduxjs/toolkit"
-import { authApi } from "./api/auth"
-import { modulesApi } from "./api/modules"
-import { formsApi } from "./api/forms"
-import { recordsApi } from "./api/records"
+import { baseApi } from "./api/baseApi"
+
+// Import all endpoint slices to ensure they register with baseApi
+import "./api/auth"
+import "./api/modules"
+import "./api/forms"
+import "./api/records"
+import "./api/permissions"
+import "./api/organization"
+import "./api/users"
+import "./api/lookup"
+import "./api/settings"
+import "./api/upload"
+import "./api/payroll"
 
 export const store = configureStore({
   reducer: {
-    [authApi.reducerPath]: authApi.reducer,
-    [modulesApi.reducerPath]: modulesApi.reducer,
-    [formsApi.reducerPath]: formsApi.reducer,
-    [recordsApi.reducerPath]: recordsApi.reducer,
+    [baseApi.reducerPath]: baseApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat([
-      authApi.middleware,
-      modulesApi.middleware,
-      formsApi.middleware,
-      recordsApi.middleware,
-    ]),
+    getDefaultMiddleware().concat(baseApi.middleware),
 })
 
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch
+export type AppStore = typeof store

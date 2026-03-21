@@ -16,7 +16,7 @@ import { Loader2, Shield, ArrowLeft, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import type { z } from "zod"
 import { CreateOrganizationModal } from "@/components/create-organization-modal"
-import { useVerifyOTPMutation, useResendOTPMutation } from "@/lib/api/auth"
+import { useVerifyOTPMutation, useResendOTPMutation, useGetUserByIdQuery } from "@/lib/api/auth"
 
 type VerifyOTPFormData = z.infer<typeof VerifyOTPSchema>
 
@@ -30,13 +30,16 @@ export default function VerifyOTPForm({ userId, type = "REGISTRATION" }: VerifyO
   const [showOrgModal, setShowOrgModal] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>("")
   const [infoMessage, setInfoMessage] = useState<string>("")
-  const [maskedEmail, setMaskedEmail] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const [verifyOTP, { isLoading: isVerifying }] = useVerifyOTPMutation()
   const [resendOTP, { isLoading: isResending }] = useResendOTPMutation()
+
+  // Fetch masked email via RTK Query (skip if no userId)
+  const { data: userByIdData } = useGetUserByIdQuery(userId!, { skip: !userId })
+  const maskedEmail = (userByIdData as any)?.maskedEmail || null
 
   const form = useForm<VerifyOTPFormData>({
     resolver: zodResolver(VerifyOTPSchema),
@@ -50,23 +53,6 @@ export default function VerifyOTPForm({ userId, type = "REGISTRATION" }: VerifyO
       router.push("/register")
     }
   }, [userId, router])
-
-  useEffect(() => {
-    if (!userId) return
-
-    const fetchMaskedEmail = async () => {
-      try {
-        const res = await fetch(`/api/auth/user?userId=${userId}`)
-        if (!res.ok) return
-        const json = await res.json()
-        if (json?.maskedEmail) setMaskedEmail(json.maskedEmail)
-      } catch (err) {
-        console.error('Failed to fetch masked email', err)
-      }
-    }
-
-    fetchMaskedEmail()
-  }, [userId])
 
   useEffect(() => {
     if (timeLeft > 0) {

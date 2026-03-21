@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,6 +64,13 @@ import {
   Folder,
 } from "lucide-react"
 import Link from "next/link"
+import {
+  useGetModuleByIdQuery,
+  useCreateModuleFormMutation,
+  useUpdateFormMetaMutation,
+  useDeleteFormMutation,
+  usePublishFormMutation,
+} from "@/lib/api/modules"
 import type { FormModule, Form } from "@/types/form-builder"
 
 interface ModuleStats {
@@ -94,16 +101,15 @@ export default function ModulePage() {
   const moduleId = params.moduleId as string
   const { toast } = useToast()
 
-  const [module, setModule] = useState<FormModule | null>(null)
+  const { data: moduleResponse, isLoading: loading, error: moduleError } = useGetModuleByIdQuery(moduleId, { skip: !moduleId })
+  const module = (moduleResponse as any)?.data as FormModule | null ?? null
   const [moduleStats, setModuleStats] = useState<ModuleStats | null>(null)
   const [formAnalytics, setFormAnalytics] = useState<FormAnalytics[]>([])
-  const [loading, setLoading] = useState(true)
-  const [statsLoading, setStatsLoading] = useState(true)
+  const statsLoading = loading
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingForm, setEditingForm] = useState<Form | null>(null)
   const [formData, setFormData] = useState({ name: "", description: "" })
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [sortBy, setSortBy] = useState<"name" | "created" | "submissions" | "updated">("updated")
@@ -111,36 +117,28 @@ export default function ModulePage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [filterStatus, setFilterStatus] = useState<"all" | "published" | "draft">("all")
 
+  const [createModuleForm, { isLoading: isCreateSubmitting }] = useCreateModuleFormMutation()
+  const [updateFormMeta, { isLoading: isEditSubmitting }] = useUpdateFormMetaMutation()
+  const [deleteForm] = useDeleteFormMutation()
+  const [publishForm] = usePublishFormMutation()
+  const isSubmitting = isCreateSubmitting || isEditSubmitting
+
   useEffect(() => {
-    if (moduleId) {
-      fetchModule()
+    if (module) {
+      calculateRealisticStats(module)
     }
-  }, [moduleId])
+  }, [module])
 
-  const fetchModule = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(`/api/modules/${moduleId}`)
-      const data = await response.json()
-
-      if (data.success) {
-        setModule(data.data)
-        calculateRealisticStats(data.data)
-      } else {
-        throw new Error(data.error || "Failed to fetch module")
-      }
-    } catch (error: any) {
-      console.error("Error fetching module:", error)
+  useEffect(() => {
+    if (moduleError) {
+      console.error("Error fetching module:", moduleError)
       toast({
         title: "Error",
         description: "Failed to load module. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setLoading(false)
-      setStatsLoading(false)
     }
-  }
+  }, [moduleError])
 
   const calculateRealisticStats = (mod: FormModule) => {
     if (!mod?.forms?.length) {
@@ -246,34 +244,17 @@ export default function ModulePage() {
     }
 
     try {
-      setIsSubmitting(true)
-      const response = await fetch(`/api/modules/${moduleId}/forms`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      })
+      const result = await createModuleForm({ moduleId, body: formData }).unwrap()
 
-      const data = await response.json()
-
-      if (data.success) {
-        setModule((prev: FormModule | null) =>
-          prev
-            ? {
-                ...prev,
-                forms: [data.data, ...prev.forms],
-              }
-            : null,
-        )
+      if (result.success) {
         setIsCreateDialogOpen(false)
         setFormData({ name: "", description: "" })
         toast({
           title: "Success",
           description: "Form created successfully!",
         })
-        // Re-calculate stats after creation
-        if (module) calculateRealisticStats({ ...module, forms: [data.data, ...module.forms] })
       } else {
-        throw new Error(data.error || "Failed to create form")
+        throw new Error(result.error || "Failed to create form")
       }
     } catch (error: any) {
       console.error("Error creating form:", error)
@@ -282,8 +263,6 @@ export default function ModulePage() {
         description: error.message || "Failed to create form. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -298,24 +277,9 @@ export default function ModulePage() {
     }
 
     try {
-      setIsSubmitting(true)
-      const response = await fetch(`/api/forms/${editingForm.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      })
+      const result = await updateFormMeta({ formId: editingForm.id, body: formData }).unwrap()
 
-      const data = await response.json()
-
-      if (data.success) {
-        setModule((prev: FormModule | null) =>
-          prev
-            ? {
-                ...prev,
-                forms: prev.forms.map((f: Form) => (f.id === editingForm.id ? data.data : f)),
-              }
-            : null,
-        )
+      if (result.success) {
         setIsEditDialogOpen(false)
         setEditingForm(null)
         setFormData({ name: "", description: "" })
@@ -323,9 +287,8 @@ export default function ModulePage() {
           title: "Success",
           description: "Form updated successfully!",
         })
-        if (module) calculateRealisticStats(module)
       } else {
-        throw new Error(data.error || "Failed to update form")
+        throw new Error(result.error || "Failed to update form")
       }
     } catch (error: any) {
       console.error("Error updating form:", error)
@@ -334,8 +297,6 @@ export default function ModulePage() {
         description: error.message || "Failed to update form. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -345,28 +306,15 @@ export default function ModulePage() {
     }
 
     try {
-      const response = await fetch(`/api/forms/${formId}`, {
-        method: "DELETE",
-      })
+      const result = await deleteForm(formId).unwrap()
 
-      const data = await response.json()
-
-      if (data.success) {
-        setModule((prev: FormModule | null) =>
-          prev
-            ? {
-                ...prev,
-                forms: prev.forms.filter((f: Form) => f.id !== formId),
-              }
-            : null,
-        )
+      if (result.success) {
         toast({
           title: "Success",
           description: "Form deleted successfully!",
         })
-        if (module) calculateRealisticStats({ ...module, forms: module.forms.filter(f => f.id !== formId) })
       } else {
-        throw new Error(data.error || "Failed to delete form")
+        throw new Error(result.error || "Failed to delete form")
       }
     } catch (error: any) {
       console.error("Error deleting form:", error)
@@ -380,32 +328,15 @@ export default function ModulePage() {
 
   const handlePublishForm = async (form: Form) => {
     try {
-      const response = await fetch(`/api/forms/${form.id}/publish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isPublished: !form.isPublished }),
-      })
+      const result = await publishForm({ formId: form.id, isPublished: !form.isPublished }).unwrap()
 
-      const data = await response.json()
-
-      if (data.success) {
-        setModule((prev: FormModule | null) =>
-          prev
-            ? {
-                ...prev,
-                forms: prev.forms.map((f: Form) =>
-                  f.id === form.id ? { ...f, isPublished: !f.isPublished } : f
-                ),
-              }
-            : null,
-        )
+      if (result.success) {
         toast({
           title: "Success",
           description: `Form ${form.isPublished ? "unpublished" : "published"} successfully!`,
         })
-        if (module) calculateRealisticStats(module)
       } else {
-        throw new Error(data.error || "Failed to publish form")
+        throw new Error(result.error || "Failed to publish form")
       }
     } catch (error: any) {
       console.error("Error publishing form:", error)

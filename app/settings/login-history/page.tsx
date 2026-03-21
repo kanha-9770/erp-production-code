@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useGetLoginHistoryQuery } from "@/lib/api/settings"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -28,22 +29,14 @@ interface LoginEntry {
 }
 
 export default function LoginHistoryPage() {
-  const [data, setData] = useState<LoginEntry[]>([])
+  const { data: rawData, isLoading: loading, error } = useGetLoginHistoryQuery()
+  const data: LoginEntry[] = Array.isArray(rawData) ? rawData : (rawData as any)?.data ?? []
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetch("/api/login-history")
-      .then((res) => res.json())
-      .then((fetchedData) => {
-        setData(fetchedData)
-      })
-      .catch((err) => {
-        console.error("Failed to load login history:", err)
-      })
-      .finally(() => setLoading(false))
-  }, [])
+  if (error) {
+    console.error("Failed to load login history:", error)
+  }
 
   const filteredData = data.filter((item) => {
     const searchLower = searchQuery.toLowerCase()

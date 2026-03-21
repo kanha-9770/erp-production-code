@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { useParams, notFound } from "next/navigation"
 import { Loader2, XCircle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 import type { Form } from "@/types/form-builder"
 import { useToast } from "@/hooks/use-toast"
 import LookupField from "@/components/lookup-field"
+import { useGetFormDetailQuery, useSubmitFormMutation } from "@/lib/api/forms"
 
 export default function PublicFormPage() {
   const params = useParams()
@@ -32,46 +33,51 @@ export default function PublicFormPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submissionSuccess, setSubmissionSuccess] = useState(false)
   const [submissionMessage, setSubmissionMessage] = useState("")
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [formInitialized, setFormInitialized] = useState(false)
 
-  const fetchForm = useCallback(async () => {
-    if (!formId) return
-    setLoading(true)
-    try {
-      const response = await fetch(`/api/forms/${formId}`)
-      if (!response.ok) {
-        if (response.status === 404) notFound()
-        throw new Error("Failed to fetch form data")
-      }
-      const result = await response.json()
-      if (!result.success || !result.data.isPublished) {
-        setError("This form is not published or could not be found.")
-        return
-      }
-      setForm(result.data)
-      setSubmissionMessage(result.data.submissionMessage || "Thank you for your submission!")
+  // RTK Query hooks
+  const { data: formDetailData, isLoading: loading, error: formQueryError } = useGetFormDetailQuery(formId, {
+    skip: !formId,
+  })
+  const [submitFormMutation] = useSubmitFormMutation()
 
-      // Initialize form data with default values
-      const initialData: Record<string, any> = {}
-      result.data.sections.forEach((section: any) => {
-        section.fields.forEach((field: any) => {
-          if (field.defaultValue) {
-            initialData[field.id] = field.defaultValue
-          }
-        })
-      })
-      setFormData(initialData)
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [formId])
-
+  // Initialize form data when query completes
   useEffect(() => {
-    fetchForm()
-  }, [fetchForm])
+    if (!formDetailData || formInitialized) return
+
+    if (formQueryError) {
+      setError("Failed to fetch form data")
+      return
+    }
+
+    if (!formDetailData.success || !formDetailData.data.isPublished) {
+      setError("This form is not published or could not be found.")
+      return
+    }
+
+    setForm(formDetailData.data)
+    setSubmissionMessage(formDetailData.data.submissionMessage || "Thank you for your submission!")
+
+    // Initialize form data with default values
+    const initialData: Record<string, any> = {}
+    formDetailData.data.sections.forEach((section: any) => {
+      section.fields.forEach((field: any) => {
+        if (field.defaultValue) {
+          initialData[field.id] = field.defaultValue
+        }
+      })
+    })
+    setFormData(initialData)
+    setFormInitialized(true)
+  }, [formDetailData, formQueryError, formInitialized])
+
+  // Handle 404 from query error
+  useEffect(() => {
+    if (formQueryError && "status" in formQueryError && formQueryError.status === 404) {
+      notFound()
+    }
+  }, [formQueryError])
 
   const handleFieldChange = (fieldId: string, value: any) => {
     setFormData((prev) => ({ ...prev, [fieldId]: value }))
@@ -135,13 +141,11 @@ export default function PublicFormPage() {
 
     setIsSubmitting(true)
     try {
-      const response = await fetch(`/api/forms/${formId}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recordData: formData }),
-      })
+      const result = await submitFormMutation({
+        formId,
+        body: { recordData: formData },
+      }).unwrap()
 
-      const result = await response.json()
       if (!result.success) {
         throw new Error(result.error || "Failed to submit form")
       }
@@ -150,8 +154,9 @@ export default function PublicFormPage() {
       setFormData({})
       toast({ title: "Success!", description: "Your form has been submitted successfully." })
     } catch (err: any) {
-      setError(err.message)
-      toast({ title: "Submission Error", description: err.message, variant: "destructive" })
+      const errorMessage = err.message || err.data?.error || "Failed to submit form"
+      setError(errorMessage)
+      toast({ title: "Submission Error", description: errorMessage, variant: "destructive" })
     } finally {
       setIsSubmitting(false)
     }

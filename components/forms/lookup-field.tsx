@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Search } from "lucide-react"
+import { useLazyLookupFormDataQuery } from "@/lib/api/forms"
 
 interface LookupFieldProps {
   label: string
@@ -34,6 +35,7 @@ export function LookupField({
   const [options, setOptions] = useState<Array<{ value: string; label: string }>>([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [triggerLookupFormData] = useLazyLookupFormDataQuery()
 
   useEffect(() => {
     fetchLookupData()
@@ -42,18 +44,17 @@ export function LookupField({
   const fetchLookupData = async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({
+      const params: Record<string, string> = {
         sourceFormId,
         sourceTable,
         displayField,
         valueField,
         filters: JSON.stringify(filters),
-      })
+      }
 
-      const response = await fetch(`/api/forms/lookup?${params.toString()}`)
+      const data = await triggerLookupFormData(params).unwrap()
 
-      if (response.ok) {
-        const data = await response.json()
+      if (data.success) {
         setOptions(
           data.data.map((item: any) => ({
             value: item[valueField],

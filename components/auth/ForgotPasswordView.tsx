@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -24,6 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, KeyRound, Mail, ArrowLeft, Shield } from "lucide-react"
 import type { AuthViewProps } from "./types"
+import { useForgotPasswordMutation } from "@/lib/api/auth"
 
 const EmailSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -32,8 +32,8 @@ const EmailSchema = z.object({
 type ForgotPasswordFormData = z.infer<typeof EmailSchema>
 
 export default function ForgotPasswordView({ onSwitchView }: AuthViewProps) {
-  const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+  const [forgotPassword, { isLoading }] = useForgotPasswordMutation()
 
   const form = useForm<ForgotPasswordFormData>({
     resolver: zodResolver(EmailSchema),
@@ -41,35 +41,26 @@ export default function ForgotPasswordView({ onSwitchView }: AuthViewProps) {
   })
 
   const onSubmit = async (data: ForgotPasswordFormData) => {
-    setIsLoading(true)
     try {
-      const response = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        toast({
-          title: "Error",
-          description: result.error || "Failed to send reset code. Please try again.",
-          variant: "destructive",
-        })
-        return
-      }
+      const result = await forgotPassword(data).unwrap()
 
       toast({ title: "Check your email", description: "A password reset code has been sent to your inbox." })
-      onSwitchView("reset-password", { userId: result?.userId })
-    } catch {
-      toast({
-        title: "Network Error",
-        description: "Unable to connect. Please check your internet connection.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
+      onSwitchView("reset-password", { userId: (result as any)?.userId })
+    } catch (error: any) {
+      const message = error?.data?.error || "Failed to send reset code. Please try again."
+      if (error?.status === "FETCH_ERROR") {
+        toast({
+          title: "Network Error",
+          description: "Unable to connect. Please check your internet connection.",
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: message,
+          variant: "destructive",
+        })
+      }
     }
   }
 

@@ -50,6 +50,9 @@ import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
+import { useGetCurrentUserQuery } from "@/lib/api/auth";
+import { useSubmitFormMutation, useTrackFormEventMutation, useCheckAttendanceMutation, useLazyGetTestingDataQuery, useLazyGetSectionPermissionsQuery, useLazyGetFormDetailQuery } from "@/lib/api/forms";
+import { useLazyGetAdminPermissionsQuery } from "@/lib/api/permissions";
 
 interface LocationResult {
   address: string;
@@ -194,6 +197,14 @@ export function PublicFormDialog({
   allowAdminPreview = false,
 }: PublicFormDialogProps) {
   const { toast } = useToast();
+  const { data: currentUserData } = useGetCurrentUserQuery(undefined, { skip: !isOpen });
+  const [submitForm] = useSubmitFormMutation();
+  const [trackFormEvent] = useTrackFormEventMutation();
+  const [checkAttendance] = useCheckAttendanceMutation();
+  const [triggerTestingData] = useLazyGetTestingDataQuery();
+  const [triggerSectionPerms] = useLazyGetSectionPermissionsQuery();
+  const [triggerFormDetail] = useLazyGetFormDetailQuery();
+  const [triggerAdminPerms] = useLazyGetAdminPermissionsQuery();
   const [form, setForm] = useState<Form | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -330,48 +341,30 @@ export function PublicFormDialog({
   }, [isOpen]);
 
   useEffect(() => {
-    const fetchCurrentUser = async () => {
-      try {
-        const response = await fetch("/api/user");
-        if (!response.ok) return;
-        const result = await response.json();
-        if (result.success && result.user) {
-          const user = result.user;
-          const fullName =
-            [user.first_name, user.last_name].filter(Boolean).join(" ") ||
-            user.name ||
-            user.username ||
-            "Current User";
-          setCurrentUser({
-            id: user.id,
-            name: fullName,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            email: user.email,
-          });
-          // Ensure window global is always set so handleSubmit can find the userId
-          (window as any).__currentUserId = user.id;
-        }
-      } catch (err) {
-        console.error("Failed to fetch current user:", err);
-      }
-    };
-    if (isOpen) {
-      fetchCurrentUser();
-    }
-  }, [isOpen]);
+    if (!isOpen || !currentUserData?.success || !currentUserData.user) return;
+    const user = currentUserData.user;
+    const fullName =
+      [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+      (user as any).name ||
+      user.username ||
+      "Current User";
+    setCurrentUser({
+      id: user.id,
+      name: fullName,
+      first_name: user.first_name ?? undefined,
+      last_name: user.last_name ?? undefined,
+      email: user.email,
+    });
+    // Ensure window global is always set so handleSubmit can find the userId
+    (window as any).__currentUserId = user.id;
+  }, [isOpen, currentUserData]);
 
   useEffect(() => {
     const fetchFormPermission = async () => {
       if (!formId || !isOpen) return;
       setFormPermissionLoading(true);
       try {
-        const response = await fetch(`/api/admin/permissions?formId=${formId}`, {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const data = await response.json();
+        const data = await triggerAdminPerms({ formId }).unwrap();
         if (!data.success || !data.data) return;
 
         const { permissions: perms, isAdmin } = data.data;
@@ -933,16 +926,13 @@ export function PublicFormDialog({
     if (!formId) return;
     try {
       setLoading(true);
-      const url = `/api/forms/${formId}${allowAdminPreview ? "" : "?published=true"}`;
-      const response = await fetch(url);
-      const result = await response.json();
+      const result = await triggerFormDetail(formId).unwrap();
       if (!result.success) throw new Error(result.error);
       if (!result.data.isPublished && !allowAdminPreview)
         throw new Error("This form is not published");
       let formulaResult: any = { success: false };
       try {
-        const formulaResponse = await fetch("/api/testing");
-        if (formulaResponse.ok) formulaResult = await formulaResponse.json();
+        formulaResult = await triggerTestingData().unwrap();
       } catch { /* formula endpoint unavailable – skip enrichment */ }
       if (formulaResult.success && Array.isArray(formulaResult.data)) {
         const formulas = formulaResult.data;
@@ -1053,12 +1043,7 @@ export function PublicFormDialog({
     await Promise.all(
       allIds.map(async (id) => {
         try {
-          const res = await fetch(`/api/permissions/sections/${id}`);
-          if (!res.ok) {
-            sectionPerms[id] = "READ";
-            return;
-          }
-          const data = await res.json();
+          const data = await triggerSectionPerms(id).unwrap();
           if (data.error) {
             sectionPerms[id] = "VIEW";
             return;
@@ -1084,18 +1069,16 @@ export function PublicFormDialog({
   const trackFormView = async () => {
     if (!formId) return;
     try {
-      const payload = {
-        eventType: "view",
-        payload: {
-          userAgent: navigator.userAgent,
-          timestamp: new Date().toISOString(),
+      await trackFormEvent({
+        formId,
+        body: {
+          eventType: "view",
+          payload: {
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString(),
+          },
         },
-      };
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      }).unwrap();
     } catch (error) {
       console.error("Track view failed:", error);
     }
@@ -1454,26 +1437,14 @@ export function PublicFormDialog({
       let attendanceHandled = false;
       const formNameLower = (form?.name || "").trim().toLowerCase();
       if (formNameLower === "check-in" || formNameLower === "checkin") {
-        const response = await fetch("/api/attendance", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkin" }),
-        });
-        const data = await response.json();
+        const data = await checkAttendance({ userId, action: "checkin" }).unwrap();
         if (!data.success) throw new Error(data.error || "Check-In failed");
         attendanceHandled = true;
       } else if (
         formNameLower === "check-out" ||
         formNameLower === "checkout"
       ) {
-        const response = await fetch("/api/attendance", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkout" }),
-        });
-        const data = await response.json();
+        const data = await checkAttendance({ userId, action: "checkout" }).unwrap();
         if (!data.success) throw new Error(data.error || "Check-Out failed");
         attendanceHandled = true;
       }
@@ -1558,63 +1529,23 @@ export function PublicFormDialog({
           userAgent: navigator.userAgent,
         };
         console.debug('[PublicForm] Submitting form', { formId, userId, currentUser });
-        try {
-          console.debug('[PublicForm] document.cookie', document.cookie);
-        } catch (e) {
-          console.debug('[PublicForm] document.cookie inaccessible', e?.message || e);
-        }
-
-        const res = await fetch(`/api/forms/${formId}/submit`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(submitPayload),
-        });
-        console.debug('[PublicForm] submit response status', res.status, res.statusText);
-        try {
-          res.headers.forEach((v, k) => console.debug('[PublicForm] response header', k, v));
-        } catch (e) {
-          console.debug('[PublicForm] response headers inaccessible', e?.message || e);
-        }
-
-        let json: any = null;
-        try {
-          json = await res.json();
-        } catch (e) {
-          const text = await res.text().catch(() => "");
-          console.error('[PublicForm] submit non-json response', { status: res.status, text });
-          throw new Error(
-            `Submission failed: ${res.status} ${res.statusText} ${text}`,
-          );
-        }
-        if (!res.ok) {
-          const serverMsg = json?.error || json?.message || JSON.stringify(json);
-          console.error('[PublicForm] submit error body', json);
-          if (res.status === 403) {
-            throw new Error(
-              `Permission denied (403). ${serverMsg || "You may not belong to the required organization or lack permission."}`,
-            );
-          }
-          throw new Error(serverMsg || `Submission failed: ${res.status}`);
-        }
+        await submitForm({ formId: formId!, body: submitPayload }).unwrap();
       }
       setSubmitted(true);
       toast({
         title: "Success!",
         description: form?.submissionMessage || "Form submitted successfully!",
       });
-      await fetch(`/api/forms/${formId}/events`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await trackFormEvent({
+        formId: formId!,
+        body: {
           eventType: "submit",
           payload: {
             recordId: attendanceHandled ? "attendance" : "form",
             timestamp: new Date().toISOString(),
           },
-        }),
-      });
+        },
+      }).unwrap();
       if ((window as any).__handleFormSubmitted) {
         await (window as any).__handleFormSubmitted(form?.name || "");
       }

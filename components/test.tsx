@@ -20,13 +20,14 @@ import {
 } from "lucide-react";
 import FormsContent from "@/components/dynamicSubmodule/formsContent";
 import { PublicFormDialog } from "@/components/public-form-dialog";
-import { useGetModuleByIdQuery } from "@/lib/api/modules";
+import { useGetModuleByIdQuery, useLazyGetModuleByIdQuery } from "@/lib/api/modules";
 import {
   useDeleteRecordMutation,
   useGetModuleRecordsQuery,
   useUpdateRecordMutation,
 } from "@/lib/api/records";
 import RecordsDisplay from "@/components/modules/recordsDisplay";
+import { useGetAdminPermissionsQuery } from "@/lib/api/permissions";
 
 interface FormModule {
   id: string;
@@ -316,28 +317,20 @@ export default function ModulePage({
 
   const [updateRecord] = useUpdateRecordMutation();
   const [deleteRecord] = useDeleteRecordMutation();
+  const [triggerGetModuleById] = useLazyGetModuleByIdQuery();
+
+  const { data: adminPermissionsData } = useGetAdminPermissionsQuery({});
 
   useEffect(() => {
-    const fetchPermissions = async () => {
-      try {
-        const response = await fetch("/api/admin/permissions");
-        if (!response.ok) throw new Error("Failed to fetch permissions");
-        const data = await response.json();
-        console.log("ModulePage: Fetched permissions", data);
-        if (data.success) {
-          setPermissions(data.data.permissions || []);
-          const hasAdminRole = data.data.unitsAndRoles?.some(
-            (ua: any) => ua.role.isAdmin || ua.role.name === "ADMIN",
-          );
-          setIsAdmin(hasAdminRole);
-        }
-      } catch (error) {
-        console.error("Error fetching permissions:", error);
-      }
-    };
-
-    fetchPermissions();
-  }, []);
+    if (adminPermissionsData?.success) {
+      console.log("ModulePage: Fetched permissions", adminPermissionsData);
+      setPermissions(adminPermissionsData.data.permissions || []);
+      const hasAdminRole = adminPermissionsData.data.unitsAndRoles?.some(
+        (ua: any) => ua.role.isAdmin || ua.role.name === "ADMIN",
+      );
+      setIsAdmin(hasAdminRole);
+    }
+  }, [adminPermissionsData]);
 
   const openFormDialog = (formId: string) => {
     console.log("ModulePage: Opening form dialog", { formId });
@@ -937,8 +930,7 @@ export default function ModulePage({
     console.log("ModulePage: fetchModuleById started", { moduleId: id });
     try {
       setLoading(true);
-      const response = await fetch(`/api/modules/${id}`);
-      const data = await response.json();
+      const data = await triggerGetModuleById(id).unwrap();
       console.log("ModulePage: fetchModuleById response", { data });
 
       if (data.success) {

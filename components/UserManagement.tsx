@@ -453,6 +453,9 @@
 "use client"
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useGetUserQuery } from "@/lib/api/auth";
+import { useGetUsersQuery, useDeleteUserMutation } from "@/lib/api/users";
+import { useGetRolesQuery } from "@/lib/api/permissions";
 
 // --- Types ---
 export interface Unit {
@@ -535,81 +538,69 @@ const UserManagement: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
 
-  const fetchInitialData = useCallback(async () => {
-    let fetchedUnits: Unit[] = [];
-    let fetchedRoles: Role[] = [];
-    let adminStatus = false;
-    let orgId: string | null = null;
+  const [deleteUser] = useDeleteUserMutation();
 
-    // 1. Organization units
-    try {
-      const unitsRes = await fetch('/api/organization-units', { credentials: 'include' });
-      if (unitsRes.ok) {
-        const payload = await unitsRes.json();
-        fetchedUnits = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
-      }
-    } catch (err) {
-      console.warn("Org units error:", err);
+  // RTK Query hooks for initial data
+  const { data: sessionData } = useGetUserQuery();
+  const { data: rolesData } = useGetRolesQuery();
+  const { data: usersData, refetch: refetchUsers } = useGetUsersQuery();
+
+  // Process session data
+  useEffect(() => {
+    if (sessionData) {
+      const session = sessionData;
+      const adminStatus = session?.user?.isAdmin === true
+        || (session?.user as any)?.isOrgOwner === true
+        || session?.user?.unitAssignments?.some(
+            (ua: any) => ua?.role?.isAdmin === true || ua?.role?.name?.toLowerCase().includes('admin')
+          )
+        || false;
+      const orgId = session?.user?.organization?.id || null;
+      setIsAdmin(adminStatus);
+      setOrganizationId(orgId);
     }
+  }, [sessionData]);
 
-    // 2. Roles
-    try {
-      const rolesRes = await fetch('/api/role', { credentials: 'include' });
-      if (rolesRes.ok) {
-        const payload = await rolesRes.json();
-        const raw = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
-        fetchedRoles = raw.map((r: any) => ({
-          id: r.id,
-          name: r.name,
-          isAdmin: !!r.isAdmin,
-          level: r.level ?? 0,
-        }));
-      }
-    } catch (err) {
-      console.warn("Roles error:", err);
+  // Process roles data
+  useEffect(() => {
+    if (rolesData) {
+      const raw = rolesData?.success ? rolesData.data : (Array.isArray(rolesData) ? rolesData : []);
+      const fetchedRoles = raw.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        isAdmin: !!r.isAdmin,
+        level: r.level ?? 0,
+      }));
+      setRoles(fetchedRoles);
     }
+  }, [rolesData]);
 
-    // 3. Session
-    try {
-      const sessionRes = await fetch('/api/auth/me', { credentials: 'include' });
-      if (sessionRes.ok) {
-        const session = await sessionRes.json();
-        // Use top-level isAdmin flag (covers role.isAdmin, org ownership, and role name)
-        adminStatus = session?.user?.isAdmin === true
-          || session?.user?.isOrgOwner === true
-          || session?.user?.unitAssignments?.some(
-              (ua: any) => ua?.role?.isAdmin === true || ua?.role?.name?.toLowerCase().includes('admin')
-            )
-          || false;
-        orgId = session?.user?.organization?.id || null;
+  // Fetch organization units (no RTK hook available, keep fetch)
+  useEffect(() => {
+    const fetchUnits = async () => {
+      try {
+        const unitsRes = await fetch('/api/organization-units', { credentials: 'include' });
+        if (unitsRes.ok) {
+          const payload = await unitsRes.json();
+          const fetchedUnits = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
+          setUnits(fetchedUnits);
+        }
+      } catch (err) {
+        console.warn("Org units error:", err);
       }
-    } catch (err) {
-      console.warn("Session error:", err);
-    }
-
-    const finalAdmin = adminStatus;
-
-    setUnits(fetchedUnits);
-    setRoles(fetchedRoles);
-    setIsAdmin(finalAdmin);
-    setOrganizationId(orgId);
+    };
+    fetchUnits();
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/users', { credentials: 'include' });
-      if (!res.ok) throw new Error(`Users fetch failed: ${res.status}`);
+  // Process users data
+  useEffect(() => {
+    if (usersData) {
+      const rawUsers = Array.isArray(usersData)
+        ? usersData
+        : (usersData as any)?.data ?? (usersData as any)?.users ?? [];
 
-      const data = await res.json();
-      const rawUsers = Array.isArray(data)
-        ? data
-        : data?.data ?? data?.users ?? [];
+      console.log('RAW USERS FROM API:', rawUsers.length, rawUsers);
 
-      // === DEBUG LOGS (open browser console to see exactly what's happening) ===
-      console.log('📥 RAW USERS FROM API:', rawUsers.length, rawUsers);
-
-      // 🔥 PERFECT FILTER: Hide ANY user who has at least one admin role
       const filteredUsers = rawUsers.filter((user: any) => {
         const hasAdminRole = user.unitAssignments?.some((ua: any) => {
           const roleIsAdmin = ua?.role?.isAdmin === true || ua?.role?.isAdmin === 'true';
@@ -620,33 +611,12 @@ const UserManagement: React.FC = () => {
         return !hasAdminRole;
       });
 
-      console.log('✅ FILTERED NON-ADMIN USERS:', filteredUsers.length);
-      console.table(
-        filteredUsers.map((u: any) => ({
-          id: u.id,
-          name: `${u.first_name} ${u.last_name}`,
-          email: u.email,
-          assignments: u.unitAssignments?.length || 0,
-          hasAdminRole: u.unitAssignments?.some((ua: any) =>
-            ua?.role?.isAdmin === true ||
-            String(ua?.role?.name || '').toLowerCase().includes('admin')
-          )
-        }))
-      );
+      console.log('FILTERED NON-ADMIN USERS:', filteredUsers.length);
 
       setUsers(filteredUsers);
-    } catch (err) {
-      console.error("Failed to fetch users:", err);
-      setUsers([]);
-    } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchInitialData();
-    fetchUsers();
-  }, [fetchInitialData, fetchUsers]);
+  }, [usersData]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -684,7 +654,7 @@ const UserManagement: React.FC = () => {
       setIsEditing(false);
       setEditId(null);
       setShowForm(false);
-      fetchUsers(); // refresh filtered list
+      refetchUsers(); // refresh filtered list
     } catch (err: any) {
       console.error("User save error:", err);
       alert("Could not save user: " + (err.message || "Unknown error"));
@@ -708,9 +678,8 @@ const UserManagement: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this user permanently?')) return;
     try {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error('Delete failed');
-      fetchUsers();
+      await deleteUser(id).unwrap();
+      refetchUsers();
     } catch (err) {
       console.error("Delete error:", err);
       alert("Could not delete user");

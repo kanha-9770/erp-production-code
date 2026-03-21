@@ -15,6 +15,7 @@ import { Settings, Loader2, ArrowRight, ArrowLeft, CheckCircle2 } from "lucide-r
 import { toast } from "sonner"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
+import { useLazyGetPayrollFormsQuery, useLazyGetPayrollFormFieldsQuery, useSavePayrollConfigMutation } from "@/lib/api/payroll"
 interface Form {
   id: string
   name: string
@@ -53,6 +54,9 @@ export function PayrollConfigDialog({ open, onOpenChange, onConfigSaved }: Payro
   const [fieldMappings, setFieldMappings] = useState<PayrollFieldMapping>({})
   const [formFields, setFormFields] = useState<Record<string, FormField[]>>({})
   const [loadingFields, setLoadingFields] = useState(false)
+  const [triggerGetPayrollForms] = useLazyGetPayrollFormsQuery()
+  const [triggerGetPayrollFormFields] = useLazyGetPayrollFormFieldsQuery()
+  const [savePayrollConfig] = useSavePayrollConfigMutation()
   useEffect(() => {
     if (open) {
       fetchForms()
@@ -65,10 +69,9 @@ export function PayrollConfigDialog({ open, onOpenChange, onConfigSaved }: Payro
   const fetchForms = async () => {
     setLoading(true)
     try {
-      const response = await fetch("/api/payroll/forms")
-      const data = await response.json()
+      const data = await triggerGetPayrollForms().unwrap()
       if (data.success) {
-        setForms(data.forms)
+        setForms((data as any).forms)
       } else {
         toast.error("Failed to load forms")
       }
@@ -81,10 +84,9 @@ export function PayrollConfigDialog({ open, onOpenChange, onConfigSaved }: Payro
   const fetchFormFields = async (formId: string) => {
     if (formFields[formId]) return
     try {
-      const response = await fetch(`/api/payroll/form-fields?formId=${formId}`)
-      const data = await response.json()
+      const data = await triggerGetPayrollFormFields(formId).unwrap()
       if (data.success) {
-        setFormFields((prev) => ({ ...prev, [formId]: data.fields }))
+        setFormFields((prev) => ({ ...prev, [formId]: (data as any).fields }))
       } else {
         toast.error(`Failed to load fields for form`)
       }
@@ -157,15 +159,10 @@ export function PayrollConfigDialog({ open, onOpenChange, onConfigSaved }: Payro
     }
     setSaving(true)
     try {
-      const response = await fetch("/api/payroll/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          formIds: selectedFormIds,
-          fieldMappings,
-        }),
-      })
-      const data = await response.json()
+      const data = await savePayrollConfig({
+        formIds: selectedFormIds,
+        fieldMappings,
+      }).unwrap()
       if (data.success) {
         toast.success("Payroll configuration saved successfully!")
         onConfigSaved()
