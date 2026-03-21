@@ -233,13 +233,13 @@ export function FileUploadZone({
     }
   };
 
-  const renderSinglePreview = (url: string, index?: number) => {
+  const renderSinglePreview = (url: string, index: number) => {
     const fileType = getFileTypeFromUrl(url);
     const isImage = fileType === "image" || fieldType === "image";
     const isVideo = fileType === "video" || fieldType === "video";
 
     return (
-      <div key={url} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col items-center justify-center min-h-[150px]">
+      <div key={`${url}-${index}`} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col items-center justify-center min-h-[150px]">
         {/* Clickable preview area */}
         <div
           className="cursor-pointer w-full h-full flex items-center justify-center"

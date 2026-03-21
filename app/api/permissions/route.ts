@@ -1,5 +1,5 @@
 // pages/api/permissions.ts
-import { getPermissions } from "@/lib/database";
+import { getPermissions } from "@/lib/database/database";
 import { NextResponse } from "next/server";
 
 export async function GET() {

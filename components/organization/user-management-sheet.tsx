@@ -10,7 +10,7 @@
 // } from "@/components/ui/sheet";
 // import { Button } from "@/components/ui/button";
 // import { X } from "lucide-react";
-// import UserManagement from "@/components/UserManagement"; 
+// import UserManagement from "@/components/users/UserManagement"; 
 
 // interface UserManagementSheetProps {
 //   open: boolean;
@@ -84,7 +84,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
-import UserManagement from "@/components/UserManagement"; 
+import UserManagement from "@/components/users/UserManagement"; 
 import { cn } from "@/lib/utils";
 
 interface UserManagementSheetProps {

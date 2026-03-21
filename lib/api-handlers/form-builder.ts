@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { DatabaseService } from "@/lib/database-service";
+import { DatabaseService } from "@/lib/database/database-service";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers";
 

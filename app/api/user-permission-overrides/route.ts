@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUserPermissionOverrides } from '@/lib/database'
+import { getUserPermissionOverrides } from '@/lib/database/database'
 
 export async function GET() {
   try {

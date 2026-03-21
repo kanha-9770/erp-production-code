@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { DatabaseModules } from "@/lib/DatabaseModules"
+import { DatabaseModules } from "@/lib/database/DatabaseModules"
 
 export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
   try {

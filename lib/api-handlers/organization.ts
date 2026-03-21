@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { DatabaseRoles } from "@/lib/DatabaseRoles";
+import { DatabaseRoles } from "@/lib/database/DatabaseRoles";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 // ─────────────────────────────────────────────────────────────────────────────

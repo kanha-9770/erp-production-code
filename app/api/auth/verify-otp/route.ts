@@ -2,7 +2,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { createSession } from "@/lib/auth"
-import { VerifyOTPSchema } from "@/lib/validations"
+import { VerifyOTPSchema } from "@/lib/utils/validations"
 
 export async function POST(request: NextRequest) {
   try {

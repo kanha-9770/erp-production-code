@@ -5,7 +5,7 @@
 // import { useRoles } from "@/context/role-context"
 // import { useToast } from "@/hooks/use-toast"
 // import type { Role, RoleFormData } from "@/types/role"
-// import { flattenRoles } from "@/lib/organization-utils"
+// import { flattenRoles } from "@/lib/utils/organization-utils"
 // import {
 //   Dialog,
 //   DialogContent,
@@ -200,7 +200,7 @@ import { useState, useEffect } from "react"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import type { Role, RoleFormData } from "@/types/role"
-import { flattenRoles } from "@/lib/organization-utils"
+import { flattenRoles } from "@/lib/utils/organization-utils"
 import {
   Dialog,
   DialogContent,

@@ -30,8 +30,8 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle, AlertCircle, Loader2, Send, Eye, Calendar, Star, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import type { Form, FormField, Subform } from "@/types/form-builder";
-import { LookupField } from "@/components/lookup-field";
-import CameraCapture from "@/components/camera-capture";
+import { LookupField } from "@/components/forms/lookup-field";
+import CameraCapture from "@/components/forms/camera-capture";
 import { useGetPublishedFormQuery, useSubmitFormMutation, useTrackFormEventMutation } from "@/lib/api/forms";
 import { useGetUserQuery } from "@/lib/api/auth";
 

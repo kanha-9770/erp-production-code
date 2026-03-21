@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { validateSession } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import { FormChatbot } from '@/components/FormChatbot'
+import { FormChatbot } from '@/components/forms/FormChatbot'
 
 export default async function ChatbotPage() {
   const cookieStore = await cookies()

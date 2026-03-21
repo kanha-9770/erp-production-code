@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendOTPEmail } from "@/lib/email";
 import { generateOTP, hashPassword } from "@/lib/auth";
-import { RegisterSchema } from "@/lib/validations";
+import { RegisterSchema } from "@/lib/utils/validations";
 
 export async function POST(request: NextRequest) {
   try {

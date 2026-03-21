@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DatabaseService } from "@/lib/database-service";
+import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function PATCH(

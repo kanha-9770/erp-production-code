@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { VerifyOTPSchema } from "@/lib/validations"
+import { VerifyOTPSchema } from "@/lib/utils/validations"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -25,7 +25,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, Shield, ArrowLeft, RefreshCw } from "lucide-react"
 import type { z } from "zod"
-import { CreateOrganizationModal } from "@/components/create-organization-modal"
+import { CreateOrganizationModal } from "@/components/users/create-organization-modal"
 import { useVerifyOTPMutation, useResendOTPMutation, useGetUserByIdQuery } from "@/lib/api/auth"
 import type { AuthViewProps } from "./types"
 

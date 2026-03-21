@@ -1,4 +1,4 @@
-import { calculatePayroll } from '@/lib/payroll-utils';
+import { calculatePayroll } from '@/lib/utils/payroll-utils';
 import { NextRequest, NextResponse } from 'next/server';
 
 // In-memory storage for demo (replace with database)

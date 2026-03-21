@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { NextRequest } from "next/server"
-import { DatabaseService } from "@/lib/database-service"
+import { DatabaseService } from "@/lib/database/database-service"
 import { AuthMiddleware } from "@/lib/auth-middleware"
 
 export async function GET(request: NextRequest, { params }: { params: { moduleId: string } }) {

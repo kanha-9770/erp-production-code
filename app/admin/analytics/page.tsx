@@ -65,7 +65,7 @@ import {
   prepareAuditLogExport,
   prepareUserAnalyticsExport,
   prepareFormMetricsExport,
-} from '@/lib/export-utils';
+} from '@/lib/utils/export-utils';
 import { formatNumber, ACTION_TYPE_COLORS, getActionDisplayName } from '@/lib/analytics-constants';
 
 const TIME_RANGES = [

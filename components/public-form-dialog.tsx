@@ -41,9 +41,9 @@ import {
   Lock,
 } from "lucide-react";
 import type { Form, FormField, Subform } from "@/types/form-builder";
-import { LookupField } from "@/components/lookup-field";
-import CameraCapture from "@/components/camera-capture";
-import { FileUploadZone } from "./file-upload-zone";
+import { LookupField } from "@/components/forms/lookup-field";
+import CameraCapture from "@/components/forms/camera-capture";
+import { FileUploadZone } from "@/components/forms/file-upload-zone";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";

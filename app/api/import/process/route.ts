@@ -2,7 +2,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { DatabaseService } from "@/lib/database-service";
+import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 const normalizeKey = (str: string): string => {

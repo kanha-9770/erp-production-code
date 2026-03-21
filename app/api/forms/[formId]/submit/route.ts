@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { headers } from "next/headers";
 import crypto from "crypto";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
-import { DatabaseTransforms } from "@/lib/DatabaseTransforms";
+import { DatabaseTransforms } from "@/lib/database/DatabaseTransforms";
 
 // ──────────────────────────────────────────────
 // Type definitions

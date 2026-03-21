@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
-import { parseEmployeeData } from '@/lib/employeeDataParser';
+import { parseEmployeeData } from '@/lib/utils/employeeDataParser';
 import { generateJWT, generateSessionToken } from '@/lib/auth';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 

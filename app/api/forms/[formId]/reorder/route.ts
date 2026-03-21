@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { DatabaseService } from "@/lib/database-service"
+import { DatabaseService } from "@/lib/database/database-service"
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {

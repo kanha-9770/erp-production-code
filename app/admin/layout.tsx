@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { AdminNav } from '@/components/admin-nav';
+import { AdminNav } from '@/components/layout/admin-nav';
 import { validateSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';

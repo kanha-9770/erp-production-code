@@ -2,8 +2,8 @@ import { DatabaseTransforms } from "./DatabaseTransforms";
 import { DatabaseRecords } from "./DatabaseRecords";
 import { DatabaseModules } from "./DatabaseModules";
 import { DatabaseRoles } from "./DatabaseRoles";
-import { UserPermission, RolePermission } from "./auth-middleware";
-import { prisma } from "./prisma";
+import { UserPermission, RolePermission } from "@/lib/auth-middleware";
+import { prisma } from "@/lib/prisma";
 
 export class DatabaseService {
   // ────────────────────────────────────────────────────────────────

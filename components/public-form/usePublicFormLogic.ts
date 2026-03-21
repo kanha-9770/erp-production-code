@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import type { Form, FormField, Subform } from "@/types/form-builder";
-import { generateUniqueId, fetchUserLocation } from "@/lib/form-utils";
+import { generateUniqueId, fetchUserLocation } from "@/lib/utils/form-utils";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";

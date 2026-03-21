@@ -162,9 +162,8 @@ export function calculateDailyPayroll(
 
 export async function calculatePayroll(month: string): Promise<PayrollCalculation[]> {
   try {
-    const response = await fetch('http://localhost:3000/api/forms/testing');
+    const response = await fetch('/api/forms/testing');
     const data = await response.json();
-      console.log('Fetching attendance data for stats calculation',response);
 
     // Parse daily attendance
     const dailyAttendance = parseApiResponse(data);

@@ -2,7 +2,7 @@
 // export const dynamic = 'force-dynamic';
 // import { NextRequest, NextResponse } from 'next/server';
 // import { PrismaClient } from '@prisma/client';
-// import { parseEmployeeData } from '@/lib/employeeDataParser';
+// import { parseEmployeeData } from '@/lib/utils/employeeDataParser';
 
 // const prisma = new PrismaClient();
 
@@ -136,7 +136,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
-import { parseEmployeeData } from '@/lib/employeeDataParser';
+import { parseEmployeeData } from '@/lib/utils/employeeDataParser';
 
 // Do NOT create new PrismaClient() here — use the shared instance from lib/prisma
 // const prisma = new PrismaClient();  ← REMOVE THIS LINE

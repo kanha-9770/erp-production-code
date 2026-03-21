@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Eye, Download, Send, X, Check, Trash2 } from "lucide-react"
-import { formatCurrency } from "@/lib/payroll-utils"
+import { formatCurrency } from "@/lib/utils/payroll-utils"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 

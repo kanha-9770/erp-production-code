@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, Legend, Tooltip } from "recharts"
 import { DollarSign, Users, AlertCircle } from "lucide-react"
-import { formatCurrency } from "@/lib/payroll-utils"
+import { formatCurrency } from "@/lib/utils/payroll-utils"
 
 interface AnalyticsDashboardProps {
   payrollData: any[]

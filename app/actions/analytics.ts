@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth2';
-import { getDateRange } from '@/lib/date-utils';
+import { getDateRange } from '@/lib/utils/date-utils';
 
 // Helper: get org-scoped user IDs (for filtering LoginHistory, Employee, etc.)
 async function getOrgUserIds(orgId: string | null | undefined): Promise<string[]> {

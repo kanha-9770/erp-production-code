@@ -50,9 +50,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { FormField, FieldOption } from "@/types/form-builder";
-import { LookupField } from "@/components/lookup-field";
-import FieldSettings from "@/components/field-settings";
-import FormulaConfigurationDialog from "@/components/FormulaConfigurationDialog";
+import { LookupField } from "@/components/forms/lookup-field";
+import FieldSettings from "@/components/form-builder/field-settings";
+import FormulaConfigurationDialog from "@/components/form-builder/FormulaConfigurationDialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { useLazyGetFieldPermissionQuery, useUpdateFieldPermissionMutation } from "@/lib/api/forms";

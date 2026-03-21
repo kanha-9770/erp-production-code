@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { verifyPassword, createSession, generateOTP } from "@/lib/auth"
 import { sendOTPEmail } from "@/lib/email"
-import { LoginSchema } from "@/lib/validations"
+import { LoginSchema } from "@/lib/utils/validations"
 import { getRequestMeta, logAudit } from "@/lib/api-helpers"
 
 export async function POST(request: NextRequest) {

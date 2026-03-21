@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { DatabaseService } from "@/lib/database-service"
+import { DatabaseService } from "@/lib/database/database-service"
 
 export async function POST(request: Request, { params }: { params: { formId: string } }) {
   try {

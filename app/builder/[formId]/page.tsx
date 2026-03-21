@@ -16,15 +16,15 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import FormCanvas from "@/components/form-canvas";
-import ResizableSidebar from "@/components/resizable-sidebar";
+import FormCanvas from "@/components/form-builder/form-canvas";
+import ResizableSidebar from "@/components/form-builder/resizable-sidebar";
 import FieldPalette, {
   PaletteItemDragOverlay,
   type fieldTypes,
-} from "@/components/field-palette";
-import PublishFormDialog from "@/components/publish-form-dialog";
-import LookupConfigurationDialog from "@/components/lookup-configuration-dialog";
-import UserFormSettingsDialog from "@/components/user-form-settings-dialog";
+} from "@/components/form-builder/field-palette";
+import PublishFormDialog from "@/components/form-builder/publish-form-dialog";
+import LookupConfigurationDialog from "@/components/form-builder/lookup-configuration-dialog";
+import UserFormSettingsDialog from "@/components/form-builder/user-form-settings-dialog";
 import type { Form, FormField, Subform } from "@/types/form-builder";
 import {
   Save,
@@ -38,9 +38,9 @@ import {
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { v4 as uuidv4 } from "uuid";
-import type { FormulaConfig } from "@/components/formula-builder";
-import FormulaConfigurationDialog from "@/components/FormulaConfigurationDialog";
-import ResourcePermissionDialog from "@/components/resource-permission-dialog";
+import type { FormulaConfig } from "@/components/form-builder/formula-builder";
+import FormulaConfigurationDialog from "@/components/form-builder/FormulaConfigurationDialog";
+import ResourcePermissionDialog from "@/components/form-builder/resource-permission-dialog";
 import {
   useGetFormDetailQuery,
   useCreateFieldMutation,

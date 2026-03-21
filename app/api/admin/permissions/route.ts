@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
-import { getUserPermissions } from "@/lib/database"; // ← NEW IMPORT
+import { getUserPermissions } from "@/lib/database/database"; // ← NEW IMPORT
 
 export const dynamic = "force-dynamic";
 

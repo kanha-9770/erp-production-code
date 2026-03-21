@@ -2,7 +2,7 @@
 // Reusable server-side logic for import/export operations
 
 import { prisma } from "@/lib/prisma"
-import { DatabaseService } from "@/lib/database-service"
+import { DatabaseService } from "@/lib/database/database-service"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

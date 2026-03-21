@@ -1,4 +1,4 @@
-import UserCreationPage from '@/components/UserCreationPage';
+import UserCreationPage from '@/components/users/UserCreationPage';
 import React from 'react';
 
 const EmployeeToUserCreation = () => {

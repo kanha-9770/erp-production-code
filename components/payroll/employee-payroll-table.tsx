@@ -3,7 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Eye, Download, Send } from "lucide-react"
-import { formatCurrency } from "@/lib/payroll-utils"
+import { formatCurrency } from "@/lib/utils/payroll-utils"
 
 interface EmployeePayroll {
   id: string

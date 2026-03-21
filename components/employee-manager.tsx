@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users, Clock, MapPin } from 'lucide-react';
-import { parseApiResponse, calculateDailyPayroll } from '@/lib/payroll-utils';
+import { parseApiResponse, calculateDailyPayroll } from '@/lib/utils/payroll-utils';
 import { useLazyGetFormsTestingDataQuery } from '@/lib/api/forms';
 
 interface DailyRecord {

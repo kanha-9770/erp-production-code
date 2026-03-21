@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import EmployeeManager from '@/components/employee-manager';
-import PayslipPreview from '@/components/payslip-preview';
+import PayslipPreview from '@/components/payroll/payslip-preview';
 import Dashboard from '@/components/dashboard';
-import PayrollEngine from '@/components/payroll-engine';
+import PayrollEngine from '@/components/payroll/payroll-engine';
 
 export default function PayrollPage() {
   const [] = useState(0);

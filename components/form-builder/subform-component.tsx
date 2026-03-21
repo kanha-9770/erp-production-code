@@ -47,7 +47,7 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
-import FieldSettings from "@/components/field-settings";
+import FieldSettings from "@/components/form-builder/field-settings";
 import type { FormField, Subform } from "@/types/form-builder";
 import { useToast } from "@/hooks/use-toast";
 import {

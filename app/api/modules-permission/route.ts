@@ -1,4 +1,4 @@
-import { getModulesWithForms } from "@/lib/database";
+import { getModulesWithForms } from "@/lib/database/database";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";

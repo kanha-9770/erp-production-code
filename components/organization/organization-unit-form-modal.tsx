@@ -5,7 +5,7 @@
 // import { useRoles } from "@/context/role-context"
 // import { useToast } from "@/hooks/use-toast"
 // import type { OrganizationUnitFormData, User } from "@/types/role"
-// import { flattenRoles, flattenUnits, getUserDisplayName, getUserInitials } from "@/lib/organization-utils"
+// import { flattenRoles, flattenUnits, getUserDisplayName, getUserInitials } from "@/lib/utils/organization-utils"
 // import {
 //   Dialog,
 //   DialogContent,
@@ -392,7 +392,7 @@ import { useState, useEffect } from "react"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import type { OrganizationUnitFormData, User } from "@/types/role"
-import { flattenRoles, flattenUnits, getUserDisplayName, getUserInitials } from "@/lib/organization-utils"
+import { flattenRoles, flattenUnits, getUserDisplayName, getUserInitials } from "@/lib/utils/organization-utils"
 import { useCreateOrgUnitMutation, useUpdateOrgUnitMutation } from "@/lib/api/organization"
 import {
   Dialog,

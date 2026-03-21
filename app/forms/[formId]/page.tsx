@@ -20,7 +20,7 @@ import { CalendarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Form } from "@/types/form-builder"
 import { useToast } from "@/hooks/use-toast"
-import LookupField from "@/components/lookup-field"
+import LookupField from "@/components/forms/lookup-field"
 import { useGetFormDetailQuery, useSubmitFormMutation } from "@/lib/api/forms"
 
 export default function PublicFormPage() {

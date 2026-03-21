@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { LoginSchema } from "@/lib/validations"
+import { LoginSchema } from "@/lib/utils/validations"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

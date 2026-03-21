@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useGetUserQuery } from "@/lib/api/auth"
-import { useGetRolePermissionsQuery } from "@/lib/api/permissions"
 
 export interface RolePermission {
   id: string

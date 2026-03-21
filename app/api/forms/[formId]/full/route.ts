@@ -2,7 +2,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
-import { DatabaseService } from "@/lib/database-service";
+import { DatabaseService } from "@/lib/database/database-service";
 
 export async function GET(
   request: NextRequest,

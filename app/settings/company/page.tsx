@@ -285,10 +285,7 @@
 "use client";
 
 import React from "react";
-import {
-  RoleProvider,
-  useRoles,
-} from "@/context/role-context";
+import { RoleProvider, useRoles } from "@/context/role-context";
 import { OrganizationTree } from "@/components/organization/organization-tree";
 import { RoleManagementSheet } from "@/components/organization/role-management-sheet";
 import { RoleFormModal } from "@/components/organization/role-form-modal";
@@ -348,7 +345,9 @@ function OrganizationHeader() {
                   <HelpCircle className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Analytics & Statistics</TooltipContent>
+              <TooltipContent side="bottom">
+                Analytics & Statistics
+              </TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
@@ -430,7 +429,9 @@ function OrganizationHeader() {
                 <Button
                   variant="outline"
                   className="justify-start gap-2 text-base h-11"
-                  onClick={() => dispatch({ type: "OPEN_USER_MANAGEMENT_SHEET" })}
+                  onClick={() =>
+                    dispatch({ type: "OPEN_USER_MANAGEMENT_SHEET" })
+                  }
                 >
                   <Users className="h-5 w-5 text-indigo-600" />
                   Manage Users
@@ -501,10 +502,12 @@ function OrganizationManagementContent() {
         open={state.showUserManagementSheet}
         onOpenChange={(open) =>
           dispatch({
-            type: open ? "OPEN_USER_MANAGEMENT_SHEET" : "CLOSE_USER_MANAGEMENT_SHEET",
+            type: open
+              ? "OPEN_USER_MANAGEMENT_SHEET"
+              : "CLOSE_USER_MANAGEMENT_SHEET",
           })
         }
       />
     </div>
   );
-} 
+}

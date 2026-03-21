@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from "next/server";
-import { DatabaseRoles } from "@/lib/DatabaseRoles";
+import { DatabaseRoles } from "@/lib/database/DatabaseRoles";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {

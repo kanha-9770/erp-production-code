@@ -6,7 +6,7 @@ import {
   getUserPermissions,
   updateUserPermissions,
   type UserPermissionUpdate,
-} from "@/lib/database";
+} from "@/lib/database/database";
 
 const VIEW_PERMISSION_ID = "1"; // ← your actual VIEW permission ID
 const CREATE_PERMISSION_ID = "2"; // ← your actual IDs

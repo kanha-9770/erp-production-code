@@ -13,7 +13,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import type { FormField } from "@/types/form-builder";
-import { FileUploadZone } from "@/components/file-upload-zone";
+import { FileUploadZone } from "@/components/forms/file-upload-zone";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";

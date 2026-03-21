@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth2';
-import { getDateRange } from '@/lib/date-utils';
+import { getDateRange } from '@/lib/utils/date-utils';
 
 // ──────────────────────────────────────────────────
 // Helpers (same patterns as intelligence.ts)

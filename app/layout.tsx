@@ -2,7 +2,7 @@ import type React from "react";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { ConditionalLayout } from "@/components/ConditionalLayout";
+import { ConditionalLayout } from "@/components/layout/ConditionalLayout";
 import { ReduxProvider } from "@/lib/providers/StoreProvider";
 const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {

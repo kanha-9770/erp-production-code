@@ -18,9 +18,9 @@ import {
   ChevronRight,
   Layers,
 } from "lucide-react";
-import { LookupField } from "@/components/lookup-field";
-import CameraCapture from "@/components/camera-capture";
-import { FileUploadZone } from "@/components/file-upload-zone";
+import { LookupField } from "@/components/forms/lookup-field";
+import CameraCapture from "@/components/forms/camera-capture";
+import { FileUploadZone } from "@/components/forms/file-upload-zone";
 import type { FormField, Subform } from "@/types/form-builder";
 import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
 import { Switch } from "../ui/switch";

@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Eye, Settings } from "lucide-react"
-import { DynamicDataTable } from "@/components/dynamic-data-table"
-import { DynamicForm } from "@/components/dynamic-form"
+import { DynamicDataTable } from "@/components/forms/dynamic-data-table"
+import { DynamicForm } from "@/components/forms/dynamic-form"
 import { useLazyGetSubmoduleDataQuery } from "@/lib/api/modules"
 
 interface Module {

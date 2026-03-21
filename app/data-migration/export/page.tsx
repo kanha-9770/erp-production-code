@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery, useLazyExportFormRecordsQuery } from "@/lib/api/forms"
-import { exportToCSV, exportToXLSX, exportToPDF } from "@/lib/export-utils"
+import { exportToCSV, exportToXLSX, exportToPDF } from "@/lib/utils/export-utils"
 import Link from "next/link"
 
 export default function ExportPage() {
