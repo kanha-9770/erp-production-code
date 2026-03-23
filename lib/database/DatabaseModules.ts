@@ -212,8 +212,26 @@ export class DatabaseModules {
               tableMapping: true,
               sections: {
                 include: {
-                  fields: true,
-               
+                  fields: { orderBy: { order: "asc" } },
+                },
+                orderBy: { order: "asc" },
+              },
+              subforms: {
+                where: { parentSubformId: null },
+                include: {
+                  fields: { orderBy: { order: "asc" } },
+                  childSubforms: {
+                    include: {
+                      fields: { orderBy: { order: "asc" } },
+                      childSubforms: {
+                        include: {
+                          fields: { orderBy: { order: "asc" } },
+                        },
+                        orderBy: { order: "asc" },
+                      },
+                    },
+                    orderBy: { order: "asc" },
+                  },
                 },
                 orderBy: { order: "asc" },
               },

@@ -15,10 +15,11 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-import { Copy, ExternalLink, Loader2, Eye } from "lucide-react"
+import { Copy, ExternalLink, Loader2, Eye, ShieldAlert } from "lucide-react"
 import { PublicFormDialog } from "@/components/public-form-dialog"
 import type { Form } from "@/types/form-builder"
 import { usePublishFormDirectMutation } from "@/lib/api/forms"
+import { useFormPermissions } from "@/hooks/use-form-permissions"
 
 export interface PublishFormDialogProps {
   form: Form
@@ -39,6 +40,7 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
   })
 
   const [publishForm] = usePublishFormDirectMutation()
+  const { canEdit, loading: permsLoading } = useFormPermissions(form.id)
 
   const handlePublish = async () => {
     setPublishing(true)
@@ -260,19 +262,25 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
         </div>
 
         <DialogFooter>
+          {!canEdit && !permsLoading && (
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground mr-auto">
+              <ShieldAlert className="h-4 w-4 text-destructive" />
+              You don't have permission to publish this form.
+            </p>
+          )}
           {form.isPublished ? (
             <div className="flex w-full justify-between">
-              <Button variant="destructive" onClick={handleUnpublish} disabled={publishing}>
+              <Button variant="destructive" onClick={handleUnpublish} disabled={publishing || !canEdit}>
                 {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Unpublish
               </Button>
-              <Button onClick={handlePublish} disabled={publishing}>
+              <Button onClick={handlePublish} disabled={publishing || !canEdit}>
                 {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Update Settings
               </Button>
             </div>
           ) : (
-            <Button onClick={handlePublish} disabled={publishing}>
+            <Button onClick={handlePublish} disabled={publishing || !canEdit}>
               {publishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Publish Form
             </Button>

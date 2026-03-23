@@ -94,8 +94,8 @@ export function useRecordsDisplay({
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
   const [recordToDelete, setRecordToDelete] = React.useState<EnhancedFormRecord | null>(null);
-  const [lastPointerDownTime, setLastPointerDownTime] = React.useState<number>(0);
-  const DOUBLE_CLICK_THRESHOLD = 300;
+  const lastPointerDownTimeRef = React.useRef<number>(0);
+  const DOUBLE_CLICK_THRESHOLD = 400;
   const [previewData, setPreviewData] = React.useState<{
     isOpen: boolean;
     rows: any[];
@@ -212,29 +212,74 @@ export function useRecordsDisplay({
     }
   }, [conditionalRules]);
 
-  // ── Visible fields init ──────────────────────────────────────────────────────
-  // Only initialize on first load; afterwards only add/remove fields that
-  // actually appeared or disappeared — never overwrite user's column choices.
+  // ── Visible fields storage key ────────────────────────────────────────────────
+  const visibleFieldsInitRef = React.useRef(false);
+  const orderedFieldsInitRef = React.useRef(false);
+
+  const visibleFieldsStorageKey = useMemo(() => {
+    if (formFieldsWithSections.length === 0) return null;
+    const fingerprint = formFieldsWithSections
+      .map((f) => f.id)
+      .sort()
+      .join(",");
+    let hash = 0;
+    for (let i = 0; i < fingerprint.length; i++) {
+      hash = ((hash << 5) - hash + fingerprint.charCodeAt(i)) | 0;
+    }
+    return `visible-columns-${hash}`;
+  }, [formFieldsWithSections]);
+
+  // ── Visible fields init from orderedFields ──────────────────────────────────
+  // When orderedFields loads (from data), initialize visibleFields if not yet done.
+  // This ensures visibleFields is based on actual available fields, not just schema.
 
   React.useEffect(() => {
-    const incomingIds = new Set(formFieldsWithSections.map((f) => f.id));
+    if (orderedFields.length === 0) return;
+    const orderedFieldIds = new Set(orderedFields.map((f) => f.id));
+
+    if (!visibleFieldsInitRef.current) {
+      visibleFieldsInitRef.current = true;
+      // Try to restore from localStorage
+      if (visibleFieldsStorageKey) {
+        try {
+          const saved = localStorage.getItem(visibleFieldsStorageKey);
+          if (saved) {
+            const savedIds: string[] = JSON.parse(saved);
+            const validSaved = savedIds.filter((id) => orderedFieldIds.has(id));
+            if (validSaved.length > 0) {
+              setVisibleFields(new Set(validSaved));
+              orderedFieldsInitRef.current = true;
+              return;
+            }
+          }
+        } catch { /* ignore corrupt data */ }
+      }
+      // No saved preference — default to ALL fields (or limit to reasonable number)
+      // Using all fields by default ensures data is visible on first load
+      setVisibleFields(new Set(orderedFieldIds));
+      orderedFieldsInitRef.current = true;
+      return;
+    }
+
+    // After init: preserve user choices, only handle added/removed fields
     setVisibleFields((prev) => {
-      // First load: make every field visible
-      if (prev.size === 0) return incomingIds;
-
-      // Check if anything actually changed
-      const added = [...incomingIds].filter((id) => !prev.has(id));
-      const removed = [...prev].filter((id) => !incomingIds.has(id));
+      const added = [...orderedFieldIds].filter((id) => !prev.has(id));
+      const removed = [...prev].filter((id) => !orderedFieldIds.has(id));
       if (added.length === 0 && removed.length === 0) return prev;
-
-      // Preserve existing choices, add newly-appeared fields as visible,
-      // drop fields that no longer exist
       const next = new Set(prev);
       removed.forEach((id) => next.delete(id));
+      // Auto-show newly added fields by default
       added.forEach((id) => next.add(id));
       return next;
     });
-  }, [formFieldsWithSections]);
+  }, [orderedFields, visibleFieldsStorageKey]);
+
+  // ── Persist visible fields to localStorage on change ────────────────────────
+  React.useEffect(() => {
+    if (visibleFieldsStorageKey && visibleFieldsInitRef.current && orderedFieldsInitRef.current) {
+      localStorage.setItem(visibleFieldsStorageKey, JSON.stringify([...visibleFields]));
+    }
+  }, [visibleFields, visibleFieldsStorageKey]);
 
   // ── Click outside → deselect ─────────────────────────────────────────────────
 
@@ -282,7 +327,12 @@ export function useRecordsDisplay({
     (formId: string, permName: string) => {
       if (isAdmin) return true;
       return permissions.some(
-        (p) => p.resource === "form" && p.form.id === formId && p.name === permName,
+        (p) =>
+          p.resource === "form" &&
+          p.name === permName &&
+          // Match form-specific permission OR module-level permission
+          // (module-level has form.id empty/"", applies to all forms in the module)
+          (p.form.id === formId || !p.form.id || p.form.id === ""),
       );
     },
     [permissions, isAdmin],
@@ -457,7 +507,26 @@ export function useRecordsDisplay({
         // processedData uses the raw fieldId — using originalId keeps them in sync.
         const rawId = f.originalId || f.id;
         const key = isMerged ? `${f.formId}-${rawId}` : rawId;
-        if (!fieldMap.has(key)) fieldMap.set(key, f);
+        if (fieldMap.has(key)) {
+          // Merge options/lookup/validation/properties from the full field definition
+          // into the stripped entry that was built from processedData (which lacks these).
+          const existing = fieldMap.get(key)! as any;
+          const src = f as any;
+          // Options: merge if missing or empty array
+          if ((!existing.options || (Array.isArray(existing.options) && existing.options.length === 0)) && src.options?.length) existing.options = src.options;
+          if (!existing.lookup && src.lookup) existing.lookup = src.lookup;
+          if (!existing.validation && src.validation) existing.validation = src.validation;
+          if (!existing.properties && src.properties) existing.properties = src.properties;
+          if (!existing.formula && src.formula) existing.formula = src.formula;
+          if (!existing.placeholder && src.placeholder) existing.placeholder = src.placeholder;
+          if (!existing.description && src.description) existing.description = src.description;
+          // Dependent dropdown fields
+          if (src.isDependent != null) existing.isDependent = src.isDependent;
+          if (src.parentFieldId) existing.parentFieldId = src.parentFieldId;
+          if (src.dependentGroups?.length) existing.dependentGroups = src.dependentGroups;
+        } else {
+          fieldMap.set(key, f);
+        }
       });
       // Final dedup: by originalId (raw field id) to catch any remaining duplicates
       // where one entry used compound id and another used raw id for the same field.
@@ -640,31 +709,45 @@ export function useRecordsDisplay({
 
   // ── Cell pointer / click handlers ────────────────────────────────────────────
 
+  const enterCellEdit = React.useCallback(
+    (record: EnhancedFormRecord, fieldDef: FormFieldWithSection) => {
+      const fd = getFieldData(record, fieldDef);
+      setEditingCell({
+        recordId: record.id, fieldId: fieldDef.id,
+        value: fd?.value ?? "", originalValue: fd?.value ?? "",
+        fieldType: fieldDef.type, options: fieldDef.options,
+      });
+      setSelectedCell(`${record.id}-${fieldDef.id}`);
+      setFocusedCell(`${record.id}-${fieldDef.id}`);
+    },
+    [getFieldData, setEditingCell, setSelectedCell, setFocusedCell],
+  );
+
   const handleCellPointerDown = React.useCallback(
     (e: React.PointerEvent<HTMLDivElement>, record: EnhancedFormRecord, fieldDef: FormFieldWithSection) => {
       if (e.button !== 0) return;
+      // ── Common guards ──
+      if (editMode === "locked" || savingChanges || isImageField(fieldDef.label)) return;
+      if (!hasPermissionForForm(fieldDef.formId, "EDIT")) return;
+
+      if (editMode === "single-click") {
+        // Single-click → enter edit immediately on pointer-down
+        e.preventDefault();
+        enterCellEdit(record, fieldDef);
+        return;
+      }
+
+      // ── Double-click detection (using ref for reliability) ──
       const now = Date.now();
-      if (now - lastPointerDownTime < DOUBLE_CLICK_THRESHOLD) {
+      if (now - lastPointerDownTimeRef.current < DOUBLE_CLICK_THRESHOLD) {
         e.preventDefault(); e.stopPropagation();
-        if (
-          editMode === "double-click" && !savingChanges &&
-          !isImageField(fieldDef.label) && hasPermissionForForm(fieldDef.formId, "EDIT")
-        ) {
-          const fd = getFieldData(record, fieldDef);
-          setEditingCell({
-            recordId: record.id, fieldId: fieldDef.id,
-            value: fd?.value ?? "", originalValue: fd?.value ?? "",
-            fieldType: fieldDef.type, options: fieldDef.options,
-          });
-          setSelectedCell(`${record.id}-${fieldDef.id}`);
-          setFocusedCell(`${record.id}-${fieldDef.id}`);
-        }
-        setLastPointerDownTime(0);
+        enterCellEdit(record, fieldDef);
+        lastPointerDownTimeRef.current = 0;
       } else {
-        setLastPointerDownTime(now);
+        lastPointerDownTimeRef.current = now;
       }
     },
-    [lastPointerDownTime, editMode, savingChanges, setEditingCell, getFieldData, hasPermissionForForm],
+    [editMode, savingChanges, hasPermissionForForm, enterCellEdit],
   );
 
   // ── Column resize handler ────────────────────────────────────────────────────
@@ -690,6 +773,8 @@ export function useRecordsDisplay({
     setVisibleFields((prev) => {
       const s = new Set(prev);
       s.has(fieldId) ? s.delete(fieldId) : s.add(fieldId);
+      // Ensure orderedFieldsInitRef is set if user is toggling (means fields exist)
+      orderedFieldsInitRef.current = true;
       return s;
     });
   };
@@ -702,6 +787,8 @@ export function useRecordsDisplay({
     } else {
       setVisibleFields(new Set(orderedFields.map((f) => f.id)));
     }
+    // Mark as initialized when user interacts with column visibility
+    orderedFieldsInitRef.current = true;
   };
 
   // ── Advanced filter opener ───────────────────────────────────────────────────
@@ -852,12 +939,29 @@ export function useRecordsDisplay({
   }, [baseRecords, currentPage, recordsPerPage]);
 
   // ── Hierarchy grouping ────────────────────────────────────────────────────────
-
-  const displayedFields = orderedFields.filter((f) => visibleFields.has(f.id));
+  // FALLBACK: If visibleFields is empty but orderedFields has content, show all.
+  // This prevents empty tables when state hasn't fully synced on initial load.
+  const displayedFields = useMemo(() => {
+    const filtered = orderedFields.filter((f) => visibleFields.has(f.id));
+    
+    // If user has selected specific columns, show only those
+    if (filtered.length > 0) {
+      return filtered;
+    }
+    
+    // Fallback: if no columns selected, show first 4 default columns
+    if (orderedFields.length > 0) {
+      return orderedFields.slice(0, 4);
+    }
+    
+    return [];
+  }, [orderedFields, visibleFields]);
 
   const hierarchyGroups = useMemo(() => {
     const formMap = new Map<string, FormGroup>();
-    displayedFields.forEach((field) => {
+    // Use safe accessor for displayedFields which might now include all fields
+    const fieldsToGroup = displayedFields;
+    fieldsToGroup.forEach((field) => {
       let fg = formMap.get(field.formId);
       if (!fg) {
         fg = { id: field.formId, name: field.formName, subforms: [], directSections: [] };
@@ -934,7 +1038,7 @@ export function useRecordsDisplay({
     recordToDelete,
     previewData, setPreviewData,
     orderedFields, setOrderedFields,
-    visibleFields,
+    visibleFields, setVisibleFields,
     isManageColumnsOpen, setIsManageColumnsOpen,
     isWrapTextEnabled, setIsWrapTextEnabled,
     activeTab, setActiveTab,

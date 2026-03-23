@@ -92,7 +92,7 @@ interface DeleteConfirmationItem {
   name: string;
   moduleId?: string;
 }
-
+  
 // ──────────────────────────────────────────────────────────────────
 export default function ModuleDashboard() {
   const { toast } = useToast();
@@ -706,18 +706,16 @@ export default function ModuleDashboard() {
       <div className="flex flex-1 overflow-hidden">
         {/* Mobile Sidebar Drawer */}
         <div
-          className={`fixed inset-0 z-50 md:hidden transition-opacity duration-300 ${
-            isMobileSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
+          className={`fixed inset-0 z-50 md:hidden transition-opacity duration-300 ${isMobileSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
         >
           <div
             className="absolute inset-0 bg-black/60"
             onClick={() => setIsMobileSidebarOpen(false)}
           />
           <div
-            className={`absolute left-0 top-0 h-full w-72 md:w-80 bg-white transform transition-transform duration-300 ease-in-out ${
-              isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
-            }`}
+            className={`absolute left-0 top-0 h-full w-72 md:w-80 bg-white transform transition-transform duration-300 ease-in-out ${isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
           >
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="text-lg font-semibold">Menu</h2>
@@ -803,11 +801,10 @@ export default function ModuleDashboard() {
                     <ChevronRight className="mx-1 h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
                     <button
                       onClick={() => setSelectedModule(m)}
-                      className={`whitespace-nowrap ${
-                        i === arr.length - 1
-                          ? "font-semibold text-gray-900"
-                          : "hover:text-gray-900"
-                      }`}
+                      className={`whitespace-nowrap ${i === arr.length - 1
+                        ? "font-semibold text-gray-900"
+                        : "hover:text-gray-900"
+                        }`}
                     >
                       {m.name}
                     </button>

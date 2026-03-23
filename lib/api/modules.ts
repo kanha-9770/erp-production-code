@@ -90,7 +90,7 @@ export const modulesApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: (result, error, { formId }) => [
         { type: "Form", id: formId },
-        "Module",
+        { type: "Module" },
         "OrgModules",
       ],
     }),
@@ -107,7 +107,7 @@ export const modulesApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["Module", "OrgModules"],
+      invalidatesTags: [{ type: "Module" }, "OrgModules"],
     }),
 
     // Update module
@@ -130,7 +130,7 @@ export const modulesApi = baseApi.injectEndpoints({
         method: "PATCH",
         body: { parentId },
       }),
-      invalidatesTags: ["Module", "OrgModules"],
+      invalidatesTags: [{ type: "Module" }, "OrgModules"],
     }),
 
     // Delete module
@@ -139,7 +139,7 @@ export const modulesApi = baseApi.injectEndpoints({
         url: `/modules/${moduleId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Module", "OrgModules"],
+      invalidatesTags: [{ type: "Module" }, "OrgModules"],
     }),
 
     // Get submodule data
@@ -185,7 +185,7 @@ export const modulesApi = baseApi.injectEndpoints({
         method: "PATCH",
         body: { newModuleId },
       }),
-      invalidatesTags: ["Module", "OrgModules"],
+      invalidatesTags: [{ type: "Module" }, "OrgModules"],
     }),
 
     // Delete form
@@ -194,7 +194,7 @@ export const modulesApi = baseApi.injectEndpoints({
         url: `/forms/${formId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Module", "OrgModules", "Form"],
+      invalidatesTags: [{ type: "Module" }, "OrgModules", "Form"],
     }),
 
     // Update form (name/description)
@@ -207,6 +207,7 @@ export const modulesApi = baseApi.injectEndpoints({
       invalidatesTags: (result, error, { formId }) => [
         { type: "Form", id: formId },
         { type: "FormDetail", id: formId },
+        { type: "Module" },
         "OrgModules",
       ],
     }),

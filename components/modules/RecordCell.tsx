@@ -1,5 +1,5 @@
 "use client";
-import React, { memo, useState, useEffect } from "react";
+import React, { memo, useState, useEffect, useMemo } from "react";
 import { ChevronDown, ChevronUp, MessageSquare, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isImageUrl, isImageField } from "@/lib/utils/fieldUtils";
@@ -75,20 +75,105 @@ export const RecordCell = memo(function RecordCell({
   toggleCellExpansion,
 }: RecordCellProps) {
   const actualValue = pendingChange ? pendingChange.value : fieldData?.value ?? null;
-  const displayText = pendingChange
-    ? String(pendingChange.value ?? "")
-    : fieldData?.displayValue ?? "";
-
+  const displayText = useMemo(() => {
+    const val = pendingChange ? pendingChange.value : fieldData?.displayValue ?? fieldData?.value ?? "";
+    if (val === null || val === undefined) return "";
+    if (Array.isArray(val)) {
+      return val.map(v => typeof v === 'object' && v !== null ? (v?.label || v?.url || JSON.stringify(v)) : String(v)).join(", ");
+    }
+    if (typeof val === 'object' && val !== null) {
+      return val.label || val.url || JSON.stringify(val);
+    }
+    return String(val);
+  }, [pendingChange, fieldData?.displayValue, fieldData?.value]);
   const cellKey = `${record.id}-${fieldDef.id}`;
   const isEditing =
     editingCell?.recordId === record.id && editingCell?.fieldId === fieldDef.id;
   const isExpanded = expandedCells.has(cellKey);
 
-  const hasImages = Array.isArray(actualValue)
-    ? actualValue.some(isImageUrl)
-    : isImageUrl(actualValue);
-  const isImageColumn = isImageField(fieldDef.label) || hasImages;
+  const getValidImages = (value: any): string[] => {
+    if (!value) return [];
 
+    let processedValue = value;
+
+    // 1. Try to parse stringified JSON
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+        try {
+          processedValue = JSON.parse(trimmed);
+        } catch (e) {
+          // Not valid JSON
+        }
+      } else if (trimmed === "[object Object]") {
+        return []; // Filter out literal "[object Object]" string
+      }
+    }
+
+    // 2. Normalize into an array
+    let rawItems: any[] = [];
+    if (Array.isArray(processedValue)) {
+      rawItems = processedValue;
+    } else if (typeof processedValue === "string") {
+      // Comma-separated or single string
+      rawItems = processedValue.includes(",")
+        ? processedValue.split(",").map(s => s.trim()).filter(Boolean)
+        : [processedValue];
+    } else if (typeof processedValue === "object" && processedValue !== null) {
+      // Single object or object with common properties
+      const possibleArrays = ["files", "urls", "images", "items", "data", "attachments"];
+      let foundArray = false;
+      for (const key of possibleArrays) {
+        if (Array.isArray((processedValue as any)[key])) {
+          rawItems = (processedValue as any)[key];
+          foundArray = true;
+          break;
+        }
+      }
+      if (!foundArray) rawItems = [processedValue];
+    }
+
+    // 3. Extract URLs from items and filter
+    return rawItems
+      .map((val) => {
+        if (typeof val === "string") return val;
+        if (typeof val === "object" && val !== null) {
+          // Search common URL keys
+          const obj = val as any;
+          return (
+            obj.url || obj.imageUrl || obj.path || obj.fileUrl ||
+            obj.secure_url || obj.src || obj.link || obj.value ||
+            (typeof obj.id === "string" && (obj.id.startsWith("http") || obj.id.includes(".")) ? obj.id : null)
+          );
+        }
+        return null;
+      })
+      .filter((url): url is string => {
+        if (typeof url !== "string" || !url || url === "[object Object]") return false;
+
+        const lowerUrl = url.toLowerCase();
+        return (
+          lowerUrl.startsWith("http") ||
+          lowerUrl.startsWith("/") ||
+          lowerUrl.startsWith("./") ||
+          lowerUrl.startsWith("data:image/") ||
+          lowerUrl.startsWith("blob:") ||
+          lowerUrl.includes("hostinger") ||
+          lowerUrl.includes("cloudinary") ||
+          lowerUrl.includes("storage") ||
+          lowerUrl.includes("googleusercontent") ||
+          lowerUrl.includes("amazonaws") ||
+          lowerUrl.includes("supabase") ||
+          lowerUrl.includes("firebase") ||
+          !!lowerUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|avif|tiff|heic)$/) ||
+          isImageUrl(url)
+        );
+      });
+  };
+
+  const images = useMemo(() => getValidImages(actualValue), [actualValue]);
+  const hasImages = images.length > 0;
+  const isImageColumn = isImageField(fieldDef.label) || hasImages;
   const hasComments = (comments.get(cellKey) || []).length > 0;
   const isDynamicRows =
     fieldDef.id.startsWith("_dynamicRows_") && Array.isArray(actualValue);
@@ -96,39 +181,23 @@ export const RecordCell = memo(function RecordCell({
   // ── State for image preview popup ──
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // Close preview on ESC
+  // Close on ESC key
   useEffect(() => {
     if (!previewUrl) return;
+
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPreviewUrl(null);
+      if (e.key === "Escape") {
+        setPreviewUrl(null);
+      }
     };
+
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
   }, [previewUrl]);
 
-  // Force array normalization (helps if backend sends string or single item)
-  const imageUrls = React.useMemo(() => {
-    if (Array.isArray(actualValue)) {
-      return actualValue.filter((v): v is string => typeof v === "string" && isImageUrl(v));
-    }
-    if (typeof actualValue === "string" && isImageUrl(actualValue)) {
-      return [actualValue];
-    }
-    // Fallback: try splitting comma-separated string (common bug)
-    if (typeof actualValue === "string" && actualValue.includes(",")) {
-      return actualValue
-        .split(",")
-        .map((u) => u.trim())
-        .filter((u) => isImageUrl(u));
-    }
-    return [];
-  }, [actualValue]);
-
-  const showDebug = true; // ← set to false when you no longer need it
-
   return (
     <>
-      {/* Image Preview Popup */}
+      {/* ── Image Preview Popup ── */}
       {previewUrl && (
         <div
           className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
@@ -144,15 +213,17 @@ export const RecordCell = memo(function RecordCell({
             >
               <X className="h-4 w-4" /> Close
             </button>
+
             <img
               src={previewUrl}
               alt={fieldDef.label || "Enlarged image"}
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white/5 backdrop-blur-sm"
               onError={(e) => {
-                e.currentTarget.src = "/placeholder.svg";
-                e.currentTarget.alt = "Image failed to load";
+                (e.currentTarget as HTMLImageElement).src = "/placeholder.svg";
+                (e.currentTarget as HTMLImageElement).alt = "Image failed to load";
               }}
             />
+
             <div className="text-center text-white mt-3 text-sm opacity-80">
               {fieldDef.label || "Image Preview"}
             </div>
@@ -160,7 +231,7 @@ export const RecordCell = memo(function RecordCell({
         </div>
       )}
 
-      {/* Main cell content */}
+      {/* ── Main cell content ── */}
       <div
         key={cellKey}
         className={cn(
@@ -168,10 +239,17 @@ export const RecordCell = memo(function RecordCell({
           isWrapTextEnabled || isExpanded
             ? "h-auto min-h-[36px] py-2 items-start"
             : "h-9 items-center",
-          selectedCell === cellKey && "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
-          isEditing && "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
-          pendingChange && !isEditing && "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
-          editMode !== "locked" && !isEditing && !isImageColumn && "cursor-pointer hover:bg-gray-50",
+          selectedCell === cellKey &&
+          "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
+          isEditing &&
+          "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
+          pendingChange &&
+          !isEditing &&
+          "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
+          editMode !== "locked" &&
+          !isEditing &&
+          !isImageColumn &&
+          "cursor-pointer hover:bg-gray-50",
           focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
         )}
         style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
@@ -197,62 +275,37 @@ export const RecordCell = memo(function RecordCell({
           {isEditing ? (
             renderFieldEditor(record, fieldDef, actualValue, displayText)
           ) : isImageColumn ? (
-            <div className="flex flex-col gap-1 py-1 w-full">
-              {/* ── DEBUG BLOCK ── shows raw data (remove when fixed) ── */}
-              {showDebug && (
-                <pre
-                  style={{
-                    fontSize: "10px",
-                    background: "#f8f9fa",
-                    padding: "6px",
-                    borderRadius: "4px",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-all",
-                    maxWidth: "100%",
-                    margin: "0 0 4px 0",
-                    border: "1px solid #e5e7eb",
-                  }}
-                >
-                  {JSON.stringify(
-                    {
-                      rawActualValue: actualValue,
-                      isArray: Array.isArray(actualValue),
-                      imageUrlsCount: imageUrls.length,
-                      imageUrlsSample: imageUrls.slice(0, 3),
-                      fieldType: fieldDef.type,
-                    },
-                    null,
-                    2
-                  )}
-                </pre>
-              )}
-
-              {/* Image thumbnails */}
-              {imageUrls.length > 0 ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  {imageUrls.slice(0, 3).map((url, idx) => (
+            <div className="flex items-center gap-2 flex-wrap py-1">
+              {Array.isArray(actualValue) ? (
+                actualValue
+                  .filter(isImageUrl)
+                  .slice(0, 3)
+                  .map((url: string, idx: number) => (
                     <img
                       key={idx}
-                      src={url}
+                      src={url || "/placeholder.svg"}
                       alt={`Image ${idx + 1} - ${fieldDef.label || "Uploaded image"}`}
                       className="h-7 w-7 object-cover rounded border border-gray-300 cursor-pointer hover:opacity-90 hover:scale-110 transition-all duration-200 shadow-sm"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = "none";
-                      }}
+                      onError={(e) => (e.currentTarget.style.display = "none")}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPreviewUrl(url);
+                        if (url) setPreviewUrl(url);
                       }}
                     />
-                  ))}
-                  {imageUrls.length > 3 && (
-                    <span className="text-xs text-gray-500">+{imageUrls.length - 3}</span>
-                  )}
-                </div>
+                  ))
+              ) : isImageUrl(actualValue) ? (
+                <img
+                  src={actualValue || "/placeholder.svg"}
+                  alt={fieldDef.label || "Uploaded image"}
+                  className="h-7 w-7 object-cover rounded border border-gray-300 cursor-pointer hover:opacity-90 hover:scale-110 transition-all duration-200 shadow-sm"
+                  onError={(e) => (e.currentTarget.style.display = "none")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (actualValue) setPreviewUrl(actualValue);
+                  }}
+                />
               ) : (
-                <span className="text-xs text-gray-400 italic">
-                  No valid images (check debug above)
-                </span>
+                <span className="text-xs text-gray-400">No image</span>
               )}
             </div>
           ) : isDynamicRows ? (
@@ -260,7 +313,11 @@ export const RecordCell = memo(function RecordCell({
               className="flex items-center gap-2 cursor-pointer hover:text-blue-600"
               onClick={(e) => {
                 e.stopPropagation();
-                onPreviewClick(actualValue, fieldDef.label, fieldData?.fieldDefinitions);
+                onPreviewClick(
+                  actualValue,
+                  fieldDef.label,
+                  fieldData?.fieldDefinitions,
+                );
               }}
             >
               <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
@@ -292,13 +349,16 @@ export const RecordCell = memo(function RecordCell({
                   }}
                   className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20"
                 >
-                  {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  {isExpanded ? (
+                    <ChevronUp className="h-3 w-3" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3" />
+                  )}
                 </button>
               )}
             </div>
           )}
         </div>
-
         {hasComments && (
           <div className="absolute top-0 right-0 group z-10">
             <button

@@ -43,7 +43,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
         {/* Sidebar — drawer on mobile, static on md+ */}
         <div
           className={[
-            "fixed md:relative z-50 md:z-auto h-full",
+            "fixed md:relative z-50 md:z-50 h-full",
             "transition-transform duration-300 ease-in-out",
             mobileSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}

@@ -67,17 +67,21 @@ export type FieldType = (typeof FIELD_TYPES)[keyof typeof FIELD_TYPES];
 
 export const isImageUrl = (val: any): boolean => {
   if (typeof val !== "string") return false;
-  return (
-    val.startsWith("http") && /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(val)
-  );
+  if (!val.startsWith("http")) return false;
+  // Strip query string before checking extension
+  const path = val.split("?")[0];
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(path);
 };
 
 export const isImageField = (label: string): boolean => {
-  const lowerLabel = label.toLowerCase();
+  const lowerLabel = label.toLowerCase().trim();
   return (
+    lowerLabel === "img" ||
     lowerLabel.includes("image") ||
     lowerLabel.includes("photo") ||
-    lowerLabel.includes("camera")
+    lowerLabel.includes("camera") ||
+    lowerLabel.includes("picture") ||
+    lowerLabel.includes("thumbnail")
   );
 };
 
@@ -136,6 +140,12 @@ export const formatFieldValue = (fieldType: string, value: any): string => {
 
     case "lookup":
       return String(value);
+
+    case "image":
+    case "camera":
+    case "signature":
+      if (Array.isArray(value)) return `${value.length} image(s)`;
+      return typeof value === "string" && value.startsWith("http") ? "1 image" : String(value);
 
     case "file":
       if (typeof value === "object" && value !== null) {

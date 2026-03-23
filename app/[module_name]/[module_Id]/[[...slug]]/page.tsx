@@ -106,37 +106,15 @@ export default function ModulePage({
   useEffect(() => {
     const fetchPermissions = async () => {
       try {
-        console.log("[Permissions] Fetching from admin/permissions");
-
         const data = await triggerAdminPerms({ formId: selectedForm?.id }).unwrap();
-        console.log("[Permissions] Raw response:", data);
 
-        if (!data.success || !data.data) {
-          console.warn("[Permissions] API returned success:false or no data");
-          return;
-        }
+        if (!data.success || !data.data) return;
 
         const apiData = data.data;
-
-        const allPermissions: PermissionItem[] = apiData.permissions ?? [];
-        setPermissions(allPermissions);
-
+        setPermissions(apiData.permissions ?? []);
         setIsAdmin(apiData.isAdmin ?? false);
-
-        if (apiData.permissionSummary) {
-          setPermissionSummary(apiData.permissionSummary);
-          console.log("[Permissions] Summary:", apiData.permissionSummary);
-        }
-
-        console.log("[Permissions] Loaded successfully", {
-          total: allPermissions.length,
-          roleBased: allPermissions.filter((p: any) => p.source === "role").length,
-          userBased: allPermissions.filter((p: any) => p.source === "user").length,
-          isAdmin: apiData.isAdmin,
-          formSpecific: !!selectedForm?.id,
-        });
+        if (apiData.permissionSummary) setPermissionSummary(apiData.permissionSummary);
       } catch (error) {
-        console.error("[Permissions] Fetch error:", error);
         toast({
           title: "Permissions Error",
           description: "Could not load user permissions. Some features may be limited.",
@@ -194,8 +172,10 @@ export default function ModulePage({
       const allFieldsWithSections: FormFieldWithSection[] = [];
 
       moduleForms.forEach((form) => {
+        let fieldOrder = 0;
+
+        // Process section fields
         if (form.sections) {
-          let fieldOrder = 0;
           form.sections.forEach((section: any) => {
             if (section.fields) {
               section.fields.forEach((field: any) => {
@@ -213,6 +193,35 @@ export default function ModulePage({
               });
             }
           });
+        }
+
+        // Process subform fields
+        const processSubform = (subform: any, parentPath: string = "") => {
+          const subformTitle = parentPath ? `${parentPath} → ${subform.name}` : subform.name;
+          if (subform.fields) {
+            subform.fields.forEach((field: any) => {
+              const uniqueFieldId = `${form.id}_${field.id}`;
+              allFieldsWithSections.push({
+                ...field,
+                id: uniqueFieldId,
+                originalId: field.id,
+                order: field.order || fieldOrder++,
+                sectionTitle: subformTitle,
+                sectionId: subform.id,
+                formId: form.id,
+                formName: form.name,
+                subformId: subform.id,
+                subformTitle: subform.name,
+              });
+            });
+          }
+          if (subform.childSubforms) {
+            subform.childSubforms.forEach((child: any) => processSubform(child, subformTitle));
+          }
+        };
+
+        if (form.subforms) {
+          form.subforms.forEach((sf: any) => processSubform(sf));
         }
       });
 
@@ -500,6 +509,18 @@ export default function ModulePage({
   // Edit mode
   // ─────────────────────────────────────────────────────────────────────────────
   const toggleEditMode = () => {
+    // Only allow switching out of locked mode if user has EDIT permission
+    if (editMode === "locked") {
+      const canEditAny = isAdmin || allModuleForms.some((f) => hasPermissionForForm(f.id, "EDIT"));
+      if (!canEditAny) {
+        toast({
+          title: "Access Denied",
+          description: "You don't have permission to edit records.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
     if (editMode !== "locked" && editingCell) setEditingCell(null);
     setPendingChanges(new Map());
     cycleEditMode();
@@ -540,10 +561,29 @@ export default function ModulePage({
     }
   };
 
+  // ─── Permission helper (matches the logic in use-records-display) ──────────
+  const hasPermissionForForm = (formId: string, permName: string) => {
+    if (isAdmin) return true;
+    return permissions.some(
+      (p: any) =>
+        p.resource === "form" &&
+        p.name === permName &&
+        (p.form?.id === formId || !p.form?.id || p.form?.id === ""),
+    );
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Form dialog
   // ─────────────────────────────────────────────────────────────────────────────
   const openFormDialog = (formId: string) => {
+    if (!hasPermissionForForm(formId, "CREATE") && !isAdmin) {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to submit this form.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSelectedFormForFilling(formId);
     setIsFormDialogOpen(true);
   };
@@ -632,6 +672,7 @@ export default function ModulePage({
         selectedForm={selectedForm}
         setSelectedForm={setSelectedForm}
         openFormDialog={openFormDialog}
+        canCreateForForm={(formId) => hasPermissionForForm(formId, "CREATE")}
       />
       <RecordsDisplay
         allModuleForms={allModuleForms}

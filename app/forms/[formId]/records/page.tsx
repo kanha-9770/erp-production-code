@@ -960,8 +960,9 @@ export default function RecordsPage() {
       const allFields: FormField[] = []
       const fieldsWithSections: FormFieldWithSection[] = []
 
+      let fieldOrder = 0
+
       if (data.data.sections) {
-        let fieldOrder = 0
         data.data.sections.forEach((section: any) => {
           if (section.fields) {
             section.fields.forEach((field: any) => {
@@ -975,6 +976,31 @@ export default function RecordsPage() {
             })
           }
         })
+      }
+
+      // Process subform fields
+      const processSubform = (subform: any, parentPath: string = "") => {
+        const subformTitle = parentPath ? `${parentPath} → ${subform.name}` : subform.name
+        if (subform.fields) {
+          subform.fields.forEach((field: any) => {
+            allFields.push(field)
+            fieldsWithSections.push({
+              ...field,
+              order: field.order || fieldOrder++,
+              sectionTitle: subformTitle,
+              sectionId: subform.id,
+              subformId: subform.id,
+              subformTitle: subform.name,
+            })
+          })
+        }
+        if (subform.childSubforms) {
+          subform.childSubforms.forEach((child: any) => processSubform(child, subformTitle))
+        }
+      }
+
+      if (data.data.subforms) {
+        data.data.subforms.forEach((sf: any) => processSubform(sf))
       }
 
       setAllFormFields(allFields)

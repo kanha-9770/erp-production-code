@@ -302,7 +302,7 @@ export const formsApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: (result, error, { formId }) => [{ type: "Form", id: formId }, "Module", "OrgModules"],
+      invalidatesTags: (result, error, { formId }) => [{ type: "Form", id: formId }, { type: "Module" }, "OrgModules"],
     }),
 
     // ─── Field/Section permissions ────────────────────────────────

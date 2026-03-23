@@ -24,9 +24,12 @@ interface FormsContentProps {
   selectedForm: Form | null
   setSelectedForm: (form: Form | null) => void
   openFormDialog: (formId: string) => void
+  /** Optional permission check — returns true if the user can CREATE records for the given formId.
+   *  When omitted, all form buttons are enabled (backwards-compatible). */
+  canCreateForForm?: (formId: string) => boolean
 }
 
-const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, openFormDialog }) => {
+const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, openFormDialog, canCreateForForm }) => {
   const visible = forms.slice(0, 2)
   const hasMore = forms.length > 2
 
@@ -133,13 +136,14 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
 
   const FormButton = (f: Form) => {
     const { disabled, title } = getButtonState(f.name)
+    const permissionDenied = canCreateForForm ? !canCreateForForm(f.id) : false
 
     return (
       <Button
         key={f.id}
         variant="outline"
         className="
-          w-full justify-start text-left text-blue-600 hover:text-blue-800 
+          w-full justify-start text-left text-blue-600 hover:text-blue-800
           border-blue-600 hover:border-blue-800 disabled:opacity-50 disabled:cursor-not-allowed
           bg-transparent font-medium transition-all
         "
@@ -147,8 +151,8 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
           e.stopPropagation()
           handleFormClick(f.id)
         }}
-        disabled={disabled || loading}
-        title={title}
+        disabled={disabled || loading || permissionDenied}
+        title={permissionDenied ? "You don't have permission to submit this form" : title}
       >
         {f.name}
       </Button>

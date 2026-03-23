@@ -32,18 +32,22 @@ import {
   RefreshCw,
   CheckCircle2,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useMemo, useEffect, type MutableRefObject } from "react"
 import { usePermissionMatrix } from "@/hooks/use-permission-matrix"
 import type { PermissionModule, Permission, PermissionUser } from "@/types/permissions"
 
 interface FormsPermissionMatrixProps {
   modules: PermissionModule[]
   selectedForm: string | null
+  /** Ref updated with the current unsaved-changes flag so the parent can
+   *  guard form switches without needing to own the hook. */
+  unsavedChangesRef?: MutableRefObject<boolean>
 }
 
 export function FormsPermissionMatrix({
   modules,
   selectedForm,
+  unsavedChangesRef,
 }: FormsPermissionMatrixProps) {
   const [expandedRoles, setExpandedRoles] = useState<Set<string>>(new Set())
 
@@ -64,6 +68,11 @@ export function FormsPermissionMatrix({
     filteredRoles,
   } = usePermissionMatrix(selectedForm)
 
+  // Keep the parent's ref in sync so it can guard form switches
+  useEffect(() => {
+    if (unsavedChangesRef) unsavedChangesRef.current = hasChanges
+  }, [hasChanges, unsavedChangesRef])
+
   const toggleRole = (roleId: string) => {
     setExpandedRoles((prev) => {
       const next = new Set(prev)
@@ -72,13 +81,15 @@ export function FormsPermissionMatrix({
     })
   }
 
-  const getFormDetails = (formId: string) => {
+  // Memoize to avoid nested-loop recalculation on every render
+  const formDetails = useMemo(() => {
+    if (!selectedForm) return null
     for (const mod of modules) {
-      const form = mod.forms?.find((f) => f.id === formId)
+      const form = mod.forms?.find((f) => f.id === selectedForm)
       if (form) return { form, module: mod, submodule: null, path: `${mod.name} > ${form.name}` }
 
       for (const sub of mod.children ?? []) {
-        const form = sub.forms?.find((f) => f.id === formId)
+        const form = sub.forms?.find((f) => f.id === selectedForm)
         if (form)
           return {
             form,
@@ -89,7 +100,7 @@ export function FormsPermissionMatrix({
       }
     }
     return null
-  }
+  }, [selectedForm, modules])
 
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -122,8 +133,6 @@ export function FormsPermissionMatrix({
   }
 
   // ─── Empty state ──────────────────────────────────────────────────────────
-  const formDetails = selectedForm ? getFormDetails(selectedForm) : null
-
   if (!selectedForm || !formDetails) {
     return (
       <Card className="border-dashed border-border">
@@ -222,6 +231,7 @@ export function FormsPermissionMatrix({
                               <PermissionCell
                                 key={p.id}
                                 checked={hasRolePermission(role.id, selectedForm, p.id)}
+                                disabled={saving}
                                 onChange={() =>
                                   togglePermission("role", role.id, selectedForm, p.id)
                                 }
@@ -254,6 +264,7 @@ export function FormsPermissionMatrix({
                                     user={user}
                                     selectedForm={selectedForm}
                                     permissions={permissions}
+                                    saving={saving}
                                     hasUserPermission={hasUserPermission}
                                     togglePermission={togglePermission}
                                   />
@@ -320,13 +331,14 @@ function EmptyRoles() {
 
 interface PermissionCellProps {
   checked: boolean
+  disabled?: boolean
   onChange: () => void
 }
 
-function PermissionCell({ checked, onChange }: PermissionCellProps) {
+function PermissionCell({ checked, disabled, onChange }: PermissionCellProps) {
   return (
     <TableCell className="text-center">
-      <Checkbox checked={checked} onCheckedChange={onChange} />
+      <Checkbox checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </TableCell>
   )
 }
@@ -335,6 +347,7 @@ interface UserRowProps {
   user: PermissionUser
   selectedForm: string
   permissions: Permission[]
+  saving: boolean
   hasUserPermission: (userId: string, formId: string, permId: string) => boolean
   togglePermission: (prefix: "role" | "user", id: string, formId: string, permId: string) => void
 }
@@ -343,6 +356,7 @@ function UserRow({
   user,
   selectedForm,
   permissions,
+  saving,
   hasUserPermission,
   togglePermission,
 }: UserRowProps) {
@@ -357,6 +371,7 @@ function UserRow({
         <PermissionCell
           key={p.id}
           checked={hasUserPermission(user.id, selectedForm, p.id)}
+          disabled={saving}
           onChange={() => togglePermission("user", user.id, selectedForm, p.id)}
         />
       ))}

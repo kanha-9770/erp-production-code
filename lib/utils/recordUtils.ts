@@ -33,31 +33,34 @@ export const processRecordData = (
         fieldById.get(fieldKey) ||
         fieldById.get(fieldKey.split("_").pop() || "");
 
-      const value =
-        fieldData && typeof fieldData === "object" && "value" in fieldData
-          ? fieldData.value
-          : fieldData;
+      // fieldData from the API may be a rich object with label, sectionTitle, etc.
+      const isRichEntry = fieldData && typeof fieldData === "object" && "value" in fieldData;
+      const value = isRichEntry ? fieldData.value : fieldData;
 
       const fieldType =
         formField?.type ||
+        (isRichEntry && fieldData.type) ||
         (fieldKey.startsWith("_dynamicRows_") ? "dynamicRows" : "text");
 
       processedData.push({
         recordId: record.id,
         recordIdFromAPI: record.id,
         fieldId: fieldKey,
-        fieldLabel: formField?.label || fieldKey,
+        fieldLabel: formField?.label || (isRichEntry && fieldData.label) || fieldKey,
         fieldType,
         value,
         displayValue: formatFieldValue(fieldType, value),
         icon: fieldType,
         order: formField?.order ?? 999,
-        sectionId: formField?.sectionId || "other",
-        sectionTitle: formField?.sectionTitle || "unauthorized",
+        sectionId: formField?.sectionId || (isRichEntry && fieldData.sectionId) || "other",
+        sectionTitle: formField?.sectionTitle || (isRichEntry && fieldData.sectionTitle) || "General",
+        subformId: formField?.subformId || (isRichEntry && fieldData.subformId),
+        subformTitle: formField?.subformTitle || (isRichEntry && fieldData.subformTitle),
         formId: record.formId,
         formName: formField?.formName || record.formName || "Form",
         lookup: formField?.lookup || {},
         options: formField?.options || [],
+        fieldDefinitions: (isRichEntry && fieldData.fieldDefinitions) || undefined,
       });
     });
   }

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     const roleId = request.nextUrl.searchParams.get("roleId");
     let formId = request.nextUrl.searchParams.get("formId");
 
-    // Normalize: treat empty / "null" string as no filter on formId
+    // Normalize: treat empty / "null" string as no filter
     if (formId === "" || formId === "null" || formId === "undefined") {
       formId = null;
     }
@@ -39,13 +39,18 @@ export async function GET(request: NextRequest) {
       whereClause.roleId = roleId;
     }
 
-    // Only apply formId filter if explicitly provided
-    if (formId !== null && formId !== undefined) {
-      whereClause.formId = formId;
+    // RolePermission unique key is (roleId, permissionId, moduleId) — formId
+    // is just metadata. Filter by the form's moduleId so we return the correct
+    // module-scoped permissions regardless of which formId was last saved.
+    if (formId) {
+      const form = await prisma.form.findUnique({
+        where: { id: formId },
+        select: { moduleId: true },
+      });
+      if (form?.moduleId) {
+        whereClause.moduleId = form.moduleId;
+      }
     }
-    // ── IMPORTANT CHANGE ──
-    // If no formId is sent → do NOT force formId = null
-    // → show both module-level (null) and form-level permissions
 
     const rolePermissions = await prisma.rolePermission.findMany({
       where: whereClause,

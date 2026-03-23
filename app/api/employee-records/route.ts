@@ -2,7 +2,7 @@
 // export const dynamic = 'force-dynamic';
 // import { NextRequest, NextResponse } from 'next/server';
 // import { PrismaClient } from '@prisma/client';
-// import { parseEmployeeData } from '@/lib/utils/employeeDataParser';
+// import { parseEmployeeData, analyzeRecordDataStructure } from '@/lib/employeeDataParser';
 
 // const prisma = new PrismaClient();
 
@@ -134,145 +134,165 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getAuthenticatedUser } from '@/lib/api-helpers';
-import { parseEmployeeData } from '@/lib/utils/employeeDataParser';
+import { prisma } from '@/lib/prisma'; // ← use your shared prisma instance (preferred)
+import { validateSession } from '@/lib/auth';
+import { parseEmployeeData, analyzeRecordDataStructure } from '@/lib/employeeDataParser';
 
 // Do NOT create new PrismaClient() here — use the shared instance from lib/prisma
 // const prisma = new PrismaClient();  ← REMOVE THIS LINE
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Auth
-    const authUser = await getAuthenticatedUser(request);
-    if (!authUser) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    console.log('Fetching employee records from FormRecord14...');
+
+    // ──────────────────────────────────────────────────────────────
+    // 1. Authentication & get current organization
+    // ──────────────────────────────────────────────────────────────
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // 2. Resolve org — owner users have organizationId = null; look up via ownedOrganization
-    const fullUser = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: { organizationId: true, ownedOrganization: { select: { id: true } } },
-    });
-    const orgId = fullUser?.organizationId ?? fullUser?.ownedOrganization?.id ?? null;
+    const session = await validateSession(token);
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
+    }
+
+    // Extract organization ID — adjust path based on your session shape
+    const orgId = session.user?.organization?.id ||
+                  session.user?.organizationId ||
+                  session.user?.orgId ||
+                  session.user?.tenantId;
 
     if (!orgId) {
-      return NextResponse.json({ error: 'No organization associated with this account' }, { status: 403 });
+      console.warn("No organization context found in session", { userId: session.user.id });
+      return NextResponse.json(
+        { error: "No organization context available" },
+        { status: 403 }
+      );
     }
 
-    // 3. Fetch employee records — try unified table first, fall back to legacy table 14
-    const selectFields = { id: true, employee_id: true, recordData: true, submittedAt: true, status: true, userId: true, organizationId: true } as const;
+    console.log(`Fetching records for organization: ${orgId}`);
 
-    let records: any[] = [];
+    // ──────────────────────────────────────────────────────────────
+    // 2. Fetch ONLY records belonging to this organization
+    // ──────────────────────────────────────────────────────────────
+    const records = await prisma.formRecord14.findMany({
+      select: {
+        id: true,
+        employee_id: true,
+        recordData: true,
+        submittedAt: true,
+        status: true,
+        userId: true,
+        organizationId: true,  // optional — good for debugging
+      },
+      where: {
+        status: 'submitted',
+        organizationId: orgId,    // ← THIS IS THE CRITICAL CHANGE
+      },
+      orderBy: {
+        submittedAt: 'desc',
+      },
+    });
 
-    // Strategy 1: Unified table — org-scoped employee forms
-    try {
-      records = await prisma.formRecord.findMany({
-        select: selectFields,
-        where: {
-          status: 'submitted',
-          organizationId: orgId,
-          form: { isEmployeeForm: true },
-        },
-        orderBy: { submittedAt: 'desc' },
-      });
-    } catch {
-      // Unified table may not exist yet (migration pending)
-    }
+    console.log(`Found ${records.length} records in FormRecord14 for org ${orgId}`);
 
-    // Strategy 2: Unified table — all employee forms (no org filter)
-    if (records.length === 0) {
-      try {
-        records = await prisma.formRecord.findMany({
-          select: selectFields,
-          where: {
-            status: 'submitted',
-            form: { isEmployeeForm: true },
-          },
-          orderBy: { submittedAt: 'desc' },
-        });
-      } catch {
-        // Unified table may not exist yet
-      }
-    }
-
-    // Strategy 3: Legacy table 14 — org-scoped
-    if (records.length === 0) {
-      records = await prisma.formRecord14.findMany({
-        select: selectFields,
-        where: { status: 'submitted', organizationId: orgId },
-        orderBy: { submittedAt: 'desc' },
-      });
-    }
-
-    // Strategy 4: Legacy table 14 — all submitted (no org filter)
-    if (records.length === 0) {
-      records = await prisma.formRecord14.findMany({
-        select: selectFields,
-        where: { status: 'submitted' },
-        orderBy: { submittedAt: 'desc' },
-      });
-    }
-
-    // 4. Parse and classify each record
+    // ──────────────────────────────────────────────────────────────
+    // 3. Process records (your original logic – unchanged)
+    // ──────────────────────────────────────────────────────────────
     const processedRecords = [];
-    const skipReasons: { recordId: string; reason: string }[] = [];
+    const skipReasons = [];
 
     for (const record of records) {
-      let parsedData: Record<string, any> = {};
-      try {
-        parsedData = parseEmployeeData(record.recordData) as Record<string, any>;
-      } catch {
-        parsedData = {};
+      const parsedData = parseEmployeeData(record.recordData);
+
+      // Debug: Analyze structure for the first record
+      if (processedRecords.length === 0) {
+        const analysis = analyzeRecordDataStructure(record.recordData);
+        console.log('Record structure analysis:', JSON.stringify(analysis, null, 2));
       }
 
-      let recStatus = 'valid';
-      let reason: string | null = null;
+      let status = 'valid';
+      let reason = null;
 
       if (!parsedData.employeeName) {
-        recStatus = 'skipped';
-        reason = 'Missing employee name';
+        status = 'skipped';
+        reason = 'Missing essential data: employeeName';
+        console.log(`Record ${record.id}: ${reason}`);
       } else if (!parsedData.email) {
-        recStatus = 'warning';
-        reason = 'Missing email';
+        status = 'warning';
+        reason = 'Missing email - can still create user but email recommended';
+        console.log(`Record ${record.id}: ${reason}`);
       } else {
-        try {
-          const existingUser = await prisma.user.findUnique({ where: { email: parsedData.email as string } });
-          if (existingUser) {
-            recStatus = 'skipped';
-            reason = `User already exists with email ${parsedData.email}`;
-          }
-        } catch { /* skip check on DB error */ }
+        const existingUser = await prisma.user.findUnique({
+          where: { email: parsedData.email }
+        });
+
+        if (existingUser) {
+          status = 'skipped';
+          reason = `User already exists with email ${parsedData.email}`;
+          console.log(`Record ${record.id}: ${reason}`);
+        }
       }
 
-      if (recStatus === 'skipped' && reason) {
+      if (reason && status === 'skipped') {
         skipReasons.push({ recordId: record.id, reason });
       }
 
-      let hasEmployeeRecord = false;
+      let employee = null;
       if (record.employee_id) {
-        try {
-          const emp = await prisma.employee.findUnique({ where: { id: record.employee_id } });
-          hasEmployeeRecord = !!emp;
-        } catch { /* ignore */ }
+        employee = await prisma.employee.findUnique({
+          where: { id: record.employee_id }
+        });
       }
 
-      processedRecords.push({ ...record, parsedData, hasEmployeeRecord, processStatus: recStatus, reason });
+      processedRecords.push({
+        ...record,
+        parsedData,
+        hasEmployeeRecord: !!employee,
+        processStatus: status,
+        reason: reason,
+        ...(process.env.NODE_ENV === 'development' && {
+          _debug: {
+            originalRecordData: record.recordData,
+            parsedFields: Object.keys(parsedData).filter(key => parsedData[key]),
+          }
+        })
+      });
     }
 
-    const usableRecords = processedRecords.filter(r => r.processStatus === 'valid' || r.processStatus === 'warning');
+    const usableRecords = processedRecords.filter(r => 
+      r.processStatus === 'valid' || r.processStatus === 'warning'
+    );
+
+    console.log(
+      `Returning ${usableRecords.length} usable records for user creation ` +
+      `(total processed: ${processedRecords.length})`
+    );
 
     return NextResponse.json({
       success: true,
       records: usableRecords,
       total: usableRecords.length,
-      _meta: { total: records.length, usable: usableRecords.length, skipped: skipReasons.length, orgId },
+      allProcessedRecords: processedRecords,
+      ...(process.env.NODE_ENV === 'development' && {
+        _metadata: {
+          totalRecordsInDB: records.length,
+          usableRecords: usableRecords.length,
+          skippedRecords: processedRecords.length - usableRecords.length,
+          skipReasons,
+          organizationId: orgId,  // helps debugging
+        }
+      })
     });
-
   } catch (error) {
-    console.error('[employee-records] GET error:', error);
+    console.error('Error fetching employee records:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch employee records', details: error instanceof Error ? error.message : String(error) },
+      { 
+        error: 'Failed to fetch employee records',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

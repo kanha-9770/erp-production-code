@@ -29,7 +29,7 @@ interface AdminUsersResponse {
 export const usersApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getAdminUsers: builder.query<AdminUsersResponse, void>({
-      query: () => "/api-test",
+      query: () => "/admin/users",
       providesTags: ["AdminUsers"],
       keepUnusedDataFor: 60,
     }),

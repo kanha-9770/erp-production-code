@@ -501,7 +501,7 @@ export function PaletteItemDragOverlay({
 }) {
   const IconComponent = fieldType.icon;
   return (
-    <Card className="palette-item-drag-overlay border-2 border-blue-500 shadow-2xl bg-blue-50 rotate-6 scale-110 z-[9999]">
+    <Card className="palette-item-drag-overlay border-2 border-blue-500 shadow-2xl bg-blue-50 rotate-6 scale-110">
       <CardContent className="p-4">
         <div className="flex items-center space-x-3">
           <div className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
@@ -556,7 +556,7 @@ export default function FieldPalette() {
   return (
     <>
       {/* ── DESKTOP: original layout — completely unchanged, hidden on mobile ── */}
-      <div className="hidden sm:flex h-screen flex-col bg-white border-r border-gray-200">
+      <div className="hidden sm:flex h-screen flex-col bg-transparent border-r border-gray-200">
         {/* Fixed Header */}
         <div className="px-5 py-4 border-b border-gray-200 bg-gray-50/80 backdrop-blur-sm sticky top-0 z-10">
           <h2 className="text-lg font-bold text-gray-900">Field Palette</h2>
@@ -566,7 +566,8 @@ export default function FieldPalette() {
       </div>
 
       {/* ── MOBILE: collapsed by default, expands as a bottom sheet on toggle ── */}
-<div className="sm:hidden fixed bottom-0 left-0 right-0 z-30">        {/* Toggle pill button — always visible at the bottom */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-50">
+        {/* Toggle pill button — always visible at the bottom */}
         <button
           onClick={() => setMobileOpen((prev) => !prev)}
           className="w-full flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 shadow-lg"

@@ -190,6 +190,7 @@ export async function GET(
                 fieldId,
                 sectionId,
                 sectionTitle,
+                type: fieldLookup[fieldId]?.type || fieldEntry.type,
                 label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
               };
             });
@@ -214,6 +215,7 @@ export async function GET(
                 subformTitle: subformName,
                 sectionId: "subform",
                 sectionTitle: subformInfo?.sectionTitle || subformName,
+                type: fieldLookup[fieldId]?.type || fieldEntry.type,
                 label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
               };
             });
@@ -279,6 +281,7 @@ export async function GET(
               subformTitle: fullPath,
               sectionId: "subform",
               sectionTitle: fullPath,
+              type: fieldLookup[fieldId]?.type || fieldEntry.type,
               label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
             };
           });
@@ -343,6 +346,7 @@ export async function GET(
           const info = fieldLookup[fieldId];
           if (info) {
             newEntry.label = info.label;
+            newEntry.type = info.type;
             newEntry.sectionTitle = info.sectionTitle;
             if (info.subformId) {
               newEntry.subformId = info.subformId;
@@ -353,6 +357,7 @@ export async function GET(
           const info = fieldLookup[key];
           if (info) {
             newEntry.label = info.label;
+            newEntry.type = info.type;
             newEntry.sectionTitle = info.sectionTitle;
             if (info.subformId) {
               newEntry.subformId = info.subformId;

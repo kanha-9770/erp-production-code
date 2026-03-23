@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, Trash2, MoreHorizontal } from "lucide-react";
+import { Eye, Trash2, MoreHorizontal, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -134,6 +134,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   saveAllPendingChanges,
   setEditingCell,
   setPendingChanges,
+  onEditRecord,
   onDeleteRecord,
   onViewDetails,
   permissions = [],
@@ -427,31 +428,68 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       );
     }
 
-    let options =
-      fieldDef.type === "lookup"
-        ? (fieldDef.lookup?.options ?? [])
-        : (fieldDef.options ?? []);
-    let normalised = options.map((opt: any) => ({
-      value: opt.value ?? opt.id ?? opt,
-      label: opt.label ?? opt.name ?? opt,
-    }));
+    const fd = fieldDef as any;
 
-    // Filter lookup options by dependency if configured
-    const depConfig = (fieldDef as any).lookup?.dependency;
-    if (depConfig?.parentFieldLabel && record.processedData) {
-      const parentPd = record.processedData.find(
-        (pd) => pd.fieldLabel === depConfig.parentFieldLabel
+    // ── Resolve options based on field configuration ────────────────────
+    let normalised: { value: string; label: string }[] = [];
+
+    if (fd.isDependent && fd.parentFieldId && fd.dependentGroups?.length) {
+      // Dependent/cascading dropdown: options come from dependentGroups
+      // filtered by the parent field's current value.
+      //
+      // We match the parent field by BOTH id and label because
+      // processedData.fieldId may be the raw key from recordData (which
+      // could be a label, a raw id, or a composite id) while
+      // parentFieldId is always the raw database field id.
+      const parentFieldDef = enhancedFormFields.find(
+        (f: any) => f.id === fd.parentFieldId || f.originalId === fd.parentFieldId,
       );
-      const parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
-      if (parentVal) {
-        const mapping = depConfig.valueMappings?.find(
-          (m: any) => m.parentValue === parentVal
+      const parentLabel = parentFieldDef?.label;
+
+      const parentPd = record.processedData.find(
+        (pd) =>
+          pd.fieldId === fd.parentFieldId ||
+          (parentLabel && pd.fieldLabel === parentLabel) ||
+          (fd.parentFieldId && pd.fieldId.endsWith(fd.parentFieldId)),
+      );
+      const parentVal = parentPd?.value != null ? String(parentPd.value) : "";
+      const matchingGroup = (fd.dependentGroups as any[]).find(
+        (g) => String(g.parentValue) === parentVal,
+      );
+      if (matchingGroup?.options?.length) {
+        normalised = matchingGroup.options.map((opt: any) => ({
+          value: opt.value ?? opt.id ?? opt,
+          label: opt.label ?? opt.name ?? opt,
+        }));
+      }
+    } else {
+      // Regular dropdown / lookup / select
+      const rawOptions =
+        fieldDef.type === "lookup"
+          ? (fieldDef.lookup?.options ?? [])
+          : (fieldDef.options ?? []);
+      normalised = rawOptions.map((opt: any) => ({
+        value: opt.value ?? opt.id ?? opt,
+        label: opt.label ?? opt.name ?? opt,
+      }));
+
+      // Filter lookup options by dependency if configured
+      const depConfig = fd.lookup?.dependency;
+      if (depConfig?.parentFieldLabel && record.processedData) {
+        const parentPd = record.processedData.find(
+          (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
         );
-        if (mapping?.allowedChildValues?.length) {
-          normalised = normalised.filter((opt: any) =>
-            mapping.allowedChildValues.includes(String(opt.value)) ||
-            mapping.allowedChildValues.includes(String(opt.label))
+        const parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+        if (parentVal) {
+          const mapping = depConfig.valueMappings?.find(
+            (m: any) => m.parentValue === parentVal,
           );
+          if (mapping?.allowedChildValues?.length) {
+            normalised = normalised.filter((opt) =>
+              mapping.allowedChildValues.includes(String(opt.value)) ||
+              mapping.allowedChildValues.includes(String(opt.label)),
+            );
+          }
         }
       }
     }
@@ -586,6 +624,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                         ) : (
                           <>
                             {paginatedRecords.map((record, rowIndex) => {
+                              const canEditThisRecord = canEditRecord(record);
                               const canDeleteThisRecord = canDeleteRecord(record);
                               return (
                                 <div
@@ -633,6 +672,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           onClick={() => handleViewDetails(record)}
                                         >
                                           <Eye className="h-4 w-4 mr-2" /> View Details
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          className={cn(
+                                            "text-xs cursor-pointer",
+                                            !canEditThisRecord && "text-gray-400 opacity-50",
+                                          )}
+                                          onClick={() => canEditThisRecord && onEditRecord(record)}
+                                          disabled={!canEditThisRecord}
+                                        >
+                                          <Pencil className="h-4 w-4 mr-2" /> Edit Record
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem

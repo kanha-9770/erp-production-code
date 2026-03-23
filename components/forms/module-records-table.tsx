@@ -29,6 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import type { FormModule } from "@/types/form-builder"
 import { useLazyGetModuleRecordsListQuery } from "@/lib/api/modules"
+import { useFormPermissions } from "@/hooks/use-form-permissions"
 
 interface DynamicRecord {
   id: string
@@ -73,6 +74,10 @@ export default function ModuleRecordsTable({
   const [imageModal, setImageModal] = useState(false) // State for image modal visibility
   const { toast } = useToast()
   const [triggerGetModuleRecordsList] = useLazyGetModuleRecordsListQuery()
+
+  // ── Permission checks ─────────────────────────────────────────────────────
+  const firstFormId = module.forms?.[0]?.id ?? null
+  const { canEdit, canDelete, canCreate, loading: permsLoading } = useFormPermissions(firstFormId)
 
   // Effect to update local state when parent props change
   useEffect(() => {
@@ -227,7 +232,7 @@ export default function ModuleRecordsTable({
     const value = data[fieldName]
 
     // Handle null or undefined
-    if (value === null || value === undefined) {
+    if (value === null || value === undefined || value === "NaN") {
       return <span>-</span>
     }
 
@@ -277,42 +282,53 @@ export default function ModuleRecordsTable({
       )
     }
 
-    // Handle objects
-    if (typeof value === "object") {
-      if (value.label) return <span>{value.label}</span>
-      if (Array.isArray(value)) {
-        return (
-          <div className="space-y-1">
-            {value.map((v, idx) => (
-              <div key={idx}>
-                {isImageURL(v) ? (
-                  <button
-                    onClick={() => {
-                      setSelectedImage(v)
-                      setImageModal(true)
-                    }}
-                    className="hover:opacity-80 transition-opacity"
-                  >
-                    <img
-                      src={v}
-                      alt={`${fieldName}-${idx}`}
-                      className="h-12 w-12 object-cover rounded border cursor-pointer hover:shadow-md"
-                      onError={(e) => {
-                        e.currentTarget.src =
-                          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%23f0f0f0' width='48' height='48'/%3E%3Ctext x='50%25' y='50%25' font-family='Arial' font-size='10' fill='%23999' text-anchor='middle' dy='.3em'%3ENo Image%3C/text%3E%3C/svg%3E"
-                      }}
-                    />
-                  </button>
-                ) : (
-                  <span>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-                )}
-              </div>
-            ))}
+// Handle objects (select, complex values)
+if (typeof value === "object" && value !== null) {
+  // Proper select object
+  if (value.label) return <span>{value.label}</span>
+
+  if (value.value) return <span>{value.value}</span>
+
+  // Handle arrays
+  if (Array.isArray(value)) {
+    return (
+      <div className="space-y-1">
+        {value.map((v, idx) => (
+          <div key={idx}>
+            {isImageURL(v) ? (
+              <button
+                onClick={() => {
+                  setSelectedImage(v)
+                  setImageModal(true)
+                }}
+                className="hover:opacity-80 transition-opacity"
+              >
+                <img
+                  src={v}
+                  alt={`${fieldName}-${idx}`}
+                  className="h-12 w-12 object-cover rounded border cursor-pointer hover:shadow-md"
+                />
+              </button>
+            ) : (
+              <span>
+                {typeof v === "object"
+                  ? v.label || v.value || JSON.stringify(v)
+                  : String(v)}
+              </span>
+            )}
           </div>
-        )
-      }
-      return <span>{JSON.stringify(value)}</span>
-    }
+        ))}
+      </div>
+    )
+  }
+
+  return <span>{JSON.stringify(value)}</span>
+}
+
+// 🔥 CRITICAL: handle string values explicitly
+if (typeof value === "string") {
+  return <span>{value}</span>
+}
 
     return <span>{String(value)}</span>
   }
@@ -704,18 +720,22 @@ export default function ModuleRecordsTable({
                             </DialogContent>
                           </Dialog>
 
-                          <Button variant="ghost" size="sm" title="Edit Record">
-                            <Edit className="w-4 h-4" />
-                          </Button>
+                          {canEdit && (
+                            <Button variant="ghost" size="sm" title="Edit Record">
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                          )}
 
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="Delete Record"
-                            onClick={() => deleteRecord(record.id)}
-                          >
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </Button>
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Delete Record"
+                              onClick={() => deleteRecord(record.id)}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-500" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -793,12 +813,16 @@ export default function ModuleRecordsTable({
                         </ScrollArea>
                       </DialogContent>
                     </Dialog>
-                    <Button variant="outline" size="sm" title="Edit Record">
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button variant="outline" size="sm" title="Delete Record" onClick={() => deleteRecord(record.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {canEdit && (
+                      <Button variant="outline" size="sm" title="Edit Record">
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button variant="outline" size="sm" title="Delete Record" onClick={() => deleteRecord(record.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>

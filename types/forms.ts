@@ -12,6 +12,13 @@ export interface FormModule {
   forms?: Form[];
 }
 
+export interface FormSubform {
+  id: string;
+  name: string;
+  fields: FormField[];
+  childSubforms?: FormSubform[];
+}
+
 export interface Form {
   id: string;
   name: string;
@@ -20,6 +27,7 @@ export interface Form {
   isPublished?: boolean;
   updatedAt?: string;
   sections?: FormSection[];
+  subforms?: FormSubform[];
 }
 
 export interface FormSection {

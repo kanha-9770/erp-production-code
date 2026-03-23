@@ -89,6 +89,13 @@ export async function GET(
   }
 }
 
+export async function PUT(
+  request: NextRequest,
+  context: { params: any }
+) {
+  return POST(request, context);
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: any }

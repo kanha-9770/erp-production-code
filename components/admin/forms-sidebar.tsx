@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -35,11 +35,19 @@ export function FormsSidebar({
   onFormSelect,
   selectedForm,
 }: FormsSidebarProps) {
-  const [expandedModules, setExpandedModules] = useState<Set<string>>(() => {
-    // Start with all top-level modules expanded
-    return new Set(modules.map((m) => m.id))
-  })
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState("")
+  const didInitialExpand = useRef(false)
+
+  // Expand all top-level modules once data arrives.
+  // The useState initializer captures modules as [] (still loading), so we
+  // need this effect to set the initial expanded state after the first load.
+  useEffect(() => {
+    if (!didInitialExpand.current && modules.length > 0) {
+      setExpandedModules(new Set(modules.map((m) => m.id)))
+      didInitialExpand.current = true
+    }
+  }, [modules])
 
   const toggleModule = (moduleId: string) => {
     setExpandedModules((prev) => {

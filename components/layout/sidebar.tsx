@@ -417,7 +417,6 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
                 onMobileClose?.();
               }}
-              
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-800 transition-colors",
                 isActive && "bg-[#5a4d96]",
@@ -569,10 +568,8 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       {/* Collapse toggle — desktop only */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="hidden md:flex fixed top-1/2 -translate-y-1/2 z-[99999] h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
-        style={{ 
-          left: isCollapsed ? "48px" : `${30 + sidebarWidth + 4}px`, 
-        }}
+        className="absolute top-1/2 -translate-y-1/2  flex h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
+        style={{ left: isCollapsed ? "48px" : `${48 + sidebarWidth - 10}px` }}
       >
         {isCollapsed ? (
           <ChevronRight className="h-4 w-4" />
