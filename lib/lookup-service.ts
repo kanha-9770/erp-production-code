@@ -66,6 +66,7 @@ export class LookupService {
       form_records_13: prisma.formRecord13,
       form_records_14: prisma.formRecord14,
       form_records_15: prisma.formRecord15,
+      form_records: prisma.formRecord,
     }
     return tableMap[tableName]
   }
@@ -76,21 +77,21 @@ export class LookupService {
   private async getFormRecords(formId: string, options: { limit?: number; offset?: number } = {}): Promise<any[]> {
     const { limit = 50, offset = 0 } = options;
 
-    console.log(`[getFormRecords] 🚀 Starting for formId=${formId} | limit=${limit} | offset=${offset}`);
+    // Try unified table first
+    const unifiedRecords = await prisma.formRecord.findMany({
+      where: { formId },
+      orderBy: { createdAt: "desc" as const },
+      take: limit,
+      skip: offset,
+    });
+    if (unifiedRecords.length > 0) return unifiedRecords;
 
+    // Fallback to legacy table mapping
     const tableName = await this.getTableName(formId);
-    if (!tableName) {
-      console.log(`[getFormRecords] ❌ ABORT: No table mapping → returning []`);
-      return [];
-    }
+    if (!tableName) return [];
 
     const model = this.getTableModel(tableName);
-    if (!model) {
-      console.log(`[getFormRecords] ❌ ABORT: No Prisma model for table ${tableName}`);
-      return [];
-    }
-
-    console.log(`[getFormRecords] Executing query on table ${tableName} where formId=${formId}`);
+    if (!model) return [];
 
     const records = await model.findMany({
       where: { formId },

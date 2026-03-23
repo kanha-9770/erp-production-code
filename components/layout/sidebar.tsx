@@ -571,7 +571,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="hidden md:flex fixed top-1/2 -translate-y-1/2 z-[99999] h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
         style={{ 
-          left: isCollapsed ? "48px" : `${48 + sidebarWidth + 4}px`, 
+          left: isCollapsed ? "48px" : `${30 + sidebarWidth + 4}px`, 
         }}
       >
         {isCollapsed ? (

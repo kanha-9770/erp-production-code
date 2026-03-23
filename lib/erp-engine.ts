@@ -199,10 +199,13 @@ export async function queryFormRecords(
 ): Promise<FormRecordRow[]> {
   if (!ctx.allowedFormIds.includes(formId)) return [];
 
-  // Discover which table stores this form's records
+  // Try unified table first (single query, no table routing needed)
+  const unifiedResult = await querySpecificTable(ctx, formId, "form_records", options);
+  if (unifiedResult.length > 0) return unifiedResult;
+
+  // Fallback to legacy table routing
   const storageTable = await getFormTableMapping(formId);
   if (!storageTable) {
-    // Fallback: scan all 15 tables looking for records with this formId
     return queryAllTablesForForm(ctx, formId, options);
   }
 

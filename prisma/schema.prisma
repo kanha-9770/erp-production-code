@@ -143,6 +143,7 @@ model User {
   employee         Employee?
   attendances      Attendance[]            @relation("UserAttendance")
   activities       Activity[]
+  formRecords      FormRecord[]             @relation("FormRecordUser")
   formRecords1     FormRecord1[]           @relation("FormRecord1User")
   formRecords2     FormRecord2[]           @relation("FormRecord2User")
   formRecords3     FormRecord3[]           @relation("FormRecord3User")
@@ -463,6 +464,7 @@ model Form {
   settings          Json            @default("{}")
   tableMapping      FormTableMapping? @relation("FormToTableMapping")
   sections          FormSection[] @relation("FormSections")
+  records           FormRecord[]    @relation("FormRecords")
   records1          FormRecord1[]   @relation("FormRecord1")
   records2          FormRecord2[]   @relation("FormRecord2")
   records3          FormRecord3[]   @relation("FormRecord3")
@@ -584,6 +586,7 @@ model FormField {
   lookupRelations LookupFieldRelation[]
 
   decimalPlaces   Int?     @default(2)
+  isIndexed       Boolean  @default(false) @map("is_indexed")
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -1598,4 +1601,61 @@ model ChatMessage {
   @@index([sender])
   @@index([timestamp])
   @@map("chat_messages")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UNIFIED FORM RECORD (replaces 15 sharded tables)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model FormRecord {
+  id              String             @id @default(cuid())
+  formId          String             @map("form_id")
+  form            Form               @relation("FormRecords", fields: [formId], references: [id], onDelete: Cascade)
+  recordData      Json               @default("{}") @map("record_data")
+  organizationId  String?            @map("organization_id")
+  employee_id     String?
+  amount          Decimal?
+  date            DateTime?
+  submittedBy     String?            @map("submitted_by")
+  submittedAt     DateTime           @default(now()) @map("submitted_at")
+  ipAddress       String?            @map("ip_address")
+  userAgent       String?            @map("user_agent")
+  status          String             @default("submitted")
+  userId          String?            @map("user_id")
+  user            User?              @relation("FormRecordUser", fields: [userId], references: [id], onDelete: SetNull)
+  indexedFields   FormRecordField[]
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  @@index([formId])
+  @@index([organizationId])
+  @@index([submittedAt])
+  @@index([status])
+  @@index([employee_id])
+  @@index([date])
+  @@index([userId])
+  @@map("form_records")
+}
+
+model FormRecordField {
+  id              String      @id @default(cuid())
+  recordId        String      @map("record_id")
+  record          FormRecord  @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  formId          String      @map("form_id")
+  fieldId         String      @map("field_id")
+  subformId       String?     @map("subform_id")
+  subformRowIndex Int?        @map("subform_row_index")
+  value_text      String?
+  value_number    Decimal?
+  value_date      DateTime?
+  value_bool      Boolean?
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@index([formId, fieldId, value_text])
+  @@index([formId, fieldId, value_number])
+  @@index([formId, fieldId, value_date])
+  @@index([formId, fieldId, value_bool])
+  @@index([recordId])
+  @@index([formId, subformId, subformRowIndex])
+  @@map("form_record_fields")
 }

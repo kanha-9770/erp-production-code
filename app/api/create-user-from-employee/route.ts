@@ -85,10 +85,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the form record exists in FormRecord14
-    const formRecord = await prisma.formRecord14.findUnique({
-      where: { id: employeeRecordId }
-    });
+    // Verify the form record exists — try unified table first, then legacy table 14
+    let formRecord: any = null;
+    let isUnifiedRecord = false;
+
+    try {
+      formRecord = await prisma.formRecord.findUnique({
+        where: { id: employeeRecordId }
+      });
+      isUnifiedRecord = !!formRecord;
+    } catch {
+      // Unified table may not exist yet (migration pending)
+    }
+
+    if (!formRecord) {
+      formRecord = await prisma.formRecord14.findUnique({
+        where: { id: employeeRecordId }
+      });
+    }
 
     if (!formRecord) {
       return NextResponse.json(
@@ -238,6 +252,22 @@ export async function POST(request: NextRequest) {
           userId: newUser.id,           // LINK TO USER (OVERWRITES old userId)
         },
       });
+
+      // 4. Sync unified table (form_records) if record exists there
+      if (isUnifiedRecord) {
+        try {
+          await tx.formRecord.update({
+            where: { id: employeeRecordId },
+            data: {
+              employee_id: employee.id,
+              userId: newUser.id,
+            },
+          });
+        } catch {
+          // Non-blocking — unified table sync failure doesn't break user creation
+          console.error("[create-user-from-employee] Unified table sync failed (non-blocking)");
+        }
+      }
 
       return { user: newUser, employee };
     });

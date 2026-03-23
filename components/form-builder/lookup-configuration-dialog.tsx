@@ -434,9 +434,9 @@ export default function LookupConfigurationDialog({
         const dep = dependencies.find((d) => d.childFieldName === field.fieldName);
         const dependencyConfig = dep
           ? {
-              parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
-              valueMappings: dep.valueMappings,
-            }
+            parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
+            valueMappings: dep.valueMappings,
+          }
           : undefined;
 
         if (field.isMaster) {
@@ -954,7 +954,7 @@ export default function LookupConfigurationDialog({
                                                 "flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] cursor-pointer transition-colors",
                                                 isChecked ? "bg-primary/10 border-primary text-primary font-medium"
                                                   : isAssignedElsewhere ? "opacity-40 cursor-not-allowed"
-                                                  : "hover:bg-muted/30"
+                                                    : "hover:bg-muted/30"
                                               )}>
                                                 <Checkbox checked={isChecked} disabled={isAssignedElsewhere} className="h-3 w-3"
                                                   onCheckedChange={(checked) => {

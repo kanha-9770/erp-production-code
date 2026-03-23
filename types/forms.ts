@@ -38,6 +38,7 @@ export interface FormField {
   validation?: any;
   options?: any[];
   lookup?: any;
+  isIndexed?: boolean;
 }
 
 export interface FormRecord {

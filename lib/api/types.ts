@@ -46,6 +46,7 @@ export interface FormField {
   formula?: any
   lookup?: any
   validation?: any
+  isIndexed?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
   [key: string]: any

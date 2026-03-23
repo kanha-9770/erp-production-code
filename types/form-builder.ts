@@ -530,6 +530,7 @@ export interface FormField {
   preferredCountries?: string[];
   defaultCountry?: string;
   decimalPlaces?: number;
+  isIndexed?: boolean;
 
   createdAt: Date;
   updatedAt: Date;

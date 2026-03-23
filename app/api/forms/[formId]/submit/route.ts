@@ -207,7 +207,7 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       submittedByDisplay,
       ipAddress,
       userAgent,
-      organizationId,
+      organizationId || undefined,
       currentUserId
     );
 
@@ -520,17 +520,20 @@ async function createFormRecord(
   organizationId?: string,
   userId?: string
 ): Promise<any> {
+  const recordId = crypto.randomUUID();
+  const now = new Date();
+
   const baseData = {
-    id: crypto.randomUUID(),
+    id: recordId,
     formId,
     recordData: structuredRecordData as any,
     submittedBy,
-    submittedAt: new Date(),
+    submittedAt: now,
     status: "submitted",
     ipAddress,
     userAgent,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: now,
+    updatedAt: now,
   };
 
   const extra: Record<string, any> = {};
@@ -548,24 +551,193 @@ async function createFormRecord(
 
   const finalData = { ...baseData, ...extra };
 
+  // ─── Write to OLD sharded table (existing behavior) ─────────
+  let oldRecord: any;
   switch (tableName) {
-    case "form_records_1":  return prisma.formRecord1.create({ data: finalData });
-    case "form_records_2":  return prisma.formRecord2.create({ data: finalData });
-    case "form_records_3":  return prisma.formRecord3.create({ data: finalData });
-    case "form_records_4":  return prisma.formRecord4.create({ data: finalData });
-    case "form_records_5":  return prisma.formRecord5.create({ data: finalData });
-    case "form_records_6":  return prisma.formRecord6.create({ data: finalData });
-    case "form_records_7":  return prisma.formRecord7.create({ data: finalData });
-    case "form_records_8":  return prisma.formRecord8.create({ data: finalData });
-    case "form_records_9":  return prisma.formRecord9.create({ data: finalData });
-    case "form_records_10": return prisma.formRecord10.create({ data: finalData });
-    case "form_records_11": return prisma.formRecord11.create({ data: finalData });
-    case "form_records_12": return prisma.formRecord12.create({ data: finalData });
-    case "form_records_13": return prisma.formRecord13.create({ data: finalData });
-    case "form_records_14": return prisma.formRecord14.create({ data: finalData });
-    case "form_records_15": return prisma.formRecord15.create({ data: finalData });
+    case "form_records_1":  oldRecord = await prisma.formRecord1.create({ data: finalData }); break;
+    case "form_records_2":  oldRecord = await prisma.formRecord2.create({ data: finalData }); break;
+    case "form_records_3":  oldRecord = await prisma.formRecord3.create({ data: finalData }); break;
+    case "form_records_4":  oldRecord = await prisma.formRecord4.create({ data: finalData }); break;
+    case "form_records_5":  oldRecord = await prisma.formRecord5.create({ data: finalData }); break;
+    case "form_records_6":  oldRecord = await prisma.formRecord6.create({ data: finalData }); break;
+    case "form_records_7":  oldRecord = await prisma.formRecord7.create({ data: finalData }); break;
+    case "form_records_8":  oldRecord = await prisma.formRecord8.create({ data: finalData }); break;
+    case "form_records_9":  oldRecord = await prisma.formRecord9.create({ data: finalData }); break;
+    case "form_records_10": oldRecord = await prisma.formRecord10.create({ data: finalData }); break;
+    case "form_records_11": oldRecord = await prisma.formRecord11.create({ data: finalData }); break;
+    case "form_records_12": oldRecord = await prisma.formRecord12.create({ data: finalData }); break;
+    case "form_records_13": oldRecord = await prisma.formRecord13.create({ data: finalData }); break;
+    case "form_records_14": oldRecord = await prisma.formRecord14.create({ data: finalData as any }); break;
+    case "form_records_15": oldRecord = await prisma.formRecord15.create({ data: finalData as any }); break;
     default:
       throw new Error(`Unsupported table: ${tableName}`);
+  }
+
+  // ─── DUAL-WRITE: Also write to unified form_records table ───
+  try {
+    await prisma.formRecord.create({
+      data: {
+        id: recordId,
+        formId,
+        recordData: structuredRecordData as any,
+        organizationId: organizationId || null,
+        submittedBy,
+        submittedAt: now,
+        status: "submitted",
+        ipAddress,
+        userAgent,
+        userId: userId || null,
+      },
+    });
+
+    // Materialize indexed fields into FormRecordField
+    await materializeIndexedFields(recordId, formId, structuredRecordData);
+  } catch (dualWriteError) {
+    // Dual-write failure should NOT block the original submission
+    console.error("[DUAL-WRITE] Failed to write to unified table (non-blocking):", dualWriteError);
+  }
+
+  return oldRecord;
+}
+
+// ──────────────────────────────────────────────
+// Materialize indexed fields into FormRecordField
+// ──────────────────────────────────────────────
+
+async function materializeIndexedFields(
+  recordId: string,
+  formId: string,
+  structuredData: StructuredRecordData
+): Promise<void> {
+  // Fetch which fields are marked as indexed
+  const indexedFields = await prisma.formField.findMany({
+    where: { isIndexed: true },
+    include: { section: { select: { formId: true } }, subform: { select: { formId: true } } },
+  });
+
+  // Build a set of indexed field IDs that belong to this form
+  const indexedFieldIds = new Set(
+    indexedFields
+      .filter((f) => {
+        const fieldFormId = f.section?.formId || f.subform?.formId;
+        return fieldFormId === formId;
+      })
+      .map((f) => f.id)
+  );
+
+  if (indexedFieldIds.size === 0) return;
+
+  const fieldRows: Array<{
+    recordId: string;
+    formId: string;
+    fieldId: string;
+    subformId: string | null;
+    subformRowIndex: number | null;
+    value_text: string | null;
+    value_number: any;
+    value_date: Date | null;
+    value_bool: boolean | null;
+  }> = [];
+
+  // Helper to determine typed value columns
+  const toTypedValue = (value: any, fieldType: string) => {
+    const row = {
+      value_text: null as string | null,
+      value_number: null as any,
+      value_date: null as Date | null,
+      value_bool: null as boolean | null,
+    };
+
+    if (value === null || value === undefined || value === "") return row;
+
+    switch (fieldType) {
+      case "number":
+      case "currency":
+      case "decimal":
+        row.value_number = isNaN(Number(value)) ? null : Number(value);
+        break;
+      case "date":
+      case "datetime":
+        row.value_date = new Date(value);
+        if (isNaN(row.value_date.getTime())) row.value_date = null;
+        break;
+      case "checkbox":
+      case "toggle":
+      case "boolean":
+        row.value_bool = Boolean(value);
+        break;
+      default:
+        row.value_text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    }
+    return row;
+  };
+
+  // Extract from sections
+  for (const section of Object.values(structuredData.sections)) {
+    for (const field of Object.values(section.fields)) {
+      if (indexedFieldIds.has(field.fieldId)) {
+        const typed = toTypedValue(field.value, field.type);
+        fieldRows.push({
+          recordId,
+          formId,
+          fieldId: field.fieldId,
+          subformId: null,
+          subformRowIndex: null,
+          ...typed,
+        });
+      }
+    }
+  }
+
+  // Extract from subforms (including rows)
+  const processSubformFields = (subformData: Record<string, StructuredSubformData>) => {
+    for (const subform of Object.values(subformData)) {
+      // Static fields
+      for (const field of Object.values(subform.fields)) {
+        if (indexedFieldIds.has(field.fieldId)) {
+          const typed = toTypedValue(field.value, field.type);
+          fieldRows.push({
+            recordId,
+            formId,
+            fieldId: field.fieldId,
+            subformId: subform.subformId,
+            subformRowIndex: null,
+            ...typed,
+          });
+        }
+      }
+
+      // Dynamic rows
+      if (subform.rows) {
+        for (const row of subform.rows) {
+          for (const field of Object.values(row.fields)) {
+            if (indexedFieldIds.has(field.fieldId)) {
+              const typed = toTypedValue(field.value, field.type);
+              fieldRows.push({
+                recordId,
+                formId,
+                fieldId: field.fieldId,
+                subformId: subform.subformId,
+                subformRowIndex: row.rowIndex,
+                ...typed,
+              });
+            }
+          }
+        }
+      }
+
+      // Child subforms
+      if (subform.childSubforms) {
+        processSubformFields(subform.childSubforms);
+      }
+    }
+  };
+
+  processSubformFields(structuredData.subforms);
+
+  // Batch insert all indexed field values
+  if (fieldRows.length > 0) {
+    await prisma.formRecordField.createMany({ data: fieldRows });
   }
 }
 

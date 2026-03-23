@@ -209,7 +209,7 @@ export function DynamicMasters() {
         row.form_id = value
         row.form_name = form?.name || ""
       } else {
-        ;(row as any)[field] = value
+        ; (row as any)[field] = value
       }
       return newRows
     })

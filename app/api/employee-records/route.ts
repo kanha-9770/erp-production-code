@@ -160,19 +160,55 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No organization associated with this account' }, { status: 403 });
     }
 
-    // 3. Fetch all submitted records from the employee form table (form_records_14)
-    //    Try org-scoped first; fall back to all submitted records if none found
-    //    (covers cases where organizationId wasn't set at submission time)
-    let records = await prisma.formRecord14.findMany({
-      select: { id: true, employee_id: true, recordData: true, submittedAt: true, status: true, userId: true, organizationId: true },
-      where: { status: 'submitted', organizationId: orgId },
-      orderBy: { submittedAt: 'desc' },
-    });
+    // 3. Fetch employee records — try unified table first, fall back to legacy table 14
+    const selectFields = { id: true, employee_id: true, recordData: true, submittedAt: true, status: true, userId: true, organizationId: true } as const;
 
+    let records: any[] = [];
+
+    // Strategy 1: Unified table — org-scoped employee forms
+    try {
+      records = await prisma.formRecord.findMany({
+        select: selectFields,
+        where: {
+          status: 'submitted',
+          organizationId: orgId,
+          form: { isEmployeeForm: true },
+        },
+        orderBy: { submittedAt: 'desc' },
+      });
+    } catch {
+      // Unified table may not exist yet (migration pending)
+    }
+
+    // Strategy 2: Unified table — all employee forms (no org filter)
     if (records.length === 0) {
-      // fallback: return all submitted records so admins can still see data
+      try {
+        records = await prisma.formRecord.findMany({
+          select: selectFields,
+          where: {
+            status: 'submitted',
+            form: { isEmployeeForm: true },
+          },
+          orderBy: { submittedAt: 'desc' },
+        });
+      } catch {
+        // Unified table may not exist yet
+      }
+    }
+
+    // Strategy 3: Legacy table 14 — org-scoped
+    if (records.length === 0) {
       records = await prisma.formRecord14.findMany({
-        select: { id: true, employee_id: true, recordData: true, submittedAt: true, status: true, userId: true, organizationId: true },
+        select: selectFields,
+        where: { status: 'submitted', organizationId: orgId },
+        orderBy: { submittedAt: 'desc' },
+      });
+    }
+
+    // Strategy 4: Legacy table 14 — all submitted (no org filter)
+    if (records.length === 0) {
+      records = await prisma.formRecord14.findMany({
+        select: selectFields,
         where: { status: 'submitted' },
         orderBy: { submittedAt: 'desc' },
       });

@@ -264,6 +264,28 @@ export class DatabaseRecords {
       }
 
       console.log("Record created successfully:", record.id)
+
+      // Dual-write to unified table (non-blocking)
+      try {
+        await prisma.formRecord.create({
+          data: {
+            id: record.id,
+            formId: recordParams.formId,
+            recordData: recordParams.recordData,
+            organizationId: null,
+            employee_id: recordParams.employee_id || null,
+            amount: recordParams.amount,
+            date: recordParams.date,
+            submittedBy: recordParams.submittedBy,
+            submittedAt: recordParams.submittedAt,
+            status: recordParams.status,
+            userId: recordParams.userId || null,
+          },
+        })
+      } catch (dualWriteError) {
+        console.error("[DUAL-WRITE] DatabaseRecords.createFormRecord sync failed (non-blocking):", dualWriteError)
+      }
+
       return DatabaseTransforms.transformRecord(record)
     } catch (error: any) {
       console.error("Error in DatabaseService.createFormRecord:", error)
@@ -300,21 +322,13 @@ export class DatabaseRecords {
         userId,
       } = options || {}
 
-      console.log(`[DatabaseService] Getting form records for form: ${formId}`)
-
-      // First, get the form structure with all fields
+      // Get the form structure
       const form = await prisma.form.findUnique({
         where: { id: formId },
         include: {
-          module: {
-            select: { id: true, name: true },
-          },
+          module: { select: { id: true, name: true } },
           sections: {
-            include: {
-              fields: {
-                orderBy: { order: "asc" },
-              },
-            },
+            include: { fields: { orderBy: { order: "asc" } } },
             orderBy: { order: "asc" },
           },
         },
@@ -324,126 +338,67 @@ export class DatabaseRecords {
         throw new Error(`Form not found: ${formId}`)
       }
 
-      const tableName = await DatabaseTransforms.getFormRecordTable(formId)
       const skip = (page - 1) * limit
 
       // Build where clause
       const where: any = { formId }
-
-      if (status && status !== "all") {
-        where.status = status
-      }
-
-      if (employeeId) {
-        where.employee_id = employeeId
-      }
-
-      if (userId) {
-        where.userId = userId
-      }
-
+      if (status && status !== "all") where.status = status
+      if (employeeId) where.employee_id = employeeId
+      if (userId) where.userId = userId
       if (dateFrom || dateTo) {
         where.date = {}
         if (dateFrom) where.date.gte = dateFrom
         if (dateTo) where.date.lte = dateTo
       }
 
-      // Build orderBy
-      const orderBy: any = {}
-      orderBy[sortBy] = sortOrder
+      const orderBy: any = { [sortBy]: sortOrder }
+      const queryParams = { where, orderBy, skip, take: limit }
 
-      // Execute query based on table name
-      let records: any[] = []
+      // ─── Try unified table first ────────────────────────────────
+      let records: any[] = await prisma.formRecord.findMany(queryParams)
 
-      const queryParams = {
-        where,
-        orderBy,
-        skip,
-        take: limit,
+      // ─── Fallback to legacy sharded table ───────────────────────
+      if (records.length === 0) {
+        const tableName = await DatabaseTransforms.getFormRecordTable(formId)
+        switch (tableName) {
+          case "form_records_1":  records = await prisma.formRecord1.findMany(queryParams); break
+          case "form_records_2":  records = await prisma.formRecord2.findMany(queryParams); break
+          case "form_records_3":  records = await prisma.formRecord3.findMany(queryParams); break
+          case "form_records_4":  records = await prisma.formRecord4.findMany(queryParams); break
+          case "form_records_5":  records = await prisma.formRecord5.findMany(queryParams); break
+          case "form_records_6":  records = await prisma.formRecord6.findMany(queryParams); break
+          case "form_records_7":  records = await prisma.formRecord7.findMany(queryParams); break
+          case "form_records_8":  records = await prisma.formRecord8.findMany(queryParams); break
+          case "form_records_9":  records = await prisma.formRecord9.findMany(queryParams); break
+          case "form_records_10": records = await prisma.formRecord10.findMany(queryParams); break
+          case "form_records_11": records = await prisma.formRecord11.findMany(queryParams); break
+          case "form_records_12": records = await prisma.formRecord12.findMany(queryParams); break
+          case "form_records_13": records = await prisma.formRecord13.findMany(queryParams); break
+          case "form_records_14": records = await prisma.formRecord14.findMany(queryParams); break
+          case "form_records_15": records = await prisma.formRecord15.findMany(queryParams); break
+          default: throw new Error(`Invalid table name: ${tableName}`)
+        }
       }
 
-      console.log(`[DatabaseService] Querying table: ${tableName}`)
-
-      switch (tableName) {
-        case "form_records_1":
-          records = await prisma.formRecord1.findMany(queryParams)
-          break
-        case "form_records_2":
-          records = await prisma.formRecord2.findMany(queryParams)
-          break
-        case "form_records_3":
-          records = await prisma.formRecord3.findMany(queryParams)
-          break
-        case "form_records_4":
-          records = await prisma.formRecord4.findMany(queryParams)
-          break
-        case "form_records_5":
-          records = await prisma.formRecord5.findMany(queryParams)
-          break
-        case "form_records_6":
-          records = await prisma.formRecord6.findMany(queryParams)
-          break
-        case "form_records_7":
-          records = await prisma.formRecord7.findMany(queryParams)
-          break
-        case "form_records_8":
-          records = await prisma.formRecord8.findMany(queryParams)
-          break
-        case "form_records_9":
-          records = await prisma.formRecord9.findMany(queryParams)
-          break
-        case "form_records_10":
-          records = await prisma.formRecord10.findMany(queryParams)
-          break
-        case "form_records_11":
-          records = await prisma.formRecord11.findMany(queryParams)
-          break
-        case "form_records_12":
-          records = await prisma.formRecord12.findMany(queryParams)
-          break
-        case "form_records_13":
-          records = await prisma.formRecord13.findMany(queryParams)
-          break
-        case "form_records_14":
-          records = await prisma.formRecord14.findMany(queryParams)
-          break
-        case "form_records_15":
-          records = await prisma.formRecord15.findMany(queryParams)
-          break
-        default:
-          throw new Error(`Invalid table name: ${tableName}`)
-      }
-
-      console.log(`[DatabaseService] Found ${records.length} records in ${tableName}`)
-
-      // Handle search if provided (client-side filtering since we can't easily search JSON)
+      // Client-side search filter (will be replaced by FormRecordField queries in Phase 5)
       if (search && search.trim() !== "") {
         const searchLower = search.toLowerCase()
         records = records.filter((record) => {
-          // Search in record data
           const recordDataStr = JSON.stringify(record.recordData).toLowerCase()
           if (recordDataStr.includes(searchLower)) return true
-
-          // Search in other fields
           if (record.employee_id?.toLowerCase().includes(searchLower)) return true
           if (record.submittedBy?.toLowerCase().includes(searchLower)) return true
           if (record.status?.toLowerCase().includes(searchLower)) return true
-
           return false
         })
       }
 
       // Transform records and include form structure
-      const transformedRecords = records.map((record) => {
+      return records.map((record) => {
         const transformedRecord = DatabaseTransforms.transformRecord(record)
-        // Include the complete form structure with each record
         transformedRecord.form = DatabaseTransforms.transformForm(form)
         return transformedRecord
       })
-
-      console.log(`[DatabaseService] Returning ${transformedRecords.length} transformed records with form structure`)
-
-      return transformedRecords
     } catch (error: any) {
       console.error("Database error fetching form records:", error)
       throw new Error(`Failed to fetch form records: ${error?.message}`)
@@ -451,61 +406,30 @@ export class DatabaseRecords {
   }
   static async getFormSubmissionCount(formId: string, userId: string | undefined): Promise<number> {
     try {
+      // Try unified table first
+      const unifiedCount = await prisma.formRecord.count({ where: { formId } })
+      if (unifiedCount > 0) return unifiedCount
+
+      // Fallback to legacy table
       const tableName = await DatabaseTransforms.getFormRecordTable(formId)
-
-      let count = 0
-
       switch (tableName) {
-        case "form_records_1":
-          count = await prisma.formRecord1.count({ where: { formId } })
-          break
-        case "form_records_2":
-          count = await prisma.formRecord2.count({ where: { formId } })
-          break
-        case "form_records_3":
-          count = await prisma.formRecord3.count({ where: { formId } })
-          break
-        case "form_records_4":
-          count = await prisma.formRecord4.count({ where: { formId } })
-          break
-        case "form_records_5":
-          count = await prisma.formRecord5.count({ where: { formId } })
-          break
-        case "form_records_6":
-          count = await prisma.formRecord6.count({ where: { formId } })
-          break
-        case "form_records_7":
-          count = await prisma.formRecord7.count({ where: { formId } })
-          break
-        case "form_records_8":
-          count = await prisma.formRecord8.count({ where: { formId } })
-          break
-        case "form_records_9":
-          count = await prisma.formRecord9.count({ where: { formId } })
-          break
-        case "form_records_10":
-          count = await prisma.formRecord10.count({ where: { formId } })
-          break
-        case "form_records_11":
-          count = await prisma.formRecord11.count({ where: { formId } })
-          break
-        case "form_records_12":
-          count = await prisma.formRecord12.count({ where: { formId } })
-          break
-        case "form_records_13":
-          count = await prisma.formRecord13.count({ where: { formId } })
-          break
-        case "form_records_14":
-          count = await prisma.formRecord14.count({ where: { formId } })
-          break
-        case "form_records_15":
-          count = await prisma.formRecord15.count({ where: { formId } })
-          break
-        default:
-          throw new Error(`Invalid table name: ${tableName}`)
+        case "form_records_1":  return prisma.formRecord1.count({ where: { formId } })
+        case "form_records_2":  return prisma.formRecord2.count({ where: { formId } })
+        case "form_records_3":  return prisma.formRecord3.count({ where: { formId } })
+        case "form_records_4":  return prisma.formRecord4.count({ where: { formId } })
+        case "form_records_5":  return prisma.formRecord5.count({ where: { formId } })
+        case "form_records_6":  return prisma.formRecord6.count({ where: { formId } })
+        case "form_records_7":  return prisma.formRecord7.count({ where: { formId } })
+        case "form_records_8":  return prisma.formRecord8.count({ where: { formId } })
+        case "form_records_9":  return prisma.formRecord9.count({ where: { formId } })
+        case "form_records_10": return prisma.formRecord10.count({ where: { formId } })
+        case "form_records_11": return prisma.formRecord11.count({ where: { formId } })
+        case "form_records_12": return prisma.formRecord12.count({ where: { formId } })
+        case "form_records_13": return prisma.formRecord13.count({ where: { formId } })
+        case "form_records_14": return prisma.formRecord14.count({ where: { formId } })
+        case "form_records_15": return prisma.formRecord15.count({ where: { formId } })
+        default: throw new Error(`Invalid table name: ${tableName}`)
       }
-
-      return count
     } catch (error: any) {
       console.error("Database error getting form submission count:", error)
       throw new Error(`Failed to get form submission count: ${error?.message}`)
@@ -514,46 +438,45 @@ export class DatabaseRecords {
 
   static async getFormRecord(recordId: string): Promise<FormRecord | null> {
     try {
-      // Try each table until we find the record
-      for (let i = 1; i <= 15; i++) {
-        const currentTable = `formRecord${i}`
-        try {
-          const record = await (prisma as any)[currentTable].findUnique({
-            where: { id: recordId },
-          })
+      // ─── Try unified table first (single query instead of 15) ───
+      let record: any = await prisma.formRecord.findUnique({
+        where: { id: recordId },
+      })
 
-          if (record) {
-            // Get the form structure for this record
-            const form = await prisma.form.findUnique({
-              where: { id: record.formId },
-              include: {
-                module: {
-                  select: { id: true, name: true },
-                },
-                sections: {
-                  include: {
-                    fields: {
-                      orderBy: { order: "asc" },
-                    },
-                  },
-                  orderBy: { order: "asc" },
-                },
-              },
+      // ─── Fallback: scan legacy tables ───────────────────────────
+      if (!record) {
+        for (let i = 1; i <= 15; i++) {
+          try {
+            record = await (prisma as any)[`formRecord${i}`].findUnique({
+              where: { id: recordId },
             })
-
-            const transformedRecord = DatabaseTransforms.transformRecord(record)
-            if (form) {
-              transformedRecord.form = DatabaseTransforms.transformForm(form)
-            }
-
-            return transformedRecord
+            if (record) break
+          } catch {
+            // Continue to next table
           }
-        } catch (error) {
-          // Continue to next table
         }
       }
 
-      return null
+      if (!record) return null
+
+      // Get the form structure
+      const form = await prisma.form.findUnique({
+        where: { id: record.formId },
+        include: {
+          module: { select: { id: true, name: true } },
+          sections: {
+            include: { fields: { orderBy: { order: "asc" } } },
+            orderBy: { order: "asc" },
+          },
+        },
+      })
+
+      const transformedRecord = DatabaseTransforms.transformRecord(record)
+      if (form) {
+        transformedRecord.form = DatabaseTransforms.transformForm(form)
+      }
+
+      return transformedRecord
     } catch (error: any) {
       console.error("Database error fetching form record:", error)
       throw new Error(`Failed to fetch form record: ${error?.message}`)
@@ -562,25 +485,35 @@ export class DatabaseRecords {
 
   static async updateFormRecord(recordId: string, data: Partial<FormRecord>): Promise<FormRecord> {
     try {
-      // First, find which table contains this record
+      // Find which table contains this record — try unified first
       let tableName = ""
-      let record = null
+      let record: any = null
 
-      // Try each table until we find the record
-      for (let i = 1; i <= 15; i++) {
-        const currentTable = `formRecord${i}`
-        try {
-          record = await (prisma as any)[currentTable].findUnique({
-            where: { id: recordId },
-            select: { id: true, formId: true },
-          })
+      // Try unified table first (single query)
+      record = await prisma.formRecord.findUnique({
+        where: { id: recordId },
+        select: { id: true, formId: true },
+      })
+      if (record) {
+        tableName = "form_records_unified"
+      }
 
-          if (record) {
-            tableName = `form_records_${i}`
-            break
+      // Fallback: scan legacy tables
+      if (!record) {
+        for (let i = 1; i <= 15; i++) {
+          const currentTable = `formRecord${i}`
+          try {
+            record = await (prisma as any)[currentTable].findUnique({
+              where: { id: recordId },
+              select: { id: true, formId: true },
+            })
+            if (record) {
+              tableName = `form_records_${i}`
+              break
+            }
+          } catch (error) {
+            // Continue to next table
           }
-        } catch (error) {
-          // Continue to next table
         }
       }
 
@@ -692,8 +625,26 @@ export class DatabaseRecords {
             data: updateData,
           })
           break
+        case "form_records_unified":
+          updatedRecord = await prisma.formRecord.update({
+            where: { id: recordId },
+            data: updateData,
+          })
+          break
         default:
           throw new Error(`Invalid table name: ${tableName}`)
+      }
+
+      // Sync update to unified table (non-blocking) when record was in legacy table
+      if (tableName !== "form_records_unified") {
+        try {
+          await prisma.formRecord.update({
+            where: { id: recordId },
+            data: updateData,
+          })
+        } catch {
+          // Record may not exist in unified table yet — ignore
+        }
       }
 
       // Get the form structure for the updated record
@@ -750,6 +701,17 @@ export class DatabaseRecords {
         }
       }
 
+      // Also try unified table
+      if (!record) {
+        try {
+          record = await prisma.formRecord.findUnique({
+            where: { id: recordId },
+            select: { id: true },
+          })
+          if (record) tableName = "form_records_unified"
+        } catch { /* ignore */ }
+      }
+
       if (!record) {
         throw new Error(`Record not found: ${recordId}`)
       }
@@ -801,8 +763,22 @@ export class DatabaseRecords {
         case "form_records_15":
           await prisma.formRecord15.delete({ where: { id: recordId } })
           break
+        case "form_records_unified":
+          // Already in unified table only
+          break
         default:
           throw new Error(`Invalid table name: ${tableName}`)
+      }
+
+      // Also delete from unified table (non-blocking sync)
+      if (tableName !== "form_records_unified") {
+        try {
+          await prisma.formRecord.delete({ where: { id: recordId } })
+        } catch {
+          // May not exist in unified table yet — ignore
+        }
+      } else {
+        await prisma.formRecord.delete({ where: { id: recordId } })
       }
     } catch (error: any) {
       console.error("Database error deleting form record:", error)

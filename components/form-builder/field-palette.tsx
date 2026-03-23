@@ -566,8 +566,7 @@ export default function FieldPalette() {
       </div>
 
       {/* ── MOBILE: collapsed by default, expands as a bottom sheet on toggle ── */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-50">
-        {/* Toggle pill button — always visible at the bottom */}
+<div className="sm:hidden fixed bottom-0 left-0 right-0 z-30">        {/* Toggle pill button — always visible at the bottom */}
         <button
           onClick={() => setMobileOpen((prev) => !prev)}
           className="w-full flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 shadow-lg"

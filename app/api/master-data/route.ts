@@ -8,7 +8,7 @@ const extractValues = (staticData: any) => {
   return staticData.map((item: any) => ({
     id: item.id || `temp-${Date.now()}-${Math.random()}`,
     value: item.label || "", // This is what user sees
-    code: (item.value || item.label || "").toLowerCase().replace(/\s+/g, "_"),
+    code: item.value || item.label || "",
   }))
 }
 async function getPermittedModulesFlat(userId: string, organizationId: string, isAdmin: boolean): Promise<any[]> {
@@ -317,7 +317,7 @@ export async function POST(req: NextRequest) {
     const staticData = values.map((v: string, i: number) => ({
       id: `val-${Date.now()}-${i}`,
       label: v.trim(),
-      value: v.trim().toLowerCase().replace(/\s+/g, "_"),
+      value: v.trim(),
       order: i,
     }))
     const lookup = await prisma.lookupSource.create({
@@ -402,7 +402,7 @@ export async function PUT(req: NextRequest) {
     const staticData = values.map((v: string, i: number) => ({
       id: `val-${Date.now()}-${i}`,
       label: v.trim(),
-      value: v.trim().toLowerCase().replace(/\s+/g, "_"),
+      value: v.trim(),
       order: i,
     }))
     const updated = await prisma.lookupSource.update({
