@@ -104,9 +104,11 @@ const getOperatorsForFieldType = (fieldType: string) => {
     case "select":
     case "radio":
     case "lookup":
+    case "dropdown":
       return [
         { value: "is", label: "is" },
         { value: "isn't", label: "isn't" },
+        { value: "contains", label: "contains" },
         { value: "is one of", label: "is one of" },
         { value: "is empty", label: "is empty" },
         { value: "is not empty", label: "is not empty" },
@@ -469,27 +471,67 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                           </SelectContent>
                         </Select>
 
-                        {needsValueInput(expandedData.operator) && (
-                          <Input
-                            ref={isPreselected ? valueInputRef : null}
-                            type={
-                              field.type === "number"
-                                ? "number"
-                                : field.type === "date"
-                                  ? "date"
-                                  : "text"
-                            }
-                            placeholder="Type here"
-                            value={expandedData.value}
-                            onChange={(e) => {
-                              updateFieldFilter(field.id, { value: e.target.value })
-                            }}
-                            className={cn(
-                              "h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500",
-                              isPreselected && "ring-2 ring-blue-400 border-blue-400"
-                            )}
-                          />
-                        )}
+                        {needsValueInput(expandedData.operator) && (() => {
+                          // For select/radio/lookup/dropdown fields, show a dropdown of available options
+                          const fieldOptions = ["select", "radio", "dropdown"].includes(field.type)
+                            ? (field.options || [])
+                            : field.type === "lookup"
+                              ? (field.lookup?.options || [])
+                              : [];
+                          const hasOptions = fieldOptions.length > 0 && expandedData.operator !== "is one of";
+
+                          if (hasOptions) {
+                            return (
+                              <Select
+                                value={expandedData.value || ""}
+                                onValueChange={(val) => {
+                                  updateFieldFilter(field.id, { value: val === "__clear__" ? "" : val })
+                                }}
+                              >
+                                <SelectTrigger className={cn(
+                                  "h-8 text-xs bg-white border-gray-300 hover:border-gray-400",
+                                  isPreselected && "ring-2 ring-blue-400 border-blue-400"
+                                )}>
+                                  <SelectValue placeholder="Select a value" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__clear__" className="text-xs text-gray-400 italic">— Clear —</SelectItem>
+                                  {fieldOptions.map((opt: any) => {
+                                    const optValue = String(opt.value ?? opt.id ?? opt);
+                                    const optLabel = String(opt.label ?? opt.name ?? opt);
+                                    return (
+                                      <SelectItem key={optValue} value={optValue} className="text-xs">
+                                        {optLabel}
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            )
+                          }
+
+                          return (
+                            <Input
+                              ref={isPreselected ? valueInputRef : null}
+                              type={
+                                field.type === "number"
+                                  ? "number"
+                                  : field.type === "date" || field.type === "datetime"
+                                    ? "date"
+                                    : "text"
+                              }
+                              placeholder={expandedData.operator === "is one of" ? "value1, value2, ..." : "Type here"}
+                              value={expandedData.value}
+                              onChange={(e) => {
+                                updateFieldFilter(field.id, { value: e.target.value })
+                              }}
+                              className={cn(
+                                "h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500",
+                                isPreselected && "ring-2 ring-blue-400 border-blue-400"
+                              )}
+                            />
+                          )
+                        })()}
 
                         {needsSecondValue(expandedData.operator) && (
                           <Input

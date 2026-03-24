@@ -120,24 +120,6 @@ export function SortableColumnHeader({
               ) : (
                 <ArrowDown className="h-3.5 w-3.5 flex-shrink-0" />
               ))}
-            {(isMergedMode ||
-              field.subformTitle ||
-              (field.sectionTitle &&
-                field.sectionTitle !== "Default Section")) && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    className="p-0.5 hover:bg-gray-200/50 rounded cursor-pointer"
-                    type="button"
-                  >
-                    <ChevronDown className="h-3.5 w-3.5 text-gray-500 hover:text-gray-700" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="text-xs max-w-xs">
-                  {tooltipText}
-                </PopoverContent>
-              </Popover>
-            )}
           </div>
         </div>
 

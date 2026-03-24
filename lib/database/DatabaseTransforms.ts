@@ -197,6 +197,10 @@ export class DatabaseTransforms {
       rollup: field.rollup as Record<string, any> | null,
       lookup: field.lookup as Record<string, any> | null,
       decimalPlaces: field.decimalPlaces,  // NEW: Added for schema update
+      // Dependent / cascading dropdown support
+      isDependent: field.isDependent ?? false,
+      parentFieldId: field.parentFieldId ?? null,
+      dependentGroups: Array.isArray(field.dependentGroups) ? field.dependentGroups : [],
       createdAt: field.createdAt,
       updatedAt: field.updatedAt,
     };

@@ -30,11 +30,7 @@ import {
 import { Eye, Trash2, MoreHorizontal, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  DndContext,
-  closestCenter,
-  DragOverlay,
-} from "@dnd-kit/core";
+import { DndContext, closestCenter, DragOverlay } from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
@@ -49,6 +45,7 @@ import { RecordTableHeader } from "./RecordTableHeader";
 import { RecordCell } from "./RecordCell";
 import { isImageUrl, isImageField } from "@/lib/utils/fieldUtils";
 import { useRecordsDisplay } from "@/hooks/use-records-display";
+import { LookupField } from "@/components/forms/lookup-field";
 
 import type {
   ProcessedFieldData,
@@ -144,31 +141,48 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   // ── Hook ─────────────────────────────────────────────────────────────────────
   const {
     tableContainerRef,
-    viewDetailsOpen, setViewDetailsOpen,
+    viewDetailsOpen,
+    setViewDetailsOpen,
     selectedRecord,
     columnWidths,
     expandedCells,
     numDummyRows,
-    isFilterSidebarOpen, setIsFilterSidebarOpen,
-    activeFieldFilters, setActiveFieldFilters,
+    isFilterSidebarOpen,
+    setIsFilterSidebarOpen,
+    activeFieldFilters,
+    setActiveFieldFilters,
     selectedFieldForAdvancedFilter,
-    columnSearchFieldId, setColumnSearchFieldId,
-    columnSearchValue, setColumnSearchValue,
+    columnSearchFieldId,
+    setColumnSearchFieldId,
+    columnSearchValue,
+    setColumnSearchValue,
     activeDragId,
-    deleteConfirmOpen, setDeleteConfirmOpen,
-    previewData, setPreviewData,
-    orderedFields, setOrderedFields,
+    deleteConfirmOpen,
+    setDeleteConfirmOpen,
+    previewData,
+    setPreviewData,
+    orderedFields,
+    setOrderedFields,
     visibleFields,
-    isManageColumnsOpen, setIsManageColumnsOpen,
-    isWrapTextEnabled, setIsWrapTextEnabled,
-    activeTab, setActiveTab,
-    focusedCell, setFocusedCell,
-    selectedCell, setSelectedCell,
-    comments, setComments,
-    activeCommentCell, setActiveCommentCell,
-    newComment, setNewComment,
+    isManageColumnsOpen,
+    setIsManageColumnsOpen,
+    isWrapTextEnabled,
+    setIsWrapTextEnabled,
+    activeTab,
+    setActiveTab,
+    focusedCell,
+    setFocusedCell,
+    selectedCell,
+    setSelectedCell,
+    comments,
+    setComments,
+    activeCommentCell,
+    setActiveCommentCell,
+    newComment,
+    setNewComment,
     confirmDeleteCommentId,
-    conditionalRules, setConditionalRules,
+    conditionalRules,
+    setConditionalRules,
     enhancedFormFields,
     isMergedMode,
     populatedRecordsWithPending,
@@ -176,13 +190,27 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     startIdx,
     displayedFields,
     hierarchyGroups,
-    canEditRecord, canDeleteRecord,
-    getFieldData, getConditionalStyle, recalculateFormulasForRecord,
-    handleResizeStart, toggleCellExpansion, toggleFieldVisibility, toggleAllFieldsVisibility, allFieldsVisible,
-    handleCellPointerDown, handleOpenAdvancedFilterForColumn,
-    handleOpenDeleteConfirm, handleConfirmDelete, handleViewDetails,
-    addComment, requestDeleteComment, cancelDeleteComment,
-    sensors, handleDragStart, handleDragEnd,
+    canEditRecord,
+    canDeleteRecord,
+    getFieldData,
+    getConditionalStyle,
+    recalculateFormulasForRecord,
+    handleResizeStart,
+    toggleCellExpansion,
+    toggleFieldVisibility,
+    toggleAllFieldsVisibility,
+    allFieldsVisible,
+    handleCellPointerDown,
+    handleOpenAdvancedFilterForColumn,
+    handleOpenDeleteConfirm,
+    handleConfirmDelete,
+    handleViewDetails,
+    addComment,
+    requestDeleteComment,
+    cancelDeleteComment,
+    sensors,
+    handleDragStart,
+    handleDragEnd,
   } = useRecordsDisplay({
     formRecords,
     formFieldsWithSections,
@@ -205,28 +233,42 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     onViewDetails,
   });
 
-
   // ── Cell event callbacks ──────────────────────────────────────────────────────
-  const handleCellClick = useCallback((cellKey: string) => {
-    setSelectedCell(cellKey);
-    setFocusedCell(cellKey);
-  }, [setSelectedCell, setFocusedCell]);
+  const handleCellClick = useCallback(
+    (cellKey: string) => {
+      setSelectedCell(cellKey);
+      setFocusedCell(cellKey);
+    },
+    [setSelectedCell, setFocusedCell],
+  );
+  // Add this line
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
 
-  const handleCellContextMenu = useCallback((cellKey: string) => {
-    setFocusedCell(cellKey);
-    setActiveCommentCell(cellKey);
-  }, [setFocusedCell, setActiveCommentCell]);
+  const handleCellContextMenu = useCallback(
+    (cellKey: string) => {
+      setFocusedCell(cellKey);
+      setActiveCommentCell(cellKey);
+    },
+    [setFocusedCell, setActiveCommentCell],
+  );
 
   const handlePreviewClick = useCallback(
-    (rows: any[], title: string, fieldDefinitions?: { id: string; label: string; type: string }[]) => {
+    (
+      rows: any[],
+      title: string,
+      fieldDefinitions?: { id: string; label: string; type: string }[],
+    ) => {
       setPreviewData({ isOpen: true, rows, title, fieldDefinitions });
     },
     [setPreviewData],
   );
 
-  const handleCommentClick = useCallback((cellKey: string) => {
-    setActiveCommentCell(cellKey);
-  }, [setActiveCommentCell]);
+  const handleCommentClick = useCallback(
+    (cellKey: string) => {
+      setActiveCommentCell(cellKey);
+    },
+    [setActiveCommentCell],
+  );
 
   // ── renderFieldEditor — keeps inline so it can close over hook state ─────────
   const renderFieldEditor = (
@@ -269,30 +311,47 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         ...record,
         processedData: record.processedData.map((pd) =>
           pd.fieldId === fieldDef.id ||
-            pd.fieldId === fieldDef.originalId ||
-            pd.fieldLabel === fieldDef.label
+          pd.fieldId === fieldDef.originalId ||
+          pd.fieldLabel === fieldDef.label
             ? { ...pd, value: pendingChange.value }
             : pd,
         ),
       };
 
-      console.log(`[AutoSave] tempRecord processedData (fields with values):`,
-        tempRecord.processedData.map((p) => ({ fieldId: p.fieldId, label: p.fieldLabel, value: p.value }))
+      console.log(
+        `[AutoSave] tempRecord processedData (fields with values):`,
+        tempRecord.processedData.map((p) => ({
+          fieldId: p.fieldId,
+          label: p.fieldLabel,
+          value: p.value,
+        })),
       );
 
       // ── Step 2: recalculate ALL formula fields using the updated record ──
-      const { updatedProcessedData } = recalculateFormulasForRecord(tempRecord, new Set());
+      const { updatedProcessedData } = recalculateFormulasForRecord(
+        tempRecord,
+        new Set(),
+      );
 
-      console.log(`[AutoSave] formula recalc result:`,
+      console.log(
+        `[AutoSave] formula recalc result:`,
         updatedProcessedData
           .filter((p) => p.fieldType === "formula")
-          .map((p) => ({ fieldId: p.fieldId, label: p.fieldLabel, value: p.value }))
+          .map((p) => ({
+            fieldId: p.fieldId,
+            label: p.fieldLabel,
+            value: p.value,
+          })),
       );
 
       // ── Step 3: build saveMap — edited field + any changed formula fields ──
-      const saveMap = new Map<string, PendingChange>([[pendingKey, pendingChange]]);
+      const saveMap = new Map<string, PendingChange>([
+        [pendingKey, pendingChange],
+      ]);
 
-      console.log(`[AutoSave] saveMap initial — edited field "${fieldDef.label}" = "${pendingChange.value}"`);
+      console.log(
+        `[AutoSave] saveMap initial — edited field "${fieldDef.label}" = "${pendingChange.value}"`,
+      );
 
       enhancedFormFields
         .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
@@ -305,7 +364,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           );
 
           if (!recalcPd) {
-            console.log(`[AutoSave] formula "${formulaField.label}" — no recalcPd found, skipping`);
+            console.log(
+              `[AutoSave] formula "${formulaField.label}" — no recalcPd found, skipping`,
+            );
             return;
           }
 
@@ -319,7 +380,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           const oldValue = existingPd?.value ?? "";
           const newValue = recalcPd.value;
 
-          console.log(`[AutoSave] formula "${formulaField.label}" — old="${oldValue}" new="${newValue}" changed=${String(oldValue) !== String(newValue)}`);
+          console.log(
+            `[AutoSave] formula "${formulaField.label}" — old="${oldValue}" new="${newValue}" changed=${String(oldValue) !== String(newValue)}`,
+          );
 
           const formulaKey = `${record.id}-${formulaField.id}`;
           saveMap.set(formulaKey, {
@@ -334,7 +397,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         });
 
       console.log(`[AutoSave] final saveMap keys:`, Array.from(saveMap.keys()));
-      console.log(`[AutoSave] calling saveAllPendingChanges with ${saveMap.size} change(s)`);
+      console.log(
+        `[AutoSave] calling saveAllPendingChanges with ${saveMap.size} change(s)`,
+      );
 
       saveAllPendingChanges(saveMap);
       setEditingCell(null);
@@ -442,7 +507,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       // could be a label, a raw id, or a composite id) while
       // parentFieldId is always the raw database field id.
       const parentFieldDef = enhancedFormFields.find(
-        (f: any) => f.id === fd.parentFieldId || f.originalId === fd.parentFieldId,
+        (f: any) =>
+          f.id === fd.parentFieldId || f.originalId === fd.parentFieldId,
       );
       const parentLabel = parentFieldDef?.label;
 
@@ -479,15 +545,17 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         const parentPd = record.processedData.find(
           (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
         );
-        const parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+        const parentVal =
+          parentPd?.value != null ? String(parentPd.value) : undefined;
         if (parentVal) {
           const mapping = depConfig.valueMappings?.find(
             (m: any) => m.parentValue === parentVal,
           );
           if (mapping?.allowedChildValues?.length) {
-            normalised = normalised.filter((opt) =>
-              mapping.allowedChildValues.includes(String(opt.value)) ||
-              mapping.allowedChildValues.includes(String(opt.label)),
+            normalised = normalised.filter(
+              (opt) =>
+                mapping.allowedChildValues.includes(String(opt.value)) ||
+                mapping.allowedChildValues.includes(String(opt.label)),
             );
           }
         }
@@ -552,7 +620,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         <AdvancedFilterSidebar
           isOpen={isFilterSidebarOpen}
           onClose={() => setIsFilterSidebarOpen(false)}
-          fields={orderedFields.length > 0 ? orderedFields : formFieldsWithSections}
+          fields={
+            orderedFields.length > 0 ? orderedFields : formFieldsWithSections
+          }
           filters={activeFieldFilters}
           onFiltersChange={(newFilters) => {
             setActiveFieldFilters(newFilters);
@@ -569,7 +639,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <Card className="border-none rounded-none shadow-none bg-transparent overflow-hidden flex-1 flex flex-col">
             <CardContent className="p-4 space-y-4 flex-1 flex flex-col min-h-0">
-
               {/* Toolbar */}
               <RecordTableToolbar
                 isFilterSidebarOpen={isFilterSidebarOpen}
@@ -613,19 +682,30 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                           recordSortOrder={recordSortOrder}
                           activeFieldFilters={activeFieldFilters}
                           handleResizeStart={handleResizeStart}
-                          handleOpenAdvancedFilterForColumn={handleOpenAdvancedFilterForColumn}
+                          handleOpenAdvancedFilterForColumn={
+                            handleOpenAdvancedFilterForColumn
+                          }
+                          // ✅ Proper bulk delete that opens popup
+                          onDeleteSelected={() => {
+                            if (selectedRecords.size > 0) {
+                              setBulkDeleteOpen(true);
+                            }
+                          }}
                         />
 
                         {/* Data Rows */}
                         {paginatedRecords.length === 0 ? (
                           <div className="flex items-center justify-center py-12 text-gray-500">
-                            <p className="text-sm font-medium">No records found</p>
+                            <p className="text-sm font-medium">
+                              No records found
+                            </p>
                           </div>
                         ) : (
                           <>
                             {paginatedRecords.map((record, rowIndex) => {
                               const canEditThisRecord = canEditRecord(record);
-                              const canDeleteThisRecord = canDeleteRecord(record);
+                              const canDeleteThisRecord =
+                                canDeleteRecord(record);
                               return (
                                 <div
                                   key={record.id}
@@ -662,37 +742,52 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           <MoreHorizontal className="h-4 w-4" />
                                         </Button>
                                       </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end" className="w-44">
+                                      <DropdownMenuContent
+                                        align="end"
+                                        className="w-44"
+                                      >
                                         <DropdownMenuLabel className="text-xs font-bold">
                                           Actions
                                         </DropdownMenuLabel>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           className="text-xs cursor-pointer"
-                                          onClick={() => handleViewDetails(record)}
+                                          onClick={() =>
+                                            handleViewDetails(record)
+                                          }
                                         >
-                                          <Eye className="h-4 w-4 mr-2" /> View Details
+                                          <Eye className="h-4 w-4 mr-2" /> View
+                                          Details
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                           className={cn(
                                             "text-xs cursor-pointer",
-                                            !canEditThisRecord && "text-gray-400 opacity-50",
+                                            !canEditThisRecord &&
+                                              "text-gray-400 opacity-50",
                                           )}
-                                          onClick={() => canEditThisRecord && onEditRecord(record)}
+                                          onClick={() =>
+                                            canEditThisRecord &&
+                                            onEditRecord(record)
+                                          }
                                           disabled={!canEditThisRecord}
                                         >
-                                          <Pencil className="h-4 w-4 mr-2" /> Edit Record
+                                          <Pencil className="h-4 w-4 mr-2" />{" "}
+                                          Edit Record
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           className={cn(
                                             "text-xs text-red-600 cursor-pointer",
-                                            !canDeleteThisRecord && "text-gray-400 opacity-50",
+                                            !canDeleteThisRecord &&
+                                              "text-gray-400 opacity-50",
                                           )}
-                                          onClick={() => handleOpenDeleteConfirm(record)}
+                                          onClick={() =>
+                                            handleOpenDeleteConfirm(record)
+                                          }
                                           disabled={!canDeleteThisRecord}
                                         >
-                                          <Trash2 className="h-4 w-4 mr-2" /> Delete Record
+                                          <Trash2 className="h-4 w-4 mr-2" />{" "}
+                                          Delete Record
                                         </DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -706,24 +801,37 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           key={`${record.id}-${fieldDef.id}`}
                                           record={record}
                                           fieldDef={fieldDef}
-                                          fieldData={getFieldData(record, fieldDef)}
-                                          pendingChange={pendingChanges.get(`${record.id}-${fieldDef.id}`)}
+                                          fieldData={getFieldData(
+                                            record,
+                                            fieldDef,
+                                          )}
+                                          pendingChange={pendingChanges.get(
+                                            `${record.id}-${fieldDef.id}`,
+                                          )}
                                           editingCell={editingCell}
                                           expandedCells={expandedCells}
-                                          columnWidth={columnWidths.get(fieldDef.id) || 192}
+                                          columnWidth={
+                                            columnWidths.get(fieldDef.id) || 192
+                                          }
                                           isWrapTextEnabled={isWrapTextEnabled}
                                           editMode={editMode}
                                           selectedCell={selectedCell}
                                           focusedCell={focusedCell}
                                           comments={comments}
-                                          getConditionalStyle={getConditionalStyle}
-                                          handleCellPointerDown={handleCellPointerDown}
+                                          getConditionalStyle={
+                                            getConditionalStyle
+                                          }
+                                          handleCellPointerDown={
+                                            handleCellPointerDown
+                                          }
                                           renderFieldEditor={renderFieldEditor}
                                           onCellClick={handleCellClick}
                                           onContextMenu={handleCellContextMenu}
                                           onPreviewClick={handlePreviewClick}
                                           onCommentClick={handleCommentClick}
-                                          toggleCellExpansion={toggleCellExpansion}
+                                          toggleCellExpansion={
+                                            toggleCellExpansion
+                                          }
                                         />
                                       )),
                                     ),
@@ -734,24 +842,44 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             key={`${record.id}-${fieldDef.id}`}
                                             record={record}
                                             fieldDef={fieldDef}
-                                            fieldData={getFieldData(record, fieldDef)}
-                                            pendingChange={pendingChanges.get(`${record.id}-${fieldDef.id}`)}
+                                            fieldData={getFieldData(
+                                              record,
+                                              fieldDef,
+                                            )}
+                                            pendingChange={pendingChanges.get(
+                                              `${record.id}-${fieldDef.id}`,
+                                            )}
                                             editingCell={editingCell}
                                             expandedCells={expandedCells}
-                                            columnWidth={columnWidths.get(fieldDef.id) || 192}
-                                            isWrapTextEnabled={isWrapTextEnabled}
+                                            columnWidth={
+                                              columnWidths.get(fieldDef.id) ||
+                                              192
+                                            }
+                                            isWrapTextEnabled={
+                                              isWrapTextEnabled
+                                            }
                                             editMode={editMode}
                                             selectedCell={selectedCell}
                                             focusedCell={focusedCell}
                                             comments={comments}
-                                            getConditionalStyle={getConditionalStyle}
-                                            handleCellPointerDown={handleCellPointerDown}
-                                            renderFieldEditor={renderFieldEditor}
+                                            getConditionalStyle={
+                                              getConditionalStyle
+                                            }
+                                            handleCellPointerDown={
+                                              handleCellPointerDown
+                                            }
+                                            renderFieldEditor={
+                                              renderFieldEditor
+                                            }
                                             onCellClick={handleCellClick}
-                                            onContextMenu={handleCellContextMenu}
+                                            onContextMenu={
+                                              handleCellContextMenu
+                                            }
                                             onPreviewClick={handlePreviewClick}
                                             onCommentClick={handleCommentClick}
-                                            toggleCellExpansion={toggleCellExpansion}
+                                            toggleCellExpansion={
+                                              toggleCellExpansion
+                                            }
                                           />
                                         )),
                                       ),
@@ -762,23 +890,27 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                             })}
 
                             {/* Dummy rows for filling space */}
-                            {Array.from({ length: numDummyRows }).map((_, i) => (
-                              <div
-                                key={`dummy-${i}`}
-                                className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0"
-                              >
-                                <div className="w-10 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-12 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-20 sm:w-24 border-r border-gray-200 flex-shrink-0" />
-                                {displayedFields.map((field) => (
-                                  <div
-                                    key={field.id}
-                                    className="border-r border-gray-200 bg-white px-3 flex-shrink-0"
-                                    style={{ width: `${columnWidths.get(field.id) || 192}px` }}
-                                  />
-                                ))}
-                              </div>
-                            ))}
+                            {Array.from({ length: numDummyRows }).map(
+                              (_, i) => (
+                                <div
+                                  key={`dummy-${i}`}
+                                  className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0"
+                                >
+                                  <div className="w-10 border-r border-gray-200 flex-shrink-0" />
+                                  <div className="w-12 border-r border-gray-200 flex-shrink-0" />
+                                  <div className="w-20 sm:w-24 border-r border-gray-200 flex-shrink-0" />
+                                  {displayedFields.map((field) => (
+                                    <div
+                                      key={field.id}
+                                      className="border-r border-gray-200 bg-white px-3 flex-shrink-0"
+                                      style={{
+                                        width: `${columnWidths.get(field.id) || 192}px`,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              ),
+                            )}
                           </>
                         )}
                       </div>
@@ -787,7 +919,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     <DragOverlay>
                       {activeDragId ? (
                         <div className="bg-white shadow-2xl border-2 border-blue-500 rounded-lg px-4 py-2 opacity-90 font-medium">
-                          {orderedFields.find((f) => f.id === activeDragId)?.label || "Column"}
+                          {orderedFields.find((f) => f.id === activeDragId)
+                            ?.label || "Column"}
                         </div>
                       ) : null}
                     </DragOverlay>
@@ -827,11 +960,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           </Card>
 
           {/* Manage Columns Dialog */}
-          <Dialog open={isManageColumnsOpen} onOpenChange={setIsManageColumnsOpen}>
+          <Dialog
+            open={isManageColumnsOpen}
+            onOpenChange={setIsManageColumnsOpen}
+          >
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Manage Columns</DialogTitle>
-                <DialogDescription>Select and reorder visible columns</DialogDescription>
+                <DialogDescription>
+                  Select and reorder visible columns
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 {/* Select All row */}
@@ -842,7 +980,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       checked={allFieldsVisible}
                       onCheckedChange={toggleAllFieldsVisibility}
                     />
-                    <label htmlFor="select-all-columns" className="text-sm font-medium cursor-pointer select-none">
+                    <label
+                      htmlFor="select-all-columns"
+                      className="text-sm font-medium cursor-pointer select-none"
+                    >
                       {allFieldsVisible ? "Deselect All" : "Select All"}
                     </label>
                   </div>
@@ -857,8 +998,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   onDragEnd={(e) => {
                     if (e.over && e.active.id !== e.over.id) {
                       setOrderedFields((items) => {
-                        const oldIndex = items.findIndex((f) => f.id === e.active.id);
-                        const newIndex = items.findIndex((f) => f.id === e.over!.id);
+                        const oldIndex = items.findIndex(
+                          (f) => f.id === e.active.id,
+                        );
+                        const newIndex = items.findIndex(
+                          (f) => f.id === e.over!.id,
+                        );
                         return arrayMove(items, oldIndex, newIndex);
                       });
                     }
@@ -884,7 +1029,65 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 </DndContext>
               </div>
               <DialogFooter>
-                <Button onClick={() => setIsManageColumnsOpen(false)}>Apply Changes</Button>
+                <Button onClick={() => setIsManageColumnsOpen(false)}>
+                  Apply Changes
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Bulk Delete Confirmation Popup */}
+          <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Delete Selected Records</DialogTitle>
+                <DialogDescription className="text-base">
+                  Are you sure you want to permanently delete{" "}
+                  <span className="font-semibold text-red-600">
+                    {selectedRecords.size}
+                  </span>{" "}
+                  selected record(s)?
+                  <br />
+                  This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setBulkDeleteOpen(false)}
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  variant="destructive"
+                  onClick={async () => {
+                    const recordsToDelete = Array.from(selectedRecords);
+
+                    try {
+                      const deletePromises = recordsToDelete.map((recordId) => {
+                        const record = formRecords.find(
+                          (r) => r.id === recordId,
+                        );
+                        if (record) {
+                          return onDeleteRecord(record);
+                        }
+                        return Promise.resolve();
+                      });
+
+                      await Promise.all(deletePromises);
+
+                      setSelectedRecords(new Set()); // Clear selection
+                      setBulkDeleteOpen(false);
+                    } catch (error) {
+                      console.error("Bulk delete failed:", error);
+                      // Optional: show error message
+                    }
+                  }}
+                >
+                  Yes, Delete {selectedRecords.size} Records
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -892,7 +1095,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           {/* Subform Preview Modal */}
           <SubformPreviewModal
             isOpen={previewData.isOpen}
-            onClose={() => setPreviewData((prev) => ({ ...prev, isOpen: false }))}
+            onClose={() =>
+              setPreviewData((prev) => ({ ...prev, isOpen: false }))
+            }
             rows={previewData.rows}
             title={previewData.title}
             fieldDefinitions={previewData.fieldDefinitions}
@@ -904,10 +1109,15 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Confirm Delete</DialogTitle>
-                <DialogDescription>This action cannot be undone.</DialogDescription>
+                <DialogDescription>
+                  This action cannot be undone.
+                </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteConfirmOpen(false)}
+                >
                   Cancel
                 </Button>
                 <Button variant="destructive" onClick={handleConfirmDelete}>

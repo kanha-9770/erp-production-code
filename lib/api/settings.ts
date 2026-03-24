@@ -30,6 +30,15 @@ export const settingsApi = baseApi.injectEndpoints({
       invalidatesTags: ["MasterData"],
     }),
 
+    updateMasterData: builder.mutation<ApiResponse, Record<string, any>>({
+      query: (body) => ({
+        url: "/master-data",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["MasterData"],
+    }),
+
     deleteMasterData: builder.mutation<ApiResponse, string>({
       query: (id) => ({
         url: `/master-data?id=${id}`,
@@ -50,6 +59,7 @@ export const {
   useGetMasterDataQuery,
   useLazyGetMasterDataQuery,
   useCreateMasterDataMutation,
+  useUpdateMasterDataMutation,
   useDeleteMasterDataMutation,
   useGetMasterDataByModuleQuery,
   useLazyGetMasterDataByModuleQuery,

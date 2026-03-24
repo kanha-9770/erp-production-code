@@ -256,7 +256,8 @@ export function useRecordsDisplay({
       }
       // No saved preference — default to ALL fields (or limit to reasonable number)
       // Using all fields by default ensures data is visible on first load
-      setVisibleFields(new Set(orderedFieldIds));
+      const defaultIds = getDefaultFields(orderedFields).map((f) => f.id);
+      setVisibleFields(new Set(defaultIds));
       orderedFieldsInitRef.current = true;
       return;
     }
@@ -583,40 +584,93 @@ export function useRecordsDisplay({
       if (activeFieldFilters.length === 0) return records;
       return records.filter((record) =>
         activeFieldFilters.every((filter) => {
-          const fieldDef = formFieldsWithSections.find((f) => f.id === filter.fieldId);
-          if (!fieldDef) return false;
-          const fd = getFieldData(record, fieldDef);
-          if (!fd) return filter.operator === "isEmpty";
-          const value = fd.value;
+          // Match by composite id, raw/original id, OR label — orderedFields may
+          // carry raw ids (from processedData) while formFieldsWithSections uses
+          // composite ids (formId_fieldId).
+          const fieldDef = formFieldsWithSections.find(
+            (f) =>
+              f.id === filter.fieldId ||
+              f.originalId === filter.fieldId ||
+              (filter.fieldLabel && f.label === filter.fieldLabel),
+          );
+          if (!fieldDef) return true; // unknown field — don't exclude
+
+          // Also look up processedData with both composite and raw id
+          const fd = fieldDef
+            ? (getFieldData(record, fieldDef) ??
+               record.processedData.find(
+                 (pd) => pd.fieldId === filter.fieldId || pd.fieldLabel === filter.fieldLabel,
+               ))
+            : undefined;
+
+          // No data found for this field in the record
+          if (!fd) {
+            return filter.operator === "is empty" || filter.operator === "isEmpty";
+          }
+
+          const rawValue = fd.value;
+          // Use displayValue for string comparisons so user-visible text is matched
+          const displayStr = (fd.displayValue ?? rawValue ?? "").toString();
+          const rawStr = String(rawValue ?? "");
           const fv = filter.value;
+
+          // Skip filters where user hasn't entered a value yet (except value-less operators)
+          const valuelessOps = ["is empty", "isEmpty", "is not empty", "isNotEmpty", "is true", "isTrue", "is false", "isFalse"];
+          if (!valuelessOps.includes(filter.operator) && (fv === undefined || fv === null || fv === "")) {
+            return true; // no filter value entered — pass through
+          }
+
+          const fvLower = String(fv).toLowerCase();
+
           switch (filter.operator) {
-            case "is empty": case "isEmpty": return value === null || value === undefined || value === "";
-            case "is not empty": case "isNotEmpty": return value !== null && value !== undefined && value !== "";
-            case "is true": case "isTrue": return value === true || value === "true";
-            case "is false": case "isFalse": return value === false || value === "false" || !value;
-            case "is": case "equals": return String(value).toLowerCase() === String(fv).toLowerCase();
-            case "isn't": return String(value).toLowerCase() !== String(fv).toLowerCase();
-            case "contains": return String(value).toLowerCase().includes(String(fv).toLowerCase());
-            case "doesn't contain": return !String(value).toLowerCase().includes(String(fv).toLowerCase());
-            case "starts with": case "startsWith": return String(value).toLowerCase().startsWith(String(fv).toLowerCase());
-            case "ends with": case "endsWith": return String(value).toLowerCase().endsWith(String(fv).toLowerCase());
-            case "greater than": case "greaterThan": return filter.fieldType === "number" && Number(value) > Number(fv);
-            case "less than": case "lessThan": return filter.fieldType === "number" && Number(value) < Number(fv);
+            case "is empty": case "isEmpty":
+              return rawValue === null || rawValue === undefined || rawValue === "" || (Array.isArray(rawValue) && rawValue.length === 0);
+            case "is not empty": case "isNotEmpty":
+              return rawValue !== null && rawValue !== undefined && rawValue !== "" && !(Array.isArray(rawValue) && rawValue.length === 0);
+            case "is true": case "isTrue":
+              return rawValue === true || rawValue === "true";
+            case "is false": case "isFalse":
+              return rawValue === false || rawValue === "false" || !rawValue;
+            case "is": case "equals":
+              return rawStr.toLowerCase() === fvLower || displayStr.toLowerCase() === fvLower;
+            case "isn't":
+              return rawStr.toLowerCase() !== fvLower && displayStr.toLowerCase() !== fvLower;
+            case "contains":
+              return displayStr.toLowerCase().includes(fvLower) || rawStr.toLowerCase().includes(fvLower);
+            case "doesn't contain":
+              return !displayStr.toLowerCase().includes(fvLower) && !rawStr.toLowerCase().includes(fvLower);
+            case "starts with": case "startsWith":
+              return displayStr.toLowerCase().startsWith(fvLower) || rawStr.toLowerCase().startsWith(fvLower);
+            case "ends with": case "endsWith":
+              return displayStr.toLowerCase().endsWith(fvLower) || rawStr.toLowerCase().endsWith(fvLower);
+            case "greater than": case "greaterThan":
+              return filter.fieldType === "number" && Number(rawValue) > Number(fv);
+            case "less than": case "lessThan":
+              return filter.fieldType === "number" && Number(rawValue) < Number(fv);
             case "between": {
               if (filter.fieldType === "number") {
-                const nv = Number(value);
+                const nv = Number(rawValue);
                 return nv >= Number(fv) && nv <= Number(filter.value2);
               }
               if (filter.fieldType === "date" || filter.fieldType === "datetime") {
-                const dv = new Date(value);
+                const dv = new Date(rawValue);
                 return dv >= new Date(fv) && dv <= new Date(filter.value2 || fv);
               }
               return false;
             }
-            case "after": return (filter.fieldType === "date" || filter.fieldType === "datetime") && new Date(value) > new Date(fv);
-            case "before": return (filter.fieldType === "date" || filter.fieldType === "datetime") && new Date(value) < new Date(fv);
-            case "is one of": case "isOneOf":
-              return Array.isArray(fv) && fv.some((v) => String(value).toLowerCase() === String(v).toLowerCase());
+            case "after":
+              return (filter.fieldType === "date" || filter.fieldType === "datetime") && new Date(rawValue) > new Date(fv);
+            case "before":
+              return (filter.fieldType === "date" || filter.fieldType === "datetime") && new Date(rawValue) < new Date(fv);
+            case "is one of": case "isOneOf": {
+              // Support both array and comma-separated string
+              const candidates = Array.isArray(fv)
+                ? fv.map((v: any) => String(v).toLowerCase())
+                : String(fv).split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+              const valLower = rawStr.toLowerCase();
+              const dispLower = displayStr.toLowerCase();
+              return candidates.some((c: string) => valLower === c || dispLower === c);
+            }
             default: return true;
           }
         }),
@@ -783,12 +837,13 @@ export function useRecordsDisplay({
 
   const toggleAllFieldsVisibility = () => {
     if (allFieldsVisible) {
-      setVisibleFields(new Set());
+      // When deselect all → go to default 4 (NOT empty)
+      const defaultIds = getDefaultFields(orderedFields).map((f) => f.id);
+
+      setVisibleFields(new Set(defaultIds));
     } else {
       setVisibleFields(new Set(orderedFields.map((f) => f.id)));
     }
-    // Mark as initialized when user interacts with column visibility
-    orderedFieldsInitRef.current = true;
   };
 
   // ── Advanced filter opener ───────────────────────────────────────────────────
@@ -805,13 +860,19 @@ export function useRecordsDisplay({
   };
 
   const handleConfirmDelete = async () => {
-    if (recordToDelete) {
-      try { await onDeleteRecord(recordToDelete); } catch (error) {
+    const record = recordToDelete;
+
+    // CLOSE IMMEDIATELY
+    setDeleteConfirmOpen(false);
+    setRecordToDelete(null);
+
+    if (record) {
+      try {
+        await onDeleteRecord(record);  // run in background
+      } catch (error) {
         console.error("Deletion error:", error);
       }
     }
-    setDeleteConfirmOpen(false);
-    setRecordToDelete(null);
   };
 
   // ── View details ─────────────────────────────────────────────────────────────
@@ -941,20 +1002,29 @@ export function useRecordsDisplay({
   // ── Hierarchy grouping ────────────────────────────────────────────────────────
   // FALLBACK: If visibleFields is empty but orderedFields has content, show all.
   // This prevents empty tables when state hasn't fully synced on initial load.
+  // If user has selected specific columns, show only those
+  // Fallback: if no columns selected, show first 4 default columns
+
+  // Get default fields safely
+  const getDefaultFields = (fields: FormFieldWithSection[]) => {
+    const defaults = fields.filter((f) => (f as any).isDefault);
+
+    if (defaults.length > 0) return defaults;
+
+    // fallback → first 4 fields
+    return fields.slice(0, 4);
+  };
+
   const displayedFields = useMemo(() => {
-    const filtered = orderedFields.filter((f) => visibleFields.has(f.id));
-    
-    // If user has selected specific columns, show only those
-    if (filtered.length > 0) {
-      return filtered;
+    const selected = orderedFields.filter((f) => visibleFields.has(f.id));
+
+    // If user selected something → show that
+    if (selected.length > 0) {
+      return selected;
     }
-    
-    // Fallback: if no columns selected, show first 4 default columns
-    if (orderedFields.length > 0) {
-      return orderedFields.slice(0, 4);
-    }
-    
-    return [];
+
+    // Otherwise → show ONLY default 4 fields
+    return getDefaultFields(orderedFields);
   }, [orderedFields, visibleFields]);
 
   const hierarchyGroups = useMemo(() => {
@@ -1003,9 +1073,12 @@ export function useRecordsDisplay({
     if (columnSearchFieldId && columnSearchValue) {
       const q = columnSearchValue.toLowerCase();
       records = records.filter((r) => {
-        const fieldDef = formFieldsWithSections.find((f) => f.id === columnSearchFieldId);
+        const fieldDef = formFieldsWithSections.find(
+          (f) => f.id === columnSearchFieldId || f.originalId === columnSearchFieldId,
+        );
         if (!fieldDef) return true;
-        const fd = getFieldData(r, fieldDef);
+        const fd = getFieldData(r, fieldDef) ??
+          r.processedData.find((pd) => pd.fieldId === columnSearchFieldId);
         if (!fd) return false;
         return (fd.displayValue ?? "").toString().toLowerCase().includes(q);
       });

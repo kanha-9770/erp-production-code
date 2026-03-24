@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useLazyGetMasterDataQuery, useCreateMasterDataMutation, useDeleteMasterDataMutation } from "@/lib/api/settings"
+import { useLazyGetMasterDataQuery, useCreateMasterDataMutation, useUpdateMasterDataMutation, useDeleteMasterDataMutation } from "@/lib/api/settings"
 import {
   Dialog,
   DialogContent,
@@ -83,6 +83,7 @@ export function DynamicMasters() {
   const [loading, setLoading] = useState(true)
   const [triggerGetMasterData] = useLazyGetMasterDataQuery()
   const [createMasterData] = useCreateMasterDataMutation()
+  const [updateMasterData] = useUpdateMasterDataMutation()
   const [deleteMasterData] = useDeleteMasterDataMutation()
   const [processingRows, setProcessingRows] = useState<Set<string>>(new Set())
   const [recordSearchQuery, setRecordSearchQuery] = useState("")
@@ -176,10 +177,11 @@ export function DynamicMasters() {
 
   const updateRow = useCallback((rowId: string, field: keyof DropdownRow, value: string) => {
     setRows(prev => {
-      const newRows = [...prev]
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
-      const row = newRows[idx]
+      const newRows = [...prev]
+      const row = { ...newRows[idx], values: [...newRows[idx].values] }
+      newRows[idx] = row
       if (field === "module_id") {
         const mod = modules.find((m) => m.id === value)
         row.module_id = value
@@ -217,25 +219,26 @@ export function DynamicMasters() {
 
   const handleValueChange = useCallback((rowId: string, vi: number, newValue: string) => {
     setRows(prev => {
-      const newRows = [...prev]
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
-      newRows[idx].values[vi].value = newValue
+      const newRows = [...prev]
+      const newValues = [...newRows[idx].values]
+      newValues[vi] = { ...newValues[vi], value: newValue }
+      newRows[idx] = { ...newRows[idx], values: newValues }
       return newRows
     })
   }, [])
 
   const addValue = useCallback((rowId: string) => {
     setRows(prev => {
-      const newRows = [...prev]
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
+      const newRows = [...prev]
       const newValueId = `temp-${Date.now()}-${Math.random()}`
-      newRows[idx].values.push({
-        id: newValueId,
-        value: "",
-        code: "",
-      })
+      newRows[idx] = {
+        ...newRows[idx],
+        values: [...newRows[idx].values, { id: newValueId, value: "", code: "" }],
+      }
       setTimeout(() => {
         const refsForRow = valueInputRefs.current.get(rowId)
         if (refsForRow && refsForRow.length > 0) {
@@ -249,18 +252,23 @@ export function DynamicMasters() {
 
   const deleteValue = useCallback((rowId: string, vi: number) => {
     setRows(prev => {
-      const newRows = [...prev]
       const idx = prev.findIndex(r => r.id === rowId)
       if (idx < 0) return prev
-      newRows[idx].values.splice(vi, 1)
+      const newRows = [...prev]
+      const newValues = [...newRows[idx].values]
+      newValues.splice(vi, 1)
+      newRows[idx] = { ...newRows[idx], values: newValues }
       return newRows
     })
   }, [])
 
+  // Use a ref to always access the latest rows, avoiding stale closure in saveRow
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+
   const saveRow = useCallback(async (rowId: string) => {
-    const idx = rows.findIndex(r => r.id === rowId)
-    if (idx < 0) return
-    const row = rows[idx]
+    const row = rowsRef.current.find(r => r.id === rowId)
+    if (!row) return
     if (!row.form_id || !row.master_data_type_name.trim() || row.values.length === 0 || row.values.every(v => !v.value.trim())) {
       toast({
         title: "Validation Error",
@@ -270,13 +278,21 @@ export function DynamicMasters() {
       return
     }
     setProcessingRows(prev => new Set([...prev, rowId]))
-    const payload = {
-      ...(row.isNew ? { form_id: row.form_id } : { id: row.id }),
-      master_data_type_name: row.master_data_type_name.trim(),
-      values: row.values.map((v) => v.value.trim()).filter(Boolean),
-    }
+    const trimmedValues = row.values.map((v) => v.value.trim()).filter(Boolean)
     try {
-      await createMasterData(payload).unwrap()
+      if (row.isNew) {
+        await createMasterData({
+          form_id: row.form_id,
+          master_data_type_name: row.master_data_type_name.trim(),
+          values: trimmedValues,
+        }).unwrap()
+      } else {
+        await updateMasterData({
+          id: row.id,
+          master_data_type_name: row.master_data_type_name.trim(),
+          values: trimmedValues,
+        }).unwrap()
+      }
       toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
       await fetchData()
       setCurrentPage(1)
@@ -289,7 +305,7 @@ export function DynamicMasters() {
         return next
       })
     }
-  }, [rows, toast])
+  }, [toast, createMasterData, updateMasterData])
 
   const handleConfirmDelete = useCallback(async (id: string) => {
     setProcessingRows(prev => new Set([...prev, id]))
@@ -321,7 +337,7 @@ export function DynamicMasters() {
   }, [])
 
   const cancelRow = useCallback((rowId: string) => {
-    const row = rows.find(r => r.id === rowId)
+    const row = rowsRef.current.find(r => r.id === rowId)
     if (row?.isNew) {
       setRows(prev => prev.filter(r => r.id !== rowId))
     } else {
@@ -329,7 +345,7 @@ export function DynamicMasters() {
       setCurrentPage(1)
     }
     setDeleteDialogOpen(false)
-  }, [rows])
+  }, [])
 
   const sortRecords = useCallback((records: DropdownRow[]): DropdownRow[] => {
     const sorted = [...records].sort((a, b) => {

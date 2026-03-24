@@ -13,7 +13,7 @@ import { AlertCircle, CheckCircle, Loader2, Send } from "lucide-react";
 import { Label } from "@/components/ui/label"; // correct import
 
 import { usePublicFormLogic } from "@/components/public-form/usePublicFormLogic";
-import {FormRenderer, RenderSubform} from "@/components/public-form/FormRenderer"
+import { FormRenderer, RenderSubform } from "@/components/public-form/FormRenderer"
 
 import type { Form, Subform } from "@/types/form-builder";
 
@@ -88,21 +88,17 @@ export function PublicFormDialog({
             <div
               key={dir}
               onMouseDown={(e) => startResize(e, dir)}
-              className={`absolute pointer-events-auto hover:bg-primary/10 transition-colors ${
-                dir.includes("n") || dir.includes("s") ? "h-3 left-0 right-0" : "w-3 top-0 bottom-0"
-              } ${
-                dir === "n" ? "top-0" :
-                dir === "s" ? "bottom-0" :
-                dir === "w" ? "left-0" :
-                dir === "e" ? "right-0" : ""
-              } ${
-                dir === "nw" || dir === "ne" || dir === "sw" || dir === "se" ? "w-6 h-6" : ""
-              } ${
-                dir === "nw" ? "top-0 left-0 rounded-tl-xl" :
-                dir === "ne" ? "top-0 right-0 rounded-tr-xl" :
-                dir === "sw" ? "bottom-0 left-0 rounded-bl-xl" :
-                dir === "se" ? "bottom-0 right-0 rounded-br-xl" : ""
-              }`}
+              className={`absolute pointer-events-auto hover:bg-primary/10 transition-colors ${dir.includes("n") || dir.includes("s") ? "h-3 left-0 right-0" : "w-3 top-0 bottom-0"
+                } ${dir === "n" ? "top-0" :
+                  dir === "s" ? "bottom-0" :
+                    dir === "w" ? "left-0" :
+                      dir === "e" ? "right-0" : ""
+                } ${dir === "nw" || dir === "ne" || dir === "sw" || dir === "se" ? "w-6 h-6" : ""
+                } ${dir === "nw" ? "top-0 left-0 rounded-tl-xl" :
+                  dir === "ne" ? "top-0 right-0 rounded-tr-xl" :
+                    dir === "sw" ? "bottom-0 left-0 rounded-bl-xl" :
+                      dir === "se" ? "bottom-0 right-0 rounded-br-xl" : ""
+                }`}
             />
           ))}
         </div>
@@ -174,13 +170,13 @@ export function PublicFormDialog({
                           .map((field) => (
                             <div key={field.id} className="space-y-2">
                               {field.type !== "checkbox" &&
-                               field.type !== "switch" &&
-                               field.type !== "hidden" && (
-                                <Label className="text-sm font-medium flex items-center gap-2">
-                                  {field.label}
-                                  {field.validation?.required && <span className="text-red-500">*</span>}
-                                </Label>
-                              )}
+                                field.type !== "switch" &&
+                                field.type !== "hidden" && (
+                                  <Label className="text-sm font-medium flex items-center gap-2">
+                                    {field.label}
+                                    {field.validation?.required && <span className="text-red-500">*</span>}
+                                  </Label>
+                                )}
                               {field.description && field.type !== "hidden" && (
                                 <p className="text-xs text-muted-foreground">{field.description}</p>
                               )}

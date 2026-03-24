@@ -32,6 +32,15 @@ import { Slider } from "../ui/slider";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 
+// Resolve parent field value (handles dynamic instance keys)
+export function resolveParentValue(f: any, formData?: Record<string, any>) {
+  if (!f || !f.parentFieldId || !formData) return undefined;
+  if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
+  const possibleKeys = Object.keys(formData).filter((k) => k.includes("__") && k.includes(f.parentFieldId));
+  if (possibleKeys.length > 0) return formData[possibleKeys[0]];
+  return undefined;
+}
+
 const NESTING_COLORS = [
   {
     bg: "bg-purple-50/30",
@@ -79,6 +88,10 @@ interface FormRendererProps {
   handleFieldChange: (id: string, value: any, fullOption?: any) => void;
   formulaValues: Record<string, any>;
   isInSubform?: boolean;
+  formData?: Record<string, any>;
+  allFields?: FormField[];
+  setErrors?: (v: Record<string, string>) => void;
+  locationStatus?: Record<string, "idle" | "fetching" | "success" | "failed">;
 }
 
 export function FormRenderer({
@@ -90,7 +103,13 @@ export function FormRenderer({
   handleFieldChange,
   formulaValues,
   isInSubform = false,
+  formData,
+  allFields,
+  setErrors,
+  locationStatus,
 }: FormRendererProps) {
+  const parentValueRaw = field.isDependent ? resolveParentValue(field, formData) : undefined;
+  const parentValue = Array.isArray(parentValueRaw) ? parentValueRaw[0] : typeof parentValueRaw === "string" ? parentValueRaw : undefined;
   const fieldType = (field.type || "").toLowerCase();
 
   const isFieldVisible = () => {
@@ -110,7 +129,35 @@ export function FormRenderer({
     className: error ? "border-red-500" : isInSubform ? "border-purple-200 focus:border-purple-400" : "",
   };
 
-  const options = Array.isArray(field.options) ? field.options : [];
+  const baseOptions = Array.isArray(field.options) ? field.options : [];
+  let effectiveOptions = baseOptions;
+  if (field.isDependent) {
+    const groups = field.dependentGroups || [];
+
+    // Build a list of candidate values to match against dependentGroups.parentValue
+    const candidates: string[] = [];
+    if (parentValue !== undefined && parentValue !== null) candidates.push(String(parentValue));
+
+    // If we have access to the parent field definition, add its option identities (value, id, label)
+    const parentFieldDef = allFields?.find((f) => f.id === field.parentFieldId);
+    if (parentFieldDef && Array.isArray(parentFieldDef.options)) {
+      parentFieldDef.options.forEach((opt: any) => {
+        if (opt.value !== undefined) candidates.push(String(opt.value));
+        if (opt.id !== undefined) candidates.push(String(opt.id));
+        if (opt.label !== undefined) candidates.push(String(opt.label));
+      });
+    }
+
+    const uniq = Array.from(new Set(candidates.map((c) => c)));
+
+    const matched = groups.find((g) => uniq.includes(String(g.parentValue)));
+    effectiveOptions = matched?.options || [];
+  }
+
+  // If this is a dependent field and parent hasn't been selected yet, don't render it
+  if (field.isDependent && (parentValue === undefined || parentValue === null || parentValue === "")) {
+    return null;
+  }
 
   switch (fieldType) {
     case "phone":
@@ -288,14 +335,18 @@ export function FormRenderer({
       if (!isFieldVisible()) return null
       return (
         <RadioGroup
-          value={value || ""}
-          onValueChange={(v: any) => !isFieldReadOnly() && handleFieldChange(field.id, v)}
+          value={value != null ? String(value) : ""}
+          onValueChange={(v: any) => {
+            if (isFieldReadOnly()) return;
+            const selected = effectiveOptions.find((opt: any) => String(opt.value ?? opt.id) === v);
+            handleFieldChange(field.id, selected ? (selected.value ?? selected.id) : v, selected);
+          }}
           disabled={submitting || submitted || isFieldReadOnly()}
         >
-          {options.map((opt: any) => (
-            <div key={opt.value} className="flex items-center space-x-2">
-              <RadioGroupItem value={opt.value} id={`${field.id}-${opt.value}`} />
-              <Label htmlFor={`${field.id}-${opt.value}`} className="text-sm">
+          {effectiveOptions.map((opt: any) => (
+            <div key={opt.value ?? opt.id} className="flex items-center space-x-2">
+              <RadioGroupItem value={String(opt.value ?? opt.id)} id={`${field.id}-${String(opt.value ?? opt.id)}`} />
+              <Label htmlFor={`${field.id}-${String(opt.value ?? opt.id)}`} className="text-sm">
                 {opt.label}
               </Label>
             </div>
@@ -307,16 +358,20 @@ export function FormRenderer({
       if (!isFieldVisible()) return null
       return (
         <Select
-          value={value || ""}
-          onValueChange={(v: any) => !isFieldReadOnly() && handleFieldChange(field.id, v)}
-          disabled={submitting || submitted || isFieldReadOnly()}
+          value={value != null ? String(value) : ""}
+          onValueChange={(v: any) => {
+            if (isFieldReadOnly()) return;
+            const selected = effectiveOptions.find((opt: any) => String(opt.value ?? opt.id) === v);
+            handleFieldChange(field.id, selected ? (selected.value ?? selected.id) : v, selected);
+          }}
+          disabled={submitting || submitted || isFieldReadOnly() || (field.isDependent && !parentValue)}
         >
           <SelectTrigger className={error ? "border-red-500" : ""}>
             <SelectValue placeholder={field.placeholder || "Select an option"} />
           </SelectTrigger>
           <SelectContent>
-            {options.map((opt: any) => (
-              <SelectItem key={opt.value || opt.id} value={(opt.value || opt.id)?.toLowerCase().trim()}>
+            {effectiveOptions.map((opt: any) => (
+              <SelectItem key={opt.value ?? opt.id} value={String(opt.value ?? opt.id)}>
                 {opt.label}
               </SelectItem>
             ))}
@@ -415,6 +470,10 @@ interface RenderSubformProps {
   formulaValues: Record<string, any>;
   toggleSubform: (id: string) => void;
   collapsedSubforms: Record<string, boolean>;
+  formData?: Record<string, any>;
+  allFields?: FormField[];
+  setErrors?: (v: Record<string, string>) => void;
+  locationStatus?: Record<string, "idle" | "fetching" | "success" | "failed">;
 }
 
 export function RenderSubform({
@@ -511,6 +570,11 @@ export function RenderSubform({
                   const f = item.item as FormField
                   if (f.visible === false) return false
                   if (f.properties && f.properties.hidden === true) return false
+                  // hide dependent fields until parent has value
+                  if (f.isDependent) {
+                    const pv = resolveParentValue(f, formData);
+                    if (pv === undefined || pv === null || pv === "" || (Array.isArray(pv) && pv.length === 0)) return false;
+                  }
                   return true
                 }
                 // For subforms, respect a `visible` flag if present
@@ -546,6 +610,10 @@ export function RenderSubform({
                       handleFieldChange={handleFieldChange}
                       formulaValues={formulaValues}
                       isInSubform={true}
+                      formData={formData}
+                      allFields={allFields}
+                      setErrors={setErrors}
+                      locationStatus={locationStatus}
                     />
                     {errors[item.id] && (
                       <p className="text-sm text-red-500 flex items-center gap-1">
@@ -567,6 +635,10 @@ export function RenderSubform({
                       formulaValues={formulaValues}
                       toggleSubform={toggleSubform}
                       collapsedSubforms={collapsedSubforms}
+                      formData={formData}
+                      allFields={allFields}
+                      setErrors={setErrors}
+                      locationStatus={locationStatus}
                     />
                   </div>
                 )

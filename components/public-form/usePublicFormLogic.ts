@@ -216,7 +216,7 @@ export function usePublicFormLogic(
     const fetchForm = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/forms/${formId}`);
+        const response = await fetch(`/api/forms/${formId}?published=true`);
         const result = await response.json();
 
         if (!result.success) throw new Error(result.error || "Failed to load form");
@@ -537,6 +537,22 @@ export function usePublicFormLogic(
   useEffect(() => {
     calculateCompletion();
   }, [formData, form, calculateCompletion]);
+
+  const allFields = useMemo(() => {
+    if (!form) return [] as FormField[];
+    const acc: FormField[] = [];
+    form.sections.forEach((section: any) => {
+      acc.push(...section.fields);
+      const collect = (subs: Subform[]) => {
+        subs.forEach((s) => {
+          acc.push(...s.fields);
+          if (s.childSubforms?.length) collect(s.childSubforms);
+        });
+      };
+      if (section.subforms?.length) collect(section.subforms);
+    });
+    return acc;
+  }, [form]);
 
   // ── Field validation helper ────────────────────────────────────────────
   const validateField = (field: FormField, value: any): string | null => {
@@ -929,5 +945,8 @@ export function usePublicFormLogic(
     handleFieldChange,
     handleSubmit,
     toggleSubform,
+    formulaValues,
+    setErrors,
+    allFields,
   };
 }
