@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,7 @@ import {
   Loader2,
   Save,
   Hash,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -1010,55 +1011,55 @@ export default function FieldSettings({
 
                     {(localField.type === "number" ||
                       localField.type === "decimal") && (
-                      <>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="min">Minimum Value</Label>
-                            <Input
-                              id="min"
-                              type="number"
-                              value={localField.validation?.min ?? ""}
-                              onChange={(e) =>
-                                handleValidationChange(
-                                  "min",
-                                  e.target.value ? Number(e.target.value) : undefined,
-                                )
-                              }
-                            />
+                        <>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="min">Minimum Value</Label>
+                              <Input
+                                id="min"
+                                type="number"
+                                value={localField.validation?.min ?? ""}
+                                onChange={(e) =>
+                                  handleValidationChange(
+                                    "min",
+                                    e.target.value ? Number(e.target.value) : undefined,
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="max">Maximum Value</Label>
+                              <Input
+                                id="max"
+                                type="number"
+                                value={localField.validation?.max ?? ""}
+                                onChange={(e) =>
+                                  handleValidationChange(
+                                    "max",
+                                    e.target.value ? Number(e.target.value) : undefined,
+                                  )
+                                }
+                              />
+                            </div>
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="max">Maximum Value</Label>
-                            <Input
-                              id="max"
-                              type="number"
-                              value={localField.validation?.max ?? ""}
-                              onChange={(e) =>
-                                handleValidationChange(
-                                  "max",
-                                  e.target.value ? Number(e.target.value) : undefined,
-                                )
-                              }
-                            />
-                          </div>
-                        </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="step">Step (increment)</Label>
-                          <Input
-                            id="step"
-                            type="number"
-                            value={localField.validation?.step ?? ""}
-                            onChange={(e) =>
-                              handleValidationChange(
-                                "step",
-                                e.target.value ? Number(e.target.value) : undefined,
-                              )
-                            }
-                            placeholder="e.g. 0.01 for decimals"
-                          />
-                        </div>
-                      </>
-                    )}
+                          <div className="space-y-2">
+                            <Label htmlFor="step">Step (increment)</Label>
+                            <Input
+                              id="step"
+                              type="number"
+                              value={localField.validation?.step ?? ""}
+                              onChange={(e) =>
+                                handleValidationChange(
+                                  "step",
+                                  e.target.value ? Number(e.target.value) : undefined,
+                                )
+                              }
+                              placeholder="e.g. 0.01 for decimals"
+                            />
+                          </div>
+                        </>
+                      )}
 
                     <div className="space-y-2">
                       <Label htmlFor="errorMessage">Custom Error Message</Label>
@@ -1080,96 +1081,96 @@ export default function FieldSettings({
                 {["select", "multi-select", "radio"].includes(
                   localField.type ?? "",
                 ) && (
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle>Field Options</CardTitle>
-                          <CardDescription>
-                            {localField.isDependent
-                              ? `Configure dependent / cascading options (${allFormFields.length} fields available)`
-                              : "Configure static options"}
-                          </CardDescription>
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle>Field Options</CardTitle>
+                            <CardDescription>
+                              {localField.isDependent
+                                ? `Configure dependent / cascading options (${allFormFields.length} fields available)`
+                                : "Configure static options"}
+                            </CardDescription>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Label htmlFor="dependent-toggle">Dependent Mode</Label>
+                            <Switch
+                              id="dependent-toggle"
+                              checked={localField.isDependent ?? false}
+                              onCheckedChange={(checked) => {
+                                handleFieldUpdate({
+                                  isDependent: checked,
+                                  dependentGroups: checked
+                                    ? (localField.dependentGroups ?? [])
+                                    : undefined,
+                                  options: checked
+                                    ? undefined
+                                    : (localField.options ?? []),
+                                  parentFieldId: checked
+                                    ? localField.parentFieldId
+                                    : undefined,
+                                });
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <Label htmlFor="dependent-toggle">Dependent Mode</Label>
-                          <Switch
-                            id="dependent-toggle"
-                            checked={localField.isDependent ?? false}
-                            onCheckedChange={(checked) => {
-                              handleFieldUpdate({
-                                isDependent: checked,
-                                dependentGroups: checked
-                                  ? (localField.dependentGroups ?? [])
-                                  : undefined,
-                                options: checked
-                                  ? undefined
-                                  : (localField.options ?? []),
-                                parentFieldId: checked
-                                  ? localField.parentFieldId
-                                  : undefined,
-                              });
-                            }}
+                      </CardHeader>
+                      <CardContent className="space-y-6 pt-6">
+                        {loadingFields ? (
+                          <div className="flex justify-center py-8">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          </div>
+                        ) : localField.isDependent ? (
+                          <DependentOptionsEditor
+                            field={localField}
+                            allFormFields={allFormFields}
+                            onUpdate={handleFieldUpdate}
                           />
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-6 pt-6">
-                      {loadingFields ? (
-                        <div className="flex justify-center py-8">
-                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        </div>
-                      ) : localField.isDependent ? (
-                        <DependentOptionsEditor
-                          field={localField}
-                          allFormFields={allFormFields}
-                          onUpdate={handleFieldUpdate}
-                        />
-                      ) : (
-                        <div className="space-y-3">
-                          {(localField.options || []).map((option, index) => (
-                            <div
-                              key={option.id}
-                              className="flex items-center gap-2 p-3 border rounded-lg"
-                            >
-                              <div className="flex-1 grid grid-cols-2 gap-2">
-                                <Input
-                                  value={option.label}
-                                  onChange={(e) =>
-                                    updateOption(index, {
-                                      label: e.target.value,
-                                      value: e.target.value,
-                                    })
-                                  }
-                                  placeholder="Option label"
-                                />
-                                <Input
-                                  value={option.value}
-                                  onChange={(e) =>
-                                    updateOption(index, { value: e.target.value })
-                                  }
-                                  placeholder="Option value"
-                                />
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => removeOption(index)}
-                                className="text-red-600 hover:text-red-700"
+                        ) : (
+                          <div className="space-y-3">
+                            {(localField.options || []).map((option, index) => (
+                              <div
+                                key={option.id}
+                                className="flex items-center gap-2 p-3 border rounded-lg"
                               >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                          <Button onClick={addOption} variant="outline" className="w-full">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Option
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
+                                <div className="flex-1 grid grid-cols-2 gap-2">
+                                  <Input
+                                    value={option.label}
+                                    onChange={(e) =>
+                                      updateOption(index, {
+                                        label: e.target.value,
+                                        value: e.target.value,
+                                      })
+                                    }
+                                    placeholder="Option label"
+                                  />
+                                  <Input
+                                    value={option.value}
+                                    onChange={(e) =>
+                                      updateOption(index, { value: e.target.value })
+                                    }
+                                    placeholder="Option value"
+                                  />
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => removeOption(index)}
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                            <Button onClick={addOption} variant="outline" className="w-full">
+                              <Plus className="h-4 w-4 mr-2" />
+                              Add Option
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
 
                 {localField.type === "file" && (
                   <Card>
@@ -1398,7 +1399,7 @@ export default function FieldSettings({
                           <Label>Custom Style (CSS)</Label>
                           <Input
                             value={localField.styling?.style || ""}
-                            onChange={(e) =>
+                            onChange={(e: ChangeEvent<HTMLInputElement>) =>
                               handleFieldUpdate({
                                 styling: {
                                   ...localField.styling,
@@ -1412,156 +1413,89 @@ export default function FieldSettings({
                       </div>
                     )}
 
-                    {/* ── UNIQUE ID FEATURE ── Only shown in Advanced tab for unique-id fields */}
-                    {localField.type === "unique-id" && (
+                    {/* ── PASSWORD SETTINGS FEATURE ── Only shown in Advanced tab for password fields */}
+                    {localField.type === "password" && (
                       <>
                         <Separator className="my-6" />
                         <div className="space-y-6">
                           <div className="flex items-center gap-3">
-                            <Hash className="h-6 w-6 text-blue-600" />
+                            <Lock className="h-6 w-6 text-blue-600" />
                             <div>
-                              <h3 className="text-lg font-semibold">Unique ID Settings</h3>
+                              <h3 className="text-lg font-semibold">Password Settings</h3>
                               <p className="text-sm text-muted-foreground">
-                                Configure how this unique identifier is generated
+                                Configure security requirements for password input
                               </p>
                             </div>
                           </div>
 
-                          {/* Generation Mode */}
-                          <div className="space-y-2">
-                            <Label>Generation Mode</Label>
-                            <Select
-                              value={localField.properties?.uniqueIdMode || "uuid"}
-                              onValueChange={(value) =>
-                                handlePropertiesChange("uniqueIdMode", value)
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select mode" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="uuid">UUID (recommended)</SelectItem>
-                                <SelectItem value="sequential">Sequential Number</SelectItem>
-                                <SelectItem value="prefix">Prefix + Number</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground">
-                              {localField.properties?.uniqueIdMode === "uuid" &&
-                                "Generates random 36-char UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)"}
-                              {localField.properties?.uniqueIdMode === "sequential" &&
-                                "Increments number for each new record (1, 2, 3...)"}
-                              {localField.properties?.uniqueIdMode === "prefix" &&
-                                "Custom prefix + padded number (e.g. INV-0001)"}
-                            </p>
-                          </div>
-
-                          {/* Prefix (only for prefix mode) */}
-                          {localField.properties?.uniqueIdMode === "prefix" && (
+                          <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                              <Label>Prefix</Label>
+                              <Label>Minimum Length</Label>
                               <Input
-                                value={localField.properties?.uniqueIdPrefix || ""}
-                                onChange={(e) =>
-                                  handlePropertiesChange("uniqueIdPrefix", e.target.value)
+                                type="number"
+                                min="4"
+                                value={localField.passwordConfig?.minLength || 8}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  handleFieldUpdate({
+                                    passwordConfig: {
+                                      ...localField.passwordConfig,
+                                      minLength: Number(e.target.value) || 8,
+                                    },
+                                  })
                                 }
-                                placeholder="e.g. INV-, EMP-, TKT-"
-                                maxLength={10}
                               />
-                              <p className="text-xs text-muted-foreground">
-                                Will be added before the number (e.g. INV-000001)
-                              </p>
                             </div>
-                          )}
-
-                          {/* Start & Padding (for sequential & prefix modes) */}
-                          {(localField.properties?.uniqueIdMode === "sequential" ||
-                            localField.properties?.uniqueIdMode === "prefix") && (
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label>Start From</Label>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  value={localField.properties?.uniqueIdStart || "1"}
-                                  onChange={(e) =>
-                                    handlePropertiesChange(
-                                      "uniqueIdStart",
-                                      Number(e.target.value) || 1
-                                    )
-                                  }
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  First record gets this number
-                                </p>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Minimum Digits</Label>
-                                <Select
-                                  value={String(
-                                    localField.properties?.uniqueIdMinDigits || "6"
-                                  )}
-                                  onValueChange={(v) =>
-                                    handlePropertiesChange("uniqueIdMinDigits", Number(v))
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="4">4 (0001)</SelectItem>
-                                    <SelectItem value="5">5 (00001)</SelectItem>
-                                    <SelectItem value="6">6 (000001)</SelectItem>
-                                    <SelectItem value="7">7 (0000001)</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <p className="text-xs text-muted-foreground">
-                                  Zero-padding for consistent length
-                                </p>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Visibility & Editability */}
-                          <div className="grid grid-cols-2 gap-6 pt-4 border-t">
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between pt-8">
                                 <div className="space-y-0.5">
-                                  <Label>Hidden from Users</Label>
-                                  <p className="text-xs text-muted-foreground">
-                                    Field is generated but not visible
-                                  </p>
+                                  <Label>Require Uppercase</Label>
                                 </div>
                                 <Switch
-                                  checked={localField.properties?.hidden ?? true}
-                                  onCheckedChange={(checked) =>
-                                    handlePropertiesChange("hidden", checked)
+                                  checked={localField.passwordConfig?.requireUppercase ?? true}
+                                  onCheckedChange={(checked: boolean) =>
+                                    handleFieldUpdate({
+                                      passwordConfig: {
+                                        ...localField.passwordConfig,
+                                        requireUppercase: checked,
+                                      },
+                                    })
                                   }
                                 />
-                              </div>
-                            </div>
-
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                  <Label>Read Only</Label>
-                                  <p className="text-xs text-muted-foreground">
-                                    Prevent manual editing (recommended)
-                                  </p>
-                                </div>
-                                <Switch
-                                  checked={localField.readonly !== false}
-                                  onCheckedChange={(checked) =>
-                                    handleFieldUpdate({ readonly: checked })
-                                  }
-                                />
-                              </div>
                             </div>
                           </div>
 
-                          {/* Preview hint */}
-                          <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm">
-                            <strong>Note:</strong> The actual ID is generated when a record is created.
-                            Admins can override it manually if read-only is turned off.
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-0.5">
+                                  <Label>Require Numbers</Label>
+                                </div>
+                                <Switch
+                                  checked={localField.passwordConfig?.requireNumber ?? true}
+                                  onCheckedChange={(checked: boolean) =>
+                                    handleFieldUpdate({
+                                      passwordConfig: {
+                                        ...localField.passwordConfig,
+                                        requireNumber: checked,
+                                      },
+                                    })
+                                  }
+                                />
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <div className="space-y-0.5">
+                                  <Label>Require Special Chars</Label>
+                                </div>
+                                <Switch
+                                  checked={localField.passwordConfig?.requireSpecialChar ?? true}
+                                  onCheckedChange={(checked: boolean) =>
+                                    handleFieldUpdate({
+                                      passwordConfig: {
+                                        ...localField.passwordConfig,
+                                        requireSpecialChar: checked,
+                                      },
+                                    })
+                                  }
+                                />
+                            </div>
                           </div>
                         </div>
                       </>

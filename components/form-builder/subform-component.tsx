@@ -228,11 +228,9 @@ export default function SubformComponent({
         try {
           const result = await triggerGetFormFields(formId).unwrap();
           const data = result;
-          const fields = Array.isArray(data) ? data : data.data || data.fields || [];
-          console.log("[Subform Visibility] Loaded parent form fields", {
-            count: fields.length,
-            firstFew: fields.slice(0, 3).map(f => ({ id: f.id, label: f.label, type: f.type })),
-          });
+          const allFields = Array.isArray(data) ? data : data.data || data.fields || [];
+          // Only show fields belonging to THIS form, not all forms in the module
+          const fields = allFields.filter((f: any) => !f.formId || f.formId === formId);
           setFormFields(fields);
         } catch (err: any) {
           console.error("[Subform Visibility] Failed to load parent fields", err);

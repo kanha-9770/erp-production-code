@@ -153,7 +153,7 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
     }
 
     if (!form.isPublished) {
-      return NextResponse.json({ error: "Form is not published" }, { status: 403 });
+      return NextResponse.json({ error: "Form not found" }, { status: 404 });
     }
 
     if (form.requireLogin && !authUser) {

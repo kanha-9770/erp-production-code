@@ -23,6 +23,14 @@ export async function POST(request: Request, { params }: { params: { formId: str
 export async function DELETE(request: Request, { params }: { params: { formId: string } }) {
   try {
     const form = await DatabaseService.unpublishForm(params.formId)
+    // Validate mutually exclusive settings
+    if (allowAnonymous === true && requireLogin === true) {
+      return NextResponse.json(
+        { success: false, error: "Cannot enable both anonymous submissions and require login. These settings are mutually exclusive." },
+        { status: 400 }
+      )
+    }
+
     return NextResponse.json({ success: true, data: form })
   } catch (error: any) {
     console.error("Error unpublishing form:", error)

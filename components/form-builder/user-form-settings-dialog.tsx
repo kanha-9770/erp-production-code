@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useCheckEmployeeFormQuery } from "@/lib/api/forms"
 
 interface UserFormSettingsDialogProps {
   form: Form | null
@@ -24,6 +25,12 @@ export default function UserFormSettingsDialog({
   const [isUserForm, setIsUserForm] = useState(form?.isUserForm || false)
   const [isEmployeeForm, setIsEmployeeForm] = useState(form?.isEmployeeForm || false)
   const [isUpdating, setIsUpdating] = useState(false)
+
+  // Check if an employee form already exists in the organization
+  const { data: employeeCheck } = useCheckEmployeeFormQuery(undefined, { skip: !open })
+  // Show employee toggle only if: this form IS the employee form, OR no employee form exists yet
+  const canShowEmployeeToggle =
+    form?.isEmployeeForm || !employeeCheck?.exists
 
   const handleSave = async () => {
     if (!form) return
@@ -126,20 +133,22 @@ export default function UserFormSettingsDialog({
                 />
               </div>
 
-              <div className="flex items-center justify-between p-2 border rounded-lg">
-                <div className="space-y-1">
-                  <div className="font-medium text-sm">Employee Form</div>
-                  <div className="text-xs text-muted-foreground">
-                    Designate this form for employee-specific data collection
+              {canShowEmployeeToggle && (
+                <div className="flex items-center justify-between p-2 border rounded-lg">
+                  <div className="space-y-1">
+                    <div className="font-medium text-sm">Employee Form</div>
+                    <div className="text-xs text-muted-foreground">
+                      Designate this form for employee-specific data collection
+                    </div>
                   </div>
+                  <Switch
+                    id="employee-form-toggle"
+                    checked={isEmployeeForm}
+                    onCheckedChange={handleEmployeeFormChange}
+                    disabled={isUpdating}
+                  />
                 </div>
-                <Switch
-                  id="employee-form-toggle"
-                  checked={isEmployeeForm}
-                  onCheckedChange={handleEmployeeFormChange}
-                  disabled={isUpdating}
-                />
-              </div>
+              )}
             </div>
           </div>
 

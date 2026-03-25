@@ -228,6 +228,13 @@ export const formsApi = baseApi.injectEndpoints({
       query: (formId) => `/forms/${formId}/fields`,
     }),
 
+    checkEmployeeForm: builder.query<
+      { success: boolean; exists: boolean; formId: string | null; formName: string | null },
+      void
+    >({
+      query: () => `/forms/employee-form-check`,
+    }),
+
     getFormFull: builder.query<ApiResponse, string>({
       query: (formId) => `/forms/${formId}/full`,
       providesTags: (result, error, formId) => [{ type: "FormDetail", id: formId }],
@@ -378,6 +385,7 @@ export const {
   useGetFormLinkedRecordsQuery,
   useGetFormFieldsQuery,
   useLazyGetFormFieldsQuery,
+  useCheckEmployeeFormQuery,
   useGetFormFullQuery,
   useLazyGetFormFullQuery,
   useLazyGetFormTotalQuery,

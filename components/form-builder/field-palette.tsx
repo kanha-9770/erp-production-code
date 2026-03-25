@@ -37,6 +37,7 @@ import {
   ChevronUp,
   PanelLeftClose,
   PanelLeftOpen,
+  Lock,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -70,6 +71,19 @@ export const fieldTypes = [
     icon: Mail,
     category: "Basic",
     description: "Email address input",
+  },
+  {
+    id: "password",
+    name: "Password",
+    icon: Lock,
+    category: "Basic",
+    description: "Secure password input field",
+    passwordConfig: {
+      minLength: 8,
+      requireSpecialChar: true,
+      requireNumber: true,
+      requireUppercase: true,
+    },
   },
   {
     id: "phone",
@@ -180,22 +194,12 @@ export const fieldTypes = [
     description: "Capture photo from device camera",
   },
   {
-    id: "subform",
-    name: "Subform",
-    icon: Layers,
-    category: "Advanced",
-    description: "Nested form with fields",
-  },
-  {
     id: "unique-id",
     name: "Unique ID",
     icon: Hash,
     category: "Advanced",
     description: "Automatically generated unique identifier",
     // ── Default uniqueIdConfig bundled with the palette entry ──
-    // The drop handler reads this from event.active.data.current.uniqueIdConfig
-    // so the field is pre-configured on drop without requiring the admin to open
-    // settings first.
     uniqueIdConfig: {
       format: "custom",
       prefix: "ID",
@@ -350,13 +354,6 @@ export const fieldTypes = [
     description: "Summary of related records",
   },
   {
-    id: "auto-number",
-    name: "Auto Number",
-    icon: Hash,
-    category: "Advanced",
-    description: "Automatically generated number",
-  },
-  {
     id: "decision",
     name: "Decision Box",
     icon: CheckSquare,
@@ -444,11 +441,13 @@ function PaletteItem({ fieldType }: PaletteItemProps) {
         isPaletteItem: true,
         fieldType: fieldType.id,
         fieldData: fieldType,
-        // ── Pass uniqueIdConfig in drag data for unique-id fields so the
-        //    drop handler can initialise the new field with sensible defaults
-        //    immediately on drop, without waiting for the settings dialog ──
+        // ── Pass uniqueIdConfig in drag data for unique-id fields ──
         ...(fieldType.id === "unique-id" && {
           uniqueIdConfig: (fieldType as any).uniqueIdConfig,
+        }),
+        // ── Pass passwordConfig in drag data for password fields ──
+        ...(fieldType.id === "password" && {
+          passwordConfig: (fieldType as any).passwordConfig,
         }),
       },
     });

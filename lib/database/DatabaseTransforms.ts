@@ -105,6 +105,9 @@ export class DatabaseTransforms {
       sections: form.sections
         ? form.sections.map((section: any) => this.transformSection(section))
         : [],
+      subforms: form.subforms
+        ? form.subforms.map((subform: any) => this.transformSubform(subform))
+        : [],
       tableMapping: form.tableMapping,
       totalRecords,
       isUserForm: form.isUserForm || false,

@@ -286,7 +286,6 @@ export default function FieldComponent({
       hidden: "Hidden",
       formula: "Formula",
       rollup: "Rollup",
-      subform: "Subform",
       "auto-number": "Auto Number",
       "rich-text": "Rich Text",
       currency: "Currency",

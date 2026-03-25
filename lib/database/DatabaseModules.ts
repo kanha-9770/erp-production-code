@@ -646,6 +646,25 @@ export class DatabaseModules {
             },
             orderBy: { order: "asc" },
           },
+          subforms: {
+            where: { parentSubformId: null },
+            include: {
+              fields: { orderBy: { order: "asc" } },
+              childSubforms: {
+                include: {
+                  fields: { orderBy: { order: "asc" } },
+                  childSubforms: {
+                    include: {
+                      fields: { orderBy: { order: "asc" } },
+                    },
+                    orderBy: { order: "asc" },
+                  },
+                },
+                orderBy: { order: "asc" },
+              },
+            },
+            orderBy: { order: "asc" },
+          },
           _count: {
             select: {
               records1: true,

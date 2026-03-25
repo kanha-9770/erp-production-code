@@ -89,44 +89,44 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   const copyToClipboard = async (text: string) => {
-  try {
-    // Modern API first (works on HTTPS/localhost in most browsers)
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
+    try {
+      // Modern API first (works on HTTPS/localhost in most browsers)
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        toast({
+          title: "Copied!",
+          description: "URL copied to clipboard",
+          duration: 2000,
+        });
+        return;
+      }
+
+      // Fallback: Use hidden textarea + execCommand
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.setAttribute("readonly", "");
+      el.style.position = "absolute";
+      el.style.left = "-9999px";
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+
       toast({
         title: "Copied!",
         description: "URL copied to clipboard",
         duration: 2000,
       });
-      return;
+    } catch (error: any) {
+      console.error("Failed to copy:", error);
+      toast({
+        title: "Failed to copy",
+        description: error?.message || "Please select and copy manually",
+        variant: "destructive",
+      });
     }
-
-    // Fallback: Use hidden textarea + execCommand
-    const el = document.createElement("textarea");
-    el.value = text;
-    el.setAttribute("readonly", "");
-    el.style.position = "absolute";
-    el.style.left = "-9999px";
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    document.execCommand("copy");
-    document.body.removeChild(el);
-
-    toast({
-      title: "Copied!",
-      description: "URL copied to clipboard",
-      duration: 2000,
-    });
-  } catch (error: any) {
-    console.error("Failed to copy:", error);
-    toast({
-      title: "Failed to copy",
-      description: error?.message || "Please select and copy manually",
-      variant: "destructive",
-    });
-  }
-};
+  };
 
   // If `form.formUrl` is already a login-wrapped URL like
   //  https://host/login?callbackUrl=%2Fform%2F..., unwrap to the direct form path.
@@ -187,7 +187,7 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
         </DialogHeader>
 
         <div className="space-y-2">
-              {form.isPublished && form.formUrl && (
+          {form.isPublished && form.formUrl && (
             <div className="space-y-2">
               <Label>Public URL</Label>
               <div className="flex items-center space-x-2">
@@ -213,7 +213,12 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
               </div>
               <Switch
                 checked={settings.allowAnonymous}
-                onCheckedChange={(checked) => setSettings((prev) => ({ ...prev, allowAnonymous: checked }))}
+                onCheckedChange={(checked) => setSettings((prev) => ({ 
+                  ...prev, 
+                  allowAnonymous: checked,
+                  // Enforce mutual exclusivity: if enabling anonymous, disable require login
+                  requireLogin: checked ? false : prev.requireLogin
+                }))}
               />
             </div>
 
@@ -224,7 +229,12 @@ export default function PublishFormDialog({ form, open, onOpenChange, onFormPubl
               </div>
               <Switch
                 checked={settings.requireLogin}
-                onCheckedChange={(checked) => setSettings((prev) => ({ ...prev, requireLogin: checked }))}
+                onCheckedChange={(checked) => setSettings((prev) => ({ 
+                  ...prev, 
+                  requireLogin: checked,
+                  // Enforce mutual exclusivity: if requiring login, disable anonymous
+                  allowAnonymous: checked ? false : prev.allowAnonymous
+                }))}
               />
             </div>
 
