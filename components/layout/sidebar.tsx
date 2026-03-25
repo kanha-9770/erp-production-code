@@ -282,11 +282,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     });
 
     const sortModules = (items: typeof roots) => {
-      items.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      items.forEach((item) => {
+      const sorted = [...items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      sorted.forEach((item) => {
         if (item.children.length > 0) sortModules(item.children);
       });
-      return items;
+      return sorted;
     };
 
     return sortModules(roots);

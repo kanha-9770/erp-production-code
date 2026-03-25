@@ -445,6 +445,70 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               fieldType: fieldDef.type,
               fieldLabel: fieldDef.label,
             });
+
+            // ── REAL-TIME FORMULA CALCULATION ──
+            // Build temp record with the new value to recalculate formulas
+            const tempRecordForFormula: EnhancedFormRecord = {
+              ...currentRecord,
+              processedData: currentRecord.processedData.map((pd) => {
+                // Check if this field matches the edited field
+                if (
+                  pd.fieldId === fieldDef.id ||
+                  pd.fieldId === fieldDef.originalId ||
+                  pd.fieldLabel === fieldDef.label
+                ) {
+                  return { ...pd, value: finalValue };
+                }
+                // Apply other pending changes
+                for (const [key, change] of newPending) {
+                  if (!key.startsWith(`${currentRecord.id}-`)) continue;
+                  if (
+                    pd.fieldId === change.fieldId ||
+                    pd.fieldId === change.originalFieldId ||
+                    pd.fieldLabel === change.fieldLabel
+                  ) {
+                    return { ...pd, value: change.value };
+                  }
+                }
+                return pd;
+              }),
+            };
+
+            // Recalculate all formulas with the new values
+            const { updatedProcessedData } = recalculateFormulasForRecord(
+              tempRecordForFormula,
+              new Set(),
+            );
+
+            // Add updated formula values to pending changes
+            updatedProcessedData.forEach((pd) => {
+              if (pd.fieldType === "formula") {
+                const oldPd = currentRecord.processedData.find(
+                  (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
+                );
+                if (oldPd && oldPd.value !== pd.value) {
+                  const formulaField = enhancedFormFields.find(
+                    (f) =>
+                      f.type === "formula" &&
+                      (f.id === pd.fieldId ||
+                        f.originalId === pd.fieldId ||
+                        f.label === pd.fieldLabel),
+                  );
+                  if (formulaField) {
+                    newPending.set(`${currentRecord.id}-${formulaField.id}`, {
+                      recordId: currentRecord.id,
+                      fieldId: formulaField.id,
+                      originalFieldId: formulaField.originalId || formulaField.id,
+                      value: pd.value,
+                      originalValue: oldPd.value ?? "",
+                      fieldType: "formula",
+                      fieldLabel: pd.fieldLabel,
+                    });
+                  }
+                }
+              }
+            });
+
             setPendingChanges(newPending);
           }}
           onBlur={handleAutoSave}
@@ -578,12 +642,69 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           const newPending = new Map(pendingChanges);
           newPending.set(`${record.id}-${fieldDef.id}`, change);
+
+          // ── REAL-TIME FORMULA CALCULATION ──
+          const tempRecordForFormula: EnhancedFormRecord = {
+            ...record,
+            processedData: record.processedData.map((pd) => {
+              if (
+                pd.fieldId === fieldDef.id ||
+                pd.fieldId === fieldDef.originalId ||
+                pd.fieldLabel === fieldDef.label
+              ) {
+                return { ...pd, value: newValue };
+              }
+              for (const [key, chg] of newPending) {
+                if (!key.startsWith(`${record.id}-`)) continue;
+                if (
+                  pd.fieldId === chg.fieldId ||
+                  pd.fieldId === chg.originalFieldId ||
+                  pd.fieldLabel === chg.fieldLabel
+                ) {
+                  return { ...pd, value: chg.value };
+                }
+              }
+              return pd;
+            }),
+          };
+
+          const { updatedProcessedData } = recalculateFormulasForRecord(
+            tempRecordForFormula,
+            new Set(),
+          );
+
+          updatedProcessedData.forEach((pd) => {
+            if (pd.fieldType === "formula") {
+              const oldPd = record.processedData.find(
+                (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
+              );
+              if (oldPd && oldPd.value !== pd.value) {
+                const formulaField = enhancedFormFields.find(
+                  (f) =>
+                    f.type === "formula" &&
+                    (f.id === pd.fieldId ||
+                      f.originalId === pd.fieldId ||
+                      f.label === pd.fieldLabel),
+                );
+                if (formulaField) {
+                  newPending.set(`${record.id}-${formulaField.id}`, {
+                    recordId: record.id,
+                    fieldId: formulaField.id,
+                    originalFieldId: formulaField.originalId || formulaField.id,
+                    value: pd.value,
+                    originalValue: oldPd.value ?? "",
+                    fieldType: "formula",
+                    fieldLabel: pd.fieldLabel,
+                  });
+                }
+              }
+            }
+          });
+
           setPendingChanges(newPending);
 
-          // Save immediately with explicit map — no setTimeout to avoid stale closures
-          saveAllPendingChanges(
-            new Map([[`${record.id}-${fieldDef.id}`, change]]),
-          );
+          // Save immediately with updated formula values
+          saveAllPendingChanges(newPending);
         }}
         onOpenChange={(open) => !open && setEditingCell(null)}
       >
