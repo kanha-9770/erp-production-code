@@ -1131,7 +1131,11 @@ export function usePublicForm({
     let storeValue = value;
     if (value && typeof value === "object") {
       if (Array.isArray(value)) {
-        storeValue = value.map((i) => i.storeValue || i.label || i.value);
+        storeValue = value.map((i: any) =>
+          typeof i === "string" || typeof i === "number"
+            ? i
+            : i.storeValue || i.label || i.value,
+        );
       } else if (value.storeValue !== undefined) {
         storeValue = value.storeValue;
       } else if (value instanceof File) {
@@ -1397,7 +1401,11 @@ export function usePublicForm({
       let storeValue = value;
       if (value && typeof value === "object") {
         if (Array.isArray(value)) {
-          storeValue = value.map((i) => i.storeValue || i.label || i.value);
+          storeValue = value.map((i: any) =>
+          typeof i === "string" || typeof i === "number"
+            ? i
+            : i.storeValue || i.label || i.value,
+        );
         } else if (value.storeValue !== undefined) {
           storeValue = value.storeValue;
         } else if (value instanceof File) {

@@ -11,14 +11,11 @@ import {
   Loader2,
   MapPin,
   Star,
-  ChevronDown,
-  ChevronRight,
-  Layers,
 } from "lucide-react";
 import { LookupField } from "@/components/forms/lookup-field";
 import CameraCapture from "@/components/forms/camera-capture";
 import { FileUploadZone } from "@/components/forms/file-upload-zone";
-import type { FormField, Subform } from "@/types/form-builder";
+import type { FormField } from "@/types/form-builder";
 import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
 import { Switch } from "../ui/switch";
 import { Label } from "../ui/label";
@@ -32,8 +29,6 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Slider } from "../ui/slider";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
 
 // Resolve parent field value (handles dynamic instance keys)
 export function resolveParentValue(f: any, formData?: Record<string, any>) {
@@ -45,44 +40,6 @@ export function resolveParentValue(f: any, formData?: Record<string, any>) {
   if (possibleKeys.length > 0) return formData[possibleKeys[0]];
   return undefined;
 }
-
-const NESTING_COLORS = [
-  {
-    bg: "bg-purple-50/30",
-    border: "border-l-purple-400",
-    accent: "text-purple-700",
-    levelBadge: "bg-purple-100 text-purple-700 border-purple-200",
-    leftBorder: "border-l-4 border-l-purple-400",
-  },
-  {
-    bg: "bg-blue-50/30",
-    border: "border-l-blue-400",
-    accent: "text-blue-700",
-    levelBadge: "bg-blue-100 text-blue-700 border-blue-200",
-    leftBorder: "border-l-4 border-l-blue-400",
-  },
-  {
-    bg: "bg-green-50/30",
-    border: "border-l-green-400",
-    accent: "text-green-700",
-    levelBadge: "bg-green-100 text-green-700 border-green-200",
-    leftBorder: "border-l-4 border-l-green-400",
-  },
-  {
-    bg: "bg-orange-50/30",
-    border: "border-l-orange-400",
-    accent: "text-orange-700",
-    levelBadge: "bg-orange-100 text-orange-700 border-orange-200",
-    leftBorder: "border-l-4 border-l-orange-400",
-  },
-  {
-    bg: "bg-pink-50/30",
-    border: "border-l-pink-400",
-    accent: "text-pink-700",
-    levelBadge: "bg-pink-100 text-pink-700 border-pink-200",
-    leftBorder: "border-l-4 border-l-pink-400",
-  },
-];
 
 interface FormRendererProps {
   field: FormField;
@@ -97,6 +54,8 @@ interface FormRendererProps {
   allFields?: FormField[];
   setErrors?: (v: Record<string, string>) => void;
   locationStatus?: Record<string, "idle" | "fetching" | "success" | "failed">;
+  forceReadOnly?: boolean;
+  idToLabel?: Record<string, string>;
 }
 
 export function FormRenderer({
@@ -110,8 +69,9 @@ export function FormRenderer({
   isInSubform = false,
   formData,
   allFields,
-  setErrors,
   locationStatus,
+  forceReadOnly = false,
+  idToLabel = {},
 }: FormRendererProps) {
   const parentValueRaw = field.isDependent
     ? resolveParentValue(field, formData)
@@ -130,7 +90,7 @@ export function FormRenderer({
   };
 
   const isFieldReadOnly = () => {
-    return !!field.readonly;
+    return !!field.readonly || forceReadOnly;
   };
 
   const fieldProps: any = {
@@ -228,22 +188,45 @@ export function FormRenderer({
 
     case "formula": {
       if (!isFieldVisible()) return null;
+      const formulaConfig = field.properties?.formulaConfig as any;
       const calculatedValue = formulaValues[field.id];
       const displayValue =
         calculatedValue !== undefined && calculatedValue !== ""
           ? String(calculatedValue)
           : "—";
+      const returnType = formulaConfig?.returnType || "Number";
+      const displayExpression = formulaConfig?.expression?.replace(
+        /\{([^}]+)\}/g,
+        (_: string, id: string) => `{${idToLabel[id] || id}}`,
+      );
 
       return (
-        <div className="relative">
-          <Input
-            {...fieldProps}
-            type="text"
-            value={displayValue}
-            readOnly
-            className="bg-muted/50 cursor-not-allowed font-medium pl-10"
-          />
-          <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <div className="space-y-1">
+          <div className="relative">
+            <Input
+              {...fieldProps}
+              type="text"
+              value={displayValue}
+              readOnly
+              className={`bg-muted/50 cursor-not-allowed font-medium pl-10 ${
+                returnType === "Currency"
+                  ? "text-green-700"
+                  : returnType === "Number"
+                    ? "text-blue-700"
+                    : ""
+              } ${isInSubform ? "border-purple-200" : ""}`}
+            />
+            <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          </div>
+          {displayExpression && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <span className="font-mono bg-muted px-1 rounded text-xs">
+                {displayExpression.length > 40
+                  ? displayExpression.substring(0, 40) + "..."
+                  : displayExpression}
+              </span>
+            </p>
+          )}
         </div>
       );
     }
@@ -251,12 +234,18 @@ export function FormRenderer({
     case "unique-id": {
       if (!isFieldVisible()) return null;
       return (
-        <Input
-          type="text"
-          value="Will be generated on submit"
-          readOnly
-          className="bg-muted/50 cursor-not-allowed font-mono text-sm italic text-muted-foreground pl-10"
-        />
+        <div className="space-y-2">
+          <div className="relative">
+            <Input
+              type="text"
+              value="Will be generated on submit"
+              readOnly
+              className="bg-muted/50 cursor-not-allowed font-mono text-sm italic text-muted-foreground pl-10"
+            />
+            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          </div>
+          <input type="hidden" name={field.id} value="" />
+        </div>
       );
     }
 
@@ -526,10 +515,19 @@ export function FormRenderer({
         <FileUploadZone
           fieldType={fieldType as any}
           currentValue={value}
+          allowMultiple={fieldType === "image" || fieldType === "file"}
           onUploadComplete={(url: any) =>
             !isFieldReadOnly() && handleFieldChange(field.id, url)
           }
-          onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
+          onClear={(urlToRemove?: string) => {
+            if (isFieldReadOnly()) return;
+            if (urlToRemove && Array.isArray(value)) {
+              const updated = value.filter((u: string) => u !== urlToRemove);
+              handleFieldChange(field.id, updated.length > 0 ? updated : "");
+            } else {
+              handleFieldChange(field.id, "");
+            }
+          }}
           disabled={submitting || submitted || isFieldReadOnly()}
           maxSize={10}
         />
@@ -546,6 +544,216 @@ export function FormRenderer({
           onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
         />
       );
+
+    case "location":
+    case "newlocation": {
+      if (!isFieldVisible()) return null;
+      const autoFetch = field.properties?.autoFetchLocation;
+      const locStatus = locationStatus?.[field.id] || "idle";
+      const isLocReadOnly =
+        isFieldReadOnly() || (autoFetch && locStatus === "success");
+
+      let locPlaceholder = field.placeholder || "Enter location";
+      let locIcon: React.ReactNode = null;
+      if (autoFetch) {
+        if (locStatus === "fetching") {
+          locPlaceholder = "Fetching your location…";
+          locIcon = (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          );
+        } else if (locStatus === "failed") {
+          locPlaceholder = "Location denied – type manually";
+          locIcon = <MapPin className="h-4 w-4 text-amber-600" />;
+        } else if (locStatus === "success") {
+          locPlaceholder = "Location auto-filled";
+          locIcon = <MapPin className="h-4 w-4 text-green-600" />;
+        } else {
+          locPlaceholder = "Click anywhere to allow location";
+          locIcon = <MapPin className="h-4 w-4 text-muted-foreground" />;
+        }
+      }
+      return (
+        <div className="space-y-1">
+          <div className="relative">
+            <Input
+              {...fieldProps}
+              type="text"
+              placeholder={locPlaceholder}
+              value={value || ""}
+              readOnly={isLocReadOnly}
+              className={`${error ? "border-red-500" : ""} ${
+                isLocReadOnly ? "bg-muted cursor-not-allowed" : ""
+              } pl-10 ${isInSubform ? "border-purple-200" : ""}`}
+              onChange={(e: { target: { value: any } }) =>
+                !isLocReadOnly && handleFieldChange(field.id, e.target.value)
+              }
+              disabled={submitting || submitted || isLocReadOnly}
+            />
+            {locIcon && (
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                {locIcon}
+              </div>
+            )}
+          </div>
+          {autoFetch && locStatus === "failed" && (
+            <p className="text-xs text-amber-600">
+              Enable location in browser settings or type your address.
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    case "rating": {
+      if (!isFieldVisible()) return null;
+      return (
+        <div className="flex items-center space-x-2">
+          {[1, 2, 3, 4, 5].map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() =>
+                !isFieldReadOnly() && handleFieldChange(field.id, r)
+              }
+              disabled={submitting || submitted || isFieldReadOnly()}
+              className="p-1 hover:scale-110 transition-transform"
+            >
+              <Star
+                className={`h-4 w-4 ${
+                  r <= (value || 0)
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-gray-300"
+                }`}
+              />
+            </button>
+          ))}
+          <span className="pl-2 text-sm text-muted-foreground">
+            {value ? `${value}/5` : "Not rated"}
+          </span>
+        </div>
+      );
+    }
+
+    case "user": {
+      if (!isFieldVisible()) return null;
+      return (
+        <div className="space-y-1">
+          <Input
+            {...fieldProps}
+            type="text"
+            value={value || ""}
+            readOnly
+            className="bg-muted/70 cursor-not-allowed"
+          />
+          <p className="text-xs text-emerald-700">
+            Auto-filled with current user: <strong>{value || "—"}</strong>
+          </p>
+        </div>
+      );
+    }
+
+    case "address": {
+      if (!isFieldVisible()) return null;
+      const subfields = field.properties?.subfields || [
+        { key: "line1", label: "Address Line 1", placeholder: "Street address, house no.", required: true },
+        { key: "line2", label: "Address Line 2", placeholder: "Apartment, suite, floor", required: false },
+        { key: "city", label: "City / District", placeholder: "Enter City", required: true },
+        { key: "state", label: "State / Province", placeholder: "Enter State", required: true },
+        { key: "postal", label: "Postal / Zip Code", placeholder: "Enter Postal Code", required: true },
+        { key: "country", label: "Country", type: "select", placeholder: "Select country", required: true },
+      ];
+      const addressValue = (value as Record<string, string>) || {};
+      const handleSubChange = (subKey: string, subVal: string) => {
+        const newAddress = { ...addressValue, [subKey]: subVal };
+        handleFieldChange(field.id, newAddress);
+      };
+      const countries = [
+        "Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia",
+        "Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados",
+        "Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina",
+        "Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia",
+        "Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile","China",
+        "Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic",
+        "Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador",
+        "Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland",
+        "France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala",
+        "Guinea","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran",
+        "Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya",
+        "Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho",
+        "Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi",
+        "Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius",
+        "Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco",
+        "Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand",
+        "Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman",
+        "Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru",
+        "Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda",
+        "Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa",
+        "San Marino","São Tomé and Príncipe","Saudi Arabia","Senegal","Serbia","Seychelles",
+        "Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia",
+        "South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname",
+        "Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand",
+        "Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan",
+        "Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States",
+        "Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen",
+        "Zambia","Zimbabwe",
+      ].sort();
+      return (
+        <div className="space-y-4 p-4 border border-gray-200 rounded-md bg-gray-50/60">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {subfields.map((sub: any) => {
+              if (!sub) return null;
+              const subVal = addressValue[sub.key] || "";
+              const isRequired = sub.required && field.validation?.required;
+              if (sub.type === "select") {
+                return (
+                  <div key={sub.key} className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      {sub.label}
+                      {isRequired && <span className="text-red-500 ml-1">*</span>}
+                    </Label>
+                    <Select
+                      value={subVal}
+                      onValueChange={(v) => handleSubChange(sub.key, v)}
+                      disabled={submitting || submitted || isFieldReadOnly()}
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue placeholder={sub.placeholder || "Select country"} />
+                      </SelectTrigger>
+                      <SelectContent className="z-50" position="popper">
+                        {countries.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              }
+              return (
+                <div key={sub.key} className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    {sub.label}
+                    {isRequired && <span className="text-red-500 ml-1">*</span>}
+                  </Label>
+                  <Input
+                    placeholder={sub.placeholder}
+                    value={subVal}
+                    onChange={(e) => handleSubChange(sub.key, e.target.value)}
+                    disabled={submitting || submitted || isFieldReadOnly()}
+                    className="bg-white"
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {error && (
+            <p className="text-sm text-red-500 flex items-center gap-1 mt-2">
+              <AlertCircle className="h-4 w-4" />
+              {error}
+            </p>
+          )}
+        </div>
+      );
+    }
 
     case "hidden":
       return <input type="hidden" value={value || ""} />;
@@ -565,252 +773,3 @@ export function FormRenderer({
   }
 }
 
-interface RenderSubformProps {
-  subform: Subform;
-  level?: number;
-  parentPath?: string;
-  value: any;
-  errors: Record<string, string>;
-  submitting: boolean;
-  handleFieldChange: (id: string, value: any, fullOption?: any) => void;
-  formulaValues: Record<string, any>;
-  toggleSubform: (id: string) => void;
-  collapsedSubforms: Record<string, boolean>;
-  formData?: Record<string, any>;
-  allFields?: FormField[];
-  setErrors?: (v: Record<string, string>) => void;
-  locationStatus?: Record<string, "idle" | "fetching" | "success" | "failed">;
-}
-
-export function RenderSubform({
-  subform,
-  level = 0,
-  parentPath = "",
-  value,
-  errors,
-  submitting,
-  handleFieldChange,
-  formulaValues,
-  toggleSubform,
-  collapsedSubforms,
-}: RenderSubformProps) {
-  const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
-  const isCollapsed =
-    collapsedSubforms[subform.id] ?? subform.collapsed ?? false;
-
-  const currentPath = parentPath
-    ? `${parentPath} > ${subform.name}`
-    : subform.name;
-  const pathParts = currentPath.split(" > ");
-
-  const allItems = [
-    ...subform.fields.map((f) => ({
-      type: "field" as const,
-      item: f,
-      id: f.id,
-      order: f.order,
-    })),
-    ...(subform.childSubforms || []).map((sf, idx) => ({
-      type: "subform" as const,
-      item: sf,
-      id: sf.id,
-      order: sf.order ?? idx,
-    })),
-  ].sort((a, b) => a.order - b.order);
-
-  return (
-    <div
-      className={`rounded-lg border border-gray-200 shadow-sm ${colorScheme.leftBorder} ${colorScheme.bg}`}
-    >
-      <div className="p-4 border-b bg-white/80">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 flex-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => toggleSubform(subform.id)}
-              className="h-6 w-6 p-0 text-gray-500 hover:text-gray-700"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </Button>
-
-            <Layers className={`w-5 h-5 ${colorScheme.accent}`} />
-
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h4 className="text-base font-semibold">{subform.name}</h4>
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${colorScheme.levelBadge}`}
-                >
-                  Level {level}
-                </Badge>
-                <Badge variant="outline" className="text-xs">
-                  {subform.fields.length} field
-                  {subform.fields.length !== 1 ? "s" : ""}
-                </Badge>
-                {subform.childSubforms?.length > 0 && (
-                  <Badge variant="outline" className="text-xs">
-                    {subform.childSubforms.length} nested
-                  </Badge>
-                )}
-              </div>
-
-              {level > 0 && (
-                <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
-                  Path:{" "}
-                  {pathParts.map((part, i) => (
-                    <span key={i} className="flex items-center">
-                      <span
-                        className={
-                          i === pathParts.length - 1
-                            ? "font-medium text-gray-700"
-                            : ""
-                        }
-                      >
-                        {part}
-                      </span>
-                      {i < pathParts.length - 1 && (
-                        <ChevronRight className="w-3 h-3 mx-1" />
-                      )}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {subform.description && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  {subform.description}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {!isCollapsed && (
-        <div className="p-5 space-y-6">
-          {allItems.length > 0 ? (
-            (() => {
-              const visibleItems = allItems.filter((item) => {
-                if (item.type === "field") {
-                  const f = item.item as FormField;
-                  if (f.visible === false) return false;
-                  if (f.properties && f.properties.hidden === true)
-                    return false;
-                  // hide dependent fields until parent has value
-                  if (f.isDependent) {
-                    const pv = resolveParentValue(f, formData);
-                    if (
-                      pv === undefined ||
-                      pv === null ||
-                      pv === "" ||
-                      (Array.isArray(pv) && pv.length === 0)
-                    )
-                      return false;
-                  }
-                  return true;
-                }
-                // For subforms, respect a `visible` flag if present
-                if (item.type === "subform") {
-                  const sf = item.item as Subform;
-                  if ((sf as any).visible === false) return false;
-                  if (
-                    (sf as any).properties &&
-                    (sf as any).properties.hidden === true
-                  )
-                    return false;
-                  return true;
-                }
-                return true;
-              });
-
-              return visibleItems.map((item) =>
-                item.type === "field" ? (
-                  <div
-                    key={item.id}
-                    className={`space-y-2 ${
-                      (item.item as FormField).isDependent
-                        ? "mt-6 p-4 border rounded-lg bg-muted/30"
-                        : ""
-                    }`}
-                  >
-                    {(item.item as FormField).type !== "checkbox" &&
-                      (item.item as FormField).type !== "switch" &&
-                      (item.item as FormField).type !== "hidden" && (
-                        <Label className="text-sm font-medium flex items-center gap-2">
-                          {(item.item as FormField).label}
-                          {(item.item as FormField).validation?.required && (
-                            <span className="text-red-500">*</span>
-                          )}
-                        </Label>
-                      )}
-                    {(item.item as FormField).description &&
-                      (item.item as FormField).type !== "hidden" && (
-                        <p className="text-xs text-muted-foreground">
-                          {(item.item as FormField).description}
-                        </p>
-                      )}
-                    <FormRenderer
-                      field={item.item as FormField}
-                      value={value?.[item.id]}
-                      error={errors[item.id]}
-                      submitting={submitting}
-                      submitted={submitted}
-                      handleFieldChange={handleFieldChange}
-                      formulaValues={formulaValues}
-                      isInSubform={true}
-                      formData={formData}
-                      allFields={allFields}
-                      setErrors={setErrors}
-                      locationStatus={locationStatus}
-                    />
-                    {errors[item.id] && (
-                      <p className="text-sm text-red-500 flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
-                        {errors[item.id]}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div key={item.id} className="ml-6 mt-4">
-                    <RenderSubform
-                      subform={item.item as Subform}
-                      level={level + 1}
-                      parentPath={currentPath}
-                      value={value?.[item.id] || {}}
-                      errors={errors}
-                      submitting={submitting}
-                      handleFieldChange={handleFieldChange}
-                      formulaValues={formulaValues}
-                      toggleSubform={toggleSubform}
-                      collapsedSubforms={collapsedSubforms}
-                      formData={formData}
-                      allFields={allFields}
-                      setErrors={setErrors}
-                      locationStatus={locationStatus}
-                    />
-                  </div>
-                ),
-              );
-            })()
-          ) : (
-            <div className="border-2 border-dashed rounded-lg p-6 text-center border-gray-300 bg-gray-50">
-              <Layers
-                className={`w-6 h-6 mx-auto mb-2 ${colorScheme.accent}`}
-              />
-              <p className={`text-sm mb-2 ${colorScheme.accent}`}>
-                No fields or nested subforms in this section
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}

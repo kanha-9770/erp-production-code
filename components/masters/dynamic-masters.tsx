@@ -81,10 +81,12 @@ export function DynamicMasters() {
   const [modules, setModules] = useState<any[]>([])
   const [forms, setForms] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+
   const [triggerGetMasterData] = useLazyGetMasterDataQuery()
   const [createMasterData] = useCreateMasterDataMutation()
   const [updateMasterData] = useUpdateMasterDataMutation()
   const [deleteMasterData] = useDeleteMasterDataMutation()
+
   const [processingRows, setProcessingRows] = useState<Set<string>>(new Set())
   const [recordSearchQuery, setRecordSearchQuery] = useState("")
   const [selectedModuleFilter, setSelectedModuleFilter] = useState("all")
@@ -93,6 +95,7 @@ export function DynamicMasters() {
   const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set())
   const [recordSortField, setRecordSortField] = useState("")
   const [recordSortOrder, setRecordSortOrder] = useState<"asc" | "desc">("asc")
+
   const [columnWidths, setColumnWidths] = useState<Map<string, number>>(new Map([
     ["module", 200],
     ["level2", 150],
@@ -102,13 +105,21 @@ export function DynamicMasters() {
     ["dropdown", 200],
     ["values", 300],
   ]))
+
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set())
   const [resizingColumn, setResizingColumn] = useState<string | null>(null)
   const [resizeStartX, setResizeStartX] = useState(0)
   const [resizeStartWidth, setResizeStartWidth] = useState(0)
   const [numDummyRows, setNumDummyRows] = useState(0)
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [rowToDelete, setRowToDelete] = useState<string | null>(null)
+
+  // ==================== BULK DELETE STATES ====================
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  // ===========================================================
+
   const { toast } = useToast()
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const valueInputRefs = useRef<Map<string, HTMLInputElement[]>>(new Map())
@@ -116,6 +127,39 @@ export function DynamicMasters() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  // ==================== BULK DELETE FUNCTION ====================
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedRecords.size === 0) return
+
+    setIsBulkDeleting(true)
+    try {
+      const deletePromises = Array.from(selectedRecords).map(async (id) => {
+        await deleteMasterData(id).unwrap()
+      })
+
+      await Promise.all(deletePromises)
+
+      toast({
+        title: "Success",
+        description: `${selectedRecords.size} dropdown(s) deleted successfully`,
+      })
+
+      setSelectedRecords(new Set())
+      await fetchData()
+      setCurrentPage(1)
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to delete some records",
+        variant: "destructive",
+      })
+    } finally {
+      setIsBulkDeleting(false)
+      setBulkDeleteDialogOpen(false)
+    }
+  }, [selectedRecords, deleteMasterData, toast])
+  // ===========================================================
 
   const fetchData = async () => {
     setLoading(true)
@@ -262,7 +306,6 @@ export function DynamicMasters() {
     })
   }, [])
 
-  // Use a ref to always access the latest rows, avoiding stale closure in saveRow
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
@@ -332,6 +375,8 @@ export function DynamicMasters() {
     setDeleteDialogOpen(true)
   }, [])
 
+  const hasSelection = selectedRecords.size > 0
+
   const startEdit = useCallback((rowId: string) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, isEditing: true } : r))
   }, [])
@@ -393,6 +438,7 @@ export function DynamicMasters() {
   if (selectedModuleFilter !== "all") {
     filteredRecords = filteredRecords.filter(r => r.module_id === selectedModuleFilter)
   }
+
   const sortedRecords = sortRecords(filteredRecords)
   const totalRecords = sortedRecords.length
   const startIdx = (currentPage - 1) * recordsPerPage
@@ -489,7 +535,6 @@ export function DynamicMasters() {
 
           <div className="p-4 sm:p-6 space-y-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-3">
-              {/* Search takes most space */}
               <div className="flex-1 min-w-0">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -501,8 +546,6 @@ export function DynamicMasters() {
                   />
                 </div>
               </div>
-
-              {/* Filters & per-page selector — stay together on one line from lg breakpoint */}
               <div className="flex flex-col gap-3 sm:flex-row sm:gap-3 lg:flex-row lg:gap-3 lg:items-end">
                 <div className="min-w-[180px] sm:min-w-[200px] lg:min-w-[220px]">
                   <Select value={selectedModuleFilter} onValueChange={setSelectedModuleFilter}>
@@ -520,7 +563,6 @@ export function DynamicMasters() {
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="min-w-[140px] sm:min-w-[160px] lg:min-w-[170px]">
                   <Select value={recordsPerPage.toString()} onValueChange={(value) => setRecordsPerPage(Number(value))}>
                     <SelectTrigger className="h-9 rounded-lg border-gray-300 hover:border-gray-400 transition-all duration-200">
@@ -607,22 +649,42 @@ export function DynamicMasters() {
                 <div className="inline-block min-w-full align-top">
                   <div style={{ fontFamily: "Segoe UI, Tahoma, Geneva, Verdana, sans-serif" }}>
                     <div className="flex bg-gradient-to-r from-slate-100 via-gray-100 to-slate-100 border-b-2 border-gray-400 sticky top-0 z-20 min-w-max shadow-sm">
-                      <div className="w-10 h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center flex-shrink-0">
-                        <Checkbox
-                          checked={selectedRecords.size === paginatedRecords.length && paginatedRecords.length > 0}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedRecords(new Set(paginatedRecords.map((r) => r.id)))
-                            } else {
-                              setSelectedRecords(new Set())
-                            }
-                          }}
-                          className="h-4 w-4"
-                        />
+                      {/* ==================== SELECT ALL + BULK DELETE ==================== */}
+                      <div className={cn(
+                        "h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-200",
+                        hasSelection ? "w-16" : "w-10"
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={selectedRecords.size === paginatedRecords.length && paginatedRecords.length > 0}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedRecords(new Set(paginatedRecords.map((r) => r.id)))
+                              } else {
+                                setSelectedRecords(new Set())
+                              }
+                            }}
+                            className="h-4 w-4"
+                          />
+
+                          {hasSelection && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-100 rounded-md"
+                              onClick={() => setBulkDeleteDialogOpen(true)}
+                              title={`Delete ${selectedRecords.size} selected record(s)`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
+
                       <div className="w-12 h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center text-xs font-bold text-gray-800 flex-shrink-0">
                         #
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("module") || 200}px` }}
@@ -651,6 +713,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("level2") || 150}px` }}
@@ -679,6 +742,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("level3") || 150}px` }}
@@ -707,6 +771,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("level4") || 150}px` }}
@@ -735,6 +800,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("form") || 200}px` }}
@@ -763,6 +829,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("dropdown") || 200}px` }}
@@ -791,6 +858,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div
                         className="relative h-10 border-r border-gray-300 bg-slate-100 flex items-center text-xs font-bold text-gray-900 px-2 cursor-pointer hover:bg-gradient-to-r hover:from-blue-50 hover:to-slate-100 transition-all duration-200 flex-shrink-0 group"
                         style={{ width: `${columnWidths.get("values") || 300}px` }}
@@ -819,6 +887,7 @@ export function DynamicMasters() {
                           title="Drag to resize column"
                         />
                       </div>
+
                       <div className="w-32 h-10 border-r border-gray-300 bg-slate-100 flex items-center justify-center text-xs font-bold text-gray-800 flex-shrink-0">
                         Actions
                       </div>
@@ -840,6 +909,7 @@ export function DynamicMasters() {
                           const num = startIdx + rowIndex + 1
                           const valuesContent = row.values.map(v => v.value).filter(Boolean).join(", ") || "—"
                           const isSelected = selectedRecords.has(rowId)
+
                           return (
                             <div
                               key={rowId}
@@ -860,6 +930,7 @@ export function DynamicMasters() {
                                   className="h-4 w-4"
                                 />
                               </div>
+
                               <div className="w-12 h-9 border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
                                 {num}
                               </div>
@@ -1145,7 +1216,6 @@ export function DynamicMasters() {
                                         <Upload className="h-4 w-4 mr-2" />
                                         Import values (.xlsx / .csv / .txt)
                                       </Button>
-
                                       <div className="relative my-2">
                                         <div className="absolute inset-0 flex items-center">
                                           <span className="w-full border-t border-gray-300" />
@@ -1154,7 +1224,6 @@ export function DynamicMasters() {
                                           <span className="bg-white px-2 text-gray-500">or enter manually</span>
                                         </div>
                                       </div>
-
                                       {row.values.map((val, vi) => (
                                         <div key={val.id} className="flex gap-2 items-center">
                                           <Input
@@ -1190,7 +1259,6 @@ export function DynamicMasters() {
                                           </Button>
                                         </div>
                                       ))}
-
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -1313,6 +1381,7 @@ export function DynamicMasters() {
           </div>
         </div>
 
+        {/* Single Record Delete Dialog */}
         <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -1343,6 +1412,45 @@ export function DynamicMasters() {
                   </>
                 ) : (
                   "Delete"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Delete Dialog */}
+        <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Delete Selected Dropdowns</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete{" "}
+                <span className="font-semibold text-red-600">{selectedRecords.size}</span>{" "}
+                selected dropdown(s)? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setBulkDeleteDialogOpen(false)}
+                disabled={isBulkDeleting}
+                className="w-full sm:w-auto"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+                className="w-full sm:w-auto"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  `Delete ${selectedRecords.size} Records`
                 )}
               </Button>
             </DialogFooter>
