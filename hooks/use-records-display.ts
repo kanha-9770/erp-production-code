@@ -73,6 +73,18 @@ export function useRecordsDisplay({
   onDeleteRecord,
   onViewDetails,
 }: UseRecordsDisplayOptions) {
+  // ── Debug logging ────────────────────────────────────────────────────────────
+  console.log("[Hook] useRecordsDisplay initialized with:", {
+    formRecordsCount: formRecords.length,
+    formFieldsWithSectionsCount: formFieldsWithSections.length,
+    formFields: formFieldsWithSections.map(f => ({
+      id: f.id,
+      label: f.label,
+      type: f.type,
+      hasFormulaConfig: !!f.properties?.formulaConfig,
+    })),
+  });
+
   // ── State ────────────────────────────────────────────────────────────────────
 
   const tableContainerRef = React.useRef<HTMLDivElement>(null);
@@ -119,6 +131,15 @@ export function useRecordsDisplay({
   >(new Map());
   const [enhancedFormFields, setEnhancedFormFields] = React.useState<FormFieldWithSection[]>([]);
 
+  React.useEffect(() => {
+    console.log("[Hook] Fields state updated:", {
+      formFieldsWithSectionsCount: formFieldsWithSections.length,
+      formFieldsWithSections: formFieldsWithSections.map(f => ({ id: f.id, label: f.label, type: f.type })),
+      enhancedFormFieldsCount: enhancedFormFields.length,
+      enhancedFormFields: enhancedFormFields.map(f => ({ id: f.id, label: f.label, type: f.type })),
+    });
+  }, [formFieldsWithSections, enhancedFormFields]);
+
   // ── Derived flags ────────────────────────────────────────────────────────────
 
   const isMergedMode = activeTab === "merged";
@@ -128,30 +149,60 @@ export function useRecordsDisplay({
 
   React.useEffect(() => {
     const mergeFormulas = async () => {
-      const res = await fetch("/api/testing");
-      const result = await res.json();
-      if (!result.success || !Array.isArray(result.data)) return;
-      const formulas = result.data;
-      const updated = formFieldsWithSections.map((field) => {
-        const match = formulas.find((f: any) => f.formFieldId === field.id);
-        if (!match) return field;
-        return {
-          ...field,
-          type: "formula",
-          formula: match.expression,
-          returnType: match.returnType,
-          properties: {
-            ...field.properties,
-            formulaConfig: {
-              expression: match.expression,
-              returnType: match.returnType,
-              decimalPlaces: match.formField?.decimalPlaces ?? 2,
-              blankPreference: match.blankPreference ?? "Empty",
+      try {
+        console.log("[Hook] Fetching formulas from /api/testing...");
+        const res = await fetch("/api/testing");
+        console.log("[Hook] API response status:", res.status);
+        const result = await res.json();
+        console.log("[Hook] API response:", {
+          success: result.success,
+          dataCount: Array.isArray(result.data) ? result.data.length : 0,
+          data: result.data,
+        });
+
+        if (!result.success || !Array.isArray(result.data)) {
+          console.warn("[Hook] API response invalid - no formulas loaded", { success: result.success, hasData: Array.isArray(result.data) });
+          setEnhancedFormFields(formFieldsWithSections);
+          return;
+        }
+
+        const formulas = result.data;
+        console.log("[Hook] Processing formulas:", {
+          count: formulas.length,
+          formulas: formulas.map((f: any) => ({ formFieldId: f.formFieldId, expression: f.expression, returnType: f.returnType })),
+        });
+
+        const updated = formFieldsWithSections.map((field) => {
+          const match = formulas.find((f: any) => f.formFieldId === field.id);
+          if (!match) return field;
+          console.log("[Hook] Found formula match:", { fieldId: field.id, fieldLabel: field.label, expression: match.expression });
+          return {
+            ...field,
+            type: "formula",
+            formula: match.expression,
+            returnType: match.returnType,
+            properties: {
+              ...field.properties,
+              formulaConfig: {
+                expression: match.expression,
+                returnType: match.returnType,
+                decimalPlaces: match.formField?.decimalPlaces ?? 2,
+                blankPreference: match.blankPreference ?? "Empty",
+              },
             },
-          },
-        } as FormFieldWithSection;
-      });
-      setEnhancedFormFields(updated);
+          } as FormFieldWithSection;
+        });
+
+        console.log("[Hook] Enhanced fields created:", {
+          total: updated.length,
+          formulas: updated.filter(f => f.type === "formula").map(f => ({ id: f.id, label: f.label })),
+        });
+
+        setEnhancedFormFields(updated);
+      } catch (err) {
+        console.error("[Hook] Error fetching formulas:", err);
+        setEnhancedFormFields(formFieldsWithSections);
+      }
     };
     mergeFormulas();
   }, [formFieldsWithSections]);
@@ -364,6 +415,13 @@ export function useRecordsDisplay({
 
   const recalculateFormulasForRecord = React.useCallback(
     (record: EnhancedFormRecord, changedFieldIds: Set<string> = new Set()) => {
+      console.log("[Hook] recalculateFormulasForRecord called:", {
+        recordId: record.id,
+        processedDataCount: record.processedData.length,
+        enhancedFormFieldsCount: enhancedFormFields.length,
+        formulaFieldsAvailable: enhancedFormFields.filter(f => f.type === "formula" && f.properties?.formulaConfig).length,
+      });
+
       const newProcessed = [...record.processedData];
       const affected = new Set<string>();
       const runningValues: Record<string, any> = {};
@@ -387,6 +445,11 @@ export function useRecordsDisplay({
       const formulaFieldsToProcess = enhancedFormFields
         .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+      console.log("[Hook] Formula fields to process:", {
+        count: formulaFieldsToProcess.length,
+        formulas: formulaFieldsToProcess.map(f => ({ id: f.id, label: f.label, expression: f.properties?.formulaConfig?.expression })),
+      });
 
       formulaFieldsToProcess.forEach((formulaField) => {
         const config = formulaField.properties.formulaConfig!;
@@ -414,6 +477,16 @@ export function useRecordsDisplay({
           );
 
           let finalValue = result.success ? result.value : config.blankPreference === "Zero" ? 0 : "";
+
+          console.log("[Hook] Formula evaluated:", {
+            formulaLabel: formulaField.label,
+            expression: config.expression,
+            variables: Object.keys(Object.fromEntries(Object.entries(variables).filter(([, v]) => v !== undefined))),
+            success: result.success,
+            calculatedValue: result.value,
+            finalValue,
+            error: result.error,
+          });
 
           if (["Number", "Currency", "Percent"].includes(config.returnType || "")) {
             const num = Number(finalValue);
@@ -783,6 +856,8 @@ export function useRecordsDisplay({
       // ── Common guards ──
       if (editMode === "locked" || savingChanges || isImageField(fieldDef.label)) return;
       if (!hasPermissionForForm(fieldDef.formId, "EDIT")) return;
+      // ── Formula fields are read-only, cannot be edited ──
+      if (fieldDef.type === "formula" && fieldDef.properties?.formulaConfig) return;
 
       if (editMode === "single-click") {
         // Single-click → enter edit immediately on pointer-down
@@ -1023,8 +1098,11 @@ export function useRecordsDisplay({
       return selected;
     }
 
-    // Otherwise → show ONLY default 4 fields
-    return getDefaultFields(orderedFields);
+    // Otherwise → show default 4 fields + always include formula fields for real-time updates
+    const defaultFields = getDefaultFields(orderedFields);
+    const formulaFields = orderedFields.filter((f) => f.type === "formula" && f.properties?.formulaConfig);
+    const combined = [...defaultFields, ...formulaFields.filter((ff) => !defaultFields.some((df) => df.id === ff.id))];
+    return combined;
   }, [orderedFields, visibleFields]);
 
   const hierarchyGroups = useMemo(() => {

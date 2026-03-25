@@ -271,6 +271,13 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   );
 
   // ── renderFieldEditor — keeps inline so it can close over hook state ─────────
+  React.useEffect(() => {
+    console.log("[Formula] Component mounted - enhancedFormFields:", {
+      count: enhancedFormFields.length,
+      formulas: enhancedFormFields.filter(f => f.type === "formula").map(f => ({ id: f.id, label: f.label, hasConfig: !!f.properties?.formulaConfig })),
+    });
+  }, [enhancedFormFields]);
+
   const renderFieldEditor = (
     record: EnhancedFormRecord,
     fieldDef: FormFieldWithSection,
@@ -293,6 +300,18 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           value={displayText}
           disabled
           className="h-7 text-[10px] sm:text-xs p-1 bg-gray-100"
+        />
+      );
+    }
+
+    // ── Formula fields are read-only and show calculated values ──
+    if (fieldDef.type === "formula" && fieldDef.properties?.formulaConfig) {
+      return (
+        <Input
+          value={displayText}
+          readOnly
+          disabled
+          className="h-7 text-[10px] sm:text-xs p-1 bg-gray-100 cursor-not-allowed font-medium"
         />
       );
     }
@@ -474,11 +493,25 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               }),
             };
 
+            console.log("[Formula] Text Input - tempRecordForFormula created:", {
+              recordId: tempRecordForFormula.id,
+              fieldEdited: fieldDef.label,
+              newValue: finalValue,
+              processedDataCount: tempRecordForFormula.processedData.length,
+              enhancedFormFieldsCount: enhancedFormFields.length,
+              formulaFieldsInEnhanced: enhancedFormFields.filter(f => f.type === "formula").map(f => ({ id: f.id, label: f.label })),
+            });
+
             // Recalculate all formulas with the new values
             const { updatedProcessedData } = recalculateFormulasForRecord(
               tempRecordForFormula,
               new Set(),
             );
+
+            console.log("[Formula] Text Input - recalculateFormulasForRecord result:", {
+              updatedProcessedDataCount: updatedProcessedData.length,
+              formulasInResult: updatedProcessedData.filter(pd => pd.fieldType === "formula").map(pd => ({ id: pd.fieldId, label: pd.fieldLabel, value: pd.value })),
+            });
 
             // Add updated formula values to pending changes
             updatedProcessedData.forEach((pd) => {
@@ -486,27 +519,72 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 const oldPd = currentRecord.processedData.find(
                   (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
                 );
-                if (oldPd && oldPd.value !== pd.value) {
-                  const formulaField = enhancedFormFields.find(
+                const oldValue = oldPd?.value ?? "";
+                console.log("[Formula] Text Input - Processing formula field:", {
+                  fieldId: pd.fieldId,
+                  fieldLabel: pd.fieldLabel,
+                  oldValue,
+                  newValue: pd.value,
+                  changed: oldValue !== pd.value,
+                });
+
+                // Add formula to pending changes if value changed OR if it's a new formula
+                if (oldValue !== pd.value) {
+                  // Try to find the formula field using multiple matching strategies
+                  let formulaField = enhancedFormFields.find(
                     (f) =>
                       f.type === "formula" &&
                       (f.id === pd.fieldId ||
                         f.originalId === pd.fieldId ||
                         f.label === pd.fieldLabel),
                   );
+
+                  console.log("[Formula] Text Input - First lookup attempt:", {
+                    fieldId: pd.fieldId,
+                    found: !!formulaField,
+                  });
+
+                  // Fallback: match by label if ID matching fails
+                  if (!formulaField && pd.fieldLabel) {
+                    formulaField = enhancedFormFields.find(
+                      (f) => f.type === "formula" && f.label === pd.fieldLabel,
+                    );
+                    console.log("[Formula] Text Input - Fallback lookup by label:", {
+                      fieldLabel: pd.fieldLabel,
+                      found: !!formulaField,
+                    });
+                  }
+
                   if (formulaField) {
-                    newPending.set(`${currentRecord.id}-${formulaField.id}`, {
+                    const formulaKey = `${currentRecord.id}-${formulaField.id}`;
+                    console.log("[Formula] Text Input - Adding formula to pending:", {
+                      key: formulaKey,
+                      fieldId: formulaField.id,
+                      value: pd.value,
+                    });
+                    newPending.set(formulaKey, {
                       recordId: currentRecord.id,
                       fieldId: formulaField.id,
                       originalFieldId: formulaField.originalId || formulaField.id,
                       value: pd.value,
-                      originalValue: oldPd.value ?? "",
+                      originalValue: oldValue,
                       fieldType: "formula",
+                      fieldLabel: pd.fieldLabel || formulaField.label,
+                    });
+                  } else {
+                    console.warn("[Formula] Text Input - Formula field NOT FOUND:", {
+                      fieldId: pd.fieldId,
                       fieldLabel: pd.fieldLabel,
+                      enhancedFields: enhancedFormFields.map(f => ({ id: f.id, label: f.label, type: f.type })),
                     });
                   }
                 }
               }
+            });
+
+            console.log("[Formula] Text Input - newPending before setState:", {
+              size: newPending.size,
+              entries: Array.from(newPending.entries()).map(([k, v]) => ({ key: k, fieldType: v.fieldType, value: v.value })),
             });
 
             setPendingChanges(newPending);
@@ -668,37 +746,78 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             }),
           };
 
+          console.log("[Formula] Lookup - tempRecordForFormula created:", {
+            recordId: record.id,
+            fieldEdited: fieldDef.label,
+            newValue,
+          });
+
           const { updatedProcessedData } = recalculateFormulasForRecord(
             tempRecordForFormula,
             new Set(),
           );
+
+          console.log("[Formula] Lookup - recalculateFormulasForRecord result:", {
+            updatedProcessedDataCount: updatedProcessedData.length,
+            formulasInResult: updatedProcessedData.filter(pd => pd.fieldType === "formula").map(pd => ({ id: pd.fieldId, label: pd.fieldLabel, value: pd.value })),
+          });
 
           updatedProcessedData.forEach((pd) => {
             if (pd.fieldType === "formula") {
               const oldPd = record.processedData.find(
                 (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
               );
-              if (oldPd && oldPd.value !== pd.value) {
-                const formulaField = enhancedFormFields.find(
+              const oldValue = oldPd?.value ?? "";
+              console.log("[Formula] Lookup - Processing formula field:", {
+                fieldId: pd.fieldId,
+                fieldLabel: pd.fieldLabel,
+                oldValue,
+                newValue: pd.value,
+                changed: oldValue !== pd.value,
+              });
+
+              // Add formula to pending changes if value changed OR if it's a new formula
+              if (oldValue !== pd.value) {
+                // Try to find the formula field using multiple matching strategies
+                let formulaField = enhancedFormFields.find(
                   (f) =>
                     f.type === "formula" &&
                     (f.id === pd.fieldId ||
                       f.originalId === pd.fieldId ||
                       f.label === pd.fieldLabel),
                 );
+
+                // Fallback: match by label if ID matching fails
+                if (!formulaField && pd.fieldLabel) {
+                  formulaField = enhancedFormFields.find(
+                    (f) => f.type === "formula" && f.label === pd.fieldLabel,
+                  );
+                }
+
                 if (formulaField) {
-                  newPending.set(`${record.id}-${formulaField.id}`, {
+                  const formulaKey = `${record.id}-${formulaField.id}`;
+                  console.log("[Formula] Lookup - Adding formula to pending:", {
+                    key: formulaKey,
+                    fieldId: formulaField.id,
+                    value: pd.value,
+                  });
+                  newPending.set(formulaKey, {
                     recordId: record.id,
                     fieldId: formulaField.id,
                     originalFieldId: formulaField.originalId || formulaField.id,
                     value: pd.value,
-                    originalValue: oldPd.value ?? "",
+                    originalValue: oldValue,
                     fieldType: "formula",
-                    fieldLabel: pd.fieldLabel,
+                    fieldLabel: pd.fieldLabel || formulaField.label,
                   });
                 }
               }
             }
+          });
+
+          console.log("[Formula] Lookup - newPending before setState:", {
+            size: newPending.size,
+            entries: Array.from(newPending.entries()).map(([k, v]) => ({ key: k, fieldType: v.fieldType, value: v.value })),
           });
 
           setPendingChanges(newPending);
