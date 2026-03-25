@@ -277,7 +277,7 @@ export function FormulaBuilder({
 
   const formOptions = useMemo(
     () =>
-      availableForms
+      [...availableForms]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((f) => ({
           value: f.id,
