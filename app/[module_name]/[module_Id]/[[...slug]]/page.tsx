@@ -401,11 +401,9 @@ export default function ModulePage({
 
       changesToProcess.forEach((change) => {
         if (!changesByRecord.has(change.recordId)) {
-          // Determine formId from processedData
-          const formId =
-            formRecords
-              .flatMap((r) => r.processedData)
-              .find((pd) => pd.recordId === change.recordId)?.formId || "";
+          // Use record.formId directly — much more reliable than searching processedData
+          const record = formRecords.find((r) => r.id === change.recordId);
+          const formId = record?.formId || "";
           console.log(`[Save] record=${change.recordId} → formId="${formId}"`);
           if (!formId) {
             console.warn(`[Save] formId is empty for record=${change.recordId} — API call may fail`);
@@ -455,7 +453,7 @@ export default function ModulePage({
       }
 
       console.log(`[Save] all records saved — triggering refetch`);
-      refetchRecords();
+      await refetchRecords();
     } catch (error: any) {
       console.error(`[Save] ERROR:`, error);
       await refetchRecords(); // revert to server state on failure

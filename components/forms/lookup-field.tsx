@@ -479,7 +479,7 @@ export function LookupField({
                 <Input
                   placeholder={
                     field.lookup?.searchPlaceholder ||
-                    "Search or type to create..."
+                    "Search or type..."
                   }
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}

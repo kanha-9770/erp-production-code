@@ -49,7 +49,7 @@ export default function FormulaConfigurationDialog({
   const handleSave = (config: FormulaConfig) => {
     const finalConfig = {
       ...config,
-      visibleInForm: isVisible,           // true = show, false = hide
+      visibleInForm: isVisible, // true = show, false = hide
     };
 
     onSave(finalConfig, fieldId);

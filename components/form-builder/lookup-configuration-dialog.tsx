@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -125,10 +124,10 @@ export default function LookupConfigurationDialog({
   const [selectedFormId, setSelectedFormId] = useState<string>("");
   const [selectedSectionId, setSelectedSectionId] = useState<string>("all");
 
-  // Master dropdowns (shown as tiles when module selected)
+  // Master dropdowns
   const [masterDropdowns, setMasterDropdowns] = useState<MasterDropdown[]>([]);
 
-  // Field data (dynamic only)
+  // Field data
   const [sections, setSections] = useState<FormSection[]>([]);
   const [sourceFields, setSourceFields] = useState<SourceField[]>([]);
   const [selectedFields, setSelectedFields] = useState<SelectedField[]>([]);
@@ -224,7 +223,6 @@ export default function LookupConfigurationDialog({
       const result = await triggerGetLookupSources().unwrap();
       if (result.success) setSources(result.data || []);
 
-      // Load all masters (or filter later if needed)
       const mastersResult = await triggerGetMasterData().unwrap();
       if (mastersResult.dropdowns) {
         setMasterDropdowns(
@@ -281,7 +279,6 @@ export default function LookupConfigurationDialog({
 
   const fetchMasterDropdowns = async (moduleId: string) => {
     try {
-      // Optional: filter masters by module if your API supports it
       const result = await triggerGetMasterDataByModule(moduleId).unwrap();
       if (result.dropdowns) {
         setMasterDropdowns(
@@ -299,16 +296,14 @@ export default function LookupConfigurationDialog({
     }
   };
 
-  /* ===================== FETCH VALUES FOR DEPENDENCY CONFIG ===================== */
+  /* ===================== FETCH VALUES FOR DEPENDENCY ===================== */
   const fetchFieldValues = async (field: SelectedField): Promise<string[]> => {
-    // Check cache first
     if (masterDataValues[field.fieldName]?.length) {
       return masterDataValues[field.fieldName];
     }
 
     if (field.isMaster) {
       try {
-        // Master data API returns ALL dropdowns — find the matching one
         const result = await triggerGetMasterData().unwrap();
         if (result.dropdowns) {
           const dropdown = result.dropdowns.find((d: any) => d.id === field.fieldName);
@@ -324,7 +319,6 @@ export default function LookupConfigurationDialog({
       return [];
     }
 
-    // Dynamic field — fetch unique values from lookup data
     try {
       const sourceId = selectedFormId && selectedFormId !== "none"
         ? selectedFormId
@@ -335,10 +329,7 @@ export default function LookupConfigurationDialog({
       if (result.success && Array.isArray(result.data)) {
         const uniqueValues = new Set<string>();
         for (const item of result.data) {
-          // Try matching by label or fieldName
-          const fieldData = item[field.label]
-            || Object.values(item).find((v: any) => v?.field_label === field.label)
-            || Object.values(item).find((v: any) => v?.field_label === field.fieldName);
+          const fieldData = item[field.label] || Object.values(item).find((v: any) => v?.field_label === field.label);
           const val = (fieldData as any)?.field_value;
           if (val != null && String(val).trim()) {
             uniqueValues.add(String(val));
@@ -430,13 +421,12 @@ export default function LookupConfigurationDialog({
   const onFinalConfirm = () => {
     const finalPayload: Partial<FormField>[] = selectedFields.map(
       (field, idx) => {
-        // Check if this field has a dependency configured
         const dep = dependencies.find((d) => d.childFieldName === field.fieldName);
         const dependencyConfig = dep
           ? {
-            parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
-            valueMappings: dep.valueMappings,
-          }
+              parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
+              valueMappings: dep.valueMappings,
+            }
           : undefined;
 
         if (field.isMaster) {
@@ -527,7 +517,7 @@ export default function LookupConfigurationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 gap-0 overflow-visible">
         {/* HEADER */}
         <DialogHeader className="px-6 py-4 border-b shrink-0 bg-background">
           <div className="flex items-center justify-between">
@@ -575,7 +565,7 @@ export default function LookupConfigurationDialog({
                 <SelectTrigger className="bg-background h-11">
                   <SelectValue placeholder="Select Module..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[100]">
                   {modules.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.name}
@@ -608,7 +598,7 @@ export default function LookupConfigurationDialog({
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[100]">
                   <SelectItem value="none">
                     -- Entire Module (No specific form) --
                   </SelectItem>
@@ -643,7 +633,7 @@ export default function LookupConfigurationDialog({
                 <SelectTrigger className="bg-background h-11">
                   <SelectValue placeholder="All Sections" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[100]">
                   <SelectItem value="all">All Sections</SelectItem>
                   {sections.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
@@ -699,7 +689,6 @@ export default function LookupConfigurationDialog({
                     </div>
                   ) : (
                     <div className="space-y-8">
-                      {/* Dynamic Form Fields */}
                       {filteredFields.length > 0 && (
                         <div>
                           <h4 className="text-sm font-medium text-muted-foreground mb-4">
@@ -748,7 +737,6 @@ export default function LookupConfigurationDialog({
                         </div>
                       )}
 
-                      {/* Master Dropdowns as selectable tiles */}
                       {masterDropdowns.length > 0 && (
                         <div>
                           <h4 className="text-sm font-medium text-muted-foreground mb-4">
@@ -797,7 +785,6 @@ export default function LookupConfigurationDialog({
                         </div>
                       )}
 
-                      {/* No content fallback */}
                       {filteredFields.length === 0 &&
                         masterDropdowns.length === 0 && (
                           <EmptyState
@@ -812,17 +799,15 @@ export default function LookupConfigurationDialog({
               </ScrollArea>
             </div>
           ) : (
-            /* MAPPING + DEPENDENCY STEP (combined) */
             <div className="h-full flex flex-col">
               <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 flex items-center gap-2 shrink-0">
                 <Info className="h-4 w-4 text-blue-600" />
                 <p className="text-xs text-blue-800">
-                  Configure field mapping.{selectedFields.length >= 2 && " Use <b>Depends On</b> to link fields — e.g. Machine depends on Category."}
+                  Configure field mapping. {selectedFields.length >= 2 && "Use Depends On to link fields."}
                 </p>
               </div>
               <ScrollArea className="flex-1 min-h-0">
                 <div className="p-6 space-y-6">
-                  {/* Mapping table */}
                   <div className="border rounded-xl overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-muted/50">
@@ -848,7 +833,7 @@ export default function LookupConfigurationDialog({
                               <TableCell>
                                 <Select value={field.displayField} onValueChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, displayField: v } : f))}>
                                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
+                                  <SelectContent position="popper" className="z-[100]">
                                     {sourceFields.map((f) => (<SelectItem key={f.name} value={f.name}>{f.label}</SelectItem>))}
                                     {field.isMaster && <SelectItem value="value">Value (default)</SelectItem>}
                                   </SelectContent>
@@ -857,7 +842,7 @@ export default function LookupConfigurationDialog({
                               <TableCell>
                                 <Select value={field.valueField} onValueChange={(v) => setSelectedFields((prev) => prev.map((f) => f.fieldName === field.fieldName ? { ...f, valueField: v } : f))}>
                                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
+                                  <SelectContent position="popper" className="z-[100]">
                                     {sourceFields.map((f) => (<SelectItem key={f.name} value={f.name}>{f.label}</SelectItem>))}
                                     {field.isMaster && <SelectItem value="value">Value (default)</SelectItem>}
                                   </SelectContent>
@@ -883,14 +868,13 @@ export default function LookupConfigurationDialog({
                                         } else {
                                           setDependencies((prev) => [...prev, { childFieldName: field.fieldName, parentFieldName: v, valueMappings: [] }]);
                                         }
-                                        // Fetch values for both parent and child
                                         const parentField = selectedFields.find((f) => f.fieldName === v);
                                         if (parentField) loadDependencyValues([parentField, field]);
                                       }
                                     }}
                                   >
                                     <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="None" /></SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent position="popper" className="z-[100]">
                                       <SelectItem value="__none__">None</SelectItem>
                                       {selectedFields.filter((f) => f.fieldName !== field.fieldName).map((f) => (
                                         <SelectItem key={f.fieldName} value={f.fieldName}>{f.label}</SelectItem>
@@ -906,7 +890,7 @@ export default function LookupConfigurationDialog({
                     </Table>
                   </div>
 
-                  {/* Inline dependency value mappings — shown for each configured dependency */}
+                  {/* Dependency Value Mappings */}
                   {dependencies.filter((d) => d.childFieldName && d.parentFieldName).map((dep, depIdx) => {
                     const parentField = selectedFields.find((f) => f.fieldName === dep.parentFieldName);
                     const childField = selectedFields.find((f) => f.fieldName === dep.childFieldName);

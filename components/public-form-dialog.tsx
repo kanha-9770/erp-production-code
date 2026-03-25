@@ -49,7 +49,14 @@ import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
 import { useGetCurrentUserQuery } from "@/lib/api/auth";
-import { useSubmitFormMutation, useTrackFormEventMutation, useCheckAttendanceMutation, useLazyGetTestingDataQuery, useLazyGetSectionPermissionsQuery, useLazyGetFormDetailQuery } from "@/lib/api/forms";
+import {
+  useSubmitFormMutation,
+  useTrackFormEventMutation,
+  useCheckAttendanceMutation,
+  useLazyGetTestingDataQuery,
+  useLazyGetSectionPermissionsQuery,
+  useLazyGetFormDetailQuery,
+} from "@/lib/api/forms";
 import { useLazyGetAdminPermissionsQuery } from "@/lib/api/permissions";
 
 interface LocationResult {
@@ -195,7 +202,9 @@ export function PublicFormDialog({
   allowAdminPreview = false,
 }: PublicFormDialogProps) {
   const { toast } = useToast();
-  const { data: currentUserData } = useGetCurrentUserQuery(undefined, { skip: !isOpen });
+  const { data: currentUserData } = useGetCurrentUserQuery(undefined, {
+    skip: !isOpen,
+  });
   const [submitForm] = useSubmitFormMutation();
   const [trackFormEvent] = useTrackFormEventMutation();
   const [checkAttendance] = useCheckAttendanceMutation();
@@ -225,7 +234,9 @@ export function PublicFormDialog({
     Record<string, string>
   >({});
   const [availablePermissions, setAvailablePermissions] = useState<any[]>([]);
-  const [formLevelPermission, setFormLevelPermission] = useState<"NONE" | "VIEW" | "CREATE" | "EDIT" | "DELETE" | null>(null);
+  const [formLevelPermission, setFormLevelPermission] = useState<
+    "NONE" | "VIEW" | "CREATE" | "EDIT" | "DELETE" | null
+  >(null);
   const [formPermissionLoading, setFormPermissionLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
@@ -393,7 +404,9 @@ export function PublicFormDialog({
         }
 
         const highest = formPerms.reduce((best, curr) => {
-          return (PERMISSION_RANK[curr] ?? 0) > (PERMISSION_RANK[best] ?? 0) ? curr : best;
+          return (PERMISSION_RANK[curr] ?? 0) > (PERMISSION_RANK[best] ?? 0)
+            ? curr
+            : best;
         }, "VIEW");
 
         setFormLevelPermission(highest as any);
@@ -431,7 +444,11 @@ export function PublicFormDialog({
   const evaluateSubformConditional = useCallback(
     (subform: Subform): boolean => {
       if (!subform.conditional) return true;
-      const { type = "show", parentFieldId, value: targetValue } = subform.conditional;
+      const {
+        type = "show",
+        parentFieldId,
+        value: targetValue,
+      } = subform.conditional;
       if (!parentFieldId || targetValue === undefined) return true;
       const parentVal = formData[parentFieldId];
       const parentStr = Array.isArray(parentVal)
@@ -514,7 +531,11 @@ export function PublicFormDialog({
 
   const evaluateSubformConditionalVisibility = (subform: Subform): boolean => {
     if (!subform.conditional) return true;
-    const { type = "show", parentFieldId, value: targetValue } = subform.conditional;
+    const {
+      type = "show",
+      parentFieldId,
+      value: targetValue,
+    } = subform.conditional;
     if (!parentFieldId || targetValue === undefined) return true;
     const parentVal = formData[parentFieldId];
     const parentStr = Array.isArray(parentVal)
@@ -556,7 +577,7 @@ export function PublicFormDialog({
 
     // Sort sections by order
     const sortedSections = [...(form.sections || [])].sort(
-      (a, b) => (a.order ?? 0) - (b.order ?? 0)
+      (a, b) => (a.order ?? 0) - (b.order ?? 0),
     );
 
     sortedSections.forEach((section) => {
@@ -565,9 +586,9 @@ export function PublicFormDialog({
       }
 
       // Direct child subforms of this section
-      const childSubforms = (form.subforms || []).filter(
-        (sf) => sf.parentSectionId === section.id
-      ).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const childSubforms = (form.subforms || [])
+        .filter((sf) => sf.parentSectionId === section.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
       childSubforms.forEach((subform) => {
         if (isSectionVisible(subform.id)) {
@@ -581,9 +602,9 @@ export function PublicFormDialog({
     });
 
     // True top-level subforms (no parent section)
-    const topLevelSubforms = (form.subforms || []).filter(
-      (sf) => sf.parentSectionId === null
-    ).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const topLevelSubforms = (form.subforms || [])
+      .filter((sf) => sf.parentSectionId === null)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     topLevelSubforms.forEach((subform) => {
       if (isSectionVisible(subform.id)) {
@@ -931,7 +952,9 @@ export function PublicFormDialog({
       let formulaResult: any = { success: false };
       try {
         formulaResult = await triggerTestingData().unwrap();
-      } catch { /* formula endpoint unavailable – skip enrichment */ }
+      } catch {
+        /* formula endpoint unavailable – skip enrichment */
+      }
       if (formulaResult.success && Array.isArray(formulaResult.data)) {
         const formulas = formulaResult.data;
         result.data.sections.forEach((section: any) => {
@@ -1330,7 +1353,7 @@ export function PublicFormDialog({
             const matched = Object.values(fullOption.data).find(
               (d: any) =>
                 d.field_label?.toLowerCase() ===
-                relatedField.label.toLowerCase() && d.field_value,
+                  relatedField.label.toLowerCase() && d.field_value,
             ) as LookupFieldData | undefined;
             if (matched) {
               newData[relatedField.id] = matched.field_value;
@@ -1435,14 +1458,20 @@ export function PublicFormDialog({
       let attendanceHandled = false;
       const formNameLower = (form?.name || "").trim().toLowerCase();
       if (formNameLower === "check-in" || formNameLower === "checkin") {
-        const data = await checkAttendance({ userId, action: "checkin" }).unwrap();
+        const data = await checkAttendance({
+          userId,
+          action: "checkin",
+        }).unwrap();
         if (!data.success) throw new Error(data.error || "Check-In failed");
         attendanceHandled = true;
       } else if (
         formNameLower === "check-out" ||
         formNameLower === "checkout"
       ) {
-        const data = await checkAttendance({ userId, action: "checkout" }).unwrap();
+        const data = await checkAttendance({
+          userId,
+          action: "checkout",
+        }).unwrap();
         if (!data.success) throw new Error(data.error || "Check-Out failed");
         attendanceHandled = true;
       }
@@ -1464,7 +1493,9 @@ export function PublicFormDialog({
         const dataToSubmit = { ...formData, ...formulaValues };
 
         // Normalize address fields: convert stored JSON/object into a single formatted string
-        const addressFields = (allFields || []).filter((f) => (f.type || "").toLowerCase() === "address");
+        const addressFields = (allFields || []).filter(
+          (f) => (f.type || "").toLowerCase() === "address",
+        );
         const formatAddress = (val: any, field?: FormField) => {
           if (!val) return "";
           let addr = val;
@@ -1489,7 +1520,8 @@ export function PublicFormDialog({
           for (const s of subfields) {
             const k = s.key;
             const v = addr[k] ?? addr[k.toUpperCase()] ?? addr[k.toLowerCase()];
-            if (v !== undefined && v !== null && String(v).trim() !== "") parts.push(String(v).trim());
+            if (v !== undefined && v !== null && String(v).trim() !== "")
+              parts.push(String(v).trim());
           }
           return parts.join(", ");
         };
@@ -1526,7 +1558,11 @@ export function PublicFormDialog({
           submittedBy: userId || currentUser?.id || "anonymous",
           userAgent: navigator.userAgent,
         };
-        console.debug('[PublicForm] Submitting form', { formId, userId, currentUser });
+        console.debug("[PublicForm] Submitting form", {
+          formId,
+          userId,
+          currentUser,
+        });
         await submitForm({ formId: formId!, body: submitPayload }).unwrap();
       }
       setSubmitted(true);
@@ -1639,15 +1675,21 @@ export function PublicFormDialog({
               placeholder={field.placeholder || "Enter phone number"}
               value={phoneValue}
               onChange={(newValue) => handleDynamicFieldChange(newValue)}
-              disabled={submitting || submitted || (field.readonly ?? false) || forceReadOnly}
+              disabled={
+                submitting ||
+                submitted ||
+                (field.readonly ?? false) ||
+                forceReadOnly
+              }
               numberInputProps={{
                 className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm
                 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium
                 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2
                 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50
                 ${field.readonly ? "bg-muted cursor-not-allowed" : ""}
-                ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-                  }`,
+                ${isInvalid ? "border-red-500" : "border-input"} ${
+                  isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+                }`,
               }}
               countrySelectProps={{ className: "rounded-l-md border-r-0" }}
             />
@@ -1662,7 +1704,12 @@ export function PublicFormDialog({
         return (
           <Input
             id={fieldKey}
-            disabled={submitting || submitted || (field.readonly ?? false) || forceReadOnly}
+            disabled={
+              submitting ||
+              submitted ||
+              (field.readonly ?? false) ||
+              forceReadOnly
+            }
             type={field.type}
             placeholder={field.placeholder || ""}
             value={value || ""}
@@ -1681,8 +1728,9 @@ export function PublicFormDialog({
             placeholder={field.placeholder || ""}
             value={value || ""}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
-            className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            className={`${error ? "border-red-500" : ""} ${
+              isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+            }`}
           />
         );
       case "textarea":
@@ -1695,8 +1743,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
             rows={3}
-            className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            className={`${error ? "border-red-500" : ""} ${
+              isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+            }`}
           />
         );
       case "date":
@@ -1722,8 +1771,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
             readOnly={field.readonly}
-            className={`${error ? "border-red-500" : ""} ${field.readonly ? "bg-muted cursor-not-allowed" : ""
-              } ${isInSubform ? "border-purple-200" : ""}`}
+            className={`${error ? "border-red-500" : ""} ${
+              field.readonly ? "bg-muted cursor-not-allowed" : ""
+            } ${isInSubform ? "border-purple-200" : ""}`}
           />
         );
       case "datetime":
@@ -1736,8 +1786,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
             readOnly={field.readonly}
-            className={`${error ? "border-red-500" : ""} ${field.readonly ? "bg-muted cursor-not-allowed" : ""
-              } ${isInSubform ? "border-purple-200" : ""}`}
+            className={`${error ? "border-red-500" : ""} ${
+              field.readonly ? "bg-muted cursor-not-allowed" : ""
+            } ${isInSubform ? "border-purple-200" : ""}`}
           />
         );
       case "checkbox":
@@ -1798,18 +1849,20 @@ export function PublicFormDialog({
             disabled={submitting || submitted || forceReadOnly}
           >
             <SelectTrigger
-              className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-                }`}
+              className={`${error ? "border-red-500" : ""} ${
+                isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+              }`}
             >
               <SelectValue
                 placeholder={field.placeholder || "Select an option"}
               />
             </SelectTrigger>
-            <SelectContent>
+
+            <SelectContent className="z-50">
               {selectOptions.map((opt: any) => (
                 <SelectItem
                   key={opt.value || opt.id}
-                  value={(opt.value || opt.id)?.toLowerCase().trim()}
+                  value={String(opt.value ?? opt.id)} // ✅ FIXED
                 >
                   {opt.label}
                 </SelectItem>
@@ -1846,16 +1899,21 @@ export function PublicFormDialog({
             disabled={submitting || submitted || forceReadOnly}
             className={error ? "border-red-500" : ""}
             placeholder={field.placeholder || ""}
-            value={value || ""}
+            value={value ?? undefined}
             onChange={(e) => handleDynamicFieldChange(e.target.value)}
-            className={`${error ? "border-red-500" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            className={`${error ? "border-red-500" : ""} ${
+              isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+            }`}
           />
         );
     }
   };
 
-  const renderField = (field: FormField, isInSubform: boolean = false, forceReadOnly: boolean = false) => {
+  const renderField = (
+    field: FormField,
+    isInSubform: boolean = false,
+    forceReadOnly: boolean = false,
+  ) => {
     if (field.visible === false || field.properties?.hidden === true)
       return null;
     const value = formData[field.id];
@@ -1864,7 +1922,8 @@ export function PublicFormDialog({
     const isLocation = fieldType === "location" || fieldType === "newlocation";
     const autoFetch = isLocation && field.properties?.autoFetchLocation;
     const status = locationStatus[field.id] || "idle";
-    const isReadOnly = field.readonly || (autoFetch && status === "success") || forceReadOnly;
+    const isReadOnly =
+      field.readonly || (autoFetch && status === "success") || forceReadOnly;
     const fieldProps = {
       id: field.id,
       disabled: submitting || submitted || isReadOnly,
@@ -1923,9 +1982,10 @@ export function PublicFormDialog({
                   placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2
                   focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50
                   ${isReadOnly ? "bg-muted cursor-not-allowed" : ""}
-                  ${isInvalid ? "border-red-500" : "border-input"} ${isInSubform
-                    ? "border-purple-200 focus:border-purple-400"
-                    : ""
+                  ${isInvalid ? "border-red-500" : "border-input"} ${
+                    isInSubform
+                      ? "border-purple-200 focus:border-purple-400"
+                      : ""
                   }`,
               }}
               countrySelectProps={{ className: "rounded-l-md border-r-0" }}
@@ -1961,13 +2021,15 @@ export function PublicFormDialog({
                 type="text"
                 value={displayValue}
                 readOnly
-                className={`${fieldProps.className
-                  } bg-muted/50 cursor-not-allowed font-medium pl-10
-                  ${returnType === "Currency"
-                    ? "text-green-700"
-                    : returnType === "Number"
-                      ? "text-blue-700"
-                      : ""
+                className={`${
+                  fieldProps.className
+                } bg-muted/50 cursor-not-allowed font-medium pl-10
+                  ${
+                    returnType === "Currency"
+                      ? "text-green-700"
+                      : returnType === "Number"
+                        ? "text-blue-700"
+                        : ""
                   }
                   ${isInSubform ? "border-purple-200" : ""}`}
               />
@@ -2053,8 +2115,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
             readOnly={field.readonly || field.properties?.autoFetchDate}
-            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""
-              } ${isInSubform ? "border-purple-200" : ""}`}
+            className={`${fieldProps.className} ${
+              isReadOnly ? "bg-muted cursor-not-allowed" : ""
+            } ${isInSubform ? "border-purple-200" : ""}`}
           />
         );
       case "time":
@@ -2065,8 +2128,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
             readOnly={field.readonly || field.properties?.autoFetchTime}
-            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""
-              } ${isInSubform ? "border-purple-200" : ""}`}
+            className={`${fieldProps.className} ${
+              isReadOnly ? "bg-muted cursor-not-allowed" : ""
+            } ${isInSubform ? "border-purple-200" : ""}`}
           />
         );
       case "datetime":
@@ -2077,8 +2141,9 @@ export function PublicFormDialog({
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
             readOnly={isReadOnly}
-            className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""
-              } ${isInSubform ? "border-purple-200" : ""}`}
+            className={`${fieldProps.className} ${
+              isReadOnly ? "bg-muted cursor-not-allowed" : ""
+            } ${isInSubform ? "border-purple-200" : ""}`}
           />
         );
       case "location":
@@ -2111,8 +2176,9 @@ export function PublicFormDialog({
                 placeholder={placeholder}
                 value={value || ""}
                 readOnly={isReadOnly}
-                className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""
-                  } pl-10 ${isInSubform ? "border-purple-200" : ""}`}
+                className={`${fieldProps.className} ${
+                  isReadOnly ? "bg-muted cursor-not-allowed" : ""
+                } pl-10 ${isInSubform ? "border-purple-200" : ""}`}
                 onChange={(e) => handleFieldChange(field.id, e.target.value)}
               />
               {icon && (
@@ -2222,7 +2288,7 @@ export function PublicFormDialog({
                   placeholder={field.placeholder || "Select an option"}
                 />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-50" position="popper">
                 {effectiveOptions.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
                     {field.isDependent
@@ -2234,8 +2300,8 @@ export function PublicFormDialog({
                 ) : (
                   effectiveOptions.map((opt) => (
                     <SelectItem
-                      key={opt.value || opt.id}
-                      value={opt.value || opt.id || ""}
+                      key={String(opt.value ?? opt.id)}
+                      value={String(opt.value ?? opt.id)}
                     >
                       {opt.label}
                     </SelectItem>
@@ -2300,10 +2366,11 @@ export function PublicFormDialog({
                 className="p-1 hover:scale-110 transition-transform"
               >
                 <Star
-                  className={`h-4 w-4 ${r <= (value || 0)
-                    ? "fill-yellow-400 text-yellow-400"
-                    : "text-gray-300"
-                    }`}
+                  className={`h-4 w-4 ${
+                    r <= (value || 0)
+                      ? "fill-yellow-400 text-yellow-400"
+                      : "text-gray-300"
+                  }`}
                 />
               </button>
             ))}
@@ -2326,7 +2393,9 @@ export function PublicFormDialog({
         let lookupParentVal: string | undefined;
         const depCfg = (field.lookup as any)?.dependency;
         if (depCfg?.parentFieldLabel) {
-          const parentFld = allFields.find((f) => f.label === depCfg.parentFieldLabel);
+          const parentFld = allFields.find(
+            (f) => f.label === depCfg.parentFieldLabel,
+          );
           if (parentFld && formData[parentFld.id] != null) {
             lookupParentVal = String(formData[parentFld.id]);
           }
@@ -2652,7 +2721,7 @@ export function PublicFormDialog({
                             placeholder={sub.placeholder || "Select country"}
                           />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="z-50" position="popper">
                           {countries.map((c) => (
                             <SelectItem key={c} value={c}>
                               {c}
@@ -2698,8 +2767,9 @@ export function PublicFormDialog({
             placeholder={field.placeholder || ""}
             value={value || ""}
             onChange={(e) => handleFieldChange(field.id, e.target.value)}
-            className={`${fieldProps.className} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""
-              }`}
+            className={`${fieldProps.className} ${
+              isInSubform ? "border-purple-200 focus:border-purple-400" : ""
+            }`}
           />
         );
     }
@@ -2756,8 +2826,6 @@ export function PublicFormDialog({
           return type.charAt(0).toUpperCase() + type.slice(1);
       }
     };
-
-
 
     return (
       <div
@@ -2937,13 +3005,14 @@ export function PublicFormDialog({
                         .map((field) => (
                           <div
                             key={field.id}
-                            className={`p-4 border-r border-slate-200 flex flex-col justify-between ${field.type === "hidden" ||
+                            className={`p-4 border-r border-slate-200 flex flex-col justify-between ${
+                              field.type === "hidden" ||
                               (field.type === "formula" &&
                                 field.properties?.formulaConfig
                                   ?.visibleInForm === false)
-                              ? "hidden p-0 min-w-0"
-                              : "min-w-[280px] bg-[#f8f9fb]"
-                              }`}
+                                ? "hidden p-0 min-w-0"
+                                : "min-w-[280px] bg-[#f8f9fb]"
+                            }`}
                           >
                             <span className="font-medium text-[#374151] text-[15px] truncate">
                               {field.label}{" "}
@@ -2970,10 +3039,11 @@ export function PublicFormDialog({
                         return (
                           <div
                             key={isOriginal ? "original" : instanceId}
-                            className={`flex min-w-max ${isOriginal && !hasChildSubforms
-                              ? "bg-white"
-                              : "bg-blue-50/40"
-                              } border-b border-slate-200`}
+                            className={`flex min-w-max ${
+                              isOriginal && !hasChildSubforms
+                                ? "bg-white"
+                                : "bg-blue-50/40"
+                            } border-b border-slate-200`}
                           >
                             {visibleFields.map((field) => {
                               const fieldKey = isOriginal
@@ -2987,10 +3057,11 @@ export function PublicFormDialog({
                               return (
                                 <div
                                   key={field.id}
-                                  className={`p-4 border-r border-slate-200 ${field.type === "hidden"
-                                    ? "hidden p-0 min-w-0"
-                                    : "min-w-[280px]"
-                                    }`}
+                                  className={`p-4 border-r border-slate-200 ${
+                                    field.type === "hidden"
+                                      ? "hidden p-0 min-w-0"
+                                      : "min-w-[280px]"
+                                  }`}
                                 >
                                   {field.description &&
                                     field.type !== "hidden" && (
@@ -2999,13 +3070,17 @@ export function PublicFormDialog({
                                       </p>
                                     )}
                                   {isOriginal
-                                    ? renderField(fieldForInstance, true, isViewOnly)
+                                    ? renderField(
+                                        fieldForInstance,
+                                        true,
+                                        isViewOnly,
+                                      )
                                     : renderDynamicField(
-                                      fieldForInstance,
-                                      fieldKey,
-                                      true,
-                                      isViewOnly,
-                                    )}
+                                        fieldForInstance,
+                                        fieldKey,
+                                        true,
+                                        isViewOnly,
+                                      )}
                                   {error && (
                                     <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
                                       <AlertCircle className="h-3 w-3" />
@@ -3024,7 +3099,9 @@ export function PublicFormDialog({
                                   onClick={() =>
                                     removeSubformRow(subform.id, instanceId)
                                   }
-                                  disabled={submitting || submitted || isViewOnly}
+                                  disabled={
+                                    submitting || submitted || isViewOnly
+                                  }
                                   className="h-6 text-xs"
                                 >
                                   Remove
@@ -3055,14 +3132,13 @@ export function PublicFormDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
         ref={dialogRef}
-        className="p-0 overflow-hidden rounded-xl shadow-2xl transition-all flex flex-col"
+        className="p-0 overflow-visible rounded-xl shadow-2xl transition-all flex flex-col"
         style={{
           width: `${dialogSize.width}px`,
           height: `${dialogSize.height}px`,
           maxWidth: "98vw",
           maxHeight: "98vh",
         }}
-        onPointerDownCapture={(e) => e.stopPropagation()}
       >
         <DialogTitle className="sr-only">{form?.name || "Form"}</DialogTitle>
         {/* RESIZE HANDLES */}
@@ -3129,8 +3205,12 @@ export function PublicFormDialog({
             <div className="text-center">
               <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
               <h2 className="text-xl font-semibold mb-2">Access Denied</h2>
-              <p className="text-muted-foreground">You don't have permission to access this form.</p>
-              <Button variant="outline" className="mt-4" onClick={onClose}>Close</Button>
+              <p className="text-muted-foreground">
+                You don't have permission to access this form.
+              </p>
+              <Button variant="outline" className="mt-4" onClick={onClose}>
+                Close
+              </Button>
             </div>
           </div>
         ) : !form ? (
@@ -3222,13 +3302,14 @@ export function PublicFormDialog({
                             <div
                               className="grid gap-8"
                               style={{
-                                gridTemplateColumns: `repeat(${section.columns || 1
-                                  }, minmax(0, 1fr))`,
+                                gridTemplateColumns: `repeat(${
+                                  section.columns || 1
+                                }, minmax(0, 1fr))`,
                               }}
                             >
                               {section.fields
                                 .filter((field) =>
-                                  isFieldVisible(field, section.id)
+                                  isFieldVisible(field, section.id),
                                 )
                                 .map((field) => (
                                   <div key={field.id} className="space-y-2">
@@ -3281,7 +3362,7 @@ export function PublicFormDialog({
                               .filter(
                                 (it) =>
                                   it.type === "subform" &&
-                                  it.parentSectionId === section.id
+                                  it.parentSectionId === section.id,
                               )
                               .map((it) => (
                                 <div key={it.data.id} className="mt-10">
@@ -3316,7 +3397,9 @@ export function PublicFormDialog({
               {isViewOnly ? (
                 <div className="flex items-center gap-2 text-sm text-amber-600">
                   <Lock className="h-4 w-4" />
-                  <span>View only mode — contact your admin to request submit access</span>
+                  <span>
+                    View only mode — contact your admin to request submit access
+                  </span>
                 </div>
               ) : (
                 <div />
@@ -3333,12 +3416,15 @@ export function PublicFormDialog({
                 {!isViewOnly && (
                   <Button
                     type="submit"
-                    disabled={submitting || loading || hasErrorsOrMissingRequired()}
+                    disabled={
+                      submitting || loading || hasErrorsOrMissingRequired()
+                    }
                     className={`
-          ${hasErrorsOrMissingRequired() && !submitting && !loading
-                        ? "opacity-70 cursor-not-allowed bg-primary/80 hover:bg-primary/80"
-                        : ""
-                      }
+          ${
+            hasErrorsOrMissingRequired() && !submitting && !loading
+              ? "opacity-70 cursor-not-allowed bg-primary/80 hover:bg-primary/80"
+              : ""
+          }
         `}
                   >
                     {submitting ? (

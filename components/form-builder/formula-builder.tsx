@@ -67,7 +67,7 @@ import type {
   BlankPreference,
   FormFieldInfo,
 } from "@/lib/formula/types";
-import { useGetFormTotalMutation } from "@/lib/api/forms";
+import { useLazyGetFormTotalQuery } from "@/lib/api/forms";
 import { useLazyGetMasterDataQuery } from "@/lib/api/settings";
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -203,7 +203,7 @@ export function FormulaBuilder({
   >({});
 
   const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false);
-  const [getFormTotal] = useGetFormTotalMutation();
+  const [triggerGetFormTotal] = useLazyGetFormTotalQuery();
   const [triggerGetMasterData] = useLazyGetMasterDataQuery();
 
   // Load master data
@@ -301,7 +301,7 @@ export function FormulaBuilder({
 
         const results = await Promise.all(
           selectedFormIds.map(async (fid) => {
-            const json = await getFormTotal({ formId: fid, body: {} }).unwrap();
+            const json = await triggerGetFormTotal(fid).unwrap();
             if (!json.success || !json.data) throw new Error("Invalid response");
 
             const data = json.data;

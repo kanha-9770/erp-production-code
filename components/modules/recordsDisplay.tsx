@@ -299,9 +299,24 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
     const handleAutoSave = () => {
       const pendingKey = `${record.id}-${fieldDef.id}`;
-      const pendingChange = pendingChanges.get(pendingKey);
 
-      if (!pendingChange) {
+      // Try to read from pendingChanges first; if stale (React batching),
+      // construct the change from closure variables that are always current.
+      const pendingChange: PendingChange = pendingChanges.get(pendingKey) ?? {
+        recordId: actualRecordId,
+        fieldId: fieldDef.id,
+        originalFieldId: originalFieldId,
+        value: currentValue,
+        originalValue,
+        fieldType: fieldDef.type,
+        fieldLabel: fieldDef.label,
+      };
+
+      // Nothing actually changed — skip save
+      if (
+        pendingChange.value === pendingChange.originalValue ||
+        (pendingChange.value === originalValue && !pendingChanges.has(pendingKey))
+      ) {
         setEditingCell(null);
         return;
       }
@@ -318,40 +333,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         ),
       };
 
-      console.log(
-        `[AutoSave] tempRecord processedData (fields with values):`,
-        tempRecord.processedData.map((p) => ({
-          fieldId: p.fieldId,
-          label: p.fieldLabel,
-          value: p.value,
-        })),
-      );
-
       // ── Step 2: recalculate ALL formula fields using the updated record ──
       const { updatedProcessedData } = recalculateFormulasForRecord(
         tempRecord,
         new Set(),
       );
 
-      console.log(
-        `[AutoSave] formula recalc result:`,
-        updatedProcessedData
-          .filter((p) => p.fieldType === "formula")
-          .map((p) => ({
-            fieldId: p.fieldId,
-            label: p.fieldLabel,
-            value: p.value,
-          })),
-      );
-
       // ── Step 3: build saveMap — edited field + any changed formula fields ──
       const saveMap = new Map<string, PendingChange>([
         [pendingKey, pendingChange],
       ]);
-
-      console.log(
-        `[AutoSave] saveMap initial — edited field "${fieldDef.label}" = "${pendingChange.value}"`,
-      );
 
       enhancedFormFields
         .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
@@ -363,12 +354,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               p.fieldLabel === formulaField.label,
           );
 
-          if (!recalcPd) {
-            console.log(
-              `[AutoSave] formula "${formulaField.label}" — no recalcPd found, skipping`,
-            );
-            return;
-          }
+          if (!recalcPd) return;
 
           const existingPd = record.processedData.find(
             (p) =>
@@ -379,10 +365,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           const oldValue = existingPd?.value ?? "";
           const newValue = recalcPd.value;
-
-          console.log(
-            `[AutoSave] formula "${formulaField.label}" — old="${oldValue}" new="${newValue}" changed=${String(oldValue) !== String(newValue)}`,
-          );
 
           const formulaKey = `${record.id}-${formulaField.id}`;
           saveMap.set(formulaKey, {
@@ -395,11 +377,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             fieldLabel: formulaField.label,
           });
         });
-
-      console.log(`[AutoSave] final saveMap keys:`, Array.from(saveMap.keys()));
-      console.log(
-        `[AutoSave] calling saveAllPendingChanges with ${saveMap.size} change(s)`,
-      );
 
       saveAllPendingChanges(saveMap);
       setEditingCell(null);
@@ -495,17 +472,65 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
     const fd = fieldDef as any;
 
+    // ── Lookup fields with sourceId: use LookupField component ──────────
+    if (fieldDef.type === "lookup" && fieldDef.lookup?.sourceId) {
+      const depConfig = fd.lookup?.dependency;
+      let parentVal: string | undefined;
+      if (depConfig?.parentFieldLabel && record.processedData) {
+        const parentPd = record.processedData.find(
+          (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
+        );
+        parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+      }
+
+      return (
+        <div
+          className="w-full"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <LookupField
+            field={{
+              id: fieldDef.originalId || fieldDef.id,
+              label: fieldDef.label,
+              type: fieldDef.type,
+              placeholder: fieldDef.placeholder,
+              description: fieldDef.description,
+              validation: fieldDef.validation || {},
+              lookup: { ...fieldDef.lookup, allowCustomValues: false },
+            }}
+            value={currentValue}
+            onChange={(newValue) => {
+              const change: PendingChange = {
+                recordId: actualRecordId,
+                fieldId: fieldDef.id,
+                originalFieldId: originalFieldId,
+                value: newValue,
+                originalValue,
+                fieldType: fieldDef.type,
+                fieldLabel: fieldDef.label,
+              };
+
+              const newPending = new Map(pendingChanges);
+              newPending.set(`${record.id}-${fieldDef.id}`, change);
+              setPendingChanges(newPending);
+
+              // Save immediately with explicit map — no setTimeout to avoid stale closures
+              saveAllPendingChanges(
+                new Map([[`${record.id}-${fieldDef.id}`, change]]),
+              );
+            }}
+            parentValue={parentVal}
+          />
+        </div>
+      );
+    }
+
     // ── Resolve options based on field configuration ────────────────────
     let normalised: { value: string; label: string }[] = [];
 
     if (fd.isDependent && fd.parentFieldId && fd.dependentGroups?.length) {
       // Dependent/cascading dropdown: options come from dependentGroups
-      // filtered by the parent field's current value.
-      //
-      // We match the parent field by BOTH id and label because
-      // processedData.fieldId may be the raw key from recordData (which
-      // could be a label, a raw id, or a composite id) while
-      // parentFieldId is always the raw database field id.
       const parentFieldDef = enhancedFormFields.find(
         (f: any) =>
           f.id === fd.parentFieldId || f.originalId === fd.parentFieldId,
@@ -529,50 +554,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         }));
       }
     } else {
-      // Regular dropdown / lookup / select
-      const rawOptions =
-        fieldDef.type === "lookup"
-          ? (fieldDef.lookup?.options ?? [])
-          : (fieldDef.options ?? []);
+      // Regular dropdown / select
+      const rawOptions = fieldDef.options ?? [];
       normalised = rawOptions.map((opt: any) => ({
         value: opt.value ?? opt.id ?? opt,
         label: opt.label ?? opt.name ?? opt,
       }));
-
-      // Filter lookup options by dependency if configured
-      const depConfig = fd.lookup?.dependency;
-      if (depConfig?.parentFieldLabel && record.processedData) {
-        const parentPd = record.processedData.find(
-          (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
-        );
-        const parentVal =
-          parentPd?.value != null ? String(parentPd.value) : undefined;
-        if (parentVal) {
-          const mapping = depConfig.valueMappings?.find(
-            (m: any) => m.parentValue === parentVal,
-          );
-          if (mapping?.allowedChildValues?.length) {
-            normalised = normalised.filter(
-              (opt) =>
-                mapping.allowedChildValues.includes(String(opt.value)) ||
-                mapping.allowedChildValues.includes(String(opt.label)),
-            );
-          }
-        }
-      }
     }
 
     return (
       <Select
         value={currentValue?.toString() ?? ""}
         onValueChange={(newValue) => {
-          const currentRecord = formRecords.find((r) => r.id === record.id);
-          if (!currentRecord) {
-            console.warn("Record not found during select change");
-            return;
-          }
-          const newPending = new Map(pendingChanges);
-          newPending.set(`${currentRecord.id}-${fieldDef.id}`, {
+          const change: PendingChange = {
             recordId: actualRecordId,
             fieldId: fieldDef.id,
             originalFieldId: originalFieldId,
@@ -580,19 +574,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             originalValue,
             fieldType: fieldDef.type,
             fieldLabel: fieldDef.label,
-          });
+          };
+
+          const newPending = new Map(pendingChanges);
+          newPending.set(`${record.id}-${fieldDef.id}`, change);
           setPendingChanges(newPending);
 
-          setTimeout(() => {
-            saveAllPendingChanges(
-              new Map([
-                [
-                  `${record.id}-${fieldDef.id}`,
-                  newPending.get(`${record.id}-${fieldDef.id}`)!,
-                ],
-              ]),
-            );
-          }, 0);
+          // Save immediately with explicit map — no setTimeout to avoid stale closures
+          saveAllPendingChanges(
+            new Map([[`${record.id}-${fieldDef.id}`, change]]),
+          );
         }}
         onOpenChange={(open) => !open && setEditingCell(null)}
       >
@@ -1065,24 +1056,20 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   onClick={async () => {
                     const recordsToDelete = Array.from(selectedRecords);
 
+                    // STEP 1: CLOSE POPUP INSTANTLY
+                    setBulkDeleteOpen(false);
+                    setSelectedRecords(new Set());
+
                     try {
-                      const deletePromises = recordsToDelete.map((recordId) => {
-                        const record = formRecords.find(
-                          (r) => r.id === recordId,
-                        );
-                        if (record) {
-                          return onDeleteRecord(record);
-                        }
-                        return Promise.resolve();
-                      });
-
-                      await Promise.all(deletePromises);
-
-                      setSelectedRecords(new Set()); // Clear selection
-                      setBulkDeleteOpen(false);
+                      // STEP 2: DELETE IN BACKGROUND
+                      await Promise.all(
+                        recordsToDelete.map((recordId) => {
+                          const record = formRecords.find((r) => r.id === recordId);
+                          return record ? onDeleteRecord(record) : Promise.resolve();
+                        })
+                      );
                     } catch (error) {
                       console.error("Bulk delete failed:", error);
-                      // Optional: show error message
                     }
                   }}
                 >

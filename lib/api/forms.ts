@@ -233,12 +233,8 @@ export const formsApi = baseApi.injectEndpoints({
       providesTags: (result, error, formId) => [{ type: "FormDetail", id: formId }],
     }),
 
-    getFormTotal: builder.mutation<ApiResponse, { formId: string; body: Record<string, any> }>({
-      query: ({ formId, body }) => ({
-        url: `/forms/${formId}/total`,
-        method: "POST",
-        body,
-      }),
+    getFormTotal: builder.query<ApiResponse, string>({
+      query: (formId) => `/forms/${formId}/total`,
     }),
 
     lookupFormData: builder.query<ApiResponse, Record<string, string>>({
@@ -384,7 +380,7 @@ export const {
   useLazyGetFormFieldsQuery,
   useGetFormFullQuery,
   useLazyGetFormFullQuery,
-  useGetFormTotalMutation,
+  useLazyGetFormTotalQuery,
   useLookupFormDataQuery,
   useLazyLookupFormDataQuery,
   useGetAttendanceStatusQuery,

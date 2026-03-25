@@ -662,8 +662,28 @@ export class DatabaseRecords {
             },
             orderBy: { order: "asc" },
           },
+          tableMapping: true,
         },
       })
+
+      // Sync update to legacy table when record was found in unified table.
+      // GET reads from the legacy table (per tableMapping), so it must stay in sync.
+      if (tableName === "form_records_unified" && form?.tableMapping) {
+        const storageTable = (form.tableMapping as any)?.storageTable
+        if (storageTable) {
+          const legacyMatch = storageTable.match(/form_records_(\d+)/)
+          if (legacyMatch) {
+            try {
+              await (prisma as any)[`formRecord${legacyMatch[1]}`].update({
+                where: { id: recordId },
+                data: updateData,
+              })
+            } catch {
+              // Record may not exist in legacy table — ignore
+            }
+          }
+        }
+      }
 
       const transformedRecord = DatabaseTransforms.transformRecord(updatedRecord)
       if (form) {

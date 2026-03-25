@@ -1,9 +1,6 @@
 // components/public-form/FormRenderer.tsx
 import React from "react";
-import {
-  Input,
-
-} from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
@@ -27,7 +24,13 @@ import { Switch } from "../ui/switch";
 import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
 import { Textarea } from "../ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Slider } from "../ui/slider";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -36,7 +39,9 @@ import { Badge } from "../ui/badge";
 export function resolveParentValue(f: any, formData?: Record<string, any>) {
   if (!f || !f.parentFieldId || !formData) return undefined;
   if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
-  const possibleKeys = Object.keys(formData).filter((k) => k.includes("__") && k.includes(f.parentFieldId));
+  const possibleKeys = Object.keys(formData).filter(
+    (k) => k.includes("__") && k.includes(f.parentFieldId),
+  );
   if (possibleKeys.length > 0) return formData[possibleKeys[0]];
   return undefined;
 }
@@ -108,25 +113,35 @@ export function FormRenderer({
   setErrors,
   locationStatus,
 }: FormRendererProps) {
-  const parentValueRaw = field.isDependent ? resolveParentValue(field, formData) : undefined;
-  const parentValue = Array.isArray(parentValueRaw) ? parentValueRaw[0] : typeof parentValueRaw === "string" ? parentValueRaw : undefined;
+  const parentValueRaw = field.isDependent
+    ? resolveParentValue(field, formData)
+    : undefined;
+
+  const parentValue =
+    parentValueRaw !== undefined && parentValueRaw !== null
+      ? String(parentValueRaw)
+      : "";
   const fieldType = (field.type || "").toLowerCase();
 
   const isFieldVisible = () => {
-    if (field.visible === false) return false
-    if (field.properties && field.properties.hidden === true) return false
-    return true
-  }
+    if (field.visible === false) return false;
+    if (field.properties && field.properties.hidden === true) return false;
+    return true;
+  };
 
   const isFieldReadOnly = () => {
-    return !!field.readonly
-  }
+    return !!field.readonly;
+  };
 
   const fieldProps: any = {
     id: field.id,
     disabled: submitting || submitted || isFieldReadOnly(),
     readOnly: isFieldReadOnly(),
-    className: error ? "border-red-500" : isInSubform ? "border-purple-200 focus:border-purple-400" : "",
+    className: error
+      ? "border-red-500"
+      : isInSubform
+        ? "border-purple-200 focus:border-purple-400"
+        : "",
   };
 
   const baseOptions = Array.isArray(field.options) ? field.options : [];
@@ -136,7 +151,8 @@ export function FormRenderer({
 
     // Build a list of candidate values to match against dependentGroups.parentValue
     const candidates: string[] = [];
-    if (parentValue !== undefined && parentValue !== null) candidates.push(String(parentValue));
+    if (parentValue !== undefined && parentValue !== null)
+      candidates.push(String(parentValue));
 
     // If we have access to the parent field definition, add its option identities (value, id, label)
     const parentFieldDef = allFields?.find((f) => f.id === field.parentFieldId);
@@ -147,15 +163,18 @@ export function FormRenderer({
         if (opt.label !== undefined) candidates.push(String(opt.label));
       });
     }
+    const uniq = Array.from(
+      new Set(candidates.map((c) => String(c).toLowerCase())),
+    );
 
-    const uniq = Array.from(new Set(candidates.map((c) => c)));
-
-    const matched = groups.find((g) => uniq.includes(String(g.parentValue)));
+    const matched = groups.find((g) =>
+      uniq.includes(String(g.parentValue).toLowerCase()),
+    );
     effectiveOptions = matched?.options || [];
   }
 
   // If this is a dependent field and parent hasn't been selected yet, don't render it
-  if (field.isDependent && (parentValue === undefined || parentValue === null || parentValue === "")) {
+  if (field.isDependent && !parentValue) {
     return null;
   }
 
@@ -165,7 +184,7 @@ export function FormRenderer({
       const phoneValue = value || "";
       const isInvalid = phoneValue && !isValidPhoneNumber(phoneValue);
 
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
 
       return (
         <div className="space-y-1">
@@ -173,10 +192,22 @@ export function FormRenderer({
             international
             countryCallingCodeEditable={false}
             defaultCountry={field.defaultCountry || "IN"}
-            preferredCountries={["IN", "US", "GB", "AE", "CA", "AU", "DE", "FR", "SA"]}
+            preferredCountries={[
+              "IN",
+              "US",
+              "GB",
+              "AE",
+              "CA",
+              "AU",
+              "DE",
+              "FR",
+              "SA",
+            ]}
             placeholder={field.placeholder || "Enter phone number"}
             value={phoneValue}
-            onChange={(newValue) => !isFieldReadOnly() && handleFieldChange(field.id, newValue)}
+            onChange={(newValue) =>
+              !isFieldReadOnly() && handleFieldChange(field.id, newValue)
+            }
             disabled={submitting || submitted || isFieldReadOnly()}
             numberInputProps={{
               className: `flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${isInvalid ? "border-red-500" : "border-input"}`,
@@ -196,9 +227,12 @@ export function FormRenderer({
     }
 
     case "formula": {
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       const calculatedValue = formulaValues[field.id];
-      const displayValue = calculatedValue !== undefined && calculatedValue !== "" ? String(calculatedValue) : "—";
+      const displayValue =
+        calculatedValue !== undefined && calculatedValue !== ""
+          ? String(calculatedValue)
+          : "—";
 
       return (
         <div className="relative">
@@ -215,7 +249,7 @@ export function FormRenderer({
     }
 
     case "unique-id": {
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           type="text"
@@ -231,82 +265,96 @@ export function FormRenderer({
     case "number":
     case "tel":
     case "url":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           type={fieldType}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
 
     case "password":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           type="password"
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
 
     case "textarea":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Textarea
           {...fieldProps}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
           rows={3}
         />
       );
 
     case "date":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           type="date"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
 
     case "time":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           type="time"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
 
     case "datetime":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           type="datetime-local"
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
 
     case "checkbox":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <div className="flex items-center space-x-2">
           <Checkbox
             id={field.id}
             checked={value || false}
-            onCheckedChange={(checked: any) => !isFieldReadOnly() && handleFieldChange(field.id, checked)}
+            onCheckedChange={(checked: any) =>
+              !isFieldReadOnly() && handleFieldChange(field.id, checked)
+            }
             disabled={submitting || submitted || isFieldReadOnly()}
           />
           <Label htmlFor={field.id} className="text-sm">
@@ -316,13 +364,15 @@ export function FormRenderer({
       );
 
     case "switch":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <div className="flex items-center space-x-2">
           <Switch
             id={field.id}
             checked={value || false}
-            onCheckedChange={(checked: any) => !isFieldReadOnly() && handleFieldChange(field.id, checked)}
+            onCheckedChange={(checked: any) =>
+              !isFieldReadOnly() && handleFieldChange(field.id, checked)
+            }
             disabled={submitting || submitted || isFieldReadOnly()}
           />
           <Label htmlFor={field.id} className="text-sm">
@@ -332,21 +382,36 @@ export function FormRenderer({
       );
 
     case "radio":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <RadioGroup
-          value={value != null ? String(value) : ""}
+          value={value != null ? String(value) : undefined}
           onValueChange={(v: any) => {
             if (isFieldReadOnly()) return;
-            const selected = effectiveOptions.find((opt: any) => String(opt.value ?? opt.id) === v);
-            handleFieldChange(field.id, selected ? (selected.value ?? selected.id) : v, selected);
+            const selected = effectiveOptions.find(
+              (opt: any) => String(opt.value ?? opt.id) === v,
+            );
+            handleFieldChange(
+              field.id,
+              selected ? (selected.value ?? selected.id) : v,
+              selected,
+            );
           }}
           disabled={submitting || submitted || isFieldReadOnly()}
         >
           {effectiveOptions.map((opt: any) => (
-            <div key={opt.value ?? opt.id} className="flex items-center space-x-2">
-              <RadioGroupItem value={String(opt.value ?? opt.id)} id={`${field.id}-${String(opt.value ?? opt.id)}`} />
-              <Label htmlFor={`${field.id}-${String(opt.value ?? opt.id)}`} className="text-sm">
+            <div
+              key={opt.value ?? opt.id}
+              className="flex items-center space-x-2"
+            >
+              <RadioGroupItem
+                value={String(opt.value ?? opt.id)}
+                id={`${field.id}-${String(opt.value ?? opt.id)}`}
+              />
+              <Label
+                htmlFor={`${field.id}-${String(opt.value ?? opt.id)}`}
+                className="text-sm"
+              >
                 {opt.label}
               </Label>
             </div>
@@ -355,37 +420,70 @@ export function FormRenderer({
       );
 
     case "select":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
+
       return (
         <Select
-          value={value != null ? String(value) : ""}
+          value={value != null ? String(value) : undefined}
           onValueChange={(v: any) => {
             if (isFieldReadOnly()) return;
-            const selected = effectiveOptions.find((opt: any) => String(opt.value ?? opt.id) === v);
-            handleFieldChange(field.id, selected ? (selected.value ?? selected.id) : v, selected);
+
+            const selected = effectiveOptions.find(
+              (opt: any) => String(opt.value ?? opt.id) === v,
+            );
+
+            handleFieldChange(
+              field.id,
+              selected ? (selected.value ?? selected.id) : v,
+              selected,
+            );
           }}
-          disabled={submitting || submitted || isFieldReadOnly() || (field.isDependent && !parentValue)}
+          disabled={
+            submitting ||
+            submitted ||
+            isFieldReadOnly() ||
+            (field.isDependent && !parentValue)
+          }
         >
           <SelectTrigger className={error ? "border-red-500" : ""}>
-            <SelectValue placeholder={field.placeholder || "Select an option"} />
+            <SelectValue
+              placeholder={field.placeholder || "Select an option"}
+            />
           </SelectTrigger>
-          <SelectContent>
-            {effectiveOptions.map((opt: any) => (
-              <SelectItem key={opt.value ?? opt.id} value={String(opt.value ?? opt.id)}>
-                {opt.label}
-              </SelectItem>
-            ))}
+
+          <SelectContent
+            className="z-50"
+            position="item-aligned"
+            sideOffset={4}
+          >
+            {effectiveOptions.length === 0 ? (
+              <div className="px-2 py-2 text-sm text-muted-foreground">
+                No options available
+              </div>
+            ) : (
+              effectiveOptions.map((opt: any) => {
+                const val = String(opt.value ?? opt.id);
+
+                return (
+                  <SelectItem key={val} value={val}>
+                    {opt.label}
+                  </SelectItem>
+                );
+              })
+            )}
           </SelectContent>
         </Select>
       );
 
     case "slider":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <div className="space-y-2">
           <Slider
             value={[value || 0]}
-            onValueChange={(vals: any[]) => !isFieldReadOnly() && handleFieldChange(field.id, vals[0])}
+            onValueChange={(vals: any[]) =>
+              !isFieldReadOnly() && handleFieldChange(field.id, vals[0])
+            }
             max={field.validation?.max || 100}
             min={field.validation?.min || 0}
             step={1}
@@ -398,7 +496,7 @@ export function FormRenderer({
       );
 
     case "lookup":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <LookupField
           field={{
@@ -411,7 +509,9 @@ export function FormRenderer({
             lookup: field.lookup,
           }}
           value={value}
-          onChange={(v, full) => !isFieldReadOnly() && handleFieldChange(field.id, v, full)}
+          onChange={(v, full) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, v, full)
+          }
           disabled={submitting || submitted || isFieldReadOnly()}
           error={error}
         />
@@ -421,12 +521,14 @@ export function FormRenderer({
     case "image":
     case "video":
     case "signature":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <FileUploadZone
           fieldType={fieldType as any}
           currentValue={value}
-          onUploadComplete={(url: any) => !isFieldReadOnly() && handleFieldChange(field.id, url)}
+          onUploadComplete={(url: any) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, url)
+          }
           onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
           disabled={submitting || submitted || isFieldReadOnly()}
           maxSize={10}
@@ -434,10 +536,12 @@ export function FormRenderer({
       );
 
     case "camera":
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <CameraCapture
-          onCapture={(img) => !isFieldReadOnly() && handleFieldChange(field.id, img)}
+          onCapture={(img) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, img)
+          }
           capturedImage={value || null}
           onClear={() => !isFieldReadOnly() && handleFieldChange(field.id, "")}
         />
@@ -447,13 +551,15 @@ export function FormRenderer({
       return <input type="hidden" value={value || ""} />;
 
     default:
-      if (!isFieldVisible()) return null
+      if (!isFieldVisible()) return null;
       return (
         <Input
           {...fieldProps}
           placeholder={field.placeholder || ""}
           value={value || ""}
-          onChange={(e: { target: { value: any; }; }) => !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)}
+          onChange={(e: { target: { value: any } }) =>
+            !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
+          }
         />
       );
   }
@@ -489,13 +595,21 @@ export function RenderSubform({
   collapsedSubforms,
 }: RenderSubformProps) {
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
-  const isCollapsed = collapsedSubforms[subform.id] ?? subform.collapsed ?? false;
+  const isCollapsed =
+    collapsedSubforms[subform.id] ?? subform.collapsed ?? false;
 
-  const currentPath = parentPath ? `${parentPath} > ${subform.name}` : subform.name;
+  const currentPath = parentPath
+    ? `${parentPath} > ${subform.name}`
+    : subform.name;
   const pathParts = currentPath.split(" > ");
 
   const allItems = [
-    ...subform.fields.map((f) => ({ type: "field" as const, item: f, id: f.id, order: f.order })),
+    ...subform.fields.map((f) => ({
+      type: "field" as const,
+      item: f,
+      id: f.id,
+      order: f.order,
+    })),
     ...(subform.childSubforms || []).map((sf, idx) => ({
       type: "subform" as const,
       item: sf,
@@ -518,7 +632,11 @@ export function RenderSubform({
               onClick={() => toggleSubform(subform.id)}
               className="h-6 w-6 p-0 text-gray-500 hover:text-gray-700"
             >
-              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {isCollapsed ? (
+                <ChevronRight className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
             </Button>
 
             <Layers className={`w-5 h-5 ${colorScheme.accent}`} />
@@ -526,11 +644,15 @@ export function RenderSubform({
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <h4 className="text-base font-semibold">{subform.name}</h4>
-                <Badge variant="outline" className={`text-xs ${colorScheme.levelBadge}`}>
+                <Badge
+                  variant="outline"
+                  className={`text-xs ${colorScheme.levelBadge}`}
+                >
                   Level {level}
                 </Badge>
                 <Badge variant="outline" className="text-xs">
-                  {subform.fields.length} field{subform.fields.length !== 1 ? "s" : ""}
+                  {subform.fields.length} field
+                  {subform.fields.length !== 1 ? "s" : ""}
                 </Badge>
                 {subform.childSubforms?.length > 0 && (
                   <Badge variant="outline" className="text-xs">
@@ -544,17 +666,27 @@ export function RenderSubform({
                   Path:{" "}
                   {pathParts.map((part, i) => (
                     <span key={i} className="flex items-center">
-                      <span className={i === pathParts.length - 1 ? "font-medium text-gray-700" : ""}>
+                      <span
+                        className={
+                          i === pathParts.length - 1
+                            ? "font-medium text-gray-700"
+                            : ""
+                        }
+                      >
                         {part}
                       </span>
-                      {i < pathParts.length - 1 && <ChevronRight className="w-3 h-3 mx-1" />}
+                      {i < pathParts.length - 1 && (
+                        <ChevronRight className="w-3 h-3 mx-1" />
+                      )}
                     </span>
                   ))}
                 </div>
               )}
 
               {subform.description && (
-                <p className="text-sm text-muted-foreground mt-1">{subform.description}</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {subform.description}
+                </p>
               )}
             </div>
           </div>
@@ -567,40 +699,63 @@ export function RenderSubform({
             (() => {
               const visibleItems = allItems.filter((item) => {
                 if (item.type === "field") {
-                  const f = item.item as FormField
-                  if (f.visible === false) return false
-                  if (f.properties && f.properties.hidden === true) return false
+                  const f = item.item as FormField;
+                  if (f.visible === false) return false;
+                  if (f.properties && f.properties.hidden === true)
+                    return false;
                   // hide dependent fields until parent has value
                   if (f.isDependent) {
                     const pv = resolveParentValue(f, formData);
-                    if (pv === undefined || pv === null || pv === "" || (Array.isArray(pv) && pv.length === 0)) return false;
+                    if (
+                      pv === undefined ||
+                      pv === null ||
+                      pv === "" ||
+                      (Array.isArray(pv) && pv.length === 0)
+                    )
+                      return false;
                   }
-                  return true
+                  return true;
                 }
                 // For subforms, respect a `visible` flag if present
                 if (item.type === "subform") {
-                  const sf = item.item as Subform
-                  if ((sf as any).visible === false) return false
-                  if ((sf as any).properties && (sf as any).properties.hidden === true) return false
-                  return true
+                  const sf = item.item as Subform;
+                  if ((sf as any).visible === false) return false;
+                  if (
+                    (sf as any).properties &&
+                    (sf as any).properties.hidden === true
+                  )
+                    return false;
+                  return true;
                 }
-                return true
-              })
+                return true;
+              });
 
               return visibleItems.map((item) =>
                 item.type === "field" ? (
-                  <div key={item.id} className="space-y-2">
+                  <div
+                    key={item.id}
+                    className={`space-y-2 ${
+                      (item.item as FormField).isDependent
+                        ? "mt-6 p-4 border rounded-lg bg-muted/30"
+                        : ""
+                    }`}
+                  >
                     {(item.item as FormField).type !== "checkbox" &&
-                     (item.item as FormField).type !== "switch" &&
-                     (item.item as FormField).type !== "hidden" && (
-                      <Label className="text-sm font-medium flex items-center gap-2">
-                        {(item.item as FormField).label}
-                        {(item.item as FormField).validation?.required && <span className="text-red-500">*</span>}
-                      </Label>
-                    )}
-                    {(item.item as FormField).description && (item.item as FormField).type !== "hidden" && (
-                      <p className="text-xs text-muted-foreground">{(item.item as FormField).description}</p>
-                    )}
+                      (item.item as FormField).type !== "switch" &&
+                      (item.item as FormField).type !== "hidden" && (
+                        <Label className="text-sm font-medium flex items-center gap-2">
+                          {(item.item as FormField).label}
+                          {(item.item as FormField).validation?.required && (
+                            <span className="text-red-500">*</span>
+                          )}
+                        </Label>
+                      )}
+                    {(item.item as FormField).description &&
+                      (item.item as FormField).type !== "hidden" && (
+                        <p className="text-xs text-muted-foreground">
+                          {(item.item as FormField).description}
+                        </p>
+                      )}
                     <FormRenderer
                       field={item.item as FormField}
                       value={value?.[item.id]}
@@ -641,13 +796,17 @@ export function RenderSubform({
                       locationStatus={locationStatus}
                     />
                   </div>
-                )
-              )
+                ),
+              );
             })()
           ) : (
             <div className="border-2 border-dashed rounded-lg p-6 text-center border-gray-300 bg-gray-50">
-              <Layers className={`w-6 h-6 mx-auto mb-2 ${colorScheme.accent}`} />
-              <p className={`text-sm mb-2 ${colorScheme.accent}`}>No fields or nested subforms in this section</p>
+              <Layers
+                className={`w-6 h-6 mx-auto mb-2 ${colorScheme.accent}`}
+              />
+              <p className={`text-sm mb-2 ${colorScheme.accent}`}>
+                No fields or nested subforms in this section
+              </p>
             </div>
           )}
         </div>
