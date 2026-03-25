@@ -163,6 +163,23 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       );
     }
 
+    // Enforce max submissions per authenticated user
+    if (form.requireLogin && form.maxSubmissions !== null && form.maxSubmissions !== undefined) {
+      const existingSubmissions = await prisma.formRecord.count({
+        where: {
+          formId: form.id,
+          userId: currentUserId,
+        },
+      });
+
+      if (existingSubmissions >= form.maxSubmissions) {
+        return NextResponse.json(
+          { error: "Maximum submissions reached for this user" },
+          { status: 429 }
+        );
+      }
+    }
+
     // ─── 3. Resolve organizationId ──────────────────────────────
     let organizationId = currentOrgId || form.module?.organizationId;
 

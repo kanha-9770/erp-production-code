@@ -211,6 +211,11 @@ export default function PublicFormPage() {
           <CardHeader className="bg-white border-b">
             <CardTitle className="text-2xl font-bold text-gray-900">{form.name}</CardTitle>
             {form.description && <p className="text-gray-600 mt-2">{form.description}</p>}
+            {form.maxSubmissions && !form.requireLogin && (
+              <p className="text-amber-600 mt-2 text-sm">
+                Note: Maximum submissions may not be enforced for anonymous users.
+              </p>
+            )}
           </CardHeader>
           <CardContent className="bg-white">
             {submissionSuccess ? (

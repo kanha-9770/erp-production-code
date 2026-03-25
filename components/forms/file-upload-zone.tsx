@@ -415,16 +415,6 @@ export function FileUploadZone({
         <p className="text-[11px] text-gray-400 mt-4 uppercase tracking-wider font-semibold">
           Max size: {maxSize}MB • Supported: {getAcceptTypes()}
         </p>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={getAcceptTypes()}
-          onChange={handleFileSelect}
-          multiple={allowMultiple}
-          disabled={disabled}
-          className="hidden"
-        />
       </div>
     );
   };
@@ -434,8 +424,8 @@ export function FileUploadZone({
       <div className="w-full">
         {renderPreviews()}
         {renderUploadZone()}
-        
-        {/* Hidden input for multiple uploads if not already shown */}
+
+        {/* Single hidden file input — shared by all click/drop triggers */}
         <input
           ref={fileInputRef}
           type="file"

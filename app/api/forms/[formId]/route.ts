@@ -60,6 +60,10 @@ export async function GET(
     // If caller requested the published view, return a pruned published representation
     const publishedParam = request.nextUrl.searchParams.get("published");
     if (publishedParam === "true") {
+      if (!form.isPublished) {
+        return NextResponse.json({ success: false, error: "Form not found" }, { status: 404 });
+      }
+
       try {
         const published = makePublishedView(form);
 

@@ -194,6 +194,7 @@ export function usePublicForm({
             last_name: user.last_name,
             email: user.email,
           });
+          (window as any).__currentUserId = user.id;
         }
       } catch {
         // ignore
@@ -1286,7 +1287,7 @@ export function usePublicForm({
     }
     setSubmitting(true);
     try {
-      const userId = (window as any).__currentUserId;
+      const userId = (window as any).__currentUserId || currentUser?.id;
       if (!userId) {
         toast({
           title: "Error",
@@ -1350,7 +1351,7 @@ export function usePublicForm({
         );
         const submitPayload = {
           recordData: { ...dataToSubmit, ...dynamicRowsData },
-          submittedBy: "anonymous",
+          submittedBy: userId || currentUser?.id || "anonymous",
           userAgent: navigator.userAgent,
         };
         const res = await fetch(`/api/forms/${formId}/submit`, {
