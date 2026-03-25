@@ -73,18 +73,6 @@ export function useRecordsDisplay({
   onDeleteRecord,
   onViewDetails,
 }: UseRecordsDisplayOptions) {
-  // ── Debug logging ────────────────────────────────────────────────────────────
-  console.log("[Hook] useRecordsDisplay initialized with:", {
-    formRecordsCount: formRecords.length,
-    formFieldsWithSectionsCount: formFieldsWithSections.length,
-    formFields: formFieldsWithSections.map(f => ({
-      id: f.id,
-      label: f.label,
-      type: f.type,
-      hasFormulaConfig: !!f.properties?.formulaConfig,
-    })),
-  });
-
   // ── State ────────────────────────────────────────────────────────────────────
 
   const tableContainerRef = React.useRef<HTMLDivElement>(null);
@@ -415,13 +403,6 @@ export function useRecordsDisplay({
 
   const recalculateFormulasForRecord = React.useCallback(
     (record: EnhancedFormRecord, changedFieldIds: Set<string> = new Set()) => {
-      console.log("[Hook] recalculateFormulasForRecord called:", {
-        recordId: record.id,
-        processedDataCount: record.processedData.length,
-        enhancedFormFieldsCount: enhancedFormFields.length,
-        formulaFieldsAvailable: enhancedFormFields.filter(f => f.type === "formula" && f.properties?.formulaConfig).length,
-      });
-
       const newProcessed = [...record.processedData];
       const affected = new Set<string>();
       const runningValues: Record<string, any> = {};
@@ -445,11 +426,6 @@ export function useRecordsDisplay({
       const formulaFieldsToProcess = enhancedFormFields
         .filter((f) => f.type === "formula" && f.properties?.formulaConfig)
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-      console.log("[Hook] Formula fields to process:", {
-        count: formulaFieldsToProcess.length,
-        formulas: formulaFieldsToProcess.map(f => ({ id: f.id, label: f.label, expression: f.properties?.formulaConfig?.expression })),
-      });
 
       formulaFieldsToProcess.forEach((formulaField) => {
         const config = formulaField.properties.formulaConfig!;
@@ -477,16 +453,6 @@ export function useRecordsDisplay({
           );
 
           let finalValue = result.success ? result.value : config.blankPreference === "Zero" ? 0 : "";
-
-          console.log("[Hook] Formula evaluated:", {
-            formulaLabel: formulaField.label,
-            expression: config.expression,
-            variables: Object.keys(Object.fromEntries(Object.entries(variables).filter(([, v]) => v !== undefined))),
-            success: result.success,
-            calculatedValue: result.value,
-            finalValue,
-            error: result.error,
-          });
 
           if (["Number", "Currency", "Percent"].includes(config.returnType || "")) {
             const num = Number(finalValue);

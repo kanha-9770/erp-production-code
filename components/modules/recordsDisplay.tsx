@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, Trash2, MoreHorizontal, Pencil } from "lucide-react";
+import { Eye, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DndContext, closestCenter, DragOverlay } from "@dnd-kit/core";
@@ -271,13 +271,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   );
 
   // ── renderFieldEditor — keeps inline so it can close over hook state ─────────
-  React.useEffect(() => {
-    console.log("[Formula] Component mounted - enhancedFormFields:", {
-      count: enhancedFormFields.length,
-      formulas: enhancedFormFields.filter(f => f.type === "formula").map(f => ({ id: f.id, label: f.label, hasConfig: !!f.properties?.formulaConfig })),
-    });
-  }, [enhancedFormFields]);
-
   const renderFieldEditor = (
     record: EnhancedFormRecord,
     fieldDef: FormFieldWithSection,
@@ -493,25 +486,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               }),
             };
 
-            console.log("[Formula] Text Input - tempRecordForFormula created:", {
-              recordId: tempRecordForFormula.id,
-              fieldEdited: fieldDef.label,
-              newValue: finalValue,
-              processedDataCount: tempRecordForFormula.processedData.length,
-              enhancedFormFieldsCount: enhancedFormFields.length,
-              formulaFieldsInEnhanced: enhancedFormFields.filter(f => f.type === "formula").map(f => ({ id: f.id, label: f.label })),
-            });
-
             // Recalculate all formulas with the new values
             const { updatedProcessedData } = recalculateFormulasForRecord(
               tempRecordForFormula,
               new Set(),
             );
-
-            console.log("[Formula] Text Input - recalculateFormulasForRecord result:", {
-              updatedProcessedDataCount: updatedProcessedData.length,
-              formulasInResult: updatedProcessedData.filter(pd => pd.fieldType === "formula").map(pd => ({ id: pd.fieldId, label: pd.fieldLabel, value: pd.value })),
-            });
 
             // Add updated formula values to pending changes
             updatedProcessedData.forEach((pd) => {
@@ -520,14 +499,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
                 );
                 const oldValue = oldPd?.value ?? "";
-                console.log("[Formula] Text Input - Processing formula field:", {
-                  fieldId: pd.fieldId,
-                  fieldLabel: pd.fieldLabel,
-                  oldValue,
-                  newValue: pd.value,
-                  changed: oldValue !== pd.value,
-                });
-
                 // Add formula to pending changes if value changed OR if it's a new formula
                 if (oldValue !== pd.value) {
                   // Try to find the formula field using multiple matching strategies
@@ -539,29 +510,15 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                         f.label === pd.fieldLabel),
                   );
 
-                  console.log("[Formula] Text Input - First lookup attempt:", {
-                    fieldId: pd.fieldId,
-                    found: !!formulaField,
-                  });
-
                   // Fallback: match by label if ID matching fails
                   if (!formulaField && pd.fieldLabel) {
                     formulaField = enhancedFormFields.find(
                       (f) => f.type === "formula" && f.label === pd.fieldLabel,
                     );
-                    console.log("[Formula] Text Input - Fallback lookup by label:", {
-                      fieldLabel: pd.fieldLabel,
-                      found: !!formulaField,
-                    });
                   }
 
                   if (formulaField) {
                     const formulaKey = `${currentRecord.id}-${formulaField.id}`;
-                    console.log("[Formula] Text Input - Adding formula to pending:", {
-                      key: formulaKey,
-                      fieldId: formulaField.id,
-                      value: pd.value,
-                    });
                     newPending.set(formulaKey, {
                       recordId: currentRecord.id,
                       fieldId: formulaField.id,
@@ -571,20 +528,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       fieldType: "formula",
                       fieldLabel: pd.fieldLabel || formulaField.label,
                     });
-                  } else {
-                    console.warn("[Formula] Text Input - Formula field NOT FOUND:", {
-                      fieldId: pd.fieldId,
-                      fieldLabel: pd.fieldLabel,
-                      enhancedFields: enhancedFormFields.map(f => ({ id: f.id, label: f.label, type: f.type })),
-                    });
                   }
                 }
               }
-            });
-
-            console.log("[Formula] Text Input - newPending before setState:", {
-              size: newPending.size,
-              entries: Array.from(newPending.entries()).map(([k, v]) => ({ key: k, fieldType: v.fieldType, value: v.value })),
             });
 
             setPendingChanges(newPending);
@@ -746,21 +692,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             }),
           };
 
-          console.log("[Formula] Lookup - tempRecordForFormula created:", {
-            recordId: record.id,
-            fieldEdited: fieldDef.label,
-            newValue,
-          });
-
           const { updatedProcessedData } = recalculateFormulasForRecord(
             tempRecordForFormula,
             new Set(),
           );
-
-          console.log("[Formula] Lookup - recalculateFormulasForRecord result:", {
-            updatedProcessedDataCount: updatedProcessedData.length,
-            formulasInResult: updatedProcessedData.filter(pd => pd.fieldType === "formula").map(pd => ({ id: pd.fieldId, label: pd.fieldLabel, value: pd.value })),
-          });
 
           updatedProcessedData.forEach((pd) => {
             if (pd.fieldType === "formula") {
@@ -768,13 +703,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
               );
               const oldValue = oldPd?.value ?? "";
-              console.log("[Formula] Lookup - Processing formula field:", {
-                fieldId: pd.fieldId,
-                fieldLabel: pd.fieldLabel,
-                oldValue,
-                newValue: pd.value,
-                changed: oldValue !== pd.value,
-              });
 
               // Add formula to pending changes if value changed OR if it's a new formula
               if (oldValue !== pd.value) {
@@ -796,11 +724,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
                 if (formulaField) {
                   const formulaKey = `${record.id}-${formulaField.id}`;
-                  console.log("[Formula] Lookup - Adding formula to pending:", {
-                    key: formulaKey,
-                    fieldId: formulaField.id,
-                    value: pd.value,
-                  });
                   newPending.set(formulaKey, {
                     recordId: record.id,
                     fieldId: formulaField.id,
@@ -813,11 +736,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 }
               }
             }
-          });
-
-          console.log("[Formula] Lookup - newPending before setState:", {
-            size: newPending.size,
-            entries: Array.from(newPending.entries()).map(([k, v]) => ({ key: k, fieldType: v.fieldType, value: v.value })),
           });
 
           setPendingChanges(newPending);
@@ -990,22 +908,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           <Eye className="h-4 w-4 mr-2" /> View
                                           Details
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          className={cn(
-                                            "text-xs cursor-pointer",
-                                            !canEditThisRecord &&
-                                              "text-gray-400 opacity-50",
-                                          )}
-                                          onClick={() =>
-                                            canEditThisRecord &&
-                                            onEditRecord(record)
-                                          }
-                                          disabled={!canEditThisRecord}
-                                        >
-                                          <Pencil className="h-4 w-4 mr-2" />{" "}
-                                          Edit Record
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                           className={cn(
                                             "text-xs text-red-600 cursor-pointer",
