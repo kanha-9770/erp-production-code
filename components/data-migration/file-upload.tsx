@@ -33,7 +33,8 @@ interface ColumnGroup {
 
 export interface ParsedFilePreview {
   headers: string[];
-  rows: string[][];
+  rows: string[][];       // preview rows (limited for display)
+  allRows: string[][];    // ALL rows for actual import
   totalRows: number;
   columnGroups?: ColumnGroup[];
 }
@@ -99,75 +100,99 @@ export function FileUpload({
           }) as string[][];
 
           if (jsonData.length < 2) {
-            throw new Error("Sheet must contain section row + header row");
+            throw new Error("File must contain a header row and at least one data row");
           }
 
           /* ====================================================
-             SECTION + FIELD MAPPING (FIXED)
+             DETECT FORMAT: standard CSV vs 2-row section format
+             Standard CSV: row 0 = headers, row 1+ = data
+             Section format: row 0 = sections, row 1 = headers, row 2+ = data
           ==================================================== */
-          const sectionRow = jsonData[0]; // Row 0 → Sections
-          const headerRow = jsonData[1];  // Row 1 → Fields
+          const row0 = jsonData[0];
+          const row1 = jsonData[1];
+
+          // Count empty cells in row 0 vs row 1
+          const row0Empty = row0.filter((c) => !String(c || "").trim()).length;
+          const row1Empty = row1.filter((c) => !String(c || "").trim()).length;
+          const totalCols = Math.max(row0.length, row1.length);
+
+          // If row 0 has many empty cells and row 1 has fewer, it's a section format
+          const hasSectionRow = totalCols > 1 && row0Empty > row1Empty && row0Empty > totalCols * 0.3;
 
           let columnGroups: ColumnGroup[] = [];
           let finalHeaders: string[] = [];
+          let dataStartIndex: number;
 
-          let currentSection = "General";
-          let currentColumns: string[] = [];
-          let currentStartIndex = 0;
+          if (hasSectionRow) {
+            // 2-row format: row 0 = sections, row 1 = headers
+            const sectionRow = row0;
+            const headerRow = row1;
+            dataStartIndex = 2;
 
-          for (let col = 0; col < headerRow.length; col++) {
-            const sectionCell = String(sectionRow[col] || "").trim();
-            const headerCell = String(headerRow[col] || "").trim();
+            let currentSection = "General";
+            let currentColumns: string[] = [];
+            let currentStartIndex = 0;
 
-            // New section starts ONLY when section cell has value
-            if (sectionCell) {
-              if (currentColumns.length > 0) {
-                columnGroups.push({
-                  sectionTitle: currentSection,
-                  columns: [...currentColumns],
-                  startIndex: currentStartIndex,
-                });
+            for (let col = 0; col < headerRow.length; col++) {
+              const sectionCell = String(sectionRow[col] || "").trim();
+              const headerCell = String(headerRow[col] || "").trim();
+
+              if (sectionCell) {
+                if (currentColumns.length > 0) {
+                  columnGroups.push({
+                    sectionTitle: currentSection,
+                    columns: [...currentColumns],
+                    startIndex: currentStartIndex,
+                  });
+                }
+                currentSection = sectionCell;
+                currentColumns = [];
+                currentStartIndex = col;
               }
 
-              currentSection = sectionCell;
-              currentColumns = [];
-              currentStartIndex = col;
+              const safeHeader = headerCell || `Column ${col + 1}`;
+              finalHeaders.push(safeHeader);
+              currentColumns.push(safeHeader);
             }
 
-            // EVERY header belongs to the current section
-            const safeHeader = headerCell || `Column ${col + 1}`;
-            finalHeaders.push(safeHeader);
-            currentColumns.push(safeHeader);
-          }
-
-          // Push last section
-          if (currentColumns.length > 0) {
-            columnGroups.push({
-              sectionTitle: currentSection,
-              columns: currentColumns,
-              startIndex: currentStartIndex,
+            if (currentColumns.length > 0) {
+              columnGroups.push({
+                sectionTitle: currentSection,
+                columns: currentColumns,
+                startIndex: currentStartIndex,
+              });
+            }
+          } else {
+            // Standard CSV: row 0 = headers, row 1+ = data
+            dataStartIndex = 1;
+            finalHeaders = row0.map((cell, idx) => {
+              const val = String(cell || "").trim();
+              return val || `Column ${idx + 1}`;
             });
           }
-
-          const dataStartIndex = 2;
 
           /* ====================================================
              ROW NORMALIZATION (CRITICAL)
           ==================================================== */
-          const previewRows = jsonData
-            .slice(dataStartIndex, dataStartIndex + PREVIEW_ROWS_LIMIT)
-            .map((row) =>
-              finalHeaders.map((_, idx) => String(row[idx] ?? ""))
-            )
-            .filter((row) =>
-              row.some((cell) => cell.trim() !== "")
-            );
+          const normalizeRow = (row: string[]) =>
+            finalHeaders.map((_, idx) => String(row[idx] ?? ""));
+
+          const filterEmpty = (row: string[]) =>
+            row.some((cell) => cell.trim() !== "");
+
+          const allDataRows = jsonData
+            .slice(dataStartIndex)
+            .map(normalizeRow)
+            .filter(filterEmpty);
+
+          const previewRows = allDataRows.slice(0, PREVIEW_ROWS_LIMIT);
 
           resolve({
             headers: finalHeaders,
             rows: previewRows,
-            totalRows: jsonData.length - dataStartIndex,
-            columnGroups,
+            allRows: allDataRows,
+            totalRows: allDataRows.length,
+            columnGroups: hasSectionRow ? columnGroups : undefined,
           });
         } catch (err) {
           const message =

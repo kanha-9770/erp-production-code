@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Upload, ArrowLeft, Loader2, Check, AlertCircle, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -66,9 +66,10 @@ export default function ImportPage() {
 
   // Auto-map columns to fields by label match
   const autoMap = () => {
-    if (!uploadedFile || formFields.length === 0) return
+    const hdrs = uploadedFile?.preview.headers
+    if (!hdrs || !Array.isArray(hdrs) || hdrs.length === 0 || formFields.length === 0) return
     const newMappings: { sourceColumn: string; targetFieldId: string }[] = []
-    for (const header of uploadedFile.preview.headers) {
+    for (const header of hdrs) {
       const match = formFields.find(
         (f: any) => f.label.toLowerCase().trim() === header.toLowerCase().trim()
       )
@@ -79,11 +80,17 @@ export default function ImportPage() {
     setMappings(newMappings)
   }
 
+  // Auto-map when file is uploaded and formFields are ready
+  useEffect(() => {
+    if (uploadedFile && formFields.length > 0 && step === "map" && mappings.length === 0) {
+      autoMap()
+    }
+  }, [uploadedFile, formFields, step])
+
   const handleFileUpload = (file: File, preview: ParsedFilePreview) => {
     setUploadedFile({ file, preview })
+    setMappings([])
     setStep("map")
-    // Auto-map after a tick so formFields is ready
-    setTimeout(autoMap, 100)
   }
 
   const handleImport = async () => {
@@ -102,7 +109,8 @@ export default function ImportPage() {
 
       if (!jobResult.success) throw new Error(jobResult.error || "Failed to create import job")
 
-      const importJobId = jobResult.data?.id || jobResult.data
+      const importJobId = jobResult.importJobId || jobResult.data?.id || jobResult.data
+      if (!importJobId) throw new Error("No import job ID returned")
 
       // Step 2: Save mappings
       await addImportMapping({
@@ -110,9 +118,9 @@ export default function ImportPage() {
         mappings: mappings.map((m) => ({ sourceColumn: m.sourceColumn, targetFieldId: m.targetFieldId })),
       }).unwrap()
 
-      // Step 3: Convert preview rows to objects and process
-      const { headers, rows } = uploadedFile.preview
-      const rowObjects = rows.map((row) => {
+      // Step 3: Convert ALL rows to objects and process
+      const { headers, allRows } = uploadedFile.preview
+      const rowObjects = (allRows || uploadedFile.preview.rows).map((row) => {
         const obj: Record<string, string> = {}
         headers.forEach((h, i) => { obj[h] = row[i] || "" })
         return obj

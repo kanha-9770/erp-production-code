@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Download, FileSpreadsheet, Loader2, ArrowLeft, FileText, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -51,8 +51,15 @@ export default function ExportPage() {
   // Auto-select all fields when form loads
   const handleFormChange = (formId: string) => {
     setSelectedFormId(formId)
-    setSelectedFieldIds([]) // Reset — will auto-populate when formDetail loads
+    setSelectedFieldIds([]) // Reset — will auto-populate via useEffect when formDetail loads
   }
+
+  // Auto-select all fields when form detail loads
+  useEffect(() => {
+    if (formFields.length > 0 && selectedFieldIds.length === 0 && selectedFormId) {
+      setSelectedFieldIds(formFields.map((f: any) => f.id))
+    }
+  }, [formFields, selectedFormId])
 
   // Select/deselect all fields
   const toggleAllFields = () => {

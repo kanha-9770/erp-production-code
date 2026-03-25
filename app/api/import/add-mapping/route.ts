@@ -56,12 +56,11 @@ export async function POST(request: Request) {
         const fieldIdRaw = m.fieldId ?? m.targetFieldId ?? m.target?.fieldId ?? "";
 
         const sourceColumn = normalizeKey(sourceColumnRaw);
-        const targetFieldId = fieldIdRaw.trim();
+        const targetFieldId = typeof fieldIdRaw === "string" ? fieldIdRaw.trim() : "";
 
         const isValid =
           sourceColumn !== "" &&
-          targetFieldId !== "" &&
-          sectionId !== ""; // optional: remove this line if sectionId is not required
+          targetFieldId !== "";
 
         if (!isValid) {
           return null;
@@ -71,8 +70,6 @@ export async function POST(request: Request) {
           importJobId,
           sourceColumn,
           targetFieldId,
-          // You can store sectionId too if you add the column to schema later:
-          // sectionId,
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);

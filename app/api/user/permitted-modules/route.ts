@@ -159,6 +159,38 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 🔹 Fetch published forms for all modules and attach them
+    const moduleIds = finalModules.map((m: any) => m.module_id);
+    if (moduleIds.length > 0) {
+      const forms = await prisma.form.findMany({
+        where: {
+          moduleId: { in: moduleIds },
+          isPublished: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          moduleId: true,
+          isPublished: true,
+          description: true,
+        },
+        orderBy: { name: "asc" },
+      });
+
+      // Group forms by moduleId
+      const formsByModule = new Map<string, any[]>();
+      for (const form of forms) {
+        const list = formsByModule.get(form.moduleId) || [];
+        list.push(form);
+        formsByModule.set(form.moduleId, list);
+      }
+
+      // Attach forms to each module
+      for (const mod of finalModules) {
+        mod.forms = formsByModule.get(mod.module_id) || [];
+      }
+    }
+
     return NextResponse.json({ success: true, modules: finalModules });
   } catch (error) {
     console.error("❌ Get permitted modules error:", error);
