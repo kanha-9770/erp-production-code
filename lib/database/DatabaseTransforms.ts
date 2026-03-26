@@ -144,7 +144,9 @@ export class DatabaseTransforms {
   static transformSubform(subform: any): Subform {
     return {
       id: subform.id,
+      formId: subform.formId,
       sectionId: subform.sectionId,
+      parentSectionId: subform.parentSectionId ?? null,
       parentSubformId: subform.parentSubformId,
       name: subform.name,
       description: subform.description,

@@ -366,34 +366,13 @@ export default function ModulePage() {
     setEditingForm(null)
   }
 
-  const copyFormLink = async (formId: string) => {
+  const copyFormLink = (formId: string) => {
     const link = `${window.location.origin}/form/${formId}`
-
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(link)
-      } else {
-        // fallback (IMPORTANT)
-        const textArea = document.createElement("textarea")
-        textArea.value = link
-        document.body.appendChild(textArea)
-        textArea.select()
-        document.execCommand("copy")
-        document.body.removeChild(textArea)
-      }
-
-      toast({
-        title: "Success",
-        description: "Form link copied to clipboard!",
-      })
-    } catch (err) {
-      console.error("Copy failed:", err)
-      toast({
-        title: "Error",
-        description: "Failed to copy link.",
-        variant: "destructive",
-      })
-    }
+    navigator.clipboard.writeText(link)
+    toast({
+      title: "Success",
+      description: "Form link copied to clipboard!",
+    })
   }
 
   const getFilteredAndSortedForms = () => {

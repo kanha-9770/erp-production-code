@@ -156,10 +156,32 @@ export default function SectionComponent({
     data: { type: "Section", isSectionDropzone: true, sectionId: section.id },
   });
 
-  const style = {
+  const borderRadiusMap: Record<string, string> = {
+    none: "0px",
+    sm: "0.125rem",
+    md: "0.375rem",
+    lg: "0.5rem",
+    xl: "0.75rem",
+  };
+
+  const paddingMap: Record<string, string> = {
+    none: "0px",
+    sm: "0.5rem",
+    md: "1rem",
+    lg: "1.5rem",
+    xl: "2rem",
+  };
+
+  const sectionStyling = section.styling || {};
+
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.82 : isDeleting ? 0.38 : 1,
+    ...(sectionStyling.backgroundColor && { backgroundColor: sectionStyling.backgroundColor }),
+    ...(sectionStyling.borderColor && { borderColor: sectionStyling.borderColor }),
+    ...(sectionStyling.borderRadius && { borderRadius: borderRadiusMap[sectionStyling.borderRadius] || sectionStyling.borderRadius }),
+    ...(sectionStyling.padding && { padding: paddingMap[sectionStyling.padding] || sectionStyling.padding }),
   };
 
   useEffect(() => {

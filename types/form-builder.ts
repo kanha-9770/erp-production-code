@@ -550,6 +550,7 @@ export interface Subform {
   id: string;
   formId: string; // NEW: Parent form ID (top-level subforms)
   parentSubformId?: string; // For nested subforms
+  parentSectionId?: string | null; // Section this subform belongs under
   name: string;
   description?: string;
   order: number;
