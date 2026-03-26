@@ -139,7 +139,8 @@ export default function ImportPage() {
       setStep("result")
       toast({ title: "Import Complete", description: `${processResult.successCount} records imported successfully` })
     } catch (error: any) {
-      toast({ title: "Import Failed", description: error.message || "Something went wrong", variant: "destructive" })
+      const errorMsg = error?.data?.error || error?.data?.details || error?.message || "Something went wrong"
+      toast({ title: "Import Failed", description: errorMsg, variant: "destructive" })
     } finally {
       setIsProcessing(false)
     }

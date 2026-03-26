@@ -1,13 +1,14 @@
 import { Badge } from "@/components/ui/badge"
-import { Users, Database, Info, AlertTriangle, UserCheck } from "lucide-react"
+import { Users, Database, AlertTriangle, UserCheck } from "lucide-react"
 import type { Form } from "@/types/form-builder"
-import { useState } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { useState, useEffect } from "react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useCheckEmployeeFormQuery } from "@/lib/api/forms"
+import { useCheckEmployeeFormQuery, usePatchFormSettingsMutation } from "@/lib/api/forms"
+import { useToast } from "@/hooks/use-toast"
 
 interface UserFormSettingsDialogProps {
   form: Form | null
@@ -22,61 +23,92 @@ export default function UserFormSettingsDialog({
   onOpenChange,
   onUpdate,
 }: UserFormSettingsDialogProps) {
-  const [isUserForm, setIsUserForm] = useState(form?.isUserForm || false)
-  const [isEmployeeForm, setIsEmployeeForm] = useState(form?.isEmployeeForm || false)
+  const { toast } = useToast()
+  const [isUserForm, setIsUserForm] = useState(false)
+  const [isEmployeeForm, setIsEmployeeForm] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
 
-  // Check if an employee form already exists in the organization
-  const { data: employeeCheck } = useCheckEmployeeFormQuery(undefined, { skip: !open })
-  // Show employee toggle only if: this form IS the employee form, OR no employee form exists yet
-  const canShowEmployeeToggle =
-    form?.isEmployeeForm || !employeeCheck?.exists
+  // Sync local state when form changes or dialog opens
+  useEffect(() => {
+    if (form && open) {
+      setIsUserForm(form.isUserForm || false)
+      setIsEmployeeForm(form.isEmployeeForm || false)
+    }
+  }, [form, open])
+
+  // Check if another employee form already exists in the org (exclude current form)
+  const { data: employeeCheck, isLoading: isCheckingEmployee } = useCheckEmployeeFormQuery(
+    form?.id,
+    { skip: !open || !form?.id, refetchOnMountOrArgChange: true }
+  )
+
+  const [patchFormSettings] = usePatchFormSettingsMutation()
+
+  // Another employee form exists in the org => this form's toggle is locked
+  const employeeFormTaken = employeeCheck?.exists === true
 
   const handleSave = async () => {
     if (!form) return
-
     setIsUpdating(true)
+
     try {
-      await onUpdate(isUserForm, isEmployeeForm)
-      onOpenChange(false)
-    } catch (error) {
-      console.error("Error updating form settings:", error)
+      const result = await patchFormSettings({
+        formId: form.id,
+        isUserForm,
+        isEmployeeForm,
+      }).unwrap()
+
+      if (result.success) {
+        // Also notify the parent so the builder UI updates
+        await onUpdate(isUserForm, isEmployeeForm)
+        onOpenChange(false)
+        toast({
+          title: "Success",
+          description: isUserForm
+            ? "Form marked as user form"
+            : isEmployeeForm
+              ? "Form marked as employee form"
+              : "Form set to regular form",
+        })
+      } else {
+        throw new Error(result.error || "Failed to update")
+      }
+    } catch (error: any) {
+      // Reset toggles back to server state
+      setIsUserForm(form.isUserForm || false)
+      setIsEmployeeForm(form.isEmployeeForm || false)
+      toast({
+        title: "Error",
+        description: error?.data?.error || error?.message || "Failed to update form settings",
+        variant: "destructive",
+      })
     } finally {
       setIsUpdating(false)
     }
   }
 
   const handleOpenChange = (newOpen: boolean) => {
-    if (!newOpen) {
-      // Reset to current form state when closing
-      setIsUserForm(form?.isUserForm || false)
-      setIsEmployeeForm(form?.isEmployeeForm || false)
+    if (!newOpen && form) {
+      setIsUserForm(form.isUserForm || false)
+      setIsEmployeeForm(form.isEmployeeForm || false)
     }
     onOpenChange(newOpen)
   }
 
   const handleUserFormChange = (checked: boolean) => {
     setIsUserForm(checked)
-    if (checked) {
-      setIsEmployeeForm(false) // Can't be both user and employee form
-    }
+    if (checked) setIsEmployeeForm(false)
   }
 
   const handleEmployeeFormChange = (checked: boolean) => {
     setIsEmployeeForm(checked)
-    if (checked) {
-      setIsUserForm(false) // Can't be both user and employee form
-    }
+    if (checked) setIsUserForm(false)
   }
 
   if (!form) return null
 
   const hasRecords = form.recordCount && form.recordCount > 0
-  const currentStorageInfo = form.isUserForm
-    ? "This form stores data in the dedicated user forms table (form_records_15)"
-    : form.isEmployeeForm
-      ? "This form stores data in the dedicated employee forms table (form_records_14)"
-      : "This form stores data in the general forms tables (form_records_1-13)"
+  const hasChanges = form.isUserForm !== isUserForm || form.isEmployeeForm !== isEmployeeForm
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -112,12 +144,11 @@ export default function UserFormSettingsDialog({
             </div>
           </div>
 
-          {/* Form Type Toggle */}
+          {/* Form Type Toggles */}
           <div className="space-y-2">
-            <Label htmlFor="user-form-toggle" className="text-sm font-medium">
-              Form Type
-            </Label>
+            <Label className="text-sm font-medium">Form Type</Label>
             <div className="space-y-2">
+              {/* User Form Toggle */}
               <div className="flex items-center justify-between p-2 border rounded-lg">
                 <div className="space-y-1">
                   <div className="font-medium text-sm">User Form</div>
@@ -133,28 +164,31 @@ export default function UserFormSettingsDialog({
                 />
               </div>
 
-              {canShowEmployeeToggle && (
-                <div className="flex items-center justify-between p-2 border rounded-lg">
-                  <div className="space-y-1">
-                    <div className="font-medium text-sm">Employee Form</div>
-                    <div className="text-xs text-muted-foreground">
-                      Designate this form for employee-specific data collection
-                    </div>
+              {/* Employee Form Toggle */}
+              <div className={`flex items-center justify-between p-2 border rounded-lg ${employeeFormTaken ? "bg-muted/50 border-dashed" : ""}`}>
+                <div className="space-y-1">
+                  <div className={`font-medium text-sm ${employeeFormTaken ? "text-muted-foreground" : ""}`}>
+                    Employee Form
                   </div>
-                  <Switch
-                    id="employee-form-toggle"
-                    checked={isEmployeeForm}
-                    onCheckedChange={handleEmployeeFormChange}
-                    disabled={isUpdating}
-                  />
+                  <div className="text-xs text-muted-foreground">
+                    {employeeFormTaken
+                      ? `"${employeeCheck?.formName}" is already designated as the employee form in your organization. Only one employee form is allowed per organization.`
+                      : "Designate this form for employee-specific data collection"
+                    }
+                  </div>
                 </div>
-              )}
+                <Switch
+                  id="employee-form-toggle"
+                  checked={employeeFormTaken ? false : isEmployeeForm}
+                  onCheckedChange={handleEmployeeFormChange}
+                  disabled={employeeFormTaken || isUpdating || isCheckingEmployee}
+                />
+              </div>
             </div>
           </div>
 
-
           {/* Warning for existing records */}
-          {hasRecords && (form.isUserForm !== isUserForm || form.isEmployeeForm !== isEmployeeForm) && (
+          {hasRecords && hasChanges && (
             <Alert>
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription className="text-sm">
@@ -187,7 +221,7 @@ export default function UserFormSettingsDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={isUpdating || (form.isUserForm === isUserForm && form.isEmployeeForm === isEmployeeForm)}
+            disabled={isUpdating || !hasChanges}
           >
             {isUpdating ? "Updating..." : "Save Changes"}
           </Button>

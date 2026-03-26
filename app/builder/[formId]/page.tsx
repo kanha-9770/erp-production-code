@@ -269,33 +269,8 @@ export default function FormBuilderPage() {
     isEmployeeForm: boolean,
   ) => {
     if (!form) return;
-
-    try {
-      const result = await saveFormMutation({
-        formId,
-        body: { ...form, isUserForm, isEmployeeForm },
-      }).unwrap();
-
-      if (result.success) {
-        optimisticFormUpdate(result.data);
-        toast({
-          title: "Success",
-          description: isUserForm
-            ? "Form marked as user form"
-            : isEmployeeForm
-              ? "Form marked as employee form"
-              : "Form marked as regular form",
-        });
-      } else {
-        throw new Error(result.error || "Failed to update form settings");
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update form settings",
-        variant: "destructive",
-      });
-    }
+    // The dialog already does the PATCH save — just update local state
+    optimisticFormUpdate({ ...form, isUserForm, isEmployeeForm });
   };
 
   const handleDragStart = (event: DragStartEvent) => {

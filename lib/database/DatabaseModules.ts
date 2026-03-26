@@ -574,8 +574,33 @@ export class DatabaseModules {
       if (data.isUserForm !== undefined || data.isEmployeeForm !== undefined) {
         const currentForm = await prisma.form.findUnique({
           where: { id },
-          select: { isUserForm: true, isEmployeeForm: true },
+          select: { isUserForm: true, isEmployeeForm: true, moduleId: true },
         });
+
+        // Validate: only one employee form per organization
+        if (data.isEmployeeForm && currentForm && !currentForm.isEmployeeForm) {
+          const formModule = await prisma.formModule.findUnique({
+            where: { id: currentForm.moduleId },
+            select: { organizationId: true },
+          });
+
+          if (formModule?.organizationId) {
+            const existingEmployeeForm = await prisma.form.findFirst({
+              where: {
+                isEmployeeForm: true,
+                id: { not: id },
+                module: { organizationId: formModule.organizationId },
+              },
+              select: { id: true, name: true },
+            });
+
+            if (existingEmployeeForm) {
+              throw new Error(
+                `Another employee form "${existingEmployeeForm.name}" already exists in this organization. Only one employee form is allowed per organization.`
+              );
+            }
+          }
+        }
 
         // If isUserForm or isEmployeeForm status is changing, update table mapping
         if (

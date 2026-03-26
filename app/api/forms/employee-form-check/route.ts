@@ -1,11 +1,27 @@
-import { NextResponse } from "next/server"
-import prisma from "@/lib/prisma"
+import { type NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Find the employee form across the entire organization
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
+    }
+
+    // Optional: exclude a specific form from the check (used when editing an existing employee form)
+    const excludeFormId = request.nextUrl.searchParams.get("excludeFormId")
+
+    // Find employee form scoped to the user's organization
+    // Form → FormModule → organizationId
     const employeeForm = await prisma.form.findFirst({
-      where: { isEmployeeForm: true },
+      where: {
+        isEmployeeForm: true,
+        ...(excludeFormId ? { id: { not: excludeFormId } } : {}),
+        module: {
+          organizationId: user.organizationId,
+        },
+      },
       select: { id: true, name: true, moduleId: true },
     })
 

@@ -26,6 +26,7 @@ export const baseApi = createApi({
     // Forms
     "Form",
     "FormDetail",
+    "EmployeeFormCheck",
     // Records
     "Records",
     "Record",

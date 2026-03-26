@@ -230,9 +230,28 @@ export const formsApi = baseApi.injectEndpoints({
 
     checkEmployeeForm: builder.query<
       { success: boolean; exists: boolean; formId: string | null; formName: string | null },
-      void
+      string | void
     >({
-      query: () => `/forms/employee-form-check`,
+      query: (excludeFormId) => ({
+        url: `/forms/employee-form-check`,
+        params: excludeFormId ? { excludeFormId } : undefined,
+      }),
+      providesTags: ["EmployeeFormCheck"],
+    }),
+
+    patchFormSettings: builder.mutation<
+      ApiResponse,
+      { formId: string; isUserForm: boolean; isEmployeeForm: boolean }
+    >({
+      query: ({ formId, ...body }) => ({
+        url: `/forms/${formId}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: (result, error, { formId }) => [
+        { type: "FormDetail", id: formId },
+        "EmployeeFormCheck",
+      ],
     }),
 
     getFormFull: builder.query<ApiResponse, string>({
@@ -386,6 +405,7 @@ export const {
   useGetFormFieldsQuery,
   useLazyGetFormFieldsQuery,
   useCheckEmployeeFormQuery,
+  usePatchFormSettingsMutation,
   useGetFormFullQuery,
   useLazyGetFormFullQuery,
   useLazyGetFormTotalQuery,

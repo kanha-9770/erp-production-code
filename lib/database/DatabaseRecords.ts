@@ -168,7 +168,7 @@ export class DatabaseRecords {
 
 
   static async createFormRecord(
-    formId: string, recordData: any, submittedBy?: string, employeeId?: string, amount?: number, date?: Date, userId?: string,
+    formId: string, recordData: any, submittedBy?: string, employeeId?: string, amount?: number, date?: Date, userId?: string, organizationId?: string,
   ): Promise<FormRecord> {
     try {
       console.log("DatabaseService.createFormRecord called with:", {
@@ -195,7 +195,7 @@ export class DatabaseRecords {
       console.log(`Using table ${tableName} for form ${formId}`)
 
       // Base record data
-      const recordParams = {
+      const recordParams: Record<string, any> = {
         id: uuidv4(),
         formId,
         recordData,
@@ -208,6 +208,14 @@ export class DatabaseRecords {
         userId,
         createdAt: new Date(),
         updatedAt: new Date(),
+      }
+
+      // organizationId is required only for form_records_14 (employee forms)
+      if (tableName === "form_records_14") {
+        if (!organizationId) {
+          throw new Error("organizationId is required for employee forms (form_records_14)");
+        }
+        recordParams.organizationId = organizationId;
       }
 
       // Create record in the appropriate table
