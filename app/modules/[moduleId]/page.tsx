@@ -328,7 +328,14 @@ export default function ModulePage() {
 
   const handlePublishForm = async (form: Form) => {
     try {
-      const result = await publishForm({ formId: form.id, isPublished: !form.isPublished }).unwrap()
+      const body = form.isPublished
+        ? { unpublish: true }   // ✅ REQUIRED for unpublish
+        : {}                    // ✅ publish uses default
+
+      const result = await publishForm({
+        formId: form.id,
+        body,
+      }).unwrap()
 
       if (result.success) {
         toast({
@@ -336,13 +343,13 @@ export default function ModulePage() {
           description: `Form ${form.isPublished ? "unpublished" : "published"} successfully!`,
         })
       } else {
-        throw new Error(result.error || "Failed to publish form")
+        throw new Error(result.error || "Failed to update form")
       }
     } catch (error: any) {
       console.error("Error publishing form:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to publish form. Please try again.",
+        description: error.message || "Failed to update form. Please try again.",
         variant: "destructive",
       })
     }

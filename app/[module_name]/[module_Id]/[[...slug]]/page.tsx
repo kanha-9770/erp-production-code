@@ -634,6 +634,45 @@ export default function ModulePage({
     }
   };
 
+  const handleBulkDeleteRecords = async (recordIds: string[]) => {
+    // 1. Optimistically remove ALL records at once
+    const idsSet = new Set(recordIds);
+    const recordsToDelete = formRecords.filter((r) => idsSet.has(r.id));
+    setFormRecords((prev) => prev.filter((r) => !idsSet.has(r.id)));
+
+    // 2. Build delete tasks: { formId, recordId } for each API call
+    const deleteTasks = recordsToDelete.flatMap((record) => {
+      if (record.formId === "merged" && record.originalRecordIds) {
+        return Array.from(record.originalRecordIds.entries()).map(
+          ([formId, recordId]) => ({ formId, recordId }),
+        );
+      }
+      return [{ formId: record.formId, recordId: record.id }];
+    });
+
+    // 3. Fire all delete requests in parallel
+    const results = await Promise.allSettled(
+      deleteTasks.map((task) => deleteRecord(task).unwrap()),
+    );
+    const failedTasks = deleteTasks.filter((_, idx) => results[idx].status === "rejected");
+
+    // 4. Single refetch at the end
+    await refetchRecords();
+
+    if (failedTasks.length > 0) {
+      toast({
+        title: "Partial Delete",
+        description: `${deleteTasks.length - failedTasks.length} deleted, ${failedTasks.length} failed. Please retry.`,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Records Deleted",
+        description: `${recordsToDelete.length} record(s) deleted successfully`,
+      });
+    }
+  };
+
   const handleEditRecord = (record: EnhancedFormRecord) => {
     console.log("Edit record clicked", record);
   };
@@ -704,6 +743,7 @@ export default function ModulePage({
         setFormRecords={setFormRecords}
         onEditRecord={handleEditRecord}
         onDeleteRecord={handleDeleteRecord}
+        onBulkDeleteRecords={handleBulkDeleteRecords}
         onViewDetails={handleViewDetails}
         permissions={permissions}
         isAdmin={isAdmin}

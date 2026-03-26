@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, type ChangeEvent } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,6 @@ import {
   Loader2,
   Save,
   Hash,
-  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -1399,7 +1398,7 @@ export default function FieldSettings({
                           <Label>Custom Style (CSS)</Label>
                           <Input
                             value={localField.styling?.style || ""}
-                            onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                            onChange={(e) =>
                               handleFieldUpdate({
                                 styling: {
                                   ...localField.styling,
@@ -1413,89 +1412,156 @@ export default function FieldSettings({
                       </div>
                     )}
 
-                    {/* ── PASSWORD SETTINGS FEATURE ── Only shown in Advanced tab for password fields */}
-                    {localField.type === "password" && (
+                    {/* ── UNIQUE ID FEATURE ── Only shown in Advanced tab for unique-id fields */}
+                    {localField.type === "unique-id" && (
                       <>
                         <Separator className="my-6" />
                         <div className="space-y-6">
                           <div className="flex items-center gap-3">
-                            <Lock className="h-6 w-6 text-blue-600" />
+                            <Hash className="h-6 w-6 text-blue-600" />
                             <div>
-                              <h3 className="text-lg font-semibold">Password Settings</h3>
+                              <h3 className="text-lg font-semibold">Unique ID Settings</h3>
                               <p className="text-sm text-muted-foreground">
-                                Configure security requirements for password input
+                                Configure how this unique identifier is generated
                               </p>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4">
+                          {/* Generation Mode */}
+                          <div className="space-y-2">
+                            <Label>Generation Mode</Label>
+                            <Select
+                              value={localField.properties?.uniqueIdMode || "uuid"}
+                              onValueChange={(value) =>
+                                handlePropertiesChange("uniqueIdMode", value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select mode" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="uuid">UUID (recommended)</SelectItem>
+                                <SelectItem value="sequential">Sequential Number</SelectItem>
+                                <SelectItem value="prefix">Prefix + Number</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                              {localField.properties?.uniqueIdMode === "uuid" &&
+                                "Generates random 36-char UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)"}
+                              {localField.properties?.uniqueIdMode === "sequential" &&
+                                "Increments number for each new record (1, 2, 3...)"}
+                              {localField.properties?.uniqueIdMode === "prefix" &&
+                                "Custom prefix + padded number (e.g. INV-0001)"}
+                            </p>
+                          </div>
+
+                          {/* Prefix (only for prefix mode) */}
+                          {localField.properties?.uniqueIdMode === "prefix" && (
                             <div className="space-y-2">
-                              <Label>Minimum Length</Label>
+                              <Label>Prefix</Label>
                               <Input
-                                type="number"
-                                min="4"
-                                value={localField.passwordConfig?.minLength || 8}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                  handleFieldUpdate({
-                                    passwordConfig: {
-                                      ...localField.passwordConfig,
-                                      minLength: Number(e.target.value) || 8,
-                                    },
-                                  })
+                                value={localField.properties?.uniqueIdPrefix || ""}
+                                onChange={(e) =>
+                                  handlePropertiesChange("uniqueIdPrefix", e.target.value)
                                 }
+                                placeholder="e.g. INV-, EMP-, TKT-"
+                                maxLength={10}
                               />
+                              <p className="text-xs text-muted-foreground">
+                                Will be added before the number (e.g. INV-000001)
+                              </p>
                             </div>
-                            <div className="flex items-center justify-between pt-8">
+                          )}
+
+                          {/* Start & Padding (for sequential & prefix modes) */}
+                          {(localField.properties?.uniqueIdMode === "sequential" ||
+                            localField.properties?.uniqueIdMode === "prefix") && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Start From</Label>
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    value={localField.properties?.uniqueIdStart || "1"}
+                                    onChange={(e) =>
+                                      handlePropertiesChange(
+                                        "uniqueIdStart",
+                                        Number(e.target.value) || 1
+                                      )
+                                    }
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    First record gets this number
+                                  </p>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Minimum Digits</Label>
+                                  <Select
+                                    value={String(
+                                      localField.properties?.uniqueIdMinDigits || "6"
+                                    )}
+                                    onValueChange={(v) =>
+                                      handlePropertiesChange("uniqueIdMinDigits", Number(v))
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="4">4 (0001)</SelectItem>
+                                      <SelectItem value="5">5 (00001)</SelectItem>
+                                      <SelectItem value="6">6 (000001)</SelectItem>
+                                      <SelectItem value="7">7 (0000001)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <p className="text-xs text-muted-foreground">
+                                    Zero-padding for consistent length
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+
+                          {/* Visibility & Editability */}
+                          <div className="grid grid-cols-2 gap-6 pt-4 border-t">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
                                 <div className="space-y-0.5">
-                                  <Label>Require Uppercase</Label>
+                                  <Label>Hidden from Users</Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    Field is generated but not visible
+                                  </p>
                                 </div>
                                 <Switch
-                                  checked={localField.passwordConfig?.requireUppercase ?? true}
-                                  onCheckedChange={(checked: boolean) =>
-                                    handleFieldUpdate({
-                                      passwordConfig: {
-                                        ...localField.passwordConfig,
-                                        requireUppercase: checked,
-                                      },
-                                    })
+                                  checked={localField.properties?.hidden ?? true}
+                                  onCheckedChange={(checked) =>
+                                    handlePropertiesChange("hidden", checked)
                                   }
                                 />
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="space-y-0.5">
+                                  <Label>Read Only</Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    Prevent manual editing (recommended)
+                                  </p>
+                                </div>
+                                <Switch
+                                  checked={localField.readonly !== false}
+                                  onCheckedChange={(checked) =>
+                                    handleFieldUpdate({ readonly: checked })
+                                  }
+                                />
+                              </div>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                  <Label>Require Numbers</Label>
-                                </div>
-                                <Switch
-                                  checked={localField.passwordConfig?.requireNumber ?? true}
-                                  onCheckedChange={(checked: boolean) =>
-                                    handleFieldUpdate({
-                                      passwordConfig: {
-                                        ...localField.passwordConfig,
-                                        requireNumber: checked,
-                                      },
-                                    })
-                                  }
-                                />
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
-                                  <Label>Require Special Chars</Label>
-                                </div>
-                                <Switch
-                                  checked={localField.passwordConfig?.requireSpecialChar ?? true}
-                                  onCheckedChange={(checked: boolean) =>
-                                    handleFieldUpdate({
-                                      passwordConfig: {
-                                        ...localField.passwordConfig,
-                                        requireSpecialChar: checked,
-                                      },
-                                    })
-                                  }
-                                />
-                            </div>
+                          {/* Preview hint */}
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm">
+                            <strong>Note:</strong> The actual ID is generated when a record is created.
+                            Admins can override it manually if read-only is turned off.
                           </div>
                         </div>
                       </>

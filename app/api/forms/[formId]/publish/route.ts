@@ -3,37 +3,54 @@ import { DatabaseService } from "@/lib/database/database-service"
 
 export async function POST(request: Request, { params }: { params: { formId: string } }) {
   try {
-    const body = await request.json()
-    const { allowAnonymous, requireLogin, maxSubmissions, submissionMessage } = body
+    let body: any = {}
 
-    const form = await DatabaseService.publishForm(params.formId, {
-      allowAnonymous: allowAnonymous ?? true,
-      requireLogin: requireLogin ?? false,
-      maxSubmissions: maxSubmissions || null,
-      submissionMessage: submissionMessage || "Thank you for your submission!",
-    })
+    // ✅ Safe body parsing (prevents crash on empty body)
+    try {
+      body = await request.json()
+    } catch {
+      body = {}
+    }
 
-    return NextResponse.json({ success: true, data: form })
-  } catch (error: any) {
-    console.error("Error publishing form:", error)
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-  }
-}
+    // ✅ HANDLE UNPUBLISH FIRST (CRITICAL)
+    if (body?.unpublish === true) {
+      const form = await DatabaseService.unpublishForm(params.formId)
+      return NextResponse.json({ success: true, data: form })
+    }
 
-export async function DELETE(request: Request, { params }: { params: { formId: string } }) {
-  try {
-    const form = await DatabaseService.unpublishForm(params.formId)
-    // Validate mutually exclusive settings
+    const {
+      allowAnonymous,
+      requireLogin,
+      maxSubmissions,
+      submissionMessage,
+    } = body
+
+    // ✅ VALIDATION (correct place)
     if (allowAnonymous === true && requireLogin === true) {
       return NextResponse.json(
-        { success: false, error: "Cannot enable both anonymous submissions and require login. These settings are mutually exclusive." },
+        {
+          success: false,
+          error: "Cannot enable both anonymous submissions and require login.",
+        },
         { status: 400 }
       )
     }
 
+    // ✅ NORMAL PUBLISH FLOW
+    const form = await DatabaseService.publishForm(params.formId, {
+      allowAnonymous: allowAnonymous ?? true,
+      requireLogin: requireLogin ?? false,
+      maxSubmissions: maxSubmissions || null,
+      submissionMessage:
+        submissionMessage || "Thank you for your submission!",
+    })
+
     return NextResponse.json({ success: true, data: form })
   } catch (error: any) {
-    console.error("Error unpublishing form:", error)
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    console.error("Error publishing/unpublishing form:", error)
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    )
   }
 }

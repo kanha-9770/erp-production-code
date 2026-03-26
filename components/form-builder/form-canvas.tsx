@@ -1061,9 +1061,8 @@ export default function FormCanvas({ form, onFormUpdate }: FormCanvasProps) {
   return (
     <div
       ref={setNodeRef}
-      className={`p-2 sm:p-4 min-h-full transition-all duration-200 ${
-        isOver ? "bg-blue-50 border-2 border-dashed border-blue-300" : ""
-      }`}
+      className={`p-2 sm:p-4 min-h-full transition-all duration-200 ${isOver ? "bg-blue-50 border-2 border-dashed border-blue-300" : ""
+        }`}
     >
       <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6">
 

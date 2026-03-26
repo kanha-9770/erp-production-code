@@ -101,6 +101,7 @@ interface RecordsDisplayProps {
   setFormRecords: (records: EnhancedFormRecord[]) => void;
   onEditRecord: (record: EnhancedFormRecord) => void;
   onDeleteRecord: (record: EnhancedFormRecord) => Promise<void>;
+  onBulkDeleteRecords?: (recordIds: string[]) => Promise<void>;
   onViewDetails: (record: EnhancedFormRecord) => void;
   permissions?: Permission[];
   isAdmin?: boolean;
@@ -133,6 +134,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   setPendingChanges,
   onEditRecord,
   onDeleteRecord,
+  onBulkDeleteRecords,
   onViewDetails,
   permissions = [],
   isAdmin = false,
@@ -338,8 +340,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         ...record,
         processedData: record.processedData.map((pd) =>
           pd.fieldId === fieldDef.id ||
-          pd.fieldId === fieldDef.originalId ||
-          pd.fieldLabel === fieldDef.label
+            pd.fieldId === fieldDef.originalId ||
+            pd.fieldLabel === fieldDef.label
             ? { ...pd, value: pendingChange.value }
             : pd,
         ),
@@ -912,7 +914,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           className={cn(
                                             "text-xs text-red-600 cursor-pointer",
                                             !canDeleteThisRecord &&
-                                              "text-gray-400 opacity-50",
+                                            "text-gray-400 opacity-50",
                                           )}
                                           onClick={() =>
                                             handleOpenDeleteConfirm(record)
@@ -1196,22 +1198,23 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 <Button
                   variant="destructive"
                   onClick={async () => {
-                    const recordsToDelete = Array.from(selectedRecords);
-
-                    // STEP 1: CLOSE POPUP INSTANTLY
+                    const recordIds = Array.from(selectedRecords);
                     setBulkDeleteOpen(false);
                     setSelectedRecords(new Set());
 
-                    try {
-                      // STEP 2: DELETE IN BACKGROUND
-                      await Promise.all(
-                        recordsToDelete.map((recordId) => {
-                          const record = formRecords.find((r) => r.id === recordId);
-                          return record ? onDeleteRecord(record) : Promise.resolve();
-                        })
-                      );
-                    } catch (error) {
-                      console.error("Bulk delete failed:", error);
+                    if (onBulkDeleteRecords) {
+                      await onBulkDeleteRecords(recordIds);
+                    } else {
+                      // Fallback: sequential delete
+                      for (const recordId of recordIds) {
+                        const record = formRecords.find((r) => r.id === recordId);
+                        if (!record) continue;
+                        try {
+                          await onDeleteRecord(record);
+                        } catch (error) {
+                          console.error(`Failed to delete record ${recordId}:`, error);
+                        }
+                      }
                     }
                   }}
                 >

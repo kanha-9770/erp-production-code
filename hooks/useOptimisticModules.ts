@@ -174,7 +174,7 @@ export function useOptimisticModules(organizationId: string | null) {
       })
 
       try {
-        await publishFormApi({ formId, isPublished: !isPublished }).unwrap()
+        await publishFormApi({ formId, body: isPublished ? { unpublish: true } : {},}).unwrap()
         refetch()
       } catch {
         patch.undo()

@@ -82,18 +82,73 @@ export const modulesApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 300,
     }),
 
-    publishForm: builder.mutation<PublishFormResponse, { formId: string; isPublished: boolean }>({
-      query: ({ formId, isPublished }) => ({
+    
+    // publishForm: builder.mutation<PublishFormResponse, { formId: string; isPublished: boolean }>({
+    //   query: ({ formId, isPublished }) => ({
+    //     url: `/forms/${formId}/publish`,
+    //     method: "POST",
+    //     body: { isPublished },
+    //   }),
+    //   invalidatesTags: (result, error, { formId }) => [
+    //     { type: "Form", id: formId },
+    //     { type: "Module" },
+    //     "OrgModules",
+    //   ],
+    // }),
+    publishForm: builder.mutation<
+      PublishFormResponse,
+      { formId: string; body?: { unpublish?: boolean } }
+    >({
+      query: ({ formId, body }) => ({
         url: `/forms/${formId}/publish`,
         method: "POST",
-        body: { isPublished },
+        body: body || {},
       }),
+      
+      async onQueryStarted({ formId, body }, { dispatch, queryFulfilled }) {
+        const isUnpublish = body?.unpublish === true
+
+        // 🔥 update ModuleById cache immediately
+        const patchModule = dispatch(
+          baseApi.util.updateQueryData("getModuleById", undefined, (draft: any) => {
+            if (!draft?.data?.forms) return
+            const form = draft.data.forms.find((f: any) => f.id === formId)
+            if (form) {
+              form.isPublished = !isUnpublish
+            }
+          })
+        )
+
+        // 🔥 update OrgModules cache immediately
+        const patchOrg = dispatch(
+          baseApi.util.updateQueryData("getOrgModules", undefined, (draft: any) => {
+            if (!draft?.data) return
+            for (const mod of draft.data) {
+              const form = mod.forms?.find((f: any) => f.id === formId)
+              if (form) {
+                form.isPublished = !isUnpublish
+                break
+              }
+            }
+          })
+        )
+
+        try {
+          await queryFulfilled
+        } catch {
+          patchModule.undo()
+          patchOrg.undo()
+        }
+      },
+
       invalidatesTags: (result, error, { formId }) => [
         { type: "Form", id: formId },
         { type: "Module" },
+        // { type: "Module", id: "LIST" },
         "OrgModules",
       ],
     }),
+
 
     // Create module
     createModule: builder.mutation<ApiResponse, {
