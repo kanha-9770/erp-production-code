@@ -324,6 +324,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         originalValue,
         fieldType: fieldDef.type,
         fieldLabel: fieldDef.label,
+        sectionId: fieldDef.sectionId,
       };
 
       // Nothing actually changed — skip save
@@ -341,7 +342,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         processedData: record.processedData.map((pd) =>
           pd.fieldId === fieldDef.id ||
             pd.fieldId === fieldDef.originalId ||
-            pd.fieldLabel === fieldDef.label
+            (pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId)
             ? { ...pd, value: pendingChange.value }
             : pd,
         ),
@@ -365,7 +366,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             (p) =>
               p.fieldId === formulaField.id ||
               p.fieldId === formulaField.originalId ||
-              p.fieldLabel === formulaField.label,
+              (p.fieldLabel === formulaField.label && p.sectionId === formulaField.sectionId),
           );
 
           if (!recalcPd) return;
@@ -374,7 +375,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             (p) =>
               p.fieldId === formulaField.id ||
               p.fieldId === formulaField.originalId ||
-              p.fieldLabel === formulaField.label,
+              (p.fieldLabel === formulaField.label && p.sectionId === formulaField.sectionId),
           );
 
           const oldValue = existingPd?.value ?? "";
@@ -389,6 +390,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             originalValue: oldValue,
             fieldType: "formula",
             fieldLabel: formulaField.label,
+            sectionId: formulaField.sectionId,
           });
         });
 
@@ -458,6 +460,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               originalValue,
               fieldType: fieldDef.type,
               fieldLabel: fieldDef.label,
+              sectionId: fieldDef.sectionId,
             });
 
             // ── REAL-TIME FORMULA CALCULATION ──
@@ -469,7 +472,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 if (
                   pd.fieldId === fieldDef.id ||
                   pd.fieldId === fieldDef.originalId ||
-                  pd.fieldLabel === fieldDef.label
+                  (pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId)
                 ) {
                   return { ...pd, value: finalValue };
                 }
@@ -479,7 +482,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   if (
                     pd.fieldId === change.fieldId ||
                     pd.fieldId === change.originalFieldId ||
-                    pd.fieldLabel === change.fieldLabel
+                    (pd.fieldLabel === change.fieldLabel && pd.sectionId === change.sectionId)
                   ) {
                     return { ...pd, value: change.value };
                   }
@@ -498,7 +501,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             updatedProcessedData.forEach((pd) => {
               if (pd.fieldType === "formula") {
                 const oldPd = currentRecord.processedData.find(
-                  (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
+                  (p) => p.fieldId === pd.fieldId || (p.fieldLabel === pd.fieldLabel && p.sectionId === pd.sectionId),
                 );
                 const oldValue = oldPd?.value ?? "";
                 // Add formula to pending changes if value changed OR if it's a new formula
@@ -509,13 +512,13 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       f.type === "formula" &&
                       (f.id === pd.fieldId ||
                         f.originalId === pd.fieldId ||
-                        f.label === pd.fieldLabel),
+                        (f.label === pd.fieldLabel && f.sectionId === pd.sectionId)),
                   );
 
-                  // Fallback: match by label if ID matching fails
+                  // Fallback: match by label + sectionId if ID matching fails
                   if (!formulaField && pd.fieldLabel) {
                     formulaField = enhancedFormFields.find(
-                      (f) => f.type === "formula" && f.label === pd.fieldLabel,
+                      (f) => f.type === "formula" && f.label === pd.fieldLabel && f.sectionId === pd.sectionId,
                     );
                   }
 
@@ -529,6 +532,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       originalValue: oldValue,
                       fieldType: "formula",
                       fieldLabel: pd.fieldLabel || formulaField.label,
+                      sectionId: formulaField.sectionId,
                     });
                   }
                 }
@@ -599,6 +603,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 originalValue,
                 fieldType: fieldDef.type,
                 fieldLabel: fieldDef.label,
+                sectionId: fieldDef.sectionId,
               };
 
               const newPending = new Map(pendingChanges);
@@ -664,6 +669,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             originalValue,
             fieldType: fieldDef.type,
             fieldLabel: fieldDef.label,
+            sectionId: fieldDef.sectionId,
           };
 
           const newPending = new Map(pendingChanges);
@@ -676,7 +682,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
               if (
                 pd.fieldId === fieldDef.id ||
                 pd.fieldId === fieldDef.originalId ||
-                pd.fieldLabel === fieldDef.label
+                (pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId)
               ) {
                 return { ...pd, value: newValue };
               }
@@ -685,7 +691,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 if (
                   pd.fieldId === chg.fieldId ||
                   pd.fieldId === chg.originalFieldId ||
-                  pd.fieldLabel === chg.fieldLabel
+                  (pd.fieldLabel === chg.fieldLabel && pd.sectionId === chg.sectionId)
                 ) {
                   return { ...pd, value: chg.value };
                 }
@@ -702,7 +708,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           updatedProcessedData.forEach((pd) => {
             if (pd.fieldType === "formula") {
               const oldPd = record.processedData.find(
-                (p) => p.fieldId === pd.fieldId || p.fieldLabel === pd.fieldLabel,
+                (p) => p.fieldId === pd.fieldId || (p.fieldLabel === pd.fieldLabel && p.sectionId === pd.sectionId),
               );
               const oldValue = oldPd?.value ?? "";
 
@@ -714,13 +720,13 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     f.type === "formula" &&
                     (f.id === pd.fieldId ||
                       f.originalId === pd.fieldId ||
-                      f.label === pd.fieldLabel),
+                      (f.label === pd.fieldLabel && f.sectionId === pd.sectionId)),
                 );
 
-                // Fallback: match by label if ID matching fails
+                // Fallback: match by label + sectionId if ID matching fails
                 if (!formulaField && pd.fieldLabel) {
                   formulaField = enhancedFormFields.find(
-                    (f) => f.type === "formula" && f.label === pd.fieldLabel,
+                    (f) => f.type === "formula" && f.label === pd.fieldLabel && f.sectionId === pd.sectionId,
                   );
                 }
 
@@ -734,6 +740,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     originalValue: oldValue,
                     fieldType: "formula",
                     fieldLabel: pd.fieldLabel || formulaField.label,
+                    sectionId: formulaField.sectionId,
                   });
                 }
               }

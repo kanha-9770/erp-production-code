@@ -138,8 +138,8 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
             formData.append("type", "camera");
 
             const result = await uploadFile(formData).unwrap();
-            console.log("[CameraCapture] Upload successful:", result.url);
-            onCapture(result.url!);
+            console.log("[CameraCapture] Upload successful:", result.imageUrl);
+            onCapture(result.imageUrl!);
           } catch (err) {
             console.error("[CameraCapture] Upload error:", err);
             setError("Failed to upload image. Please try again.");
@@ -169,8 +169,8 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
         formData.append("type", "gallery");
 
         const result = await uploadFile(formData).unwrap();
-        console.log("[CameraCapture] Upload successful:", result.url);
-        onCapture(result.url!);
+        console.log("[CameraCapture] Upload successful:", result.imageUrl);
+        onCapture(result.imageUrl!);
       } catch (err) {
         console.error("[CameraCapture] Upload error:", err);
         setError("Failed to upload image. Please try again.");

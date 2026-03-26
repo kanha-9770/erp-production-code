@@ -2,7 +2,7 @@ import { baseApi } from "./baseApi"
 
 interface UploadResponse {
   success: boolean
-  url?: string
+  imageUrl?: string
   error?: string
 }
 

@@ -641,7 +641,7 @@ export function useRecordsDisplay({
           const fd = fieldDef
             ? (getFieldData(record, fieldDef) ??
                record.processedData.find(
-                 (pd) => pd.fieldId === filter.fieldId || pd.fieldLabel === filter.fieldLabel,
+                 (pd) => pd.fieldId === filter.fieldId || (pd.fieldLabel === filter.fieldLabel && pd.sectionId === filter.sectionId),
                ))
             : undefined;
 
@@ -987,7 +987,7 @@ export function useRecordsDisplay({
           (pd) =>
             pd.fieldId === change.fieldId ||
             (change.originalFieldId && pd.fieldId === change.originalFieldId) ||
-            (change.fieldLabel && pd.fieldLabel === change.fieldLabel),
+            (change.fieldLabel && pd.fieldLabel === change.fieldLabel && pd.sectionId === change.sectionId),
         );
         if (pdIndex !== -1) {
           updatedProcessed[pdIndex] = {

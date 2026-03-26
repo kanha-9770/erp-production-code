@@ -76,6 +76,7 @@ export interface PendingChange {
   originalValue: any;
   fieldType: string;
   fieldLabel: string;
+  sectionId?: string;
 }
 
 export interface FieldFilter {
@@ -85,6 +86,7 @@ export interface FieldFilter {
   operator: string;
   value: any;
   value2?: any;
+  sectionId?: string;
 }
 
 export interface User {
