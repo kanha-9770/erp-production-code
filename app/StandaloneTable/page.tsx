@@ -412,6 +412,12 @@ const StandaloneTable: React.FC = () => {
       }
 
       if (!matchedField) {
+        // Prefer matching by label AND sectionId to avoid duplicate-label collisions
+        const sectionMatch = record.processedData.find(
+          (pd) => pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId,
+        )
+        if (sectionMatch) return sectionMatch
+
         const matchingFields = record.processedData.filter((pd) => pd.fieldLabel === fieldDef.label)
 
         if (matchingFields.length === 0) {

@@ -511,7 +511,10 @@ export function useRecordsDisplay({
   const getFieldData = React.useCallback(
     (record: EnhancedFormRecord, fieldDef: FormFieldWithSection): ProcessedFieldData | undefined =>
       record.processedData.find(
-        (pd) => pd.fieldId === fieldDef.id || pd.fieldId === fieldDef.originalId || pd.fieldLabel === fieldDef.label,
+        (pd) =>
+          pd.fieldId === fieldDef.id ||
+          pd.fieldId === fieldDef.originalId ||
+          (pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId),
       ),
     [pendingChanges, enhancedFormFields],
   );
