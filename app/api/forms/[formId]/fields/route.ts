@@ -35,6 +35,10 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
           visible: field.visible,
           readonly: field.readonly,
           decimalPlaces: field.decimalPlaces,
+          options: Array.isArray(field.options) ? field.options : [],
+          isDependent: field.isDependent ?? false,
+          dependentGroups: Array.isArray(field.dependentGroups) ? field.dependentGroups : [],
+          lookup: field.lookup ?? null,
           ...(field.type === "formula" &&
             field.formula && {
               formulaConfig: {

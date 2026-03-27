@@ -67,7 +67,7 @@ export class DatabaseTransforms {
     // Calculate total records count across all record tables
     let totalRecords = 0;
     if (form._count) {
-      totalRecords =
+      const shardedCount =
         (form._count.records1 || 0) +
         (form._count.records2 || 0) +
         (form._count.records3 || 0) +
@@ -83,6 +83,9 @@ export class DatabaseTransforms {
         (form._count.records13 || 0) +
         (form._count.records14 || 0) +
         (form._count.records15 || 0);
+      const unifiedCount = form._count.records || 0;
+      // Use whichever is higher — unified table has all records via dual-write
+      totalRecords = Math.max(shardedCount, unifiedCount);
     }
 
     return {

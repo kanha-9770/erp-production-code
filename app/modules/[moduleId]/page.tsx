@@ -203,14 +203,14 @@ export default function ModulePage() {
     })
 
     const totalViews = analytics.reduce((sum, a) => sum + a.views, 0)
-    const avgCompletion = totalViews > 0 
-      ? Math.round((totalSubmissions / totalViews) * 100) 
+    const avgCompletion = totalViews > 0
+      ? Math.round((totalSubmissions / totalViews) * 100)
       : 0
 
-    const topForm = analytics.length > 0 
-      ? mod.forms.find(f => f.id === analytics.reduce((prev, curr) => 
-          curr.conversionRate > prev.conversionRate ? curr : prev
-        ).formId) || null
+    const topForm = analytics.length > 0
+      ? mod.forms.find(f => f.id === analytics.reduce((prev, curr) =>
+        curr.conversionRate > prev.conversionRate ? curr : prev
+      ).formId) || null
       : null
 
     setFormAnalytics(analytics)
@@ -335,6 +335,7 @@ export default function ModulePage() {
       const result = await publishForm({
         formId: form.id,
         body,
+        moduleId: moduleId,
       }).unwrap()
 
       if (result.success) {
@@ -625,41 +626,8 @@ export default function ModulePage() {
               </Card>
             </div>
 
-            {/* Quick Actions & Recent Activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Zap className="h-4 w-4 text-yellow-500" />
-                    Quick Actions
-                  </CardTitle>
-                  <CardDescription>Common tasks for this module</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <Button
-                    className="w-full justify-start"
-                    variant="outline"
-                    onClick={() => setIsCreateDialogOpen(true)}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create New Form
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline">
-                    <FolderPlus className="mr-2 h-4 w-4" />
-                    Add Submodule
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Import Forms
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline">
-                    <Share2 className="mr-2 h-4 w-4" />
-                    Share Module
-                  </Button>
-                </CardContent>
-              </Card>
-
+            {/* Recent Activity */}
+            <div>
               {/* Recent Forms */}
               <Card>
                 <CardHeader>
@@ -687,7 +655,7 @@ export default function ModulePage() {
                           </div>
                           <div className="flex items-center gap-1">
                             {form.isPublished && (
-                              <Badge variant="default" className="text-xs h-4 w-full px-2">
+                              <Badge variant="default" className="text-xs h-4 w-full px-2 py-0,">
                                 <Globe className="h-2 w-2 mr-1" />
                                 Live
                               </Badge>
@@ -906,31 +874,7 @@ export default function ModulePage() {
                               </Badge>
                             )}
                           </div>
-                          {analytics && (
-                            <div className="text-right">
-                              <p className="text-xs text-gray-500">Conversion</p>
-                              <p className="text-sm font-medium">{analytics.conversionRate}%</p>
-                            </div>
-                          )}
                         </div>
-
-                        {/* Quick Stats */}
-                        {analytics && (
-                          <div className="grid grid-cols-3 gap-3 text-center">
-                            <div className="bg-blue-50 rounded-lg p-2">
-                              <p className="text-xs text-blue-600 font-medium">Views</p>
-                              <p className="text-sm font-bold text-blue-900">{analytics.views}</p>
-                            </div>
-                            <div className="bg-green-50 rounded-lg p-2">
-                              <p className="text-xs text-green-600 font-medium">Submissions</p>
-                              <p className="text-sm font-bold text-green-900">{analytics.submissions}</p>
-                            </div>
-                            <div className="bg-purple-50 rounded-lg p-2">
-                              <p className="text-xs text-purple-600 font-medium">Avg. Time</p>
-                              <p className="text-sm font-bold text-purple-900">{Math.floor(analytics.averageTime / 60)}m</p>
-                            </div>
-                          </div>
-                        )}
 
                         {/* Action Buttons */}
                         <div className="flex gap-2 pt-2">
@@ -983,16 +927,6 @@ export default function ModulePage() {
                               )}
                               <div className="flex items-center gap-4 text-xs text-gray-500">
                                 <span>Updated {formatTimeAgo(new Date(form.updatedAt))}</span>
-                                {analytics && (
-                                  <>
-                                    <span>•</span>
-                                    <span>{analytics.views} views</span>
-                                    <span>•</span>
-                                    <span>{analytics.submissions} submissions</span>
-                                    <span>•</span>
-                                    <span>{analytics.conversionRate}% conversion</span>
-                                  </>
-                                )}
                               </div>
                             </div>
                           </div>

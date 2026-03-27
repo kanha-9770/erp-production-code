@@ -136,6 +136,7 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  records: true,
                   records1: true,
                   records2: true,
                   records3: true,
@@ -237,6 +238,7 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  records: true,
                   records1: true,
                   records2: true,
                   records3: true,
@@ -299,6 +301,7 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  records: true,
                   records1: true,
                   records2: true,
                   records3: true,
@@ -368,6 +371,7 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  records: true,
                   records1: true,
                   records2: true,
                   records3: true,
@@ -490,6 +494,7 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              records: true,
               records1: true,
               records2: true,
               records3: true,
@@ -537,6 +542,7 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              records: true,
               records1: true,
               records2: true,
               records3: true,
@@ -692,6 +698,7 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              records: true,
               records1: true,
               records2: true,
               records3: true,

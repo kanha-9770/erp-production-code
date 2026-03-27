@@ -64,6 +64,36 @@ export function useOptimisticModules(organizationId: string | null) {
     [dispatch, organizationId]
   )
 
+  // Helper: find a form in the full module tree (including nested children)
+  const findFormInTree = (
+    mods: Module[],
+    formId: string
+  ): { mod: Module; form: Form; index: number } | null => {
+    for (const mod of mods) {
+      if (mod.forms) {
+        const idx = mod.forms.findIndex((f: Form) => f.id === formId)
+        if (idx >= 0) return { mod, form: mod.forms[idx], index: idx }
+      }
+      if (mod.children) {
+        const found = findFormInTree(mod.children, formId)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  // Helper: find a module in the full tree
+  const findModuleInTree = (mods: Module[], moduleId: string): Module | null => {
+    for (const mod of mods) {
+      if (mod.id === moduleId) return mod
+      if (mod.children) {
+        const found = findModuleInTree(mod.children, moduleId)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
   // ── Move form ──────────────────────────────────────────────────────────────
 
   const moveFormOptimistic = useCallback(
@@ -71,16 +101,13 @@ export function useOptimisticModules(organizationId: string | null) {
       let movedForm: Form | undefined
 
       const patch = patchModules((mods) => {
-        for (const mod of mods) {
-          const idx = mod.forms?.findIndex((f: Form) => f.id === formId) ?? -1
-          if (idx >= 0) {
-            movedForm = mod.forms![idx]
-            mod.forms!.splice(idx, 1)
-            break
-          }
+        const found = findFormInTree(mods, formId)
+        if (found) {
+          movedForm = found.form
+          found.mod.forms!.splice(found.index, 1)
         }
         if (movedForm && targetModuleId) {
-          const target = mods.find((m: Module) => m.id === targetModuleId)
+          const target = findModuleInTree(mods, targetModuleId)
           if (target) {
             if (!target.forms) target.forms = []
             target.forms.push(movedForm)
@@ -162,14 +189,9 @@ export function useOptimisticModules(organizationId: string | null) {
   const publishFormOptimistic = useCallback(
     async (formId: string, isPublished: boolean) => {
       const patch = patchModules((mods) => {
-        for (const mod of mods) {
-          if (mod.forms) {
-            const form = mod.forms.find((f: Form) => f.id === formId)
-            if (form) {
-              form.isPublished = !isPublished
-              break
-            }
-          }
+        const found = findFormInTree(mods, formId)
+        if (found) {
+          found.form.isPublished = !isPublished
         }
       })
 
@@ -189,10 +211,9 @@ export function useOptimisticModules(organizationId: string | null) {
   const deleteFormOptimistic = useCallback(
     async (formId: string) => {
       const patch = patchModules((mods) => {
-        for (const mod of mods) {
-          if (mod.forms) {
-            mod.forms = mod.forms.filter((f: Form) => f.id !== formId)
-          }
+        const found = findFormInTree(mods, formId)
+        if (found) {
+          found.mod.forms = found.mod.forms!.filter((f: Form) => f.id !== formId)
         }
       })
 
@@ -214,7 +235,7 @@ export function useOptimisticModules(organizationId: string | null) {
       const tempId = `temp-${Date.now()}`
 
       const patch = patchModules((mods) => {
-        const mod = mods.find((m: Module) => m.id === moduleId)
+        const mod = findModuleInTree(mods, moduleId)
         if (mod) {
           if (!mod.forms) mod.forms = []
           mod.forms.push({ id: tempId, name: formData.name, isPublished: false })
@@ -237,14 +258,9 @@ export function useOptimisticModules(organizationId: string | null) {
   const updateFormOptimistic = useCallback(
     async (formId: string, _moduleId: string, formData: { name: string; description: string }) => {
       const patch = patchModules((mods) => {
-        for (const mod of mods) {
-          if (mod.forms) {
-            const form = mod.forms.find((f: Form) => f.id === formId)
-            if (form) {
-              form.name = formData.name
-              break
-            }
-          }
+        const found = findFormInTree(mods, formId)
+        if (found) {
+          found.form.name = formData.name
         }
       })
 

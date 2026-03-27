@@ -97,7 +97,7 @@ export const modulesApi = baseApi.injectEndpoints({
     // }),
     publishForm: builder.mutation<
       PublishFormResponse,
-      { formId: string; body?: { unpublish?: boolean } }
+      { formId: string; body?: { unpublish?: boolean }; moduleId: string }
     >({
       query: ({ formId, body }) => ({
         url: `/forms/${formId}/publish`,
@@ -105,12 +105,12 @@ export const modulesApi = baseApi.injectEndpoints({
         body: body || {},
       }),
       
-      async onQueryStarted({ formId, body }, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ formId, body, moduleId }, { dispatch, queryFulfilled }) {
         const isUnpublish = body?.unpublish === true
 
         // 🔥 update ModuleById cache immediately
         const patchModule = dispatch(
-          baseApi.util.updateQueryData("getModuleById", undefined, (draft: any) => {
+          baseApi.util.updateQueryData("getModuleById", moduleId, (draft: any) => {
             if (!draft?.data?.forms) return
             const form = draft.data.forms.find((f: any) => f.id === formId)
             if (form) {

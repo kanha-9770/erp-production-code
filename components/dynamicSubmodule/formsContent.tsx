@@ -30,8 +30,10 @@ interface FormsContentProps {
 }
 
 const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, openFormDialog, canCreateForForm }) => {
-  const visible = forms.slice(0, 2)
-  const hasMore = forms.length > 2
+  const publishedForms = forms.filter(f => f.isPublished)
+
+  const visible = publishedForms.slice(0, 2)
+  const hasMore = publishedForms.length > 2
 
   const [userId, setUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -129,9 +131,13 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
     return { disabled: false };
   };
 
-  const handleFormClick = (formId: string) => {
-    ; (window as any).__currentUserId = userId
-    openFormDialog(formId)
+  const handleFormClick = (form: Form) => {
+    if (!form.isPublished) {
+      return
+    }
+
+    ;(window as any).__currentUserId = userId
+    openFormDialog(form.id)
   }
 
   const FormButton = (f: Form) => {
@@ -149,7 +155,7 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
         "
         onClick={(e) => {
           e.stopPropagation()
-          handleFormClick(f.id)
+          handleFormClick(f)
         }}
         disabled={disabled || loading || permissionDenied}
         title={permissionDenied ? "You don't have permission to submit this form" : title}
@@ -171,7 +177,7 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
 
   return (
     <div>
-      {forms.length > 0 ? (
+      {publishedForms.length > 0 ? (
         <div className="grid grid-cols-6 gap-2">
           {Array.from({ length: 6 - (visible.length + (hasMore ? 1 : 0)) }).map((_, i) => (
             <div key={`empty-${i}`} />
@@ -194,10 +200,10 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
 
                 <DialogContent className="sm:max-w-md">
                   <DialogHeader>
-                    <DialogTitle>All Forms</DialogTitle>
+                    <DialogTitle>All Published Forms Available</DialogTitle>
                   </DialogHeader>
                   <ScrollArea className="max-h-[60vh] pr-4">
-                    <div className="space-y-2 pt-2">{forms.map(FormButton)}</div>
+                    <div className="space-y-2 pt-2">{publishedForms.map(FormButton)}</div>
                   </ScrollArea>
                 </DialogContent>
               </Dialog>
@@ -205,7 +211,7 @@ const FormsContent: React.FC<FormsContentProps> = ({ forms, setSelectedForm, ope
           )}
         </div>
       ) : (
-        <div className="text-center py-4 text-gray-500">No forms available</div>
+        <div className="text-center py-4 text-gray-500">No published forms available</div>
       )}
     </div>
   )

@@ -190,6 +190,10 @@ export default function SubformComponent({
   const [localConditional, setLocalConditional] = useState<Subform["conditional"] | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Lookup field options (fetched dynamically when a lookup field is selected)
+  const [lookupOptions, setLookupOptions] = useState<{ label: string; value: string }[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+
   const { toast } = useToast();
 
   const [createField] = useCreateFieldMutation();
@@ -259,6 +263,36 @@ export default function SubformComponent({
       setHasChanges(false);
     }
   }, [showSubformSettings, subform.conditional]);
+
+  // Fetch lookup options when a lookup field is selected as the parent
+  useEffect(() => {
+    if (!localConditional?.parentFieldId || formFields.length === 0) return;
+    const parent = formFields.find((f: any) => f.id === localConditional.parentFieldId);
+    const lookupSourceId = parent?.lookup?.sourceId;
+    if (!lookupSourceId) {
+      setLookupOptions([]);
+      return;
+    }
+    const fetchLookup = async () => {
+      setLookupLoading(true);
+      try {
+        const res = await fetch(`/api/lookup/data?sourceId=${lookupSourceId}&limit=200`);
+        const json = await res.json();
+        const items = json.data ?? [];
+        setLookupOptions(
+          items.map((item: any) => ({
+            label: item.label || item.name || item.value || String(item.id),
+            value: item.value || item.label || String(item.id),
+          }))
+        );
+      } catch {
+        setLookupOptions([]);
+      } finally {
+        setLookupLoading(false);
+      }
+    };
+    fetchLookup();
+  }, [localConditional?.parentFieldId, formFields]);
 
   const addField = async (type: string) => {
     try {
@@ -591,53 +625,83 @@ export default function SubformComponent({
                   <Label>Trigger value</Label>
 
                   {(() => {
-                    const parent = formFields.find((f) => f.id === localConditional.parentFieldId);
-                    const options = parent?.options ?? [];
+                    const parent: any = formFields.find((f) => f.id === localConditional.parentFieldId);
+                    if (!parent) return null;
 
-                    console.log("[Subform Visibility] Rendering trigger value input", {
-                      parentId: localConditional.parentFieldId,
-                      parentLabel: parent?.label,
-                      hasOptions: options.length > 0,
-                      optionCount: options.length,
+                    // 1. Collect options from regular options array
+                    const rawOptions = parent.options;
+                    const staticOptions: { label: string; value: string }[] =
+                      Array.isArray(rawOptions)
+                        ? rawOptions
+                        : typeof rawOptions === "string"
+                          ? (() => { try { const p = JSON.parse(rawOptions); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                          : [];
+
+                    // 2. Collect options from dependent groups (flatten all groups)
+                    const rawGroups = parent.dependentGroups;
+                    const depGroups: any[] =
+                      Array.isArray(rawGroups)
+                        ? rawGroups
+                        : typeof rawGroups === "string"
+                          ? (() => { try { const p = JSON.parse(rawGroups); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                          : [];
+                    const dependentOptions: { label: string; value: string }[] = depGroups.flatMap(
+                      (g: any) => (g.options ?? []).map((opt: any) => ({ label: opt.label, value: opt.value || opt.label }))
+                    );
+
+                    // 3. For lookup fields, use dynamically fetched lookupOptions
+                    const isLookup = !!parent.lookup?.sourceId;
+
+                    // Merge all option sources (deduplicate by value)
+                    const allOptions = [...staticOptions, ...dependentOptions, ...(isLookup ? lookupOptions : [])];
+                    const seen = new Set<string>();
+                    const options = allOptions.filter((opt) => {
+                      const key = opt.value || opt.label;
+                      if (seen.has(key)) return false;
+                      seen.add(key);
+                      return true;
                     });
 
-                    if (options.length > 0) {
+                    // Show loading for lookup fields
+                    if (isLookup && lookupLoading) {
                       return (
-                        <Select
-                          value={localConditional.value || ""}
-                          onValueChange={(val) => {
-                            console.log("[Subform Visibility] Trigger value (dropdown) selected →", val);
-                            setLocalConditional((prev) => ({ ...prev!, value: val }));
-                            setHasChanges(true);
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Choose value that triggers the action" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.map((opt) => (
-                              <SelectItem key={opt.value || opt.label} value={opt.value || opt.label}>
-                                {opt.label}
-                                {opt.value && opt.value !== opt.label && (
-                                  <span className="text-xs text-muted-foreground ml-1">({opt.value})</span>
-                                )}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2 py-3">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                          <span className="text-sm text-muted-foreground">Loading lookup options...</span>
+                        </div>
+                      );
+                    }
+
+                    if (options.length === 0) {
+                      return (
+                        <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded">
+                          The selected field has no options. Please choose a field that has predefined options (e.g. dropdown, radio, checkbox, lookup).
+                        </div>
                       );
                     }
 
                     return (
-                      <Input
+                      <Select
                         value={localConditional.value || ""}
-                        onChange={(e) => {
-                          console.log("[Subform Visibility] Trigger value (free text) changed →", e.target.value);
-                          setLocalConditional((prev) => ({ ...prev!, value: e.target.value }));
+                        onValueChange={(val) => {
+                          setLocalConditional((prev) => ({ ...prev!, value: val }));
                           setHasChanges(true);
                         }}
-                        placeholder="e.g. Yes, Active, 1, Rajasthan, true"
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose value that triggers the action" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {options.map((opt) => (
+                            <SelectItem key={opt.value || opt.label} value={opt.value || opt.label}>
+                              {opt.label}
+                              {opt.value && opt.value !== opt.label && (
+                                <span className="text-xs text-muted-foreground ml-1">({opt.value})</span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     );
                   })()}
 

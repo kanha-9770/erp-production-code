@@ -1104,59 +1104,63 @@ export default function ModuleDashboard() {
           <DialogHeader>
             <DialogTitle>Create Module</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={moduleData.name}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, name: e.target.value }))
-                }
-                placeholder="Module name"
-              />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCreateModule();
+            }}
+          >
+            <div className="space-y-4 py-4">
+              <div>
+                <Label>Name</Label>
+                <Input
+                  value={moduleData.name}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, name: e.target.value }))
+                  }
+                  placeholder="Module name"
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={moduleData.description}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, description: e.target.value }))
+                  }
+                  placeholder="Optional description"
+                />
+              </div>
+              <div>
+                <Label>Parent</Label>
+                <select
+                  className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={moduleData.parentId}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, parentId: e.target.value }))
+                  }
+                >
+                  <option value="">Top level</option>
+                  {availableParents.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {"  ".repeat(p.level)} {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={moduleData.description}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, description: e.target.value }))
-                }
-                placeholder="Optional description"
-              />
-            </div>
-            <div>
-              <Label>Parent</Label>
-              <select
-                className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={moduleData.parentId}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, parentId: e.target.value }))
-                }
-              >
-                <option value="">Top level</option>
-                {availableParents.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {"  ".repeat(p.level)} {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleCreateModule} disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1166,7 +1170,13 @@ export default function ModuleDashboard() {
           <DialogHeader>
             <DialogTitle>Edit Module</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleEditModule();
+            }}
+          >
+            <div className="space-y-4 py-4">
             <div>
               <Label>Name</Label>
               <Input
@@ -1204,21 +1214,19 @@ export default function ModuleDashboard() {
                   ))}
               </select>
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsEditDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleEditModule} disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Save
-            </Button>
-          </DialogFooter>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1234,7 +1242,13 @@ export default function ModuleDashboard() {
               Under: {parentModuleForSubmodule?.name}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCreateModule();
+            }}
+          >
+            <div className="space-y-4 py-4">
             <div>
               <Label>Name</Label>
               <Input
@@ -1253,21 +1267,19 @@ export default function ModuleDashboard() {
                 }
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsSubmoduleDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleCreateModule} disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create
-            </Button>
-          </DialogFooter>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsSubmoduleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1280,7 +1292,13 @@ export default function ModuleDashboard() {
           <DialogHeader>
             <DialogTitle>New Form</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCreateForm();
+            }}
+          >
+            <div className="space-y-4 py-4">
             <div>
               <Label>Name</Label>
               <Input
@@ -1299,21 +1317,19 @@ export default function ModuleDashboard() {
                 }
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsCreateFormDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleCreateForm} disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create Form
-            </Button>
-          </DialogFooter>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsCreateFormDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Create Form
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1326,7 +1342,13 @@ export default function ModuleDashboard() {
           <DialogHeader>
             <DialogTitle>Edit Form</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleEditForm();
+            }}
+          >
+            <div className="space-y-4 py-4">
             <div>
               <Label>Name</Label>
               <Input
@@ -1345,21 +1367,19 @@ export default function ModuleDashboard() {
                 }
               />
             </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsEditFormDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleEditForm} disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Save Changes
-            </Button>
-          </DialogFooter>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsEditFormDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -1409,17 +1429,21 @@ export default function ModuleDashboard() {
               )}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsConfirmDeleteOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
-              Yes, Delete
-            </Button>
-          </DialogFooter>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleConfirmDelete();
+            }}
+          >
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => setIsConfirmDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" type="submit">
+                Yes, Delete
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
