@@ -650,32 +650,39 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
             </div>
           </div>
 
-          <DialogFooter className="mt-5 sm:mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4 border-t border-slate-200">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-              disabled={isSubmitting}
-              className="h-9 sm:h-10 px-4 sm:px-5 text-sm"
-            >
-              Cancel
-            </Button>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCreateModule();
+            }}
+          >
+            <DialogFooter className="mt-5 sm:mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4 border-t border-slate-200">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsCreateDialogOpen(false)}
+                disabled={isSubmitting}
+                className="h-9 sm:h-10 px-4 sm:px-5 text-sm"
+              >
+                Cancel
+              </Button>
 
-            <Button
-              onClick={handleCreateModule}
-              disabled={isSubmitting || !moduleData.name.trim()}
-              className={cn(
-                "h-9 sm:h-10 px-4 sm:px-6 text-sm font-medium",
-                "bg-indigo-600 hover:bg-indigo-700",
-                "shadow-sm hover:shadow transition-all",
-              )}
-            >
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create
-            </Button>
-          </DialogFooter>
+              <Button
+                type="submit"
+                disabled={isSubmitting || !moduleData.name.trim()}
+                className={cn(
+                  "h-9 sm:h-10 px-4 sm:px-6 text-sm font-medium",
+                  "bg-indigo-600 hover:bg-indigo-700",
+                  "shadow-sm hover:shadow transition-all",
+                )}
+              >
+                {isSubmitting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

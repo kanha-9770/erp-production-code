@@ -390,30 +390,38 @@ export default function ModuleDashboard() {
       setSelectedForm(null);
     }
 
-    const moduleToDelete = findModuleById(id, modules);
-    if (moduleToDelete) {
-      const allForms = collectFormsRecursive(moduleToDelete);
-      if (allForms.length > 0) {
-        try {
-          await Promise.all(
-            allForms.map((form) =>
-              deleteFormOptimistic(form.id).catch((err) => {
-                console.error(`Failed to delete form ${form.id}`, err);
-                return null;
-              }),
-            ),
-          );
-        } catch (err) {
-          console.error("Some form deletions failed", err);
+    // Recursively delete a module: first its forms, then children (bottom-up), then itself
+    const deleteModuleRecursive = async (moduleId: string) => {
+      const mod = findModuleById(moduleId, modules);
+      if (!mod) return;
+
+      // Delete all forms in this module
+      if (mod.forms?.length) {
+        await Promise.all(
+          mod.forms.map((form) =>
+            deleteFormOptimistic(form.id).catch((err) => {
+              console.error(`Failed to delete form ${form.id}`, err);
+            }),
+          ),
+        );
+      }
+
+      // Recursively delete child modules first (bottom-up)
+      if (mod.children?.length) {
+        for (const child of mod.children) {
+          await deleteModuleRecursive(child.id);
         }
       }
-    }
+
+      // Now delete this module itself
+      await deleteModuleOptimistic(moduleId);
+    };
 
     try {
-      await deleteModuleOptimistic(id);
+      await deleteModuleRecursive(id);
       toast({
         title: "Success",
-        description: "Module and all its forms deleted",
+        description: "Module and all its contents deleted",
       });
     } catch (err: any) {
       toast({
@@ -1439,7 +1447,7 @@ export default function ModuleDashboard() {
               <Button variant="outline" type="button" onClick={() => setIsConfirmDeleteOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="destructive" type="submit">
+              <Button variant="destructive" type="submit" autoFocus>
                 Yes, Delete
               </Button>
             </DialogFooter>
