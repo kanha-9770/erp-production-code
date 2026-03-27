@@ -563,6 +563,17 @@ export default function ModuleDashboard() {
 
     try {
       await publishFormOptimistic(form.id, form.isPublished);
+
+      // Immediately update selectedModule to reflect the new publish status
+      if (selectedModule) {
+        setSelectedModule({
+          ...selectedModule,
+          forms: (selectedModule.forms || []).map((f) =>
+            f.id === form.id ? { ...f, isPublished: !form.isPublished } : f,
+          ),
+        });
+      }
+
       toast({
         title: "Success",
         description: `Form ${form.isPublished ? "unpublished" : "published"}`,
@@ -1091,9 +1102,240 @@ export default function ModuleDashboard() {
                       </tbody>
                     </table>
                   </div>
+                ) : viewMode === "grid" ? (
+                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {selectedModule.forms.map((form) => (
+                      <div
+                        key={form.id}
+                        className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white flex flex-col"
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                            <span className="font-medium text-gray-900 truncate">
+                              {form.name}
+                            </span>
+                          </div>
+                          {form.isPublished ? (
+                            <Badge className="bg-green-100 text-green-800 hover:bg-green-100 text-xs flex-shrink-0">
+                              Published
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs flex-shrink-0">
+                              Draft
+                            </Badge>
+                          )}
+                        </div>
+
+                        <p className="text-sm text-gray-500 line-clamp-2 mb-3 flex-1">
+                          {form.description || "No description"}
+                        </p>
+
+                        <p className="text-xs text-gray-400 mb-3">
+                          Updated {new Date(form.updatedAt).toLocaleDateString()}
+                        </p>
+
+                        <div className="flex items-center gap-0.5 border-t pt-3 flex-wrap">
+                          {can("read", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="View / Fill"
+                              onClick={() => setViewFormId(form.id)}
+                            >
+                              <Eye className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {can("update", selectedModule.id, form.id) && (
+                            <Button
+                              asChild
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Edit Builder"
+                            >
+                              <NextLink href={`/builder/${form.id}`}>
+                                <Edit className="h-4 w-4 text-blue-600" />
+                              </NextLink>
+                            </Button>
+                          )}
+                          {form.isPublished &&
+                            can("read", selectedModule.id, form.id) && (
+                              <Button
+                                asChild
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Open Published Form"
+                              >
+                                <NextLink
+                                  href={`/form/${form.id}`}
+                                  target="_blank"
+                                >
+                                  <ExternalLink className="h-4 w-4 text-green-600" />
+                                </NextLink>
+                              </Button>
+                            )}
+                          {can("publish", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handlePublishForm(form)}
+                              title={form.isPublished ? "Unpublish" : "Publish"}
+                            >
+                              <Globe className="h-4 w-4 text-purple-600" />
+                            </Button>
+                          )}
+                          {can("update", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => openEditForm(form)}
+                              title="Edit Details"
+                            >
+                              <Settings className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {can("delete", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() =>
+                                openDeleteConfirmation(
+                                  "form",
+                                  form.id,
+                                  form.name,
+                                  form.moduleId,
+                                )
+                              }
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
-                  <div className="p-6 text-center text-gray-500">
-                    Grid / List view coming soon...
+                  <div className="divide-y divide-gray-200">
+                    {selectedModule.forms.map((form) => (
+                      <div
+                        key={form.id}
+                        className="flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-gray-50 transition-colors"
+                      >
+                        <FileText className="h-5 w-5 text-blue-500 flex-shrink-0" />
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900 text-sm truncate">
+                              {form.name}
+                            </span>
+                            {form.isPublished ? (
+                              <Badge className="bg-green-100 text-green-800 hover:bg-green-100 text-xs">
+                                Published
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-xs">
+                                Draft
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 truncate mt-0.5">
+                            {form.description || "No description"} &middot; Updated{" "}
+                            {new Date(form.updatedAt).toLocaleDateString()}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          {can("read", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="View / Fill"
+                              onClick={() => setViewFormId(form.id)}
+                            >
+                              <Eye className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {can("update", selectedModule.id, form.id) && (
+                            <Button
+                              asChild
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Edit Builder"
+                            >
+                              <NextLink href={`/builder/${form.id}`}>
+                                <Edit className="h-4 w-4 text-blue-600" />
+                              </NextLink>
+                            </Button>
+                          )}
+                          {form.isPublished &&
+                            can("read", selectedModule.id, form.id) && (
+                              <Button
+                                asChild
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Open Published Form"
+                              >
+                                <NextLink
+                                  href={`/form/${form.id}`}
+                                  target="_blank"
+                                >
+                                  <ExternalLink className="h-4 w-4 text-green-600" />
+                                </NextLink>
+                              </Button>
+                            )}
+                          {can("publish", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handlePublishForm(form)}
+                              title={form.isPublished ? "Unpublish" : "Publish"}
+                            >
+                              <Globe className="h-4 w-4 text-purple-600" />
+                            </Button>
+                          )}
+                          {can("update", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => openEditForm(form)}
+                              title="Edit Details"
+                            >
+                              <Settings className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                          {can("delete", selectedModule.id, form.id) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() =>
+                                openDeleteConfirmation(
+                                  "form",
+                                  form.id,
+                                  form.name,
+                                  form.moduleId,
+                                )
+                              }
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1185,43 +1427,43 @@ export default function ModuleDashboard() {
             }}
           >
             <div className="space-y-4 py-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={moduleData.name}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, name: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={moduleData.description}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, description: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Parent</Label>
-              <select
-                className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={moduleData.parentId}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, parentId: e.target.value }))
-                }
-              >
-                <option value="">Top level</option>
-                {availableParents
-                  .filter((p) => p.id !== editingModule?.id)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {"  ".repeat(p.level)} {p.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
+              <div>
+                <Label>Name</Label>
+                <Input
+                  value={moduleData.name}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={moduleData.description}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, description: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <Label>Parent</Label>
+                <select
+                  className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={moduleData.parentId}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, parentId: e.target.value }))
+                  }
+                >
+                  <option value="">Top level</option>
+                  {availableParents
+                    .filter((p) => p.id !== editingModule?.id)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {"  ".repeat(p.level)} {p.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setIsEditDialogOpen(false)}>
@@ -1257,24 +1499,24 @@ export default function ModuleDashboard() {
             }}
           >
             <div className="space-y-4 py-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={moduleData.name}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, name: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={moduleData.description}
-                onChange={(e) =>
-                  setModuleData((s) => ({ ...s, description: e.target.value }))
-                }
-              />
-            </div>
+              <div>
+                <Label>Name</Label>
+                <Input
+                  value={moduleData.name}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={moduleData.description}
+                  onChange={(e) =>
+                    setModuleData((s) => ({ ...s, description: e.target.value }))
+                  }
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setIsSubmoduleDialogOpen(false)}>
@@ -1307,24 +1549,24 @@ export default function ModuleDashboard() {
             }}
           >
             <div className="space-y-4 py-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData((s) => ({ ...s, name: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData((s) => ({ ...s, description: e.target.value }))
-                }
-              />
-            </div>
+              <div>
+                <Label>Name</Label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData((s) => ({ ...s, description: e.target.value }))
+                  }
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setIsCreateFormDialogOpen(false)}>
@@ -1357,24 +1599,24 @@ export default function ModuleDashboard() {
             }}
           >
             <div className="space-y-4 py-4">
-            <div>
-              <Label>Name</Label>
-              <Input
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData((s) => ({ ...s, name: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData((s) => ({ ...s, description: e.target.value }))
-                }
-              />
-            </div>
+              <div>
+                <Label>Name</Label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData((s) => ({ ...s, name: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData((s) => ({ ...s, description: e.target.value }))
+                  }
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setIsEditFormDialogOpen(false)}>
