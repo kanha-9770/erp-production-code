@@ -297,8 +297,8 @@ export default function SectionComponent({
   };
 
   const duplicateField = async (original: FormField) => {
+    const tempId = `temp_${uuidv4()}`;
     try {
-      const tempId = `temp_${uuidv4()}`;
       const newLabel = `${original.label} (copy)`;
 
       const maxOrder = Math.max(...section.fields.map((f) => f.order ?? 0), -1);
@@ -313,8 +313,11 @@ export default function SectionComponent({
         updatedAt: new Date(),
       };
 
+      // Snapshot the fields BEFORE adding the optimistic entry
+      const fieldsBeforeDuplicate = [...section.fields];
+
       onUpdateSection({
-        fields: [...section.fields, duplicated],
+        fields: [...fieldsBeforeDuplicate, duplicated],
       });
 
       const res = await createFieldMutation({
@@ -338,13 +341,17 @@ export default function SectionComponent({
         rollup: original.rollup,
       }).unwrap();
 
+      // Use the snapshot + duplicated with real ID to avoid stale closure
+      const realId = res.data?.id ?? tempId;
       onUpdateSection({
-        fields: section.fields.map((f) =>
-          f.id === tempId ? { ...f, id: res.data?.id ?? f.id } : f,
-        ),
+        fields: [...fieldsBeforeDuplicate, { ...duplicated, id: realId }],
       });
       toast({ title: "Success", description: `Duplicated: ${newLabel}` });
     } catch (error: any) {
+      // Rollback: remove the optimistic temp field on failure
+      onUpdateSection({
+        fields: section.fields.filter((f) => f.id !== tempId),
+      });
       toast({
         variant: "destructive",
         title: "Error",
