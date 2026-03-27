@@ -981,7 +981,8 @@ export function useRecordsDisplay({
       const updatedProcessed = [...enhanced.processedData];
 
       pendingChanges.forEach((change, changeKey) => {
-        if (!changeKey.startsWith(`${record.id}-`)) return;
+        // Match by key prefix (normal records) OR by change.recordId (merged records)
+        if (!changeKey.startsWith(`${record.id}-`) && change.recordId !== record.id) return;
         hasPending = true;
         const pdIndex = updatedProcessed.findIndex(
           (pd) =>
@@ -1009,10 +1010,68 @@ export function useRecordsDisplay({
     });
   }, [formRecords, pendingChanges, enhancedFormFields, formulaDependencies, recalculateFormulasForRecord]);
 
-  const baseRecords = useMemo(
-    () => isMergedMode ? populatedRecordsWithPending : populatedRecordsWithPending.filter((r) => r.formId === activeTab),
-    [isMergedMode, populatedRecordsWithPending, activeTab],
-  );
+  const baseRecords = useMemo(() => {
+    if (!isMergedMode) {
+      return populatedRecordsWithPending.filter((r) => r.formId === activeTab);
+    }
+
+    // ── Merged mode: combine records from different forms by row index ──
+    // Group records by formId, preserving their order within each form
+    const formGroups = new Map<string, EnhancedFormRecord[]>();
+    populatedRecordsWithPending.forEach((record) => {
+      const group = formGroups.get(record.formId) || [];
+      group.push(record);
+      formGroups.set(record.formId, group);
+    });
+
+    const formIds = Array.from(formGroups.keys());
+    if (formIds.length <= 1) {
+      // Only one form (or none) — no merging needed
+      return populatedRecordsWithPending;
+    }
+
+    // Find max row count across all forms
+    const maxRows = Math.max(...Array.from(formGroups.values()).map((g) => g.length));
+
+    // Build merged records by pairing rows at the same index
+    const mergedRecords: EnhancedFormRecord[] = [];
+    for (let rowIdx = 0; rowIdx < maxRows; rowIdx++) {
+      // Use the first form's record at this index as the base (if it exists)
+      let baseRecord: EnhancedFormRecord | null = null;
+      const combinedProcessedData: ProcessedFieldData[] = [];
+      const originalIds = new Map<string, string>();
+
+      for (const formId of formIds) {
+        const formRecs = formGroups.get(formId)!;
+        const rec = formRecs[rowIdx];
+        if (!rec) continue;
+
+        // Track original record ids for each form
+        originalIds.set(formId, rec.id);
+
+        // Pick the first available record as the base
+        if (!baseRecord) {
+          baseRecord = rec;
+        }
+
+        // Add all processedData from this form's record
+        combinedProcessedData.push(...rec.processedData);
+      }
+
+      if (!baseRecord) continue;
+
+      mergedRecords.push({
+        ...baseRecord,
+        id: `merged__${rowIdx}__${formIds.map((fid) => formGroups.get(fid)?.[rowIdx]?.id || "empty").join("__")}`,
+        formId: "merged",
+        formName: "Merged",
+        processedData: combinedProcessedData,
+        originalRecordIds: originalIds,
+      });
+    }
+
+    return mergedRecords;
+  }, [isMergedMode, populatedRecordsWithPending, activeTab]);
 
   // ── Ordered fields update ─────────────────────────────────────────────────────
 

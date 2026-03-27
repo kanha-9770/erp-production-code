@@ -635,8 +635,25 @@ export default function ModulePage({
   };
 
   const handleBulkDeleteRecords = async (recordIds: string[]) => {
-    // 1. Optimistically remove ALL records at once
-    const idsSet = new Set(recordIds);
+    // 1. Resolve merged IDs to original record IDs
+    const resolvedOriginalIds = new Set<string>();
+
+    for (const id of recordIds) {
+      if (id.startsWith("merged__")) {
+        // Parse original record IDs from the merged ID parts
+        // merged__{rowIdx}__{id1}__{id2}__...
+        const parts = id.split("__").slice(2); // skip "merged" and rowIdx
+        parts.forEach((origId) => {
+          if (origId !== "empty") {
+            resolvedOriginalIds.add(origId);
+          }
+        });
+      } else {
+        resolvedOriginalIds.add(id);
+      }
+    }
+
+    const idsSet = resolvedOriginalIds;
     const recordsToDelete = formRecords.filter((r) => idsSet.has(r.id));
     setFormRecords((prev) => prev.filter((r) => !idsSet.has(r.id)));
 
