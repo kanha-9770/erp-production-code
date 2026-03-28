@@ -167,37 +167,104 @@ export default function ImportPage() {
     })
   }
 
+  const steps: { key: ImportStep; label: string }[] = [
+    { key: "select", label: "Select" },
+    { key: "upload", label: "Upload" },
+    { key: "map", label: "Map" },
+    { key: "result", label: "Done" },
+  ]
+
+  const currentStepIndex = steps.findIndex((s) => s.key === step)
+
   return (
     <div className="min-h-screen bg-background">
+      {/* ─── MOBILE-RESPONSIVE HEADER ─── */}
       <div className="border-b bg-white">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4 relative">
+          {/* Row 1: Back button + icon + title + desktop step indicator */}
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link href="/">
-              <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 shrink-0">
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
             </Link>
-            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-              <Upload className="w-5 h-5 text-blue-600" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+              <Upload className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold">Import Data</h1>
-              <p className="text-xs text-muted-foreground">Import records from CSV or Excel files</p>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-bold leading-tight">Import Data</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight hidden sm:block">
+                Import records from CSV or Excel files
+              </p>
             </div>
-            {/* Step indicator */}
-            <div className="ml-auto flex items-center gap-1 text-xs">
-              {(["select", "upload", "map", "result"] as ImportStep[]).map((s, i) => (
-                <div key={s} className="flex items-center gap-1">
+
+            {/* Desktop step indicator (hidden on mobile) */}
+            <div className="ml-auto hidden sm:flex items-center gap-1 text-xs">
+              {steps.map((s, i) => (
+                <div key={s.key} className="flex items-center gap-1 shrink-0">
                   {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
-                  <Badge variant={step === s ? "default" : "secondary"} className="text-[10px] px-2 py-0">
-                    {s === "select" ? "Select" : s === "upload" ? "Upload" : s === "map" ? "Map" : "Done"}
+                  <Badge variant={step === s.key ? "default" : "secondary"} className="text-[10px] px-2 py-0 whitespace-nowrap">
+                    {s.label}
                   </Badge>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* Mobile step progress bar (hidden on desktop) */}
+          <div className="flex items-start justify-between mt-4 px-2 sm:hidden">
+            {steps.map((s, i) => {
+              const isCompleted = i < currentStepIndex
+              const isActive = s.key === step
+              return (
+                <div key={s.key} className="flex flex-1 items-start">
+                  {/* Step circle + label */}
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`
+                        w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold
+                        transition-all duration-300 shrink-0
+                        ${isCompleted
+                          ? "bg-blue-600 text-white"
+                          : isActive
+                            ? "bg-blue-600 text-white ring-4 ring-blue-100"
+                            : "bg-gray-100 text-gray-400 border border-gray-200"
+                        }
+                      `}
+                    >
+                      {isCompleted ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                    </div>
+                    <span
+                      className={`
+                        text-[10px] mt-1 font-medium whitespace-nowrap
+                        ${isActive ? "text-blue-600" : isCompleted ? "text-gray-700" : "text-gray-400"}
+                      `}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
+
+                  {/* Connecting line (not after the last step) */}
+                  {i < steps.length - 1 && (
+                    <div className="flex-1 mt-3.5 mx-1">
+                      <div className="h-[2px] w-full rounded-full bg-gray-200 relative">
+                        <div
+                          className={`
+                            absolute inset-y-0 left-0 rounded-full transition-all duration-500
+                            ${i < currentStepIndex ? "w-full bg-blue-600" : "w-0 bg-blue-600"}
+                          `}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      <div className="container mx-auto px-6 py-6 max-w-4xl space-y-5">
+      <div className="container mx-auto px-4 sm:px-6 py-4 sm:py-6 max-w-4xl space-y-5">
         {/* Step 1: Select Module & Form */}
         {step === "select" && (
           <Card>
@@ -264,7 +331,7 @@ export default function ImportPage() {
         {step === "map" && uploadedFile && (
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <CardTitle className="text-base">Map Columns to Fields</CardTitle>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="text-xs">
@@ -277,7 +344,8 @@ export default function ImportPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="border rounded-lg overflow-hidden">
+              {/* Desktop table view */}
+              <div className="border rounded-lg overflow-hidden hidden sm:block">
                 <Table>
                   <TableHeader className="bg-muted/50">
                     <TableRow>
@@ -318,12 +386,48 @@ export default function ImportPage() {
                 </Table>
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              {/* Mobile card view for mapping */}
+              <div className="space-y-3 sm:hidden">
+                {uploadedFile.preview.headers.map((header, idx) => {
+                  const sampleValues = uploadedFile.preview.rows.slice(0, 3).map((r) => r[idx]).filter(Boolean)
+                  const currentTarget = getMappingForColumn(header)
+                  return (
+                    <div key={header} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium">{header}</span>
+                        {currentTarget && currentTarget !== "__none__" && (
+                          <Check className="h-3.5 w-3.5 text-green-600" />
+                        )}
+                      </div>
+                      {sampleValues[0] && (
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          Sample: {sampleValues[0]}
+                        </p>
+                      )}
+                      <Select value={currentTarget || "__none__"} onValueChange={(v) => updateMapping(header, v)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Skip" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— Skip —</SelectItem>
+                          {formFields.map((f: any) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              {f.label} <span className="text-muted-foreground">({f.type})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
                 <Button variant="outline" size="sm" onClick={() => setStep("upload")}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Back
                 </Button>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                  <span className="text-xs text-muted-foreground text-center sm:text-left">
                     {uploadedFile.preview.totalRows} rows to import
                   </span>
                   <Button

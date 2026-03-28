@@ -35,6 +35,8 @@ export const baseApi = createApi({
     "Permissions",
     "RolePermissions",
     "UserPermissions",
+    "SectionRolePermissions",
+    "FormSections",
     // Organization
     "OrgRoles",
     "OrgUnits",

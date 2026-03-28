@@ -129,7 +129,7 @@ export function usePublicForm({
   const formulaValuesRef = useRef<Record<string, any>>({});
   const [userRoleId, setUserRoleId] = useState<string | null>(null);
   const [sectionPermissions, setSectionPermissions] = useState<
-    Record<string, string>
+    Record<string, string[]>
   >({});
   const [fieldPermissions, setFieldPermissions] = useState<
     Record<string, string>
@@ -297,8 +297,9 @@ export function usePublicForm({
 
   const isSectionVisible = useCallback(
     (id: string): boolean => {
-      const permId = sectionPermissions[id];
-      if (permId !== undefined && permId === "NONE") return false;
+      const perms = sectionPermissions[id];
+      // Hidden if permissions are explicitly set to ["NONE"] or empty
+      if (perms !== undefined && perms.length === 1 && perms[0] === "NONE") return false;
 
       if (form) {
         const checkSubforms = (subforms: Subform[]): boolean | null => {
@@ -320,6 +321,21 @@ export function usePublicForm({
       return true;
     },
     [sectionPermissions, form, evaluateSubformConditional],
+  );
+
+  const isSectionReadOnly = useCallback(
+    (id: string): boolean => {
+      const perms = sectionPermissions[id];
+      if (!perms || perms.length === 0) return false; // No restrictions
+      // Read-only if only VIEW is granted (no CREATE, EDIT, or DELETE)
+      return (
+        perms.includes("VIEW") &&
+        !perms.includes("CREATE") &&
+        !perms.includes("EDIT") &&
+        !perms.includes("DELETE")
+      );
+    },
+    [sectionPermissions],
   );
 
   const getParentValueMemo = useCallback(
@@ -366,8 +382,12 @@ export function usePublicForm({
 
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
     const fieldPermId = fieldPermissions[field.id];
-    const effectivePermId = fieldPermId ?? sectionPermissions[sectionId];
-    if (effectivePermId === "NONE") return false;
+    // Field-level override is a string; section-level is now string[]
+    if (fieldPermId === "NONE") return false;
+    if (!fieldPermId) {
+      const sectionPerms = sectionPermissions[sectionId];
+      if (sectionPerms && sectionPerms.length === 1 && sectionPerms[0] === "NONE") return false;
+    }
     if (field.type === "formula") {
       const config = field.properties?.formulaConfig as
         | FormulaConfig
@@ -870,7 +890,7 @@ export function usePublicForm({
         await fetchSectionPermissions(result.data);
       } else {
         const defaultSectionPerms = result.data.sections.reduce(
-          (acc: Record<string, string>, s: any) => ({ ...acc, [s.id]: "READ" }),
+          (acc: Record<string, string[]>, s: any) => ({ ...acc, [s.id]: ["VIEW", "CREATE", "EDIT", "DELETE"] }),
           {},
         );
         setSectionPermissions(defaultSectionPerms);
@@ -900,7 +920,7 @@ export function usePublicForm({
 
   const fetchSectionPermissions = async (formData: Form) => {
     let avails: any[] = availablePermissions;
-    const sectionPerms: Record<string, string> = {};
+    const sectionPerms: Record<string, string[]> = {};
     const allFieldPerms: Record<string, string> = {};
     const allIds = getAllPermissionableIds(formData);
     await Promise.all(
@@ -908,24 +928,29 @@ export function usePublicForm({
         try {
           const res = await fetch(`/api/permissions/sections/${id}`);
           if (!res.ok) {
-            sectionPerms[id] = "READ";
+            sectionPerms[id] = ["VIEW"];
             return;
           }
           const data = await res.json();
           if (data.error) {
-            sectionPerms[id] = "VIEW";
+            sectionPerms[id] = ["VIEW"];
             return;
           }
           if (data.availablePermissions && avails.length === 0) {
             avails = data.availablePermissions;
           }
           const profile = data.profiles.find((p: any) => p.id === userRoleId);
-          const sectionPermId = profile?.permission || "READ";
+          // Use the new `permissions` array if available, fall back to legacy single `permission`
+          const permNames: string[] = profile?.permissions
+            ? profile.permissions
+            : profile?.permission
+              ? [profile.permission === "NONE" ? "NONE" : "VIEW"]
+              : ["VIEW"];
           const sectionFieldPerms = profile?.fieldPermissions || {};
-          sectionPerms[id] = sectionPermId;
+          sectionPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
         } catch (e) {
-          sectionPerms[id] = "READ";
+          sectionPerms[id] = ["VIEW"];
         }
       }),
     );
@@ -1459,6 +1484,7 @@ export function usePublicForm({
     dynamicSubformInstances,
     isViewOnly,
     hasNoAccess,
+    isSectionReadOnly,
     // dialog resize
     dialogSize,
     dialogRef,

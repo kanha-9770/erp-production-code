@@ -89,6 +89,33 @@ export const permissionsApi = baseApi.injectEndpoints({
       },
       providesTags: ["Permissions"],
     }),
+
+    // Fetch sections for a form
+    getFormSections: builder.query<ApiListResponse<{ id: string; title: string; order: number; description?: string }>, string>({
+      query: (formId) => `/forms/${formId}/sections`,
+      providesTags: (result, error, formId) => [{ type: "FormSections", id: formId }],
+      keepUnusedDataFor: 300,
+    }),
+
+    // Fetch section-level role permissions
+    getSectionRolePermissions: builder.query<ApiListResponse<RolePermission>, { sectionId: string }>({
+      query: ({ sectionId }) => `/section-role-permissions?sectionId=${sectionId}`,
+      providesTags: (result, error, arg) => [
+        { type: "SectionRolePermissions", id: arg.sectionId },
+      ],
+      keepUnusedDataFor: 120,
+    }),
+
+    // Batch update section role permissions
+    updateSectionRolePermissions: builder.mutation<{ success: boolean }, object[]>({
+      query: (body) => ({
+        url: "/section-role-permissions",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["SectionRolePermissions"],
+    }),
   }),
 })
 
@@ -101,4 +128,7 @@ export const {
   useUpdateUserPermissionsMutation,
   useGetAdminPermissionsQuery,
   useLazyGetAdminPermissionsQuery,
+  useGetFormSectionsQuery,
+  useGetSectionRolePermissionsQuery,
+  useUpdateSectionRolePermissionsMutation,
 } = permissionsApi

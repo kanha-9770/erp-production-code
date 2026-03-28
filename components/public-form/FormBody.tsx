@@ -84,6 +84,7 @@ interface FormBodyProps {
 
   // Optional (dialog-only features)
   isViewOnly?: boolean;
+  isSectionReadOnly?: (sectionId: string) => boolean;
   dynamicSubformInstances?: Record<string, string[]>;
   addSubformRow?: (id: string) => void;
   removeSubformRow?: (id: string, instanceId: string) => void;
@@ -139,6 +140,7 @@ function SubformBlock({
     isFieldVisible,
     isSectionVisible,
     isViewOnly = false,
+    isSectionReadOnly,
     dynamicSubformInstances = {},
     addSubformRow,
     removeSubformRow,
@@ -146,6 +148,9 @@ function SubformBlock({
   } = props;
 
   if (!isSectionVisible(subform.id)) return null;
+
+  // If the section-level permissions say read-only, treat as view-only
+  const effectiveViewOnly = isViewOnly || (isSectionReadOnly?.(subform.id) ?? false);
 
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
   const isCollapsed =
@@ -299,7 +304,7 @@ function SubformBlock({
               variant="outline"
               size="sm"
               onClick={() => addSubformRow(subform.id)}
-              disabled={submitting || submitted || isViewOnly}
+              disabled={submitting || submitted || effectiveViewOnly}
               className="ml-2 whitespace-nowrap"
             >
               <span className="mr-1">+</span> Add Row
@@ -324,7 +329,7 @@ function SubformBlock({
                     {renderFieldItem(
                       item.item as FormField,
                       (item.item as FormField).id,
-                      isViewOnly,
+                      effectiveViewOnly,
                     )}
                   </FieldWrapper>
                 ) : (
@@ -431,7 +436,7 @@ function SubformBlock({
                                       {field.description}
                                     </p>
                                   )}
-                                {renderFieldItem(field, fieldKey, isViewOnly)}
+                                {renderFieldItem(field, fieldKey, effectiveViewOnly)}
                                 {errors[fieldKey] && (
                                   <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
                                     <AlertCircle className="h-3 w-3" />
@@ -452,7 +457,7 @@ function SubformBlock({
                                     removeSubformRow(subform.id, instanceId)
                                   }
                                   disabled={
-                                    submitting || submitted || isViewOnly
+                                    submitting || submitted || effectiveViewOnly
                                   }
                                   className="h-6 text-xs"
                                 >
@@ -565,6 +570,7 @@ export function FormBody(props: FormBodyProps) {
     setErrors,
     isFieldVisible,
     isViewOnly = false,
+    isSectionReadOnly,
   } = props;
 
   if (rootItems.length === 0) {
@@ -614,29 +620,32 @@ export function FormBody(props: FormBodyProps) {
                     gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
                   }}
                 >
-                  {visibleSectionFields.map((field: FormField) => (
-                    <FieldWrapper
-                      key={field.id}
-                      field={field}
-                      error={errors[field.id]}
-                    >
-                      <FormRenderer
+                  {visibleSectionFields.map((field: FormField) => {
+                    const sectionViewOnly = isViewOnly || (isSectionReadOnly?.(section.id) ?? false);
+                    return (
+                      <FieldWrapper
+                        key={field.id}
                         field={field}
-                        value={formData[field.id]}
                         error={errors[field.id]}
-                        submitting={submitting}
-                        submitted={submitted}
-                        handleFieldChange={handleFieldChange}
-                        formulaValues={formulaValues}
-                        formData={formData}
-                        allFields={allFields}
-                        setErrors={setErrors}
-                        locationStatus={locationStatus}
-                        forceReadOnly={isViewOnly}
-                        idToLabel={idToLabel}
-                      />
-                    </FieldWrapper>
-                  ))}
+                      >
+                        <FormRenderer
+                          field={field}
+                          value={formData[field.id]}
+                          error={errors[field.id]}
+                          submitting={submitting}
+                          submitted={submitted}
+                          handleFieldChange={handleFieldChange}
+                          formulaValues={formulaValues}
+                          formData={formData}
+                          allFields={allFields}
+                          setErrors={setErrors}
+                          locationStatus={locationStatus}
+                          forceReadOnly={sectionViewOnly}
+                          idToLabel={idToLabel}
+                        />
+                      </FieldWrapper>
+                    );
+                  })}
                 </div>
 
                 {/* Subforms belonging to this section */}

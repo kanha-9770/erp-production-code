@@ -50,6 +50,7 @@ export default function PublicFormPage() {
     collapsedSubforms,
     dynamicSubformInstances,
     isViewOnly,
+    isSectionReadOnly,
     // derived
     rootItems,
     allFields,
@@ -179,6 +180,7 @@ export default function PublicFormPage() {
                 isFieldVisible={isFieldVisible}
                 isSectionVisible={isSectionVisible}
                 isViewOnly={isViewOnly}
+                isSectionReadOnly={isSectionReadOnly}
                 dynamicSubformInstances={dynamicSubformInstances}
                 addSubformRow={addSubformRow}
                 removeSubformRow={removeSubformRow}

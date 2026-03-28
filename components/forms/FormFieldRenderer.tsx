@@ -188,6 +188,8 @@ interface FormFieldRendererProps {
   formData?: Record<string, any>;
   /** All fields in the form — used for finding parent field by label */
   allFields?: FormField[];
+  /** Force field to be read-only (e.g. section-level VIEW-only permission) */
+  forceReadOnly?: boolean;
 }
 
 const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
@@ -204,12 +206,13 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
   onFileClear,
   formData,
   allFields,
+  forceReadOnly = false,
 }) => {
   const fieldType = (field.type || "").toLowerCase();
   const isLocation = fieldType === "location" || fieldType === "newlocation";
   const autoFetch = isLocation && field.properties?.autoFetchLocation;
   const status = locationStatus[fieldKey] || "idle";
-  const isReadOnly = field.readonly || (autoFetch && status === "success");
+  const isReadOnly = forceReadOnly || field.readonly || (autoFetch && status === "success");
   const fieldProps = {
     id: fieldKey,
     disabled: submitting || submitted || isReadOnly,
@@ -871,7 +874,7 @@ export function PublicFormDialog({
   const [formulaValues, setFormulaValues] = useState<Record<string, any>>({});
   const [userRoleId, setUserRoleId] = useState<string | null>(null);
   const [sectionPermissions, setSectionPermissions] = useState<
-    Record<string, string>
+    Record<string, string[]>
   >({});
   const [fieldPermissions, setFieldPermissions] = useState<
     Record<string, string>
@@ -1327,7 +1330,7 @@ export function PublicFormDialog({
         await fetchSectionPermissions(result.data);
       } else {
         const defaultSectionPerms = result.data.sections.reduce(
-          (acc: Record<string, string>, s: any) => ({ ...acc, [s.id]: "READ" }),
+          (acc: Record<string, string[]>, s: any) => ({ ...acc, [s.id]: ["VIEW", "CREATE", "EDIT", "DELETE"] }),
           {},
         );
         setSectionPermissions(defaultSectionPerms);
@@ -1361,12 +1364,11 @@ export function PublicFormDialog({
       formData.id,
     );
     let avails: any[] = availablePermissions;
-    const sectionPerms: Record<string, string> = {};
+    const sectionPerms: Record<string, string[]> = {};
     const allFieldPerms: Record<string, string> = {};
     const allIds = getAllPermissionableIds(formData);
     await Promise.all(
       allIds.map(async (id) => {
-        // Grouping logs by ID to keep the console organized
         console.groupCollapsed(`ID: ${id}`);
         try {
           console.log(`📡 Fetching: /api/permissions/sections/${id}`);
@@ -1377,38 +1379,40 @@ export function PublicFormDialog({
               `❌ Data Error for id ${id}:`,
               data.error,
             );
-            sectionPerms[id] = "VIEW";
+            sectionPerms[id] = ["VIEW"];
             console.groupEnd();
             return;
           }
-          // Handle available permissions logic
           if (data.availablePermissions && avails.length === 0) {
             console.log("✨ Updating shared availablePermissions list");
             avails = data.availablePermissions;
           }
-          // Find user specific profile
           const profile = data.profiles.find((p: any) => p.id === userRoleId);
           if (!profile) {
             console.warn(
               `👤 No profile match found for userRoleId: ${userRoleId}`,
             );
           }
-          const sectionPermId = profile?.permission || "READ";
+          // Use the new `permissions` array if available, fall back to legacy
+          const permNames: string[] = profile?.permissions
+            ? profile.permissions
+            : profile?.permission
+              ? [profile.permission === "NONE" ? "NONE" : "VIEW"]
+              : ["VIEW"];
           const sectionFieldPerms = profile?.fieldPermissions || {};
           console.log(
-            `✅ Result: Section Perm: ${sectionPermId}, Field Perms Count:`,
+            `✅ Result: Section Perms: ${permNames.join(",")}, Field Perms Count:`,
             Object.keys(sectionFieldPerms).length,
           );
-          sectionPerms[id] = sectionPermId;
+          sectionPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
         } catch (e) {
           console.error(`🔥 Critical Catch for id ${id}:`, e);
-          sectionPerms[id] = "READ";
+          sectionPerms[id] = ["VIEW"];
         }
         console.groupEnd();
       }),
     );
-    // Final Summary Logs
     console.log("🏁 [fetchSectionPermissions] Process Complete");
     console.log("📊 Final Section Permissions Map:", sectionPerms);
     console.log("📊 Final Field Permissions Map:", allFieldPerms);
@@ -1419,17 +1423,30 @@ export function PublicFormDialog({
   };
 
   const isSectionVisible = (sectionId: string): boolean => {
-    const permId = sectionPermissions[sectionId];
-    if (permId === undefined) return true;
-    return permId !== "NONE";
+    const perms = sectionPermissions[sectionId];
+    if (perms === undefined) return true;
+    return !(perms.length === 1 && perms[0] === "NONE");
+  };
+
+  const isSectionReadOnly = (sectionId: string): boolean => {
+    const perms = sectionPermissions[sectionId];
+    if (!perms || perms.length === 0) return false;
+    return (
+      perms.includes("VIEW") &&
+      !perms.includes("CREATE") &&
+      !perms.includes("EDIT") &&
+      !perms.includes("DELETE")
+    );
   };
 
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
     const fieldPermId = fieldPermissions[field.id];
-    const effectivePermId =
-      fieldPermId !== undefined ? fieldPermId : sectionPermissions[sectionId];
-    if (effectivePermId === undefined) return true;
-    return effectivePermId !== "NONE";
+    if (fieldPermId === "NONE") return false;
+    if (!fieldPermId) {
+      const perms = sectionPermissions[sectionId];
+      if (perms && perms.length === 1 && perms[0] === "NONE") return false;
+    }
+    return true;
   };
 
   const trackFormView = async () => {
@@ -2131,6 +2148,7 @@ export function PublicFormDialog({
                         onFileClear={() => handleClearFile((item.item as FormField).id)}
                         formData={formData}
                         allFields={allFormFields}
+                        forceReadOnly={isSectionReadOnly(subform.id)}
                       />
                       {errors[(item.item as FormField).id] && (
                         <p className="text-sm text-red-500 flex items-center gap-1">
@@ -2249,6 +2267,7 @@ export function PublicFormDialog({
                                     onFileClear={() => handleClearFile(fieldKey)}
                                     formData={formData}
                                     allFields={allFormFields}
+                                    forceReadOnly={isSectionReadOnly(subform.id)}
                                   />
                                   {error && (
                                     <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
@@ -2499,6 +2518,7 @@ export function PublicFormDialog({
                                   onFileClear={() => handleClearFile(field.id)}
                                   formData={formData}
                                   allFields={allFormFields}
+                                  forceReadOnly={isSectionReadOnly(section.id)}
                                 />
                                 {errors[field.id] &&
                                   field.type !== "phone" &&

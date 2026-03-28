@@ -37,19 +37,19 @@ export async function GET(
     const roles = allRoles.filter((r) => r.isActive && !r.isAdmin);
     console.log("[Permissions GET] Filtered roles (active, non-admin):", roles.length);
 
-    // Get assignments based on resource type
+    // Get assignments based on resource type (include permission details)
     let assignments: any[] = [];
 
     if (resourceType === "field") {
-      // For fields: get field-level permissions
       assignments = await prisma.rolePermission.findMany({
         where: { formFieldId: resourceId, granted: true },
+        include: { permission: { select: { id: true, name: true, category: true } } },
       });
       console.log("[Permissions GET] Field assignments:", assignments.length);
-    } else if (resourceType === "section") {
-      // For sections: get section-level permissions (formFieldId must be null)
+    } else if (resourceType === "section" || resourceType === "sections") {
       assignments = await prisma.rolePermission.findMany({
         where: { sectionId: resourceId, formFieldId: null, granted: true },
+        include: { permission: { select: { id: true, name: true, category: true } } },
       });
       console.log("[Permissions GET] Section assignments:", assignments.length);
     }
@@ -61,13 +61,20 @@ export async function GET(
 
     console.log("[Permissions GET] Available permissions:", availablePermissions.length);
 
-    // Map profiles (SAME FOR BOTH FIELD AND SECTION)
+    // Map profiles — return ALL granted permissions per role (not just the first)
     const profiles = roles.map((role) => {
-      const assigned = assignments.find((a) => a.roleId === role.id);
+      const roleAssignments = assignments.filter((a) => a.roleId === role.id);
+      // Backwards-compatible: `permission` is the first permissionId or "NONE"
+      const firstAssigned = roleAssignments[0];
+      // New field: `permissions` is an array of all granted permission names
+      const permissionNames = roleAssignments.map(
+        (a) => a.permission?.name || a.permissionId
+      );
       return {
         id: role.id,
         name: role.name,
-        permission: assigned?.permissionId || "NONE",
+        permission: firstAssigned?.permissionId || "NONE",
+        permissions: permissionNames.length > 0 ? permissionNames : ["NONE"],
       };
     });
 

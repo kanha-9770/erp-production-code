@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { FormsSidebar } from "@/components/admin/forms-sidebar"
 import { FormsPermissionMatrix } from "@/components/admin/forms-permission-matrix"
+import { SectionsPermissionMatrix } from "@/components/admin/sections-permission-matrix"
 import { useModules } from "@/hooks/use-modules"
 import type { FormSelection } from "@/types/permissions"
 
@@ -48,11 +49,14 @@ export default function RolesPermissionsPage() {
           />
         </div>
 
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-4 space-y-6">
           <FormsPermissionMatrix
             modules={modules}
             selectedForm={formSelection?.formId ?? null}
             unsavedChangesRef={unsavedChangesRef}
+          />
+          <SectionsPermissionMatrix
+            selectedFormId={formSelection?.formId ?? null}
           />
         </div>
       </div>

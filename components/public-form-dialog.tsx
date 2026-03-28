@@ -50,6 +50,7 @@ export function PublicFormDialog({
     dynamicSubformInstances,
     isViewOnly,
     hasNoAccess,
+    isSectionReadOnly,
     // dialog resize
     dialogSize,
     dialogRef,
@@ -238,6 +239,7 @@ export function PublicFormDialog({
                   isFieldVisible={isFieldVisible}
                   isSectionVisible={isSectionVisible}
                   isViewOnly={isViewOnly}
+                  isSectionReadOnly={isSectionReadOnly}
                   dynamicSubformInstances={dynamicSubformInstances}
                   addSubformRow={addSubformRow}
                   removeSubformRow={removeSubformRow}

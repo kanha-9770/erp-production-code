@@ -60,6 +60,7 @@ export async function GET(
       prisma.rolePermission.findMany({
         // TARGET ONLY SECTION: formFieldId MUST be null
         where: { sectionId: sectionId, formFieldId: null, granted: true },
+        include: { permission: { select: { id: true, name: true, category: true } } },
       }),
       fetch(internalApiUrl, {
         headers: {
@@ -77,11 +78,16 @@ export async function GET(
     const availablePermissions = permissionsRes.data || [];
 
     const profiles = roles.map((role) => {
-      const assigned = assignments.find((a) => a.roleId === role.id);
+      const roleAssignments = assignments.filter((a: any) => a.roleId === role.id);
+      const firstAssigned = roleAssignments[0] as any;
+      const permissionNames = roleAssignments.map(
+        (a: any) => a.permission?.name || a.permissionId
+      );
       return {
         id: role.id,
         name: role.name,
-        permission: assigned?.permissionId || "NONE",
+        permission: firstAssigned?.permissionId || "NONE",
+        permissions: permissionNames.length > 0 ? permissionNames : ["NONE"],
       };
     });
 
