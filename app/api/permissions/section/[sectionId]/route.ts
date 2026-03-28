@@ -87,7 +87,7 @@ export async function GET(
         id: role.id,
         name: role.name,
         permission: firstAssigned?.permissionId || "NONE",
-        permissions: permissionNames.length > 0 ? permissionNames : ["NONE"],
+        permissions: permissionNames,
       };
     });
 

@@ -78,18 +78,45 @@ export function PublicFormDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
         ref={dialogRef}
-        className="p-0 overflow-visible rounded-xl shadow-2xl transition-all flex flex-col"
+        className="p-0 overflow-visible rounded-xl shadow-2xl transition-all flex flex-col
+          w-full h-[100dvh] sm:h-auto sm:rounded-xl rounded-none"
         style={{
-          width: `${dialogSize.width}px`,
-          height: `${dialogSize.height}px`,
+          width: undefined,
+          height: undefined,
           maxWidth: "98vw",
           maxHeight: "98vh",
+          // On sm+ use the resizable pixel sizes; on mobile go full-screen
         }}
+        // Apply desktop resize dimensions via inline style only on sm+
+        // We use a CSS custom property approach
+        data-desktop-width={dialogSize.width}
+        data-desktop-height={dialogSize.height}
       >
+        {/* Inline style to handle responsive dialog sizing */}
+        <style jsx>{`
+          @media (min-width: 640px) {
+            [data-desktop-width][data-desktop-height] {
+              width: ${dialogSize.width}px !important;
+              height: ${dialogSize.height}px !important;
+              max-width: 98vw !important;
+              max-height: 98vh !important;
+            }
+          }
+          @media (max-width: 639px) {
+            [data-desktop-width][data-desktop-height] {
+              width: 100vw !important;
+              height: 100dvh !important;
+              max-width: 100vw !important;
+              max-height: 100dvh !important;
+              border-radius: 0 !important;
+            }
+          }
+        `}</style>
+
         <DialogTitle className="sr-only">{form?.name || "Form"}</DialogTitle>
 
-        {/* RESIZE HANDLES */}
-        <div className="absolute inset-0 pointer-events-none z-10">
+        {/* RESIZE HANDLES — hidden on mobile */}
+        <div className="absolute inset-0 pointer-events-none z-10 hidden sm:block">
           <div
             onMouseDown={(e) => startResize(e, "n")}
             className="absolute top-0 left-0 right-0 h-3 cursor-ns-resize pointer-events-auto hover:bg-primary/10 transition-colors"
@@ -131,7 +158,7 @@ export function PublicFormDialog({
         </div>
 
         {loading ? (
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
             <div className="space-y-6 w-full max-w-md">
               <div className="space-y-2">
                 <Skeleton className="h-8 w-3/4" />
@@ -148,12 +175,12 @@ export function PublicFormDialog({
             </div>
           </div>
         ) : hasNoAccess ? (
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
             <div className="text-center">
-              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <h2 className="text-xl font-semibold mb-2">Access Denied</h2>
-              <p className="text-muted-foreground">
-                You don't have permission to access this form.
+              <AlertCircle className="h-10 w-10 sm:h-12 sm:w-12 text-red-500 mx-auto mb-4" />
+              <h2 className="text-lg sm:text-xl font-semibold mb-2">Access Denied</h2>
+              <p className="text-sm text-muted-foreground">
+                You don&apos;t have permission to access this form.
               </p>
               <Button variant="outline" className="mt-4" onClick={onClose}>
                 Close
@@ -161,11 +188,11 @@ export function PublicFormDialog({
             </div>
           </div>
         ) : !form ? (
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
             <div className="text-center">
-              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <h2 className="text-xl font-semibold mb-2">Form Not Found</h2>
-              <p className="text-muted-foreground">
+              <AlertCircle className="h-10 w-10 sm:h-12 sm:w-12 text-red-500 mx-auto mb-4" />
+              <h2 className="text-lg sm:text-xl font-semibold mb-2">Form Not Found</h2>
+              <p className="text-sm text-muted-foreground">
                 This form may have been removed or is not published.
               </p>
             </div>
@@ -173,12 +200,12 @@ export function PublicFormDialog({
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col h-full">
             {/* Header */}
-            <DialogHeader className="flex-shrink-0 p-6 pb-4 border-b">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <DialogTitle className="text-2xl">{form.name}</DialogTitle>
+            <DialogHeader className="flex-shrink-0 p-4 sm:p-6 pb-3 sm:pb-4 border-b">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  <DialogTitle className="text-lg sm:text-2xl truncate">{form.name}</DialogTitle>
                   {form.description && (
-                    <div className="relative group">
+                    <div className="relative group shrink-0">
                       <button
                         type="button"
                         className="flex h-5 w-5 items-center justify-center rounded-full bg-muted/50 text-muted-foreground hover:bg-primary/20 hover:text-primary transition-colors"
@@ -211,16 +238,17 @@ export function PublicFormDialog({
                 </div>
               </div>
               {isViewOnly && (
-                <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-amber-700 text-sm w-fit">
-                  <Lock className="h-3.5 w-3.5" />
-                  View only — you don't have permission to submit this form
+                <div className="flex items-center gap-2 mt-2 px-2 sm:px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-amber-700 text-xs sm:text-sm w-fit">
+                  <Lock className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">View only — you don&apos;t have permission to submit this form</span>
+                  <span className="sm:hidden">View only mode</span>
                 </div>
               )}
             </DialogHeader>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-8">
-              <div className="max-w-5xl mx-auto pb-8">
+            <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-8">
+              <div className="max-w-5xl mx-auto pb-4 sm:pb-8">
                 <FormBody
                   form={form}
                   formData={formData}
@@ -249,23 +277,25 @@ export function PublicFormDialog({
             </div>
 
             {/* Footer */}
-            <div className="flex-shrink-0 border-t bg-background px-6 py-4 flex justify-between items-center gap-3">
+            <div className="flex-shrink-0 border-t bg-background px-3 py-3 sm:px-6 sm:py-4 flex flex-col-reverse sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-3">
               {isViewOnly ? (
-                <div className="flex items-center gap-2 text-sm text-amber-600">
-                  <Lock className="h-4 w-4" />
-                  <span>
+                <div className="flex items-center justify-center sm:justify-start gap-2 text-xs sm:text-sm text-amber-600">
+                  <Lock className="h-4 w-4 shrink-0" />
+                  <span className="hidden sm:inline">
                     View only mode — contact your admin to request submit access
                   </span>
+                  <span className="sm:hidden">View only — contact admin</span>
                 </div>
               ) : (
                 <div />
               )}
-              <div className="flex gap-3">
+              <div className="flex gap-2 sm:gap-3">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={onClose}
                   disabled={submitting}
+                  className="flex-1 sm:flex-none"
                 >
                   {isViewOnly ? "Close" : "Cancel"}
                 </Button>
@@ -275,7 +305,7 @@ export function PublicFormDialog({
                     disabled={
                       submitting || loading || hasErrorsOrMissingRequired()
                     }
-                    className={`${hasErrorsOrMissingRequired() && !submitting && !loading
+                    className={`flex-1 sm:flex-none ${hasErrorsOrMissingRequired() && !submitting && !loading
                       ? "opacity-70 cursor-not-allowed bg-primary/80 hover:bg-primary/80"
                       : ""
                       }`}
@@ -283,17 +313,20 @@ export function PublicFormDialog({
                     {submitting ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Submitting...
+                        <span className="hidden sm:inline">Submitting...</span>
+                        <span className="sm:hidden">Saving...</span>
                       </>
                     ) : hasErrorsOrMissingRequired() ? (
                       <>
-                        <AlertCircle className="h-4 w-4 mr-2" />
-                        Fix Errors to Submit
+                        <AlertCircle className="h-4 w-4 mr-1 sm:mr-2" />
+                        <span className="hidden sm:inline">Fix Errors to Submit</span>
+                        <span className="sm:hidden">Fix Errors</span>
                       </>
                     ) : (
                       <>
-                        <Send className="h-4 w-4 mr-2" />
-                        Submit Form
+                        <Send className="h-4 w-4 mr-1 sm:mr-2" />
+                        <span className="hidden sm:inline">Submit Form</span>
+                        <span className="sm:hidden">Submit</span>
                       </>
                     )}
                   </Button>

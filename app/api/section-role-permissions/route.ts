@@ -72,9 +72,10 @@ export async function PUT(request: NextRequest) {
 /**
  * PUT/PATCH /api/section-role-permissions
  *
- * Body: Array of { roleId, permissionId, sectionId, granted, moduleId? }
+ * Body: Array of { roleId, permissionId, sectionId, granted }
  *
- * Uses the unique constraint (roleId, permissionId, moduleId, sectionId) to upsert.
+ * Uses a delete-then-create approach inside a transaction to avoid
+ * constraint name mismatches with Prisma's generated client.
  */
 async function handleUpdate(request: NextRequest) {
   try {
@@ -93,78 +94,87 @@ async function handleUpdate(request: NextRequest) {
       return NextResponse.json({ error: "Body must be a non-empty array" }, { status: 400 });
     }
 
-    const updated = [];
-    const skipped = [];
+    // Validate all items first
+    const validItems: Array<{
+      roleId: string
+      permissionId: string
+      sectionId: string
+      granted: boolean
+    }> = [];
+    const skipped: any[] = [];
+
+    // Collect unique roleIds for org verification
+    const uniqueRoleIds = new Set<string>();
 
     for (const [index, item] of body.entries()) {
-      const {
-        roleId,
-        permissionId,
-        sectionId,
-        moduleId = null,
-        granted,
-        canDelegate = false,
-      } = item;
+      const { roleId, permissionId, sectionId, granted } = item;
 
       if (!roleId || !permissionId || !sectionId) {
-        skipped.push({ index, reason: "missing roleId, permissionId, or sectionId", item });
+        skipped.push({ index, reason: "missing roleId, permissionId, or sectionId" });
         continue;
       }
 
-      // Verify role belongs to the organization
-      const role = await prisma.role.findFirst({
-        where: { id: roleId, organizationId },
-        select: { id: true },
-      });
-
-      if (!role) {
-        skipped.push({ index, reason: "role not in organization", roleId });
-        continue;
-      }
-
-      try {
-        const result = await prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId_moduleId_sectionId: {
-              roleId,
-              permissionId,
-              moduleId: moduleId ?? null,
-              sectionId,
-            },
-          },
-          update: {
-            granted: Boolean(granted),
-            canDelegate: Boolean(canDelegate),
-          },
-          create: {
-            roleId,
-            permissionId,
-            sectionId,
-            moduleId: moduleId ?? null,
-            formFieldId: null,
-            granted: Boolean(granted),
-            canDelegate: Boolean(canDelegate),
-          },
-        });
-
-        updated.push(result);
-      } catch (upsertError) {
-        console.error(
-          `[section-role-permissions] Upsert failed for role=${roleId} perm=${permissionId} section=${sectionId}:`,
-          upsertError,
-        );
-        skipped.push({
-          index,
-          reason: "upsert failed",
-          error: upsertError instanceof Error ? upsertError.message : String(upsertError),
-          item,
-        });
-      }
+      uniqueRoleIds.add(roleId);
+      validItems.push({ roleId, permissionId, sectionId, granted: Boolean(granted) });
     }
+
+    // Batch verify roles belong to the organization
+    const orgRoles = await prisma.role.findMany({
+      where: { id: { in: Array.from(uniqueRoleIds) }, organizationId },
+      select: { id: true },
+    });
+    const validRoleIds = new Set(orgRoles.map((r) => r.id));
+
+    // Filter out items with invalid roles
+    const finalItems = validItems.filter((item) => {
+      if (!validRoleIds.has(item.roleId)) {
+        skipped.push({ reason: "role not in organization", roleId: item.roleId });
+        return false;
+      }
+      return true;
+    });
+
+    if (finalItems.length === 0) {
+      return NextResponse.json({
+        success: true,
+        updatedCount: 0,
+        skippedCount: skipped.length,
+        skippedItems: skipped.length > 0 ? skipped : undefined,
+      });
+    }
+
+    // Group items by (roleId + sectionId) for efficient bulk operations
+    await prisma.$transaction(async (tx) => {
+      for (const item of finalItems) {
+        // Delete existing record for this exact combination
+        await tx.rolePermission.deleteMany({
+          where: {
+            roleId: item.roleId,
+            permissionId: item.permissionId,
+            sectionId: item.sectionId,
+            formFieldId: null,
+          },
+        });
+
+        // Create new record if granted
+        if (item.granted) {
+          await tx.rolePermission.create({
+            data: {
+              roleId: item.roleId,
+              permissionId: item.permissionId,
+              sectionId: item.sectionId,
+              formFieldId: null,
+              granted: true,
+              canDelegate: false,
+            },
+          });
+        }
+      }
+    });
 
     return NextResponse.json({
       success: true,
-      updatedCount: updated.length,
+      updatedCount: finalItems.length,
       skippedCount: skipped.length,
       skippedItems: skipped.length > 0 ? skipped : undefined,
     });

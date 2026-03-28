@@ -21,7 +21,22 @@ import type {
 } from "@/types/permissions"
 import { STANDARD_PERMISSIONS } from "@/types/permissions"
 
+// Use "::" separator so IDs never collide with the delimiter
+const SEP = "::"
+
 type ChangeKey = string
+
+function makeKey(prefix: "role" | "user", id: string, formId: string, permId: string): ChangeKey {
+  return `${prefix}${SEP}${id}${SEP}${formId}${SEP}${permId}`
+}
+
+function parseKey(key: string): { prefix: "role" | "user"; id: string; formId: string; permissionId: string } | null {
+  const parts = key.split(SEP)
+  if (parts.length !== 4) return null
+  const prefix = parts[0] as "role" | "user"
+  if (prefix !== "role" && prefix !== "user") return null
+  return { prefix, id: parts[1], formId: parts[2], permissionId: parts[3] }
+}
 
 const EMPTY_ROLES: PermissionRole[] = []
 const EMPTY_USERS: PermissionUser[] = []
@@ -54,7 +69,6 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
   const [changes, setChanges] = useState<Map<ChangeKey, boolean>>(new Map())
   const [saving, setSaving] = useState(false)
 
-  // Track which form the current changes belong to so we can detect stale state
   const changesFormRef = useRef<string | null>(selectedForm)
 
   // RTK Query hooks — skip when no form is selected
@@ -135,18 +149,16 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
     setChanges(new Map())
   }, [selectedForm])
 
-  // Derive hasChanges — ignore stale changes from a different form
   const hasChanges = changes.size > 0 && changesFormRef.current === selectedForm
 
   // ─── Permission lookup helpers ────────────────────────────────────────────
 
   const hasRolePermission = useCallback(
     (roleId: string, formId: string, permId: string): boolean => {
-      const key: ChangeKey = `role-${roleId}-${formId}-${permId}`
+      const key = makeKey("role", roleId, formId, permId)
       if (changes.has(key)) return changes.get(key)!
-      // RolePermission unique key is (roleId, permissionId, moduleId) — formId
-      // is just metadata. The backend already filters by the form's moduleId,
-      // so we only need to match roleId + permissionId here.
+      // The API already filters by formId, so rolePermissions only contains
+      // records for the selected form.
       return rolePermissions.some(
         (rp) =>
           rp.roleId === roleId &&
@@ -159,7 +171,7 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
 
   const hasUserPermission = useCallback(
     (userId: string, formId: string, permId: string): boolean => {
-      const key: ChangeKey = `user-${userId}-${formId}-${permId}`
+      const key = makeKey("user", userId, formId, permId)
       if (changes.has(key)) return changes.get(key)!
 
       const direct = userPermissions.find(
@@ -171,8 +183,6 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
       )
       if (direct) return direct.granted
 
-      // Fall back to role inheritance — check ALL of the user's roles, not just
-      // the first. A user's effective permission is the union of all their roles.
       const userRoleIds =
         users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
       return userRoleIds.some((rid) => hasRolePermission(rid, formId, permId))
@@ -180,30 +190,20 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
     [changes, userPermissions, users, hasRolePermission]
   )
 
-  // ─── Toggle (race-condition-free) ─────────────────────────────────────────
-  //
-  // Uses the functional updater so rapid clicks always read from the latest
-  // pending state (`prev`) instead of the stale closure `changes`.
+  // ─── Toggle ─────────────────────────────────────────────────────────────
 
   const togglePermission = useCallback(
     (prefix: "role" | "user", id: string, formId: string, permId: string) => {
-      const key: ChangeKey = `${prefix}-${id}-${formId}-${permId}`
+      const key = makeKey(prefix, id, formId, permId)
 
       setChanges((prev) => {
         const next = new Map(prev)
 
         if (prev.has(key)) {
-          // Already toggled at least once — just flip the pending value.
-          // Reading from `prev` instead of the closure avoids the double-click
-          // race where two clicks see the same stale `changes` Map.
           next.set(key, !prev.get(key)!)
           return next
         }
 
-        // First toggle — compute the current server/inherited state so we can
-        // invert it.  rolePermissions / userPermissions / users are stable
-        // references from RTK Query cache and don't change on local toggles,
-        // so reading them from the closure is safe here.
         let serverState: boolean
 
         if (prefix === "role") {
@@ -211,7 +211,6 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
             (rp) => rp.roleId === id && rp.permissionId === permId && rp.granted
           )
         } else {
-          // User: check direct DB override first
           const directUp = userPermissions.find(
             (up) =>
               up.userId === id &&
@@ -222,11 +221,10 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
           if (directUp) {
             serverState = directUp.granted
           } else {
-            // Inherit from roles — also consider pending role changes in `prev`
             const userRoleIds =
               users.find((u) => u.id === id)?.unitAssignments?.map((a) => a.roleId) ?? []
             serverState = userRoleIds.some((rid) => {
-              const roleKey = `role-${rid}-${formId}-${permId}`
+              const roleKey = makeKey("role", rid, formId, permId)
               if (prev.has(roleKey)) return prev.get(roleKey)!
               return rolePermissions.some(
                 (rp) => rp.roleId === rid && rp.permissionId === permId && rp.granted
@@ -252,6 +250,7 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
       setSaving(true)
 
       try {
+        // Find the moduleId for the selected form
         let moduleId: string | null = null
         outer: for (const mod of modules) {
           if (mod.forms?.some((f) => f.id === selectedFormId)) {
@@ -270,17 +269,24 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
         const userUpdates: object[] = []
 
         changes.forEach((granted, key) => {
-          const parts = key.split("-")
-          if (key.startsWith("role-")) {
-            const [, roleId, formId, permissionId] = parts
-            roleUpdates.push({ roleId, moduleId, formId, permissionId, granted, canDelegate: false })
-          } else if (key.startsWith("user-")) {
-            const [, userId, formId, permissionId] = parts
-            userUpdates.push({
-              userId,
+          const parsed = parseKey(key)
+          if (!parsed) return
+
+          if (parsed.prefix === "role") {
+            roleUpdates.push({
+              roleId: parsed.id,
               moduleId,
-              formId,
-              permissionId,
+              formId: parsed.formId,
+              permissionId: parsed.permissionId,
+              granted,
+              canDelegate: false,
+            })
+          } else {
+            userUpdates.push({
+              userId: parsed.id,
+              moduleId,
+              formId: parsed.formId,
+              permissionId: parsed.permissionId,
               granted,
               reason: "Manual override",
               isActive: true,
@@ -293,9 +299,6 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
         if (userUpdates.length) promises.push(updateUserPerms(userUpdates).unwrap())
 
         await Promise.all(promises)
-
-        // Await refetches so the cache is updated BEFORE we clear the optimistic
-        // changes map — prevents the brief checkbox revert flash.
         await Promise.all([refetchRolePerms(), refetchUserPerms()])
         setChanges(new Map())
 

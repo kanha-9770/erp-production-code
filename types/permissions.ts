@@ -14,6 +14,7 @@ export interface RolePermission {
   permissionId: string
   moduleId?: string | null
   formId?: string | null
+  sectionId?: string | null
   granted: boolean
   inheritedFrom?: string
   canDelegate: boolean

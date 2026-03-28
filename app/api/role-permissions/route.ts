@@ -13,43 +13,31 @@ export async function GET(request: NextRequest) {
     }
 
     const organizationId = authUser.organizationId;
-
     if (!organizationId) {
-      return NextResponse.json(
-        { error: "No organization context" },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: "No organization context" }, { status: 403 });
     }
 
     const roleId = request.nextUrl.searchParams.get("roleId");
     let formId = request.nextUrl.searchParams.get("formId");
 
-    // Normalize: treat empty / "null" string as no filter
     if (formId === "" || formId === "null" || formId === "undefined") {
       formId = null;
     }
 
     const whereClause: any = {
-      role: {
-        organizationId,
-      },
+      role: { organizationId },
+      // Only return module/form-level permissions, not section/field-level
+      sectionId: null,
+      formFieldId: null,
     };
 
     if (roleId) {
       whereClause.roleId = roleId;
     }
 
-    // RolePermission unique key is (roleId, permissionId, moduleId) — formId
-    // is just metadata. Filter by the form's moduleId so we return the correct
-    // module-scoped permissions regardless of which formId was last saved.
+    // Filter by formId directly — each form has its own permissions
     if (formId) {
-      const form = await prisma.form.findUnique({
-        where: { id: formId },
-        select: { moduleId: true },
-      });
-      if (form?.moduleId) {
-        whereClause.moduleId = form.moduleId;
-      }
+      whereClause.formId = formId;
     }
 
     const rolePermissions = await prisma.rolePermission.findMany({
@@ -84,8 +72,6 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy: [
-        { module: { sortOrder: "asc" } },
-        { form: { name: "asc" } },
         { permission: { name: "asc" } },
       ],
     });
@@ -108,14 +94,20 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  return handleUpdate(request, "PATCH");
+  return handleUpdate(request);
 }
 
 export async function PUT(request: NextRequest) {
-  return handleUpdate(request, "PUT");
+  return handleUpdate(request);
 }
 
-async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
+/**
+ * PUT/PATCH — saves form-level role permissions.
+ *
+ * Uses delete+create inside a transaction so each form gets its own
+ * independent permission records (no more module-level sharing).
+ */
+async function handleUpdate(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {
@@ -123,22 +115,27 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
     }
 
     const organizationId = authUser.organizationId;
-
     if (!organizationId) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
-
     if (!Array.isArray(body) || body.length === 0) {
-      return NextResponse.json(
-        { error: "Body must be a non-empty array" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Body must be a non-empty array" }, { status: 400 });
     }
 
-    const updated = [];
-    const skipped = [];
+    // Validate items
+    const validItems: Array<{
+      roleId: string;
+      permissionId: string;
+      moduleId: string | null;
+      formId: string | null;
+      granted: boolean;
+      canDelegate: boolean;
+    }> = [];
+    const skipped: any[] = [];
+
+    const uniqueRoleIds = new Set<string>();
 
     for (const [index, item] of body.entries()) {
       const {
@@ -151,71 +148,85 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
       } = item;
 
       if (!roleId || !permissionId) {
-        skipped.push({ index, reason: "missing roleId or permissionId", item });
+        skipped.push({ index, reason: "missing roleId or permissionId" });
         continue;
       }
 
-      const role = await prisma.role.findFirst({
-        where: { id: roleId, organizationId },
-        select: { id: true, name: true },
+      uniqueRoleIds.add(roleId);
+      validItems.push({
+        roleId,
+        permissionId,
+        moduleId: moduleId ?? null,
+        formId: formId ?? null,
+        granted: Boolean(granted),
+        canDelegate: Boolean(canDelegate),
       });
-
-      if (!role) {
-        skipped.push({ index, reason: "role not in organization", roleId });
-        continue;
-      }
-
-      try {
-        const result = await prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId_moduleId: {
-              roleId,
-              permissionId,
-              moduleId: moduleId ?? null,
-            },
-          },
-          update: {
-            granted: Boolean(granted),
-            canDelegate: Boolean(canDelegate),
-            formId: formId ?? null,
-          },
-          create: {
-            roleId,
-            permissionId,
-            moduleId: moduleId ?? null,
-            formId: formId ?? null,
-            granted: Boolean(granted),
-            canDelegate: Boolean(canDelegate),
-          },
-        });
-
-        updated.push(result);
-      } catch (upsertError) {
-        console.error(
-          `Upsert failed for role=${roleId} perm=${permissionId}:`,
-          upsertError,
-        );
-        skipped.push({
-          index,
-          reason: "upsert failed",
-          error:
-            upsertError instanceof Error
-              ? upsertError.message
-              : String(upsertError),
-          item,
-        });
-      }
     }
+
+    // Batch verify roles
+    const orgRoles = await prisma.role.findMany({
+      where: { id: { in: Array.from(uniqueRoleIds) }, organizationId },
+      select: { id: true },
+    });
+    const validRoleIds = new Set(orgRoles.map((r) => r.id));
+
+    const finalItems = validItems.filter((item) => {
+      if (!validRoleIds.has(item.roleId)) {
+        skipped.push({ reason: "role not in organization", roleId: item.roleId });
+        return false;
+      }
+      return true;
+    });
+
+    if (finalItems.length === 0) {
+      return NextResponse.json({
+        success: true,
+        updatedCount: 0,
+        skippedCount: skipped.length,
+        skippedItems: skipped.length > 0 ? skipped : undefined,
+      });
+    }
+
+    // Delete + create in a transaction — scoped per (roleId, permissionId, formId)
+    await prisma.$transaction(async (tx) => {
+      for (const item of finalItems) {
+        // Delete the old record for this exact role+permission+form combo
+        await tx.rolePermission.deleteMany({
+          where: {
+            roleId: item.roleId,
+            permissionId: item.permissionId,
+            formId: item.formId,
+            sectionId: null,
+            formFieldId: null,
+          },
+        });
+
+        // Create new record if granted
+        if (item.granted) {
+          await tx.rolePermission.create({
+            data: {
+              roleId: item.roleId,
+              permissionId: item.permissionId,
+              moduleId: item.moduleId,
+              formId: item.formId,
+              sectionId: null,
+              formFieldId: null,
+              granted: true,
+              canDelegate: item.canDelegate,
+            },
+          });
+        }
+      }
+    });
 
     return NextResponse.json({
       success: true,
-      updatedCount: updated.length,
+      updatedCount: finalItems.length,
       skippedCount: skipped.length,
-      method,
       skippedItems: skipped.length > 0 ? skipped : undefined,
     });
   } catch (error) {
-    console.error(`[${method} /api/role-permissions] Critical error:`, error);
+    console.error("[PUT /api/role-permissions] Critical error:", error);
     return NextResponse.json(
       {
         success: false,
@@ -226,4 +237,3 @@ async function handleUpdate(request: NextRequest, method: "PATCH" | "PUT") {
     );
   }
 }
-

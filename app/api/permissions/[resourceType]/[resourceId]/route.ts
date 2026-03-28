@@ -64,9 +64,9 @@ export async function GET(
     // Map profiles — return ALL granted permissions per role (not just the first)
     const profiles = roles.map((role) => {
       const roleAssignments = assignments.filter((a) => a.roleId === role.id);
-      // Backwards-compatible: `permission` is the first permissionId or "NONE"
       const firstAssigned = roleAssignments[0];
-      // New field: `permissions` is an array of all granted permission names
+      // `permissions` is an array of all granted permission names.
+      // Empty array [] means "no section permissions configured" (inherit form-level).
       const permissionNames = roleAssignments.map(
         (a) => a.permission?.name || a.permissionId
       );
@@ -74,7 +74,7 @@ export async function GET(
         id: role.id,
         name: role.name,
         permission: firstAssigned?.permissionId || "NONE",
-        permissions: permissionNames.length > 0 ? permissionNames : ["NONE"],
+        permissions: permissionNames,
       };
     });
 

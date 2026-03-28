@@ -212,7 +212,7 @@ const FormFieldRenderer: React.FC<FormFieldRendererProps> = ({
   const isLocation = fieldType === "location" || fieldType === "newlocation";
   const autoFetch = isLocation && field.properties?.autoFetchLocation;
   const status = locationStatus[fieldKey] || "idle";
-  const isReadOnly = forceReadOnly || field.readonly || (autoFetch && status === "success");
+  const isReadOnly = forceReadOnly === true || !!field.readonly || (autoFetch && status === "success");
   const fieldProps = {
     id: fieldKey,
     disabled: submitting || submitted || isReadOnly,
@@ -1023,6 +1023,14 @@ export function PublicFormDialog({
         last_name: user.last_name ?? undefined,
         email: user.email,
       });
+      // Extract user's role ID for section permission lookups
+      const assignments = (user as any).unitAssignments;
+      if (Array.isArray(assignments) && assignments.length > 0) {
+        const roleId = assignments[0]?.role?.id;
+        if (roleId) {
+          setUserRoleId(roleId);
+        }
+      }
     }
   }, [currentUserData]);
 
@@ -1032,6 +1040,13 @@ export function PublicFormDialog({
       trackFormView();
     }
   }, [formId, isOpen]);
+
+  // Fetch section permissions once we have both the form data and the user's role
+  useEffect(() => {
+    if (userRoleId && form && isOpen) {
+      fetchSectionPermissions(form);
+    }
+  }, [userRoleId, form, isOpen]);
 
   useEffect(() => {
     calculateCompletion();
@@ -1379,7 +1394,7 @@ export function PublicFormDialog({
               `❌ Data Error for id ${id}:`,
               data.error,
             );
-            sectionPerms[id] = ["VIEW"];
+            sectionPerms[id] = []; // Error = no restrictions
             console.groupEnd();
             return;
           }
@@ -1393,22 +1408,31 @@ export function PublicFormDialog({
               `👤 No profile match found for userRoleId: ${userRoleId}`,
             );
           }
-          // Use the new `permissions` array if available, fall back to legacy
-          const permNames: string[] = profile?.permissions
-            ? profile.permissions
-            : profile?.permission
-              ? [profile.permission === "NONE" ? "NONE" : "VIEW"]
-              : ["VIEW"];
+          // Empty array [] = no section permissions configured = full access.
+          // Non-empty array = explicit permissions set.
+          let permNames: string[];
+          if (profile?.permissions && Array.isArray(profile.permissions)) {
+            permNames = profile.permissions.length > 0 ? profile.permissions : [];
+          } else if (profile?.permission && profile.permission !== "NONE") {
+            permNames = [profile.permission];
+          } else if (profile && profile.permission === "NONE") {
+            const anyConfigured = data.profiles.some(
+              (p: any) => p.permissions?.length > 0 || (p.permission && p.permission !== "NONE")
+            );
+            permNames = anyConfigured ? ["NONE"] : [];
+          } else {
+            permNames = []; // No profile found = no restrictions
+          }
           const sectionFieldPerms = profile?.fieldPermissions || {};
           console.log(
-            `✅ Result: Section Perms: ${permNames.join(",")}, Field Perms Count:`,
+            `✅ Result: Section Perms: ${permNames.length > 0 ? permNames.join(",") : "(none configured)"}, Field Perms Count:`,
             Object.keys(sectionFieldPerms).length,
           );
           sectionPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
         } catch (e) {
           console.error(`🔥 Critical Catch for id ${id}:`, e);
-          sectionPerms[id] = ["VIEW"];
+          sectionPerms[id] = []; // Exception = no restrictions
         }
         console.groupEnd();
       }),
@@ -1428,15 +1452,24 @@ export function PublicFormDialog({
     return !(perms.length === 1 && perms[0] === "NONE");
   };
 
-  const isSectionReadOnly = (sectionId: string): boolean => {
+  /**
+   * Returns:
+   *  - `null`  → no section-level permissions configured (inherit form-level)
+   *  - `true`  → section is explicitly read-only (only VIEW granted)
+   *  - `false` → section is explicitly editable (CREATE/EDIT/DELETE granted)
+   */
+  const isSectionReadOnly = (sectionId: string): boolean | null => {
     const perms = sectionPermissions[sectionId];
-    if (!perms || perms.length === 0) return false;
-    return (
+    if (!perms || perms.length === 0) return null; // No section config → inherit
+    if (
       perms.includes("VIEW") &&
       !perms.includes("CREATE") &&
       !perms.includes("EDIT") &&
       !perms.includes("DELETE")
-    );
+    ) {
+      return true;
+    }
+    return false; // Has CREATE/EDIT/DELETE → editable
   };
 
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
@@ -2148,7 +2181,7 @@ export function PublicFormDialog({
                         onFileClear={() => handleClearFile((item.item as FormField).id)}
                         formData={formData}
                         allFields={allFormFields}
-                        forceReadOnly={isSectionReadOnly(subform.id)}
+                        forceReadOnly={isSectionReadOnly(subform.id) === true}
                       />
                       {errors[(item.item as FormField).id] && (
                         <p className="text-sm text-red-500 flex items-center gap-1">
@@ -2267,7 +2300,7 @@ export function PublicFormDialog({
                                     onFileClear={() => handleClearFile(fieldKey)}
                                     formData={formData}
                                     allFields={allFormFields}
-                                    forceReadOnly={isSectionReadOnly(subform.id)}
+                                    forceReadOnly={isSectionReadOnly(subform.id) === true}
                                   />
                                   {error && (
                                     <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
@@ -2518,7 +2551,7 @@ export function PublicFormDialog({
                                   onFileClear={() => handleClearFile(field.id)}
                                   formData={formData}
                                   allFields={allFormFields}
-                                  forceReadOnly={isSectionReadOnly(section.id)}
+                                  forceReadOnly={isSectionReadOnly(section.id) === true}
                                 />
                                 {errors[field.id] &&
                                   field.type !== "phone" &&

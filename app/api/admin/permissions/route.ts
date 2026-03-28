@@ -93,13 +93,26 @@ export async function GET(request: NextRequest) {
     // ─────────────────────────────────────────────────────────
     const roleIds = user.unitAssignments.map((ua) => ua.role.id);
 
+    // Build where clause: exclude section/field permissions, optionally scope to form
+    const rpWhere: any = {
+      roleId: { in: roleIds },
+      granted: true,
+      sectionId: null,
+      formFieldId: null,
+    };
+    // If a formId is provided, return permissions for that specific form
+    // (plus any module-level ones that have no formId — those apply to all forms)
+    if (formId) {
+      rpWhere.OR = [
+        { formId },
+        { formId: null },
+      ];
+    }
+
     const rolePermissions =
       roleIds.length > 0
         ? await prisma.rolePermission.findMany({
-            where: {
-              roleId: { in: roleIds },
-              granted: true,
-            },
+            where: rpWhere,
             include: {
               permission: {
                 select: {

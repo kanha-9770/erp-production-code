@@ -195,6 +195,13 @@ export function usePublicForm({
             email: user.email,
           });
           (window as any).__currentUserId = user.id;
+          // Extract user's role ID for section permission lookups
+          if (Array.isArray(user.unitAssignments) && user.unitAssignments.length > 0) {
+            const roleId = user.unitAssignments[0]?.role?.id;
+            if (roleId) {
+              setUserRoleId(roleId);
+            }
+          }
         }
       } catch {
         // ignore
@@ -214,11 +221,27 @@ export function usePublicForm({
           credentials: "include",
           cache: "no-store",
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          // API error — fail open, allow editing
+          setFormLevelPermission("CREATE");
+          return;
+        }
         const data = await response.json();
-        if (!data.success || !data.data) return;
+        if (!data.success || !data.data) {
+          // Bad response — fail open, allow editing
+          setFormLevelPermission("CREATE");
+          return;
+        }
 
-        const { permissions: perms, isAdmin } = data.data;
+        const { permissions: perms, isAdmin, unitsAndRoles } = data.data;
+
+        // Extract the user's first role ID for section permission lookups
+        if (Array.isArray(unitsAndRoles) && unitsAndRoles.length > 0) {
+          const firstRole = unitsAndRoles[0]?.role;
+          if (firstRole?.id) {
+            setUserRoleId(firstRole.id);
+          }
+        }
 
         // Admins always get full access
         if (isAdmin) {
@@ -267,6 +290,13 @@ export function usePublicForm({
       trackFormView();
     }
   }, [formId, isOpen]);
+
+  // Fetch section permissions once we have both the form data and the user's role
+  useEffect(() => {
+    if (userRoleId && form && isOpen) {
+      fetchSectionPermissions(form);
+    }
+  }, [userRoleId, form, isOpen]);
 
   useEffect(() => {
     calculateCompletion();
@@ -323,17 +353,26 @@ export function usePublicForm({
     [sectionPermissions, form, evaluateSubformConditional],
   );
 
+  /**
+   * Returns:
+   *  - `null`  → no section-level permissions configured (inherit form-level)
+   *  - `true`  → section is explicitly read-only (only VIEW granted)
+   *  - `false` → section is explicitly editable (CREATE/EDIT/DELETE granted)
+   */
   const isSectionReadOnly = useCallback(
-    (id: string): boolean => {
+    (id: string): boolean | null => {
       const perms = sectionPermissions[id];
-      if (!perms || perms.length === 0) return false; // No restrictions
+      if (!perms || perms.length === 0) return null; // No section config → inherit
       // Read-only if only VIEW is granted (no CREATE, EDIT, or DELETE)
-      return (
+      if (
         perms.includes("VIEW") &&
         !perms.includes("CREATE") &&
         !perms.includes("EDIT") &&
         !perms.includes("DELETE")
-      );
+      ) {
+        return true;
+      }
+      return false; // Has CREATE/EDIT/DELETE → editable
     },
     [sectionPermissions],
   );
@@ -928,29 +967,43 @@ export function usePublicForm({
         try {
           const res = await fetch(`/api/permissions/sections/${id}`);
           if (!res.ok) {
-            sectionPerms[id] = ["VIEW"];
+            sectionPerms[id] = []; // API error = no restrictions
             return;
           }
           const data = await res.json();
           if (data.error) {
-            sectionPerms[id] = ["VIEW"];
+            sectionPerms[id] = []; // Error = no restrictions
             return;
           }
           if (data.availablePermissions && avails.length === 0) {
             avails = data.availablePermissions;
           }
           const profile = data.profiles.find((p: any) => p.id === userRoleId);
-          // Use the new `permissions` array if available, fall back to legacy single `permission`
-          const permNames: string[] = profile?.permissions
-            ? profile.permissions
-            : profile?.permission
-              ? [profile.permission === "NONE" ? "NONE" : "VIEW"]
-              : ["VIEW"];
+          // Use the new `permissions` array if available.
+          // Empty array [] = no section permissions configured = full access (inherit form-level).
+          // Non-empty array = explicit permissions set.
+          let permNames: string[];
+          if (profile?.permissions && Array.isArray(profile.permissions)) {
+            permNames = profile.permissions.length > 0 ? profile.permissions : [];
+          } else if (profile?.permission && profile.permission !== "NONE") {
+            // Legacy single permission fallback
+            permNames = [profile.permission];
+          } else if (profile && profile.permission === "NONE") {
+            // Legacy: explicitly no permission but only if permissions were actually configured
+            // Check if there are any assignments at all for any role
+            const anyConfigured = data.profiles.some(
+              (p: any) => p.permissions?.length > 0 || (p.permission && p.permission !== "NONE")
+            );
+            permNames = anyConfigured ? ["NONE"] : [];
+          } else {
+            // No profile found for this role = no restrictions
+            permNames = [];
+          }
           const sectionFieldPerms = profile?.fieldPermissions || {};
           sectionPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
         } catch (e) {
-          sectionPerms[id] = ["VIEW"];
+          sectionPerms[id] = []; // Exception = no restrictions
         }
       }),
     );
@@ -1288,12 +1341,26 @@ export function usePublicForm({
     });
   };
 
-  const isViewOnly = formLevelPermission === "VIEW";
+  // Only restrict to view-only when formLevelPermission is explicitly "VIEW".
+  // null (not yet loaded / API failed) defaults to editable — fail open.
+  const isFormViewOnly = formLevelPermission === "VIEW";
   const hasNoAccess = formLevelPermission === "NONE";
+
+  // Check if any section has explicit edit permissions that override form-level VIEW
+  const hasAnySectionEditPermission = useMemo(() => {
+    return Object.values(sectionPermissions).some(
+      (perms) =>
+        perms.length > 0 &&
+        (perms.includes("CREATE") || perms.includes("EDIT") || perms.includes("DELETE"))
+    );
+  }, [sectionPermissions]);
+
+  // Effective view-only: form says VIEW but section permissions can override
+  const effectiveViewOnly = isFormViewOnly && !hasAnySectionEditPermission;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isViewOnly || hasNoAccess) {
+    if (effectiveViewOnly || hasNoAccess) {
       toast({
         title: "Permission Denied",
         description: "You only have view access to this form.",
@@ -1482,7 +1549,7 @@ export function usePublicForm({
     fieldPermissions,
     collapsedSubforms,
     dynamicSubformInstances,
-    isViewOnly,
+    isViewOnly: effectiveViewOnly,
     hasNoAccess,
     isSectionReadOnly,
     // dialog resize

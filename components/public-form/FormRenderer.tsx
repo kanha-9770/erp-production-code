@@ -90,7 +90,10 @@ export function FormRenderer({
   };
 
   const isFieldReadOnly = () => {
-    return !!field.readonly || forceReadOnly;
+    // Only respect the field's own readonly flag and explicit forceReadOnly=true
+    if (field.readonly) return true;
+    if (forceReadOnly === true) return true;
+    return false;
   };
 
   const fieldProps: any = {

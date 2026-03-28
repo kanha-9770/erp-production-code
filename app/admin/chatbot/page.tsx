@@ -7,7 +7,7 @@ import type { UIMessage } from "ai";
 import {
   Bot, Send, Plus, Trash2, MessageSquare, Sparkles, RefreshCw, ChevronLeft,
   Loader2, ShieldCheck, Database, BarChart3, Users, FileText, Clock,
-  AlertCircle, Copy, Check, Settings,
+  AlertCircle, Copy, Check, Settings, Menu,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -253,53 +253,90 @@ function ConversationSidebar({
   setSidebarOpen: (open: boolean) => void;
 }) {
   return (
-    <div className={`${sidebarOpen ? "w-72" : "w-0"} transition-all duration-200 flex-shrink-0 border-r border-border bg-muted/20 pt-10 overflow-hidden`}>
-      <div className="w-72 h-full flex flex-col">
-        <div className="p-3 border-b border-border flex items-center justify-between">
-          <h2 className="font-semibold text-sm">Conversations</h2>
-          <div className="flex items-center gap-1">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onNew}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>New conversation</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSidebarOpen(false)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
+    <>
+      {/* Backdrop overlay - closes sidebar when tapped (mobile & desktop) */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar panel - always overlays on mobile, inline on desktop */}
+      <div
+        className={`
+          fixed top-0 left-0 h-full w-72 z-50
+          bg-background border-r border-border shadow-lg
+          transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
+      >
+        <div className="w-72 h-full flex flex-col">
+          {/* Sidebar header */}
+          <div className="p-3 pt-4 border-b border-border flex items-center justify-between">
+            <h2 className="font-semibold text-sm">Conversations</h2>
+            <div className="flex items-center gap-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onNew}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>New conversation</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSidebarOpen(false)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {conversations.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-xs">
+                No conversations yet
+              </div>
+            )}
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className={`group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+                  activeId === conv.id
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-muted text-foreground"
+                }`}
+                onClick={() => {
+                  onSelect(conv.id);
+                  setSidebarOpen(false);
+                }}
+              >
+                <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">
+                    {conv.title || "Untitled"}
+                  </p>
+                  {conv.messages[0] && (
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {conv.messages[0].content.slice(0, 40)}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(conv.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {conversations.length === 0 && <div className="text-center py-8 text-muted-foreground text-xs">No conversations yet</div>}
-          {conversations.map((conv) => (
-            <div
-              key={conv.id}
-              className={`group flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-                activeId === conv.id ? "bg-accent text-accent-foreground" : "hover:bg-muted text-foreground"
-              }`}
-              onClick={() => onSelect(conv.id)}
-            >
-              <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{conv.title || "Untitled"}</p>
-                {conv.messages[0] && <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.messages[0].content.slice(0, 40)}</p>}
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -322,47 +359,50 @@ function SuggestionChips({ questions, onSelect, disabled }: { questions: string[
 
 function WelcomeState({ suggestions, onSelectSuggestion, disabled }: { suggestions: string[]; onSelectSuggestion: (q: string) => void; disabled: boolean }) {
   return (
-    <div className="flex-1 flex flex-col items-center pt-10 justify-center px-6">
-      <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-foreground/5 mb-6">
-        <Sparkles className="h-7 w-7 text-foreground/60" />
-      </div>
-      <h2 className="text-xl font-semibold text-foreground mb-2 text-balance text-center">ERP Intelligence Assistant</h2>
-      <p className="text-sm text-muted-foreground max-w-md text-center mb-8 text-pretty leading-relaxed">
-        Ask questions about your organization data, generate analytics, explore modules, and get insights. All queries respect your role-based permissions.
-      </p>
+    <div className="flex-1 overflow-y-auto">
+      <div className="flex flex-col items-center px-4 sm:px-6 py-8 sm:py-12">
+        <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-foreground/5 mb-6">
+          <Sparkles className="h-7 w-7 text-foreground/60" />
+        </div>
+        <h2 className="text-xl font-semibold text-foreground mb-2 text-balance text-center">ERP Intelligence Assistant</h2>
+        <p className="text-sm text-muted-foreground max-w-md text-center mb-8 text-pretty leading-relaxed">
+          Ask questions about your organization data, generate analytics, explore modules, and get insights. All queries respect your role-based permissions.
+        </p>
 
-      <div className="grid grid-cols-2 gap-3 max-w-lg mb-8">
-        <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
-          <ShieldCheck className="h-4 w-4 text-chart-2 mt-0.5 flex-shrink-0" />
-          <div><p className="text-xs font-medium">Role-Based Access</p><p className="text-xs text-muted-foreground mt-0.5">Data filtered by your permissions</p></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full mb-8">
+          <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
+            <ShieldCheck className="h-4 w-4 text-chart-2 mt-0.5 flex-shrink-0" />
+            <div><p className="text-xs font-medium">Role-Based Access</p><p className="text-xs text-muted-foreground mt-0.5">Data filtered by your permissions</p></div>
+          </div>
+          <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
+            <Database className="h-4 w-4 text-chart-1 mt-0.5 flex-shrink-0" />
+            <div><p className="text-xs font-medium">Live Data</p><p className="text-xs text-muted-foreground mt-0.5">Queries run against real-time data</p></div>
+          </div>
+          <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
+            <BarChart3 className="h-4 w-4 text-chart-4 mt-0.5 flex-shrink-0" />
+            <div><p className="text-xs font-medium">Smart Analytics</p><p className="text-xs text-muted-foreground mt-0.5">Dynamic KPI & trend analysis</p></div>
+          </div>
+          <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
+            <FileText className="h-4 w-4 text-chart-5 mt-0.5 flex-shrink-0" />
+            <div><p className="text-xs font-medium">All Modules</p><p className="text-xs text-muted-foreground mt-0.5">Discover forms & records dynamically</p></div>
+          </div>
         </div>
-        <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
-          <Database className="h-4 w-4 text-chart-1 mt-0.5 flex-shrink-0" />
-          <div><p className="text-xs font-medium">Live Data</p><p className="text-xs text-muted-foreground mt-0.5">Queries run against real-time data</p></div>
-        </div>
-        <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
-          <BarChart3 className="h-4 w-4 text-chart-4 mt-0.5 flex-shrink-0" />
-          <div><p className="text-xs font-medium">Smart Analytics</p><p className="text-xs text-muted-foreground mt-0.5">Dynamic KPI & trend analysis</p></div>
-        </div>
-        <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/30">
-          <FileText className="h-4 w-4 text-chart-5 mt-0.5 flex-shrink-0" />
-          <div><p className="text-xs font-medium">All Modules</p><p className="text-xs text-muted-foreground mt-0.5">Discover forms & records dynamically</p></div>
-        </div>
-      </div>
 
-      {suggestions.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground text-center">Try asking:</p>
-          <SuggestionChips questions={suggestions} onSelect={onSelectSuggestion} disabled={disabled} />
-        </div>
-      )}
+        {suggestions.length > 0 && (
+          <div className="space-y-3 w-full">
+            <p className="text-xs text-muted-foreground text-center">Try asking:</p>
+            <SuggestionChips questions={suggestions} onSelect={onSelectSuggestion} disabled={disabled} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ====================== MAIN PAGE ======================
 export default function ERPChatbotPage() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // ✅ FIX: Sidebar starts CLOSED so the chat content is visible first
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -487,7 +527,7 @@ export default function ERPChatbotPage() {
   }, [handleSend]);
 
   return (
-    <div className="-mx-6 -my-8 flex h-[calc(100vh-60px)]">
+    <div className="-mx-6 -my-8 flex flex-col h-[calc(100vh-60px)] relative">
       <ConversationSidebar
         conversations={conversations}
         activeId={activeConversationId}
@@ -498,13 +538,23 @@ export default function ERPChatbotPage() {
         setSidebarOpen={setSidebarOpen}
       />
 
-      <div className="flex-1 flex flex-col pt-10 min-w-0">
+      {/* Main chat area - takes full width, flex-1 fills remaining height */}
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-background/80 backdrop-blur-sm">
-          {!sidebarOpen && (
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSidebarOpen(true)}>
-              <MessageSquare className="h-4 w-4" />
-            </Button>
-          )}
+          {/* ✅ FIX: Always show the sidebar toggle button so user can open sidebar */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 flex-shrink-0"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            {sidebarOpen ? (
+              <ChevronLeft className="h-4 w-4" />
+            ) : (
+              <Menu className="h-4 w-4" />
+            )}
+          </Button>
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-foreground/5">
               <Bot className="h-4 w-4 text-foreground/70" />

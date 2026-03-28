@@ -84,7 +84,7 @@ interface FormBodyProps {
 
   // Optional (dialog-only features)
   isViewOnly?: boolean;
-  isSectionReadOnly?: (sectionId: string) => boolean;
+  isSectionReadOnly?: (sectionId: string) => boolean | null;
   dynamicSubformInstances?: Record<string, string[]>;
   addSubformRow?: (id: string) => void;
   removeSubformRow?: (id: string, instanceId: string) => void;
@@ -149,8 +149,16 @@ function SubformBlock({
 
   if (!isSectionVisible(subform.id)) return null;
 
-  // If the section-level permissions say read-only, treat as view-only
-  const effectiveViewOnly = isViewOnly || (isSectionReadOnly?.(subform.id) ?? false);
+  // Compute effective view-only for this subform
+  let effectiveViewOnly = false;
+  if (isSectionReadOnly) {
+    const sr = isSectionReadOnly(subform.id);
+    if (sr === true) effectiveViewOnly = true;
+    else if (sr === false) effectiveViewOnly = false;
+    else effectiveViewOnly = !!isViewOnly;
+  } else {
+    effectiveViewOnly = !!isViewOnly;
+  }
 
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
   const isCollapsed =
@@ -621,7 +629,18 @@ export function FormBody(props: FormBodyProps) {
                   }}
                 >
                   {visibleSectionFields.map((field: FormField) => {
-                    const sectionViewOnly = isViewOnly || (isSectionReadOnly?.(section.id) ?? false);
+                    // Compute read-only:
+                    // 1) If section has explicit permissions → use them
+                    // 2) Else fall back to form-level isViewOnly
+                    let readOnly = false;
+                    if (isSectionReadOnly) {
+                      const sr = isSectionReadOnly(section.id);
+                      if (sr === true) readOnly = true;       // section says read-only
+                      else if (sr === false) readOnly = false; // section says editable
+                      else readOnly = !!isViewOnly;            // null = no config, inherit
+                    } else {
+                      readOnly = !!isViewOnly;
+                    }
                     return (
                       <FieldWrapper
                         key={field.id}
@@ -640,7 +659,7 @@ export function FormBody(props: FormBodyProps) {
                           allFields={allFields}
                           setErrors={setErrors}
                           locationStatus={locationStatus}
-                          forceReadOnly={sectionViewOnly}
+                          forceReadOnly={readOnly}
                           idToLabel={idToLabel}
                         />
                       </FieldWrapper>

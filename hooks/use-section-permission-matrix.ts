@@ -15,6 +15,9 @@ import type {
 } from "@/types/permissions"
 import { STANDARD_PERMISSIONS } from "@/types/permissions"
 
+// Use "::" as separator so CUID IDs (which may contain dashes) don't break parsing
+const SEP = "::"
+
 type ChangeKey = string
 
 const EMPTY_ROLES: PermissionRole[] = []
@@ -35,6 +38,16 @@ interface UseSectionPermissionMatrixResult {
   saveChanges: (sectionId: string) => Promise<void>
   getGrantedCountForRole: (roleId: string, sectionId: string) => number
   filteredRoles: PermissionRole[]
+}
+
+function makeKey(roleId: string, sectionId: string, permId: string): ChangeKey {
+  return `role${SEP}${roleId}${SEP}${sectionId}${SEP}${permId}`
+}
+
+function parseKey(key: string): { roleId: string; sectionId: string; permissionId: string } | null {
+  const parts = key.split(SEP)
+  if (parts.length !== 4 || parts[0] !== "role") return null
+  return { roleId: parts[1], sectionId: parts[2], permissionId: parts[3] }
 }
 
 export function useSectionPermissionMatrix(
@@ -106,9 +119,11 @@ export function useSectionPermissionMatrix(
   // ─── Permission lookup ────────────────────────────────────────────────────
 
   const hasRolePermission = useCallback(
-    (roleId: string, sectionId: string, permId: string): boolean => {
-      const key: ChangeKey = `role-${roleId}-${sectionId}-${permId}`
+    (roleId: string, _sectionId: string, permId: string): boolean => {
+      const key = makeKey(roleId, _sectionId, permId)
       if (changes.has(key)) return changes.get(key)!
+      // The API already filters by sectionId, so rolePermissions only contains
+      // records for the selected section. Match on roleId + permissionId.
       return rolePermissions.some(
         (rp) =>
           rp.roleId === roleId &&
@@ -123,7 +138,7 @@ export function useSectionPermissionMatrix(
 
   const togglePermission = useCallback(
     (roleId: string, sectionId: string, permId: string) => {
-      const key: ChangeKey = `role-${roleId}-${sectionId}-${permId}`
+      const key = makeKey(roleId, sectionId, permId)
 
       setChanges((prev) => {
         const next = new Map(prev)
@@ -157,15 +172,13 @@ export function useSectionPermissionMatrix(
         const roleUpdates: object[] = []
 
         changes.forEach((granted, key) => {
-          const parts = key.split("-")
-          // key format: "role-{roleId}-{sectionId}-{permissionId}"
-          const [, roleId, secId, permissionId] = parts
+          const parsed = parseKey(key)
+          if (!parsed) return
           roleUpdates.push({
-            roleId,
-            sectionId: secId,
-            permissionId,
+            roleId: parsed.roleId,
+            sectionId: parsed.sectionId,
+            permissionId: parsed.permissionId,
             granted,
-            canDelegate: false,
           })
         })
 
@@ -178,6 +191,7 @@ export function useSectionPermissionMatrix(
 
         toast({ title: "Section permissions saved", description: `${changes.size} change(s) applied.` })
       } catch (err) {
+        console.error("[useSectionPermissionMatrix] Save failed:", err)
         toast({
           title: "Save failed",
           description: err instanceof Error ? err.message : "Failed to save section permissions",
