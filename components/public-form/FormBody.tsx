@@ -150,14 +150,12 @@ function SubformBlock({
   if (!isSectionVisible(subform.id)) return null;
 
   // Compute effective view-only for this subform
-  let effectiveViewOnly = false;
-  if (isSectionReadOnly) {
+  // If isViewOnly is false (user has CREATE/EDIT/DELETE), subforms are always
+  // editable.  Section restrictions only apply in view-only mode.
+  let effectiveViewOnly = !!isViewOnly;
+  if (isViewOnly && isSectionReadOnly) {
     const sr = isSectionReadOnly(subform.id);
-    if (sr === true) effectiveViewOnly = true;
-    else if (sr === false) effectiveViewOnly = false;
-    else effectiveViewOnly = !!isViewOnly;
-  } else {
-    effectiveViewOnly = !!isViewOnly;
+    if (sr === false) effectiveViewOnly = false; // section overrides → editable
   }
 
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
@@ -630,16 +628,13 @@ export function FormBody(props: FormBodyProps) {
                 >
                   {visibleSectionFields.map((field: FormField) => {
                     // Compute read-only:
-                    // 1) If section has explicit permissions → use them
-                    // 2) Else fall back to form-level isViewOnly
-                    let readOnly = false;
-                    if (isSectionReadOnly) {
+                    // If isViewOnly is false (user has CREATE/EDIT/DELETE), fields
+                    // are always editable unless the field itself is flagged readonly.
+                    // Section-level restrictions only apply when the form is view-only.
+                    let readOnly = !!isViewOnly;
+                    if (isViewOnly && isSectionReadOnly) {
                       const sr = isSectionReadOnly(section.id);
-                      if (sr === true) readOnly = true;       // section says read-only
-                      else if (sr === false) readOnly = false; // section says editable
-                      else readOnly = !!isViewOnly;            // null = no config, inherit
-                    } else {
-                      readOnly = !!isViewOnly;
+                      if (sr === false) readOnly = false; // section overrides form → editable
                     }
                     return (
                       <FieldWrapper

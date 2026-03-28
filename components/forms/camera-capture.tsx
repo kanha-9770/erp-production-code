@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useLayoutEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Camera, X, RotateCcw, ImageIcon, Loader2 } from "lucide-react"
 import { Card } from "@/components/ui/card"
@@ -17,17 +17,29 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [pendingRetake, setPendingRetake] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadFile] = useUploadFileMutation()
+
+  const updateStream = (nextStream: MediaStream | null) => {
+    streamRef.current = nextStream
+    setStream(nextStream)
+  }
 
   // Open camera with live preview
   const openCamera = async () => {
     console.log("[CameraCapture] Attempting to open camera...");
     setError(null);
     setIsCameraOpen(true); // Set early to show video element
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      updateStream(null);
+    }
 
     // Check MediaDevices API support
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -49,24 +61,7 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
       });
 
       console.log("[CameraCapture] Camera access granted");
-      setStream(mediaStream);
-
-      // Attach stream to video element
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        videoRef.current.onloadedmetadata = () => {
-          console.log("[CameraCapture] Video metadata loaded, attempting to play...");
-          videoRef.current?.play().catch((playErr) => {
-            console.error("[CameraCapture] Video playback error:", playErr);
-            setError("Failed to start camera stream. Please try again.");
-            setIsCameraOpen(false);
-          });
-        };
-      } else {
-        console.error("[CameraCapture] Video ref not available");
-        setError("Failed to initialize camera. Please try again.");
-        setIsCameraOpen(false);
-      }
+      updateStream(mediaStream);
     } catch (err) {
       console.error("[CameraCapture] Camera access error:", err);
       let errorMessage = "Unable to access camera. Please use file upload.";
@@ -90,9 +85,9 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
   // Close camera and stop stream
   const closeCamera = () => {
     console.log("[CameraCapture] Closing camera...");
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      updateStream(null);
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -156,6 +151,12 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
     }
   }
 
+  // Retake flow must clear the parent image before opening the camera again.
+  const handleRetake = () => {
+    setPendingRetake(true)
+    onClear()
+  }
+
   // Handle file input fallback
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,15 +181,44 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
     }
   }
 
+  useLayoutEffect(() => {
+    if (!stream || !isCameraOpen) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.srcObject = stream;
+    const handleLoadedMetadata = () => {
+      console.log("[CameraCapture] Video metadata loaded, attempting to play...");
+      video.play().catch((playErr) => {
+        console.error("[CameraCapture] Video playback error:", playErr);
+        setError("Failed to start camera stream. Please try again.");
+        setIsCameraOpen(false);
+      });
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    return () => {
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+    };
+  }, [stream, isCameraOpen]);
+
+  useEffect(() => {
+    if (!pendingRetake) return
+    if (capturedImage) return
+
+    setPendingRetake(false)
+    openCamera()
+  }, [pendingRetake, capturedImage])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       console.log("[CameraCapture] Cleaning up stream on unmount...");
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [stream]);
+  }, []);
 
   if (isUploading) {
     return (
@@ -201,7 +231,7 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
     );
   }
 
-  if (capturedImage) {
+  if (capturedImage && !isCameraOpen && !pendingRetake) {
     return (
       <div className="space-y-2">
         <Card className="relative overflow-hidden border border-gray-200 rounded-lg">
@@ -218,7 +248,7 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
         </Card>
         <Button
           type="button"
-          onClick={openCamera}
+          onClick={handleRetake}
           size="sm"
           className="w-full bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
         >
@@ -229,7 +259,7 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
     );
   }
 
-  if (isCameraOpen) {
+  if (isCameraOpen || stream) {
     return (
       <div className="space-y-2">
         <Card className="relative overflow-hidden bg-black rounded-lg">

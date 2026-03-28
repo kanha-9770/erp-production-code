@@ -103,10 +103,13 @@ export default function ModulePage({
   // Fetch permissions — uses isAdmin flag returned directly from the new endpoint
   // and stores both role-based AND user-based permissions in the same array.
   // ─────────────────────────────────────────────────────────────────────────────
+  // Fetch ALL permissions once (no formId filter) so that hasPermissionForForm
+  // works correctly for every form button.  The PublicFormDialog does its own
+  // form-specific permission check inside the usePublicForm hook.
   useEffect(() => {
     const fetchPermissions = async () => {
       try {
-        const data = await triggerAdminPerms({ formId: selectedForm?.id }).unwrap();
+        const data = await triggerAdminPerms({}).unwrap();
 
         if (!data.success || !data.data) return;
 
@@ -124,7 +127,7 @@ export default function ModulePage({
     };
 
     fetchPermissions();
-  }, [selectedForm?.id]);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Module data processing
@@ -562,10 +565,10 @@ export default function ModulePage({
   // ─── Permission helper (matches the logic in use-records-display) ──────────
   const hasPermissionForForm = (formId: string, permName: string) => {
     if (isAdmin) return true;
+    const target = permName.toUpperCase();
     return permissions.some(
       (p: any) =>
-        p.resource === "form" &&
-        p.name === permName &&
+        (p.name || "").toUpperCase() === target &&
         (p.form?.id === formId || !p.form?.id || p.form?.id === ""),
     );
   };
@@ -574,7 +577,11 @@ export default function ModulePage({
   // Form dialog
   // ─────────────────────────────────────────────────────────────────────────────
   const openFormDialog = (formId: string) => {
-    if (!hasPermissionForForm(formId, "CREATE") && !isAdmin) {
+    const canOpen = isAdmin
+      || hasPermissionForForm(formId, "CREATE")
+      || hasPermissionForForm(formId, "EDIT")
+      || hasPermissionForForm(formId, "DELETE");
+    if (!canOpen) {
       toast({
         title: "Access Denied",
         description: "You don't have permission to submit this form.",
@@ -726,7 +733,11 @@ export default function ModulePage({
         selectedForm={selectedForm}
         setSelectedForm={setSelectedForm}
         openFormDialog={openFormDialog}
-        canCreateForForm={(formId) => hasPermissionForForm(formId, "CREATE")}
+        canCreateForForm={(formId) =>
+          hasPermissionForForm(formId, "CREATE")
+          || hasPermissionForForm(formId, "EDIT")
+          || hasPermissionForForm(formId, "DELETE")
+        }
       />
       <RecordsDisplay
         allModuleForms={allModuleForms}

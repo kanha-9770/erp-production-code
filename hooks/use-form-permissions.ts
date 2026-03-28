@@ -75,12 +75,12 @@ export function useFormPermissions(formId: string | null | undefined): FormPermi
   const hasPermission = useMemo(() => {
     return (permName: string): boolean => {
       if (isAdmin) return true
+      const target = permName.toUpperCase()
       return permissions.some(
         (p) =>
-          p.name === permName &&
-          p.resource === "form" &&
+          (p.name || "").toUpperCase() === target &&
           // Match if the permission is form-specific or module-wide (form.id empty)
-          (p.form?.id === formId || !p.form?.id || p.form.id === ""),
+          (p.form?.id === formId || !p.form?.id || p.form?.id === ""),
       )
     }
   }, [permissions, isAdmin, formId])

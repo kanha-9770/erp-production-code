@@ -78,10 +78,12 @@ export async function GET(request: NextRequest) {
     const allUserOverrides = await getUserPermissions(authUser.id);
 
     // Filter active + form/module specific
+    // Include module-level overrides (formId/moduleId = null) since they apply
+    // to all forms within the module.
     const activeOverrides = allUserOverrides.filter((o) => {
       const isNotExpired = !o.expiresAt || new Date(o.expiresAt) >= new Date();
-      const matchesForm = !formId || o.formId === formId;
-      const matchesModule = !moduleId || o.moduleId === moduleId;
+      const matchesForm = !formId || o.formId === formId || !o.formId;
+      const matchesModule = !moduleId || o.moduleId === moduleId || !o.moduleId;
       return isNotExpired && matchesForm && matchesModule;
     });
 

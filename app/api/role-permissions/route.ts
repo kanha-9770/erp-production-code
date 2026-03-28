@@ -188,9 +188,24 @@ async function handleUpdate(request: NextRequest) {
     }
 
     // Delete + create in a transaction — scoped per (roleId, permissionId, formId)
+    // We delete by the FULL key (roleId, permissionId, moduleId, formId) to match
+    // the unique constraint and avoid conflicts when multiple forms share a module.
     await prisma.$transaction(async (tx) => {
       for (const item of finalItems) {
-        // Delete the old record for this exact role+permission+form combo
+        // Delete any existing record for this exact role+permission+module+form combo
+        await tx.rolePermission.deleteMany({
+          where: {
+            roleId: item.roleId,
+            permissionId: item.permissionId,
+            moduleId: item.moduleId,
+            formId: item.formId,
+            sectionId: null,
+            formFieldId: null,
+          },
+        });
+
+        // Also clean up any old record that matches on (roleId, permissionId, formId)
+        // but has a different moduleId (legacy data)
         await tx.rolePermission.deleteMany({
           where: {
             roleId: item.roleId,
@@ -198,6 +213,7 @@ async function handleUpdate(request: NextRequest) {
             formId: item.formId,
             sectionId: null,
             formFieldId: null,
+            moduleId: { not: item.moduleId ?? undefined },
           },
         });
 

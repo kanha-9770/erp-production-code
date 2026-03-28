@@ -366,13 +366,13 @@ export function useRecordsDisplay({
   const hasPermissionForForm = React.useCallback(
     (formId: string, permName: string) => {
       if (isAdmin) return true;
+      const target = permName.toUpperCase();
       return permissions.some(
         (p) =>
-          p.resource === "form" &&
-          p.name === permName &&
+          (p.name || "").toUpperCase() === target &&
           // Match form-specific permission OR module-level permission
           // (module-level has form.id empty/"", applies to all forms in the module)
-          (p.form.id === formId || !p.form.id || p.form.id === ""),
+          (p.form?.id === formId || !p.form?.id || p.form?.id === ""),
       );
     },
     [permissions, isAdmin],
@@ -410,7 +410,7 @@ export function useRecordsDisplay({
       const currentValues: Record<string, any> = {};
       record.processedData.forEach((pd) => {
         const ef = enhancedFormFields.find(
-          (f) => f.originalId === pd.fieldId || f.label === pd.fieldLabel,
+          (f) => f.originalId === pd.fieldId || f.id === pd.fieldId || `${record.formId}_${pd.fieldId}` === f.id,
         );
         const pendingKey = ef ? `${record.id}-${ef.id}` : `${record.id}-${pd.fieldId}`;
         const pending = pendingChanges.get(pendingKey);
@@ -473,7 +473,7 @@ export function useRecordsDisplay({
           };
 
           const idx = newProcessed.findIndex(
-            (p) => p.fieldId === formulaField.id || p.fieldId === formulaField.originalId || p.fieldLabel === formulaField.label,
+            (p) => p.fieldId === formulaField.id || p.fieldId === formulaField.originalId,
           );
           if (idx !== -1) {
             newProcessed[idx] = { ...newProcessed[idx], value: finalValue, displayValue: String(finalValue) };
@@ -495,7 +495,7 @@ export function useRecordsDisplay({
           }
         } catch {
           const idx = newProcessed.findIndex(
-            (p) => p.fieldId === formulaField.id || p.fieldId === formulaField.originalId || p.fieldLabel === formulaField.label,
+            (p) => p.fieldId === formulaField.id || p.fieldId === formulaField.originalId,
           );
           if (idx !== -1) newProcessed[idx] = { ...newProcessed[idx], value: "", displayValue: "Error" };
         }
@@ -509,13 +509,18 @@ export function useRecordsDisplay({
   // ── Field data ───────────────────────────────────────────────────────────────
 
   const getFieldData = React.useCallback(
-    (record: EnhancedFormRecord, fieldDef: FormFieldWithSection): ProcessedFieldData | undefined =>
-      record.processedData.find(
+    (record: EnhancedFormRecord, fieldDef: FormFieldWithSection): ProcessedFieldData | undefined => {
+      const rawId = fieldDef.originalId || fieldDef.id;
+      // Match strictly by field ID — never by label.
+      // processedData stores the raw field ID; column definitions store either
+      // the raw ID (originalId) or compound ID (formId_fieldId).
+      return record.processedData.find(
         (pd) =>
+          pd.fieldId === rawId ||
           pd.fieldId === fieldDef.id ||
-          pd.fieldId === fieldDef.originalId ||
-          (pd.fieldLabel === fieldDef.label && pd.sectionId === fieldDef.sectionId),
-      ),
+          `${record.formId}_${pd.fieldId}` === fieldDef.id,
+      );
+    },
     [pendingChanges, enhancedFormFields],
   );
 
@@ -641,7 +646,7 @@ export function useRecordsDisplay({
           const fd = fieldDef
             ? (getFieldData(record, fieldDef) ??
                record.processedData.find(
-                 (pd) => pd.fieldId === filter.fieldId || (pd.fieldLabel === filter.fieldLabel && pd.sectionId === filter.sectionId),
+                 (pd) => pd.fieldId === filter.fieldId,
                ))
             : undefined;
 
@@ -987,8 +992,7 @@ export function useRecordsDisplay({
         const pdIndex = updatedProcessed.findIndex(
           (pd) =>
             pd.fieldId === change.fieldId ||
-            (change.originalFieldId && pd.fieldId === change.originalFieldId) ||
-            (change.fieldLabel && pd.fieldLabel === change.fieldLabel && pd.sectionId === change.sectionId),
+            (change.originalFieldId && pd.fieldId === change.originalFieldId),
         );
         if (pdIndex !== -1) {
           updatedProcessed[pdIndex] = {

@@ -87,35 +87,70 @@ export async function GET(
           console.error("Error checking session in published view:", err);
         }
 
-        // Non-admins: only publicEditable fields remain editable
+        // Non-admins: check if the user has form-level write permissions.
+        // If they do (CREATE/EDIT/DELETE), fields stay editable.
+        // If they only have VIEW or are anonymous, enforce publicEditable.
         if (!isAdmin) {
-          const markReadonly = (sections: any[]) => {
-            if (!Array.isArray(sections)) return;
-            sections.forEach((section) => {
-              if (Array.isArray(section.fields)) {
-                section.fields = section.fields.map((f: any) => ({
-                  ...f,
-                  readonly: !!(f.readonly || f.properties?.readonly || f.properties?.readOnly) || !(f.properties?.publicEditable === true),
-                }));
+          let hasWritePermission = false;
+          try {
+            const currentUserForPerms = await getAuthenticatedUser(request);
+            if (currentUserForPerms) {
+              const { prisma: db } = await import("@/lib/prisma");
+              const userRoles = await db.user.findUnique({
+                where: { id: currentUserForPerms.id },
+                select: { unitAssignments: { select: { role: { select: { id: true } } } } },
+              });
+              const roleIds = (userRoles?.unitAssignments || []).map((ua: any) => ua.role.id);
+              if (roleIds.length > 0) {
+                const writePerms = await db.rolePermission.count({
+                  where: {
+                    roleId: { in: roleIds },
+                    granted: true,
+                    sectionId: null,
+                    formFieldId: null,
+                    permission: { name: { in: ["CREATE", "EDIT", "DELETE"] } },
+                    OR: [{ formId: form.id }, { formId: null }],
+                  },
+                });
+                hasWritePermission = writePerms > 0;
               }
-              if (Array.isArray(section.subforms)) {
-                const proc = (sforms: any[]) => {
-                  sforms.forEach((sf: any) => {
-                    if (Array.isArray(sf.fields)) {
-                      sf.fields = sf.fields.map((f: any) => ({
-                        ...f,
-                        readonly: !!(f.readonly || f.properties?.readonly || f.properties?.readOnly) || !(f.properties?.publicEditable === true),
-                      }));
-                    }
-                    if (Array.isArray(sf.childSubforms)) proc(sf.childSubforms);
-                  });
-                };
-                proc(section.subforms);
-              }
-            });
-          };
+            }
+          } catch {
+            // If permission check fails, fall through to publicEditable logic
+          }
 
-          markReadonly(published.sections);
+          // Only enforce publicEditable restrictions for users WITHOUT write
+          // permissions (anonymous visitors, VIEW-only users).  Users with
+          // CREATE/EDIT/DELETE should be able to fill in all fields.
+          if (!hasWritePermission) {
+            const markReadonly = (sections: any[]) => {
+              if (!Array.isArray(sections)) return;
+              sections.forEach((section) => {
+                if (Array.isArray(section.fields)) {
+                  section.fields = section.fields.map((f: any) => ({
+                    ...f,
+                    readonly: !!(f.readonly || f.properties?.readonly || f.properties?.readOnly) || !(f.properties?.publicEditable === true),
+                  }));
+                }
+                if (Array.isArray(section.subforms)) {
+                  const proc = (sforms: any[]) => {
+                    sforms.forEach((sf: any) => {
+                      if (Array.isArray(sf.fields)) {
+                        sf.fields = sf.fields.map((f: any) => ({
+                          ...f,
+                          readonly: !!(f.readonly || f.properties?.readonly || f.properties?.readOnly) || !(f.properties?.publicEditable === true),
+                        }));
+                      }
+                      if (Array.isArray(sf.childSubforms)) proc(sf.childSubforms);
+                    });
+                  };
+                  proc(section.subforms);
+                }
+              });
+            };
+
+            markReadonly(published.sections);
+          }
         }
 
         if (request.nextUrl.searchParams.get("debug") === "true") {

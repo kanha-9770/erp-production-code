@@ -329,11 +329,9 @@ model RolePermission {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  // REMOVE or comment out the old constraint
-  // @@unique([roleId, permissionId, sectionId, formFieldId, moduleId])
-
-  // ADD these three new ones
-  @@unique([roleId, permissionId, moduleId], map: "role_perm_module_unique")
+  // Unique constraints — formId is included so each form in a module can have
+  // its own independent permission set without violating uniqueness.
+  @@unique([roleId, permissionId, moduleId, formId], map: "role_perm_module_unique")
   @@unique([roleId, permissionId, moduleId, sectionId], map: "role_perm_section_unique")
   @@unique([roleId, permissionId, moduleId, sectionId, formFieldId], map: "role_perm_field_unique")
 

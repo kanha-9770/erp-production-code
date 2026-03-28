@@ -4,7 +4,9 @@
       "Bash(npx tsc:*)",
       "Bash(wc -l /c/Users/pc/Desktop/ERP/app/[module_name]/[module_Id]/[[...slug]]/page.tsx)",
       "Bash(xargs wc:*)",
-      "Bash(grep -n \"from ''./types''\" lib/api/forms.ts lib/api/modules.ts lib/api/records.ts)"
+      "Bash(grep -n \"from ''./types''\" lib/api/forms.ts lib/api/modules.ts lib/api/records.ts)",
+      "Bash(find /c/Users/p/Desktop/ERP/erp-production-code/components -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(node -e \":*)"
     ]
   }
 }
