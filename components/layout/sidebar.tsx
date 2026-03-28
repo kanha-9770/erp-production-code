@@ -54,7 +54,7 @@ import { Loader2 } from "lucide-react";
 import { useGetUserQuery } from "@/lib/api/auth";
 
 import { useOptimisticModules } from "@/hooks/useOptimisticModules";
-// import { usePermissionContext } from "@/context/PermissionContext"; // ← uncomment when ready
+import { usePermissionContext } from "@/context/PermissionContext";
 
 interface FormModule {
   id: string;
@@ -139,9 +139,8 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   const { modules, isLoading, error, createModuleOptimistic } =
     useOptimisticModules(organizationId);
 
-  // Temporary placeholder - replace with real context when ready
-  const hasPermission = (_action: string, _id: string, _extra: any | null) =>
-    true;
+  // Real permission check from context
+  const { hasPermission: checkPermission, hasAnyPermission } = usePermissionContext();
 
   const [view, setView] = useState<ViewType>("modules");
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -341,11 +340,12 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     }
   };
 
-  const iconButtons: {
+  const allIconButtons: {
     icon: any;
     view?: ViewType;
     route?: string;
     label: string;
+    requireAdmin?: boolean;
   }[] = [
     { icon: Folder, view: "modules", label: "Modules" },
     { icon: BarChart3, view: "reports", label: "Reports" },
@@ -358,8 +358,14 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     { icon: Calendar, view: "calendar", label: "Calendar" },
     { icon: Bell, view: "notifications", label: "Notifications" },
     { icon: Settings, route: "/settings", label: "Settings" },
-    { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant" },
+    { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
   ];
+
+  // Filter nav items based on permissions
+  const iconButtons = allIconButtons.filter((btn) => {
+    if (btn.requireAdmin && !isAdmin) return false;
+    return true;
+  });
 
   return (
     <div className="flex h-full md:h-screen bg-gray-200 text-black relative">

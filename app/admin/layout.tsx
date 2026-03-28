@@ -29,6 +29,14 @@ export default async function AdminLayout({
     redirect('/login');
   }
 
+  // Check if user has admin role
+  const isAdmin = (session.user as any).unitAssignments?.some(
+    (ua: any) => ua.role?.isAdmin || ua.role?.name?.toUpperCase() === 'ADMIN'
+  );
+  if (!isAdmin) {
+    redirect('/unauthorized');
+  }
+
   const user = {
     email: session.user.email,
     name: (session.user.first_name && session.user.last_name)

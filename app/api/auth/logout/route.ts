@@ -83,8 +83,9 @@ export async function POST(request: NextRequest) {
       message: 'Logged out successfully',
     })
 
-    // Clear cookie
+    // Clear cookies
     response.cookies.delete('auth-token')
+    response.cookies.delete('auth-meta')
 
     return response
   } catch (error) {

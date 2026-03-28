@@ -296,6 +296,23 @@ export async function POST(request: NextRequest) {
     // Create session
     const session = await createSession(user.id, ipAddress, userAgent)
 
+    // Fetch user roles for auth-meta cookie (lightweight permission data for middleware)
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        unitAssignments: {
+          select: {
+            role: { select: { name: true, isAdmin: true } },
+          },
+        },
+      },
+    })
+
+    const isAdmin = userWithRoles?.unitAssignments?.some(
+      (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+    ) ?? false
+    const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
+
     const response = NextResponse.json({
       success: true,
       message: "Login successful",
@@ -310,6 +327,15 @@ export async function POST(request: NextRequest) {
     })
 
     response.cookies.set("auth-token", session.token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: "/",
+    })
+
+    // Set auth-meta cookie for lightweight middleware permission checks
+    response.cookies.set("auth-meta", JSON.stringify({ isAdmin, roleNames }), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

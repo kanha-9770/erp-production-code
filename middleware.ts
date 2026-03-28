@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { matchRoute } from "@/lib/route-permissions";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -12,6 +13,7 @@ export function middleware(request: NextRequest) {
     "/forgot-password",
     "/reset-password",
     "/auth/reset-password",
+    "/unauthorized",
   ];
 
   // Always allow public routes, /auth prefixed pages, & Next internals
@@ -44,7 +46,25 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  return NextResponse.next();
+  // 🛡️ Lightweight route-based permission check using auth-meta cookie
+  const authMetaRaw = request.cookies.get("auth-meta")?.value;
+  if (authMetaRaw) {
+    try {
+      const authMeta = JSON.parse(authMetaRaw);
+      const rule = matchRoute(pathname);
+
+      if (rule?.requireAdmin && !authMeta.isAdmin) {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
+    } catch {
+      // Invalid auth-meta cookie — skip middleware check, let layout handle it
+    }
+  }
+
+  // Forward pathname to server components via header
+  const response = NextResponse.next();
+  response.headers.set("x-next-pathname", pathname);
+  return response;
 }
 
 export const config = {

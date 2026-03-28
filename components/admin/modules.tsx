@@ -2455,7 +2455,7 @@ export default function ModuleDashboard() {
           <div className="flex items-center gap-3 md:gap-4">
             <Button
               variant="ghost"
-              size="icon"
+              si 
               className="md:hidden"
               onClick={() => setIsMobileSidebarOpen(true)}
             >
