@@ -1760,14 +1760,14 @@ export default function ModulePage() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" size="sm" className="hidden sm:flex">
+              {/* <Button variant="outline" size="sm" className="hidden sm:flex">
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Refresh
               </Button>
               <Button variant="outline" size="sm" className="hidden sm:flex">
                 <Download className="mr-2 h-4 w-4" />
                 Export
-              </Button>
+              </Button> */}
 
               <Dialog
                 open={isCreateDialogOpen}
