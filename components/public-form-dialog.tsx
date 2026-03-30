@@ -79,32 +79,20 @@ export function PublicFormDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
         ref={dialogRef}
+        data-public-form-dialog=""
         className="p-0 overflow-visible rounded-xl shadow-2xl transition-all flex flex-col
-          w-full h-[100dvh] sm:h-auto sm:rounded-xl rounded-none"
+          w-full h-[100dvh] max-w-none sm:h-auto sm:rounded-xl rounded-none"
         style={{
-          width: undefined,
-          height: undefined,
+          width: dialogSize.width,
+          height: dialogSize.height,
           maxWidth: "98vw",
           maxHeight: "98vh",
-          // On sm+ use the resizable pixel sizes; on mobile go full-screen
         }}
-        // Apply desktop resize dimensions via inline style only on sm+
-        // We use a CSS custom property approach
-        data-desktop-width={dialogSize.width}
-        data-desktop-height={dialogSize.height}
       >
-        {/* Inline style to handle responsive dialog sizing */}
-        <style jsx>{`
-          @media (min-width: 640px) {
-            [data-desktop-width][data-desktop-height] {
-              width: ${dialogSize.width}px !important;
-              height: ${dialogSize.height}px !important;
-              max-width: 98vw !important;
-              max-height: 98vh !important;
-            }
-          }
+        {/* Mobile full-screen override (important beats inline styles) */}
+        <style>{`
           @media (max-width: 639px) {
-            [data-desktop-width][data-desktop-height] {
+            [data-public-form-dialog] {
               width: 100vw !important;
               height: 100dvh !important;
               max-width: 100vw !important;
