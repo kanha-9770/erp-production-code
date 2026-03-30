@@ -22,6 +22,7 @@ export interface RecordCellProps {
   columnWidth: number;
   isWrapTextEnabled: boolean;
   editMode: "locked" | "single-click" | "double-click";
+  canEdit?: boolean;
   selectedCell: string | null;
   focusedCell: string | null;
   comments: Map<string, Comment[]>;
@@ -62,6 +63,7 @@ export const RecordCell = memo(function RecordCell({
   columnWidth,
   isWrapTextEnabled,
   editMode,
+  canEdit = true,
   selectedCell,
   focusedCell,
   comments,
@@ -247,6 +249,7 @@ export const RecordCell = memo(function RecordCell({
           !isEditing &&
           "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
           editMode !== "locked" &&
+          canEdit &&
           !isEditing &&
           !isImageColumn &&
           "cursor-pointer hover:bg-gray-50",
@@ -254,7 +257,7 @@ export const RecordCell = memo(function RecordCell({
         )}
         style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
         onClick={() => {
-          if (!isEditing && editMode !== "locked" && !isImageColumn) {
+          if (!isEditing && editMode !== "locked" && canEdit && !isImageColumn) {
             onCellClick(cellKey);
           }
         }}

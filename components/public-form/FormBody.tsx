@@ -85,6 +85,7 @@ interface FormBodyProps {
   // Optional (dialog-only features)
   isViewOnly?: boolean;
   isSectionReadOnly?: (sectionId: string) => boolean | null;
+  isFieldReadOnly?: (fieldId: string) => boolean | null;
   dynamicSubformInstances?: Record<string, string[]>;
   addSubformRow?: (id: string) => void;
   removeSubformRow?: (id: string, instanceId: string) => void;
@@ -141,6 +142,7 @@ function SubformBlock({
     isSectionVisible,
     isViewOnly = false,
     isSectionReadOnly,
+    isFieldReadOnly,
     dynamicSubformInstances = {},
     addSubformRow,
     removeSubformRow,
@@ -150,12 +152,11 @@ function SubformBlock({
   if (!isSectionVisible(subform.id)) return null;
 
   // Compute effective view-only for this subform
-  // If isViewOnly is false (user has CREATE/EDIT/DELETE), subforms are always
-  // editable.  Section restrictions only apply in view-only mode.
   let effectiveViewOnly = !!isViewOnly;
-  if (isViewOnly && isSectionReadOnly) {
+  if (isSectionReadOnly) {
     const sr = isSectionReadOnly(subform.id);
-    if (sr === false) effectiveViewOnly = false; // section overrides → editable
+    if (sr === true) effectiveViewOnly = true;   // section is VIEW-only
+    if (sr === false) effectiveViewOnly = false;  // section is explicitly editable
   }
 
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
@@ -198,34 +199,43 @@ function SubformBlock({
     field: FormField,
     fieldKey: string,
     forceReadOnly: boolean,
-  ) => (
-    <FormRenderer
-      field={{ ...field, id: fieldKey }}
-      value={formData[fieldKey]}
-      error={errors[fieldKey]}
-      submitting={submitting}
-      submitted={submitted}
-      handleFieldChange={
-        fieldKey === field.id
-          ? handleFieldChange
-          : (_, v, full) => {
-              if (handleDynamicFieldChange) {
-                handleDynamicFieldChange(fieldKey, v, field);
-              } else {
-                handleFieldChange(fieldKey, v, full);
+  ) => {
+    // Field-level permission can override section/form-level
+    let fieldReadOnly = forceReadOnly;
+    if (isFieldReadOnly) {
+      const fr = isFieldReadOnly(field.id);
+      if (fr === true) fieldReadOnly = true;
+      if (fr === false) fieldReadOnly = false;
+    }
+    return (
+      <FormRenderer
+        field={{ ...field, id: fieldKey }}
+        value={formData[fieldKey]}
+        error={errors[fieldKey]}
+        submitting={submitting}
+        submitted={submitted}
+        handleFieldChange={
+          fieldKey === field.id
+            ? handleFieldChange
+            : (_, v, full) => {
+                if (handleDynamicFieldChange) {
+                  handleDynamicFieldChange(fieldKey, v, field);
+                } else {
+                  handleFieldChange(fieldKey, v, full);
+                }
               }
-            }
-      }
-      formulaValues={formulaValues}
-      isInSubform
-      formData={formData}
-      allFields={allFields}
-      setErrors={setErrors}
-      locationStatus={locationStatus}
-      forceReadOnly={forceReadOnly}
-      idToLabel={idToLabel}
-    />
-  );
+        }
+        formulaValues={formulaValues}
+        isInSubform
+        formData={formData}
+        allFields={allFields}
+        setErrors={setErrors}
+        locationStatus={locationStatus}
+        forceReadOnly={fieldReadOnly}
+        idToLabel={idToLabel}
+      />
+    );
+  };
 
   return (
     <div
@@ -577,6 +587,7 @@ export function FormBody(props: FormBodyProps) {
     isFieldVisible,
     isViewOnly = false,
     isSectionReadOnly,
+    isFieldReadOnly,
   } = props;
 
   if (rootItems.length === 0) {
@@ -627,14 +638,20 @@ export function FormBody(props: FormBodyProps) {
                   }}
                 >
                   {visibleSectionFields.map((field: FormField) => {
-                    // Compute read-only:
-                    // If isViewOnly is false (user has CREATE/EDIT/DELETE), fields
-                    // are always editable unless the field itself is flagged readonly.
-                    // Section-level restrictions only apply when the form is view-only.
+                    // Compute read-only for this field:
+                    // 1. Start with form-level view-only state
                     let readOnly = !!isViewOnly;
-                    if (isViewOnly && isSectionReadOnly) {
+                    // 2. Section-level can override (editable section in view-only form)
+                    if (isSectionReadOnly) {
                       const sr = isSectionReadOnly(section.id);
-                      if (sr === false) readOnly = false; // section overrides form → editable
+                      if (sr === true) readOnly = true;   // section is VIEW-only
+                      if (sr === false) readOnly = false;  // section is explicitly editable
+                    }
+                    // 3. Field-level is most specific — overrides everything
+                    if (isFieldReadOnly) {
+                      const fr = isFieldReadOnly(field.id);
+                      if (fr === true) readOnly = true;   // field is VIEW-only
+                      if (fr === false) readOnly = false;  // field is explicitly editable
                     }
                     return (
                       <FieldWrapper

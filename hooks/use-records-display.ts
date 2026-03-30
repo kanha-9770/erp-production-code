@@ -399,6 +399,14 @@ export function useRecordsDisplay({
     [getRecordForms, hasPermissionForForm, isAdmin],
   );
 
+  // True if the user can delete ANY record (used for bulk delete button visibility)
+  const canDeleteAny = React.useMemo(() => {
+    if (isAdmin) return true;
+    return permissions.some(
+      (p) => (p.name || "").toUpperCase() === "DELETE",
+    );
+  }, [permissions, isAdmin]);
+
   // ── Formula evaluation ───────────────────────────────────────────────────────
 
   const recalculateFormulasForRecord = React.useCallback(
@@ -1244,7 +1252,7 @@ export function useRecordsDisplay({
     displayedFields,
     hierarchyGroups,
     // Helpers
-    canEditRecord, canDeleteRecord, hasPermissionForForm,
+    canEditRecord, canDeleteRecord, hasPermissionForForm, canDeleteAny,
     getFieldData, getConditionalStyle, recalculateFormulasForRecord,
     sortRecords, applyFieldFilters,
     // Handlers

@@ -69,6 +69,7 @@ export function PublicFormDialog({
     // visibility helpers
     isSectionVisible,
     isFieldVisible,
+    isFieldReadOnly,
     // misc
     hasErrorsOrMissingRequired,
     setErrors,
@@ -268,6 +269,7 @@ export function PublicFormDialog({
                   isSectionVisible={isSectionVisible}
                   isViewOnly={isViewOnly}
                   isSectionReadOnly={isSectionReadOnly}
+                  isFieldReadOnly={isFieldReadOnly}
                   dynamicSubformInstances={dynamicSubformInstances}
                   addSubformRow={addSubformRow}
                   removeSubformRow={removeSubformRow}

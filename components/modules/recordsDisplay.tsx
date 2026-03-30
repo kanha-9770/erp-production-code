@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, Trash2, MoreHorizontal } from "lucide-react";
+import { Eye, Pencil, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DndContext, closestCenter, DragOverlay } from "@dnd-kit/core";
@@ -194,6 +194,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     hierarchyGroups,
     canEditRecord,
     canDeleteRecord,
+    canDeleteAny,
     getFieldData,
     getConditionalStyle,
     recalculateFormulasForRecord,
@@ -843,6 +844,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                           handleOpenAdvancedFilterForColumn={
                             handleOpenAdvancedFilterForColumn
                           }
+                          canBulkDelete={canDeleteAny}
                           // ✅ Proper bulk delete that opens popup
                           onDeleteSelected={() => {
                             if (selectedRecords.size > 0) {
@@ -919,6 +921,20 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
                                           className={cn(
+                                            "text-xs cursor-pointer",
+                                            !canEditThisRecord &&
+                                            "text-gray-400 opacity-50",
+                                          )}
+                                          onClick={() => {
+                                            if (canEditThisRecord) onEditRecord(record);
+                                          }}
+                                          disabled={!canEditThisRecord}
+                                        >
+                                          <Pencil className="h-4 w-4 mr-2" />{" "}
+                                          Edit Record
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          className={cn(
                                             "text-xs text-red-600 cursor-pointer",
                                             !canDeleteThisRecord &&
                                             "text-gray-400 opacity-50",
@@ -957,6 +973,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           }
                                           isWrapTextEnabled={isWrapTextEnabled}
                                           editMode={editMode}
+                                          canEdit={canEditThisRecord}
                                           selectedCell={selectedCell}
                                           focusedCell={focusedCell}
                                           comments={comments}
@@ -1001,6 +1018,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                               isWrapTextEnabled
                                             }
                                             editMode={editMode}
+                                            canEdit={canEditThisRecord}
                                             selectedCell={selectedCell}
                                             focusedCell={focusedCell}
                                             comments={comments}

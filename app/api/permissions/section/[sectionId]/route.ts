@@ -11,90 +11,95 @@ export async function GET(
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {
-      console.error("[Section Permissions GET] User not authenticated");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { sectionId } = params;
-    console.log("[Section Permissions GET] sectionId:", sectionId);
+    console.log("[SectionPerm GET] sectionId:", sectionId);
 
     if (!sectionId) {
       return NextResponse.json({ error: "Section ID is required" }, { status: 400 });
     }
 
-    // Verify section exists
-    const sectionExists = await prisma.formSection.findUnique({
-      where: { id: sectionId },
-    });
+    // Verify section exists (check both FormSection and Subform tables)
+    const [sectionExists, subformExists] = await Promise.all([
+      prisma.formSection.findUnique({ where: { id: sectionId } }),
+      prisma.subform.findUnique({ where: { id: sectionId } }).catch(() => null),
+    ]);
 
-    console.log("[Section Permissions GET] section found:", !!sectionExists);
+    const resourceExists = sectionExists || subformExists;
+    console.log("[SectionPerm GET] section found:", !!sectionExists, "subform found:", !!subformExists);
 
-    if (!sectionExists) {
-      console.error("[Section Permissions GET] Section not found:", sectionId);
-      const sectionCount = await prisma.formSection.count();
-      console.log("[Section Permissions GET] Total sections in database:", sectionCount);
-      return NextResponse.json({ error: "Section not found", sectionId, totalSectionsInDB: sectionCount }, { status: 404 });
+    if (!resourceExists) {
+      // Not a section or subform — return empty profiles so the caller
+      // treats it as "no restrictions" rather than an error
+      console.log("[SectionPerm GET] Section/subform not found:", sectionId, "— returning empty profiles");
+      return NextResponse.json({ profiles: [], availablePermissions: [] });
     }
 
-    const { protocol, host } = request.nextUrl;
-    const internalApiUrl = `${protocol}//${host}/api/permissions`;
-
-    // First get ALL roles to debug
+    // Get all roles for this organization
     const allRoles = await prisma.role.findMany({
-      where: {
-        organizationId: authUser.organizationId,
-      },
+      where: { organizationId: authUser.organizationId! },
       orderBy: { sortOrder: "asc" },
-    });
-
-    console.log("[Section Permissions GET] All roles in org:", allRoles.length);
-    allRoles.forEach((r) => {
-      console.log("[Section Permissions GET] Role:", r.id, r.name, "isActive:", r.isActive, "isAdmin:", r.isAdmin);
     });
 
     // Filter to active, non-admin roles
     const roles = allRoles.filter((r) => r.isActive && !r.isAdmin);
-    console.log("[Section Permissions GET] Filtered roles (active, non-admin):", roles.length);
 
-    const [assignments, permissionsRes] = await Promise.all([
+    // Fetch section-level assignments (formFieldId IS null) and
+    // field-level assignments (formFieldId IS NOT null) in parallel
+    const [sectionAssignments, fieldAssignments, availablePerms] = await Promise.all([
       prisma.rolePermission.findMany({
-        // TARGET ONLY SECTION: formFieldId MUST be null
-        where: { sectionId: sectionId, formFieldId: null, granted: true },
+        where: { sectionId, formFieldId: null, granted: true },
         include: { permission: { select: { id: true, name: true, category: true } } },
       }),
-      fetch(internalApiUrl, {
-        headers: {
-          cookie: request.headers.get("cookie") || "",
-          "Content-Type": "application/json",
-        },
-        cache: "no-store",
-      })
-        .then((res) => (res.ok ? res.json() : { data: [] }))
-        .catch(() => ({ data: [] })),
+      prisma.rolePermission.findMany({
+        where: { sectionId, formFieldId: { not: null }, granted: true },
+        include: { permission: { select: { id: true, name: true, category: true } } },
+      }),
+      prisma.permission.findMany({
+        select: { id: true, name: true, category: true },
+      }),
     ]);
 
-    console.log("[Section Permissions GET] roles:", roles.length, "assignments:", assignments.length);
+    console.log("[SectionPerm GET] roles:", roles.length,
+      "sectionAssignments:", sectionAssignments.length,
+      "fieldAssignments:", fieldAssignments.length);
 
-    const availablePermissions = permissionsRes.data || [];
-
+    // Build profiles with section permissions AND field permissions per role
     const profiles = roles.map((role) => {
-      const roleAssignments = assignments.filter((a: any) => a.roleId === role.id);
-      const firstAssigned = roleAssignments[0] as any;
-      const permissionNames = roleAssignments.map(
+      // Section-level permissions for this role
+      const roleSectionAssigns = sectionAssignments.filter((a: any) => a.roleId === role.id);
+      const firstAssigned = roleSectionAssigns[0] as any;
+      const permissionNames = roleSectionAssigns.map(
         (a: any) => a.permission?.name || a.permissionId
       );
+
+      // Field-level permissions for this role: { fieldId: permissionName }
+      const roleFieldAssigns = fieldAssignments.filter((a: any) => a.roleId === role.id);
+      const fieldPermissions: Record<string, string> = {};
+      roleFieldAssigns.forEach((a: any) => {
+        if (a.formFieldId) {
+          fieldPermissions[a.formFieldId] = a.permission?.name || a.permissionId;
+        }
+      });
+
       return {
         id: role.id,
         name: role.name,
         permission: firstAssigned?.permissionId || "NONE",
         permissions: permissionNames,
+        fieldPermissions,
       };
     });
 
-    console.log("[Section Permissions GET] profiles:", profiles);
-    return NextResponse.json({ profiles, availablePermissions });
+    console.log("[SectionPerm GET] profiles:", JSON.stringify(profiles.map(p => ({
+      role: p.name, perms: p.permissions, fields: p.fieldPermissions,
+    }))));
+
+    return NextResponse.json({ profiles, availablePermissions: availablePerms });
   } catch (error: any) {
-    console.error("[Section Permissions GET Error]:", error);
+    console.error("[SectionPerm GET Error]:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error?.message },
       { status: 500 }

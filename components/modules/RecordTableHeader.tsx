@@ -462,6 +462,7 @@ interface RecordTableHeaderProps {
   ) => void;
   handleOpenAdvancedFilterForColumn: (fieldId: string) => void;
   onDeleteSelected: () => void;
+  canBulkDelete?: boolean;
 }
 
 export function RecordTableHeader({
@@ -478,6 +479,7 @@ export function RecordTableHeader({
   handleResizeStart,
   handleOpenAdvancedFilterForColumn,
   onDeleteSelected,
+  canBulkDelete = true,
 }: RecordTableHeaderProps) {
   const getGroupWidth = (fields: FormFieldWithSection[]) =>
     fields.reduce((sum, f) => sum + (columnWidths.get(f.id) || 192), 0);
@@ -547,8 +549,8 @@ export function RecordTableHeader({
               className="h-4 w-4"
             />
 
-            {/* Delete Icon - appears only when something is selected */}
-            {hasSelection && (
+            {/* Delete Icon - appears only when something is selected and user has delete permission */}
+            {hasSelection && canBulkDelete && (
               <Button
                 variant="ghost"
                 size="sm"

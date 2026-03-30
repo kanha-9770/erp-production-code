@@ -578,13 +578,14 @@ export default function ModulePage({
   // ─────────────────────────────────────────────────────────────────────────────
   const openFormDialog = (formId: string) => {
     const canOpen = isAdmin
+      || hasPermissionForForm(formId, "VIEW")
       || hasPermissionForForm(formId, "CREATE")
       || hasPermissionForForm(formId, "EDIT")
       || hasPermissionForForm(formId, "DELETE");
     if (!canOpen) {
       toast({
         title: "Access Denied",
-        description: "You don't have permission to submit this form.",
+        description: "You don't have permission to access this form.",
         variant: "destructive",
       });
       return;
@@ -734,7 +735,8 @@ export default function ModulePage({
         setSelectedForm={setSelectedForm}
         openFormDialog={openFormDialog}
         canCreateForForm={(formId) =>
-          hasPermissionForForm(formId, "CREATE")
+          hasPermissionForForm(formId, "VIEW")
+          || hasPermissionForForm(formId, "CREATE")
           || hasPermissionForForm(formId, "EDIT")
           || hasPermissionForForm(formId, "DELETE")
         }

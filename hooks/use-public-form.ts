@@ -276,9 +276,20 @@ export function usePublicForm({
         console.log("[usePublicForm] formPerms:", formPerms, "from", Array.isArray(perms) ? perms.length : 0, "raw perms");
 
         if (formPerms.length === 0) {
-          // No explicit permission set — default to full access (backward compat)
-          console.log("[usePublicForm] No permissions found → defaulting to CREATE (fail-open)");
-          setFormLevelPermission("CREATE");
+          // No explicit permission for this form.
+          // Check if the user has ANY permissions at all (for other forms) — if
+          // yes, it means the admin has configured permissions and this role was
+          // intentionally excluded from this form → NONE (no access).
+          // If the user has zero total permissions, permission management hasn't
+          // been set up yet → fail open to CREATE for backward compat.
+          const totalPerms = (Array.isArray(perms) ? perms : []).length;
+          if (totalPerms > 0) {
+            console.log("[usePublicForm] User has", totalPerms, "perms but none for this form → NONE");
+            setFormLevelPermission("NONE");
+          } else {
+            console.log("[usePublicForm] No permissions configured at all → defaulting to CREATE (fail-open)");
+            setFormLevelPermission("CREATE");
+          }
           return;
         }
 
@@ -343,8 +354,11 @@ export function usePublicForm({
   const isSectionVisible = useCallback(
     (id: string): boolean => {
       const perms = sectionPermissions[id];
-      // Hidden if permissions are explicitly set to ["NONE"] or empty
-      if (perms !== undefined && perms.length === 1 && perms[0] === "NONE") return false;
+      // Hidden if permissions are explicitly set to ["NONE"]
+      if (perms !== undefined && perms.length === 1 && perms[0] === "NONE") {
+        console.log("[isSectionVisible]", id, "→ HIDDEN (NONE)");
+        return false;
+      }
 
       if (form) {
         const checkSubforms = (subforms: Subform[]): boolean | null => {
@@ -378,9 +392,15 @@ export function usePublicForm({
     (id: string): boolean | null => {
       const perms = sectionPermissions[id];
       // No perms, empty, or only "NONE" → no section config → inherit form-level
-      if (!perms || perms.length === 0) return null;
+      if (!perms || perms.length === 0) {
+        console.log("[isSectionReadOnly]", id, "→ null (inherit form-level), perms:", perms);
+        return null;
+      }
       const meaningful = perms.filter((p) => p !== "NONE");
-      if (meaningful.length === 0) return null;
+      if (meaningful.length === 0) {
+        console.log("[isSectionReadOnly]", id, "→ null (only NONE), perms:", perms);
+        return null;
+      }
       // Read-only if only VIEW is granted (no CREATE, EDIT, or DELETE)
       if (
         meaningful.includes("VIEW") &&
@@ -388,8 +408,10 @@ export function usePublicForm({
         !meaningful.includes("EDIT") &&
         !meaningful.includes("DELETE")
       ) {
+        console.log("[isSectionReadOnly]", id, "→ true (VIEW only), perms:", meaningful);
         return true;
       }
+      console.log("[isSectionReadOnly]", id, "→ false (editable), perms:", meaningful);
       return false; // Has CREATE/EDIT/DELETE → editable
     },
     [sectionPermissions],
@@ -437,11 +459,32 @@ export function usePublicForm({
     return type === "show" ? matches : !matches;
   };
 
+  /**
+   * Returns true if a field should be read-only due to field-level permission.
+   * Only "VIEW" at field level makes it read-only.
+   * Returns null if no field-level permission is set (inherit section/form level).
+   */
+  const isFieldReadOnly = useCallback(
+    (fieldId: string): boolean | null => {
+      const perm = fieldPermissions[fieldId];
+      if (!perm) return null; // No field-level override → inherit
+      const permUpper = perm.toUpperCase();
+      if (permUpper === "VIEW") return true; // Field is view-only
+      if (permUpper === "NONE") return true; // Shouldn't be visible, but treat as read-only too
+      return false; // Has CREATE/EDIT/DELETE → editable
+    },
+    [fieldPermissions],
+  );
+
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
-    const fieldPermId = fieldPermissions[field.id];
-    // Field-level override is a string; section-level is now string[]
-    if (fieldPermId === "NONE") return false;
-    if (!fieldPermId) {
+    const fieldPerm = fieldPermissions[field.id];
+    // Field-level "NONE" hides the field entirely
+    if (fieldPerm && fieldPerm.toUpperCase() === "NONE") {
+      console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perm NONE)");
+      return false;
+    }
+    // If no field-level perm, check section-level
+    if (!fieldPerm) {
       const sectionPerms = sectionPermissions[sectionId];
       if (sectionPerms && sectionPerms.length === 1 && sectionPerms[0] === "NONE") return false;
     }
@@ -976,59 +1019,81 @@ export function usePublicForm({
   };
 
   const fetchSectionPermissions = async (formData: Form) => {
-    // If the form-level permission already grants editing, section permissions
-    // can only restrict individual sections — never the whole form.
     let avails: any[] = availablePermissions;
-    const sectionPerms: Record<string, string[]> = {};
+    const rawPerms: Record<string, string[]> = {};
     const allFieldPerms: Record<string, string> = {};
     const allIds = getAllPermissionableIds(formData);
+
     await Promise.all(
       allIds.map(async (id) => {
         try {
-          const res = await fetch(`/api/permissions/sections/${id}`);
+          const res = await fetch(`/api/permissions/section/${id}`);
           if (!res.ok) {
-            sectionPerms[id] = []; // API error = no restrictions
+            rawPerms[id] = [];
             return;
           }
           const data = await res.json();
           if (data.error) {
-            sectionPerms[id] = []; // Error = no restrictions
+            rawPerms[id] = [];
             return;
           }
           if (data.availablePermissions && avails.length === 0) {
             avails = data.availablePermissions;
           }
           const profile = data.profiles?.find((p: any) => p.id === userRoleId);
-          // No profile means the role isn't listed (admin roles are excluded from
-          // the section permission API) — treat as no restrictions.
           if (!profile) {
-            sectionPerms[id] = [];
+            // Role not listed (admin roles excluded) — no restrictions
+            rawPerms[id] = [];
             return;
           }
-          // Use the new `permissions` array if available.
-          // Empty array [] = no section permissions configured = full access (inherit form-level).
-          // Non-empty array = explicit permissions set.
+
           let permNames: string[];
           if (profile.permissions && Array.isArray(profile.permissions)) {
             permNames = profile.permissions.length > 0 ? profile.permissions : [];
           } else if (profile.permission && profile.permission !== "NONE") {
-            // Legacy single permission fallback
             permNames = [profile.permission];
           } else {
-            // No explicit permission for this role on this section = no restrictions
             permNames = [];
           }
+
+          // Collect field-level permissions from the API response
           const sectionFieldPerms = profile.fieldPermissions || {};
-          sectionPerms[id] = permNames;
+          rawPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
         } catch (e) {
-          sectionPerms[id] = []; // Exception = no restrictions
+          rawPerms[id] = [];
         }
       }),
     );
-    console.log("[usePublicForm] sectionPermissions:", sectionPerms);
+
+    // ── KEY LOGIC: If ANY section has explicit permissions, then sections
+    // with NO permissions (empty []) are intentionally excluded → mark as NONE.
+    // This ensures: "I gave Section A all perms, Section B has nothing → B is hidden."
+    const anySectionHasExplicitPerms = Object.values(rawPerms).some(
+      (perms) => perms.length > 0,
+    );
+
+    const finalPerms: Record<string, string[]> = {};
+    for (const [id, perms] of Object.entries(rawPerms)) {
+      if (perms.length > 0) {
+        // Has explicit permissions — use as-is
+        finalPerms[id] = perms;
+      } else if (anySectionHasExplicitPerms) {
+        // No permissions BUT other sections do → this section is hidden
+        finalPerms[id] = ["NONE"];
+      } else {
+        // No permissions configured at all anywhere → full access (backward compat)
+        finalPerms[id] = [];
+      }
+    }
+
+    console.log("[usePublicForm] sectionPermissions (raw):", rawPerms);
+    console.log("[usePublicForm] sectionPermissions (final):", finalPerms);
+    console.log("[usePublicForm] fieldPermissions:", allFieldPerms);
+    console.log("[usePublicForm] anySectionHasExplicitPerms:", anySectionHasExplicitPerms);
+
     setAvailablePermissions(avails);
-    setSectionPermissions(sectionPerms);
+    setSectionPermissions(finalPerms);
     setFieldPermissions(allFieldPerms);
   };
 
@@ -1384,6 +1449,8 @@ export function usePublicForm({
     hasAnySectionEditPermission,
     effectiveViewOnly,
     sectionPermissions,
+    fieldPermissions,
+    userRoleId,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1601,6 +1668,7 @@ export function usePublicForm({
     // visibility helpers
     isSectionVisible,
     isFieldVisible,
+    isFieldReadOnly,
     evaluateSubformConditional,
     evaluateConditionalVisibility,
     isFieldVisibleDependingOnParent,
