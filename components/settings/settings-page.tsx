@@ -217,7 +217,7 @@ const settingsData: SettingCategory[] = [
     title: "Security Control",
     items: [
       { name: "Profiles", href: "/settings/profiles" },
-      { name: "Roles and Sharing", href: "/settings/roles" },
+      { name: "Permissions", href: "/settings/permission" },
       { name: "Zoho Mail Add-on Users", href: "/settings/zoho-mail" },
       { name: "Compliance Settings", href: "/settings/compliance" },
       { name: "Territory Management", href: "/settings/territory" },

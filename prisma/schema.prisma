@@ -160,6 +160,7 @@ model User {
   formRecords14    FormRecord14[]          @relation("FormRecord14User")
   formRecords15    FormRecord15[]          @relation("FormRecord15User")
   conversations    ChatConversation[]      @relation("UserConversations")
+  routeAccess      RouteUserAccess[]
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
 
@@ -223,6 +224,7 @@ model Organization {
   activities         Activity[]
   formModules        FormModule[]    @relation("UserOrganization")
   aiConfigurations   AIConfiguration[] @relation("OrganizationAIConfigs")
+  routePermissions   RoutePermission[]
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
@@ -273,6 +275,7 @@ model Role {
   unitAssignments      UnitRoleAssignment[]
   userAssignments      UserUnitAssignment[]
   rolePermissions      RolePermission[]
+  routeAccess          RouteRoleAccess[]
   createdAt            DateTime          @default(now()) @map("created_at")
   updatedAt            DateTime          @updatedAt @map("updated_at")
 
@@ -1656,4 +1659,53 @@ model FormRecordField {
   @@index([recordId])
   @@index([formId, subformId, subformRowIndex])
   @@map("form_record_fields")
+}
+
+model RoutePermission {
+  id                  String   @id @default(cuid())
+  pattern             String
+  description         String?
+  redirectTo          String?  @map("redirect_to")
+  organizationId      String   @map("organization_id")
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleAccess          RouteRoleAccess[]
+  userAccess          RouteUserAccess[]
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([pattern, organizationId])
+  @@index([organizationId])
+  @@map("route_permissions")
+}
+
+model RouteRoleAccess {
+  id                String          @id @default(cuid())
+  routePermissionId String          @map("route_permission_id")
+  routePermission   RoutePermission @relation(fields: [routePermissionId], references: [id], onDelete: Cascade)
+  roleId            String          @map("role_id")
+  role              Role            @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  granted           Boolean         @default(true)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@unique([routePermissionId, roleId])
+  @@index([routePermissionId])
+  @@index([roleId])
+  @@map("route_role_access")
+}
+
+model RouteUserAccess {
+  id                String          @id @default(cuid())
+  routePermissionId String          @map("route_permission_id")
+  routePermission   RoutePermission @relation(fields: [routePermissionId], references: [id], onDelete: Cascade)
+  userId            String          @map("user_id")
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  granted           Boolean         @default(true)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@unique([routePermissionId, userId])
+  @@index([routePermissionId])
+  @@index([userId])
+  @@map("route_user_access")
 }

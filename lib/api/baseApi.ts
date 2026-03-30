@@ -44,6 +44,9 @@ export const baseApi = createApi({
     "AdminUsers",
     // Settings
     "MasterData",
+    // Route Permissions
+    "RoutePermissions",
+    "RouteAccess",
     // Chat
     "Conversations",
   ],
