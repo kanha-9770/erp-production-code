@@ -34,36 +34,36 @@ The ERP application implements a **three-layer route-based permission system** t
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Request Flow                                  │
-│                                                                      │
-│  User Request                                                        │
-│      │                                                               │
-│      ▼                                                               │
-│  ┌──────────────────────────────────────────┐                        │
-│  │  Layer 1: MIDDLEWARE (middleware.ts)       │  Fast / No DB calls   │
-│  │  - Checks auth-token cookie exists        │                       │
-│  │  - Reads auth-meta cookie (JSON)          │                       │
-│  │  - Blocks admin-only routes for non-admin │                       │
-│  │  - Forwards pathname via x-next-pathname  │                       │
-│  └──────────────────┬───────────────────────┘                        │
-│                     │                                                │
-│                     ▼                                                │
-│  ┌──────────────────────────────────────────┐                        │
-│  │  Layer 2: SERVER LAYOUTS                  │  Authoritative / DB   │
-│  │  - admin/layout.tsx → admin role check    │                       │
-│  │  - settings/layout.tsx → checkRoutePerms  │                       │
-│  │  - Queries DB for roles & permissions     │                       │
-│  │  - Redirects to /unauthorized if denied   │                       │
-│  └──────────────────┬───────────────────────┘                        │
-│                     │                                                │
-│                     ▼                                                │
-│  ┌──────────────────────────────────────────┐                        │
-│  │  Layer 3: CLIENT-SIDE (RouteGuard)        │  UX Polish            │
-│  │  - RouteGuard component for dynamic pages │                       │
-│  │  - Sidebar filters nav items              │                       │
-│  │  - PermissionGate hides UI elements       │                       │
-│  └──────────────────────────────────────────┘                        │
-│                                                                      │
+│                        Request Flow                                 │
+│                                                                     │
+│  User Request                                                       │
+│      │                                                              │
+│      ▼                                                              │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  Layer 1: MIDDLEWARE (middleware.ts)     │   Fast / No DB calls  │
+│  │  - Checks auth-token cookie exists       │                       │
+│  │  - Reads auth-meta cookie (JSON)         │                       │
+│  │  - Blocks admin-only routes for non-admin│                       │
+│  │  - Forwards pathname via x-next-pathname │                       │
+│  └──────────────────┬───────────────────────┘                       │
+│                     │                                               │
+│                     ▼                                               │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  Layer 2: SERVER LAYOUTS                 │  Authoritative / DB   │
+│  │  - admin/layout.tsx → admin role check   │                       │
+│  │  - settings/layout.tsx → checkRoutePerms │                       │
+│  │  - Queries DB for roles & permissions    │                       │
+│  │  - Redirects to /unauthorized if denied  │                       │
+│  └──────────────────┬───────────────────────┘                       │
+│                     │                                               │
+│                     ▼                                               │
+│  ┌──────────────────────────────────────────┐                       │
+│  │  Layer 3: CLIENT-SIDE (RouteGuard)       │  UX Polish            │
+│  │  - RouteGuard component for dynamic pages│                       │
+│  │  - Sidebar filters nav items             │                       │
+│  │  - PermissionGate hides UI elements      │                       │
+│  └──────────────────────────────────────────┘                       │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

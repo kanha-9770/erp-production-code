@@ -77,6 +77,7 @@ export const RecordCell = memo(function RecordCell({
   toggleCellExpansion,
 }: RecordCellProps) {
   const actualValue = pendingChange ? pendingChange.value : fieldData?.value ?? null;
+
   const displayText = useMemo(() => {
     const val = pendingChange ? pendingChange.value : fieldData?.displayValue ?? fieldData?.value ?? "";
     if (val === null || val === undefined) return "";
@@ -88,10 +89,55 @@ export const RecordCell = memo(function RecordCell({
     }
     return String(val);
   }, [pendingChange, fieldData?.displayValue, fieldData?.value]);
+
   const cellKey = `${record.id}-${fieldDef.id}`;
   const isEditing =
     editingCell?.recordId === record.id && editingCell?.fieldId === fieldDef.id;
   const isExpanded = expandedCells.has(cellKey);
+
+  // ── Location Field Detection & Google Maps URL Generation ──
+  const isLocationField = useMemo(() => {
+    const type = (fieldDef.type || "").toLowerCase();
+    const label = (fieldDef.label || "").toLowerCase();
+    return (
+      type === "location" ||
+      type === "coordinates" ||
+      label.includes("location") ||
+      label.includes("coordinates") ||
+      label.includes("latitude") ||
+      label.includes("longitude") ||
+      label.includes("lat") ||
+      label.includes("lng")
+    );
+  }, [fieldDef.type, fieldDef.label]);
+
+  const locationUrl = useMemo(() => {
+    if (!isLocationField || !actualValue) return null;
+
+    let lat: number | null = null;
+    let lng: number | null = null;
+
+    // Handle object format: { lat: 26.9124, lng: 75.7873 } or { latitude, longitude }
+    if (typeof actualValue === "object" && actualValue !== null) {
+      lat = actualValue.lat ?? actualValue.latitude ?? null;
+      lng = actualValue.lng ?? actualValue.longitude ?? null;
+    }
+    // Handle string format: "26.9124,75.7873" or "26.9124, 75.7873"
+    else if (typeof actualValue === "string") {
+      const trimmed = actualValue.trim();
+      const parts = trimmed.split(",").map((p) => parseFloat(p.trim()));
+      if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        lat = parts[0];
+        lng = parts[1];
+      }
+    }
+
+    if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    }
+
+    return null;
+  }, [actualValue, isLocationField]);
 
   const getValidImages = (value: any): string[] => {
     if (!value) return [];
@@ -257,7 +303,7 @@ export const RecordCell = memo(function RecordCell({
         )}
         style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
         onClick={() => {
-          if (!isEditing && editMode !== "locked" && canEdit && !isImageColumn) {
+          if (!isEditing && editMode !== "locked" && canEdit && !isImageColumn && !locationUrl) {
             onCellClick(cellKey);
           }
         }}
@@ -330,7 +376,30 @@ export const RecordCell = memo(function RecordCell({
                 {displayText || "Click to view"}
               </span>
             </div>
+          ) : locationUrl ? (
+            // ── Clickable Location Map Link ──
+            <a
+              href={locationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full h-full text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-2 group/link"
+              onClick={(e) => e.stopPropagation()} // Prevent triggering cell edit
+              title={`Open ${displayText} in Google Maps`}
+            >
+              <span className="text-blue-500 text-lg flex-shrink-0">📍</span>
+              <span
+                className={cn(
+                  "text-sm leading-tight py-2 flex-1",
+                  isWrapTextEnabled || isExpanded
+                    ? "whitespace-normal break-words"
+                    : "whitespace-nowrap overflow-hidden text-ellipsis"
+                )}
+              >
+                {displayText || "View on Google Maps"}
+              </span>
+            </a>
           ) : (
+            // ── Normal Text Display ──
             <div className="relative group w-full h-full">
               <div
                 className={cn(
@@ -344,6 +413,7 @@ export const RecordCell = memo(function RecordCell({
               >
                 {(displayText ?? "") === "" ? "N/A" : displayText}
               </div>
+
               {!isWrapTextEnabled && displayText && displayText.length > 40 && (
                 <button
                   onClick={(e) => {
@@ -362,6 +432,7 @@ export const RecordCell = memo(function RecordCell({
             </div>
           )}
         </div>
+
         {hasComments && (
           <div className="absolute top-0 right-0 group z-10">
             <button
