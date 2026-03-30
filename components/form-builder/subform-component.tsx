@@ -52,7 +52,6 @@ import type { FormField, Subform } from "@/types/form-builder";
 import { useToast } from "@/hooks/use-toast";
 import {
   useCreateFieldMutation,
-  useDeleteSubformMutation,
   useUpdateSubformMutation,
   useLazyGetFormFieldsQuery,
   useLazyGetFieldPermissionQuery,
@@ -179,7 +178,6 @@ export default function SubformComponent({
 }: SubformComponentProps) {
   const [isExpanded, setIsExpanded] = useState(!subform.collapsed ?? true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [showSubformSettings, setShowSubformSettings] = useState(false);
 
   const [formFields, setFormFields] = useState<FormField[]>([]);
@@ -197,7 +195,6 @@ export default function SubformComponent({
   const { toast } = useToast();
 
   const [createField] = useCreateFieldMutation();
-  const [deleteSubform] = useDeleteSubformMutation();
   const [updateSubform] = useUpdateSubformMutation();
   const [triggerGetFormFields] = useLazyGetFormFieldsQuery();
 
@@ -310,26 +307,9 @@ export default function SubformComponent({
     }
   };
 
-  const handleDeleteSubform = async () => {
-    setIsDeleting(true);
-    try {
-      await deleteSubform(subform.id).unwrap();
-      toast({
-        title: "Subform deleted",
-        description: "The subform and all nested content have been removed.",
-      });
-      onDeleteSubform();
-    } catch (err: any) {
-      console.error("[Subform Delete]", err);
-      toast({
-        variant: "destructive",
-        title: "Deletion failed",
-        description: err.data?.error || err.message || "Could not delete subform. Please try again.",
-      });
-    } finally {
-      setIsDeleting(false);
-      setShowDeleteDialog(false);
-    }
+  const handleDeleteSubform = () => {
+    setShowDeleteDialog(false);
+    onDeleteSubform();
   };
 
   // ── Save subform name inline ─────────────────────────────────────────────
@@ -410,7 +390,6 @@ export default function SubformComponent({
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
               onClick={() => setShowDeleteDialog(true)}
-              disabled={isDeleting}
             >
               <Trash2 className="mr-2 h-4 w-4" />
               Delete subform
@@ -488,23 +467,14 @@ export default function SubformComponent({
             <Button
               variant="outline"
               onClick={() => setShowDeleteDialog(false)}
-              disabled={isDeleting}
             >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={handleDeleteSubform}
-              disabled={isDeleting}
             >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete Subform"
-              )}
+              Delete Subform
             </Button>
           </DialogFooter>
         </DialogContent>

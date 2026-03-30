@@ -1330,6 +1330,25 @@ export function usePublicForm({
     }
     setFormData((prev) => {
       const newData = { ...prev, [fieldId]: storeValue };
+
+      // Clear all dependent children (and grandchildren) when a parent changes
+      if (form) {
+        const everyField: FormField[] = [
+          ...form.sections.flatMap((s) => s.fields),
+          ...getAllSubformFields(form.subforms || []),
+        ];
+        const clearDependents = (parentId: string) => {
+          everyField.forEach((f) => {
+            if (f.isDependent && f.parentFieldId === parentId) {
+              newData[f.id] = "";
+              // Recursively clear grandchildren
+              clearDependents(f.id);
+            }
+          });
+        };
+        clearDependents(fieldId);
+      }
+
       if (
         form &&
         fullOption &&
@@ -1376,6 +1395,22 @@ export function usePublicForm({
         else delete newErrors[fieldId];
       } else {
         delete newErrors[fieldId];
+      }
+      // Clear errors for dependent children that were reset
+      if (form) {
+        const everyField: FormField[] = [
+          ...form.sections.flatMap((s) => s.fields),
+          ...getAllSubformFields(form.subforms || []),
+        ];
+        const clearDepErrors = (parentId: string) => {
+          everyField.forEach((f) => {
+            if (f.isDependent && f.parentFieldId === parentId) {
+              delete newErrors[f.id];
+              clearDepErrors(f.id);
+            }
+          });
+        };
+        clearDepErrors(fieldId);
       }
       return newErrors;
     });
@@ -1615,19 +1650,62 @@ export function usePublicForm({
           return;
         }
       }
-      setFormData((prev) => ({
-        ...prev,
-        [fieldKey]: storeValue,
-      }));
+      setFormData((prev) => {
+        const newData = { ...prev, [fieldKey]: storeValue };
+        // Clear dependent children in the same dynamic row
+        if (form) {
+          const everyField: FormField[] = [
+            ...form.sections.flatMap((s) => s.fields),
+            ...getAllSubformFields(form.subforms || []),
+          ];
+          // Extract the instance suffix (e.g. "__instanceId") from the fieldKey
+          const separatorIdx = fieldKey.indexOf("__");
+          const instanceSuffix = separatorIdx !== -1 ? fieldKey.substring(separatorIdx) : "";
+          const baseFieldId = separatorIdx !== -1 ? fieldKey.substring(0, separatorIdx) : fieldKey;
+
+          const clearDependents = (parentBaseId: string) => {
+            everyField.forEach((f) => {
+              if (f.isDependent && f.parentFieldId === parentBaseId) {
+                const childKey = instanceSuffix ? `${f.id}${instanceSuffix}` : f.id;
+                newData[childKey] = "";
+                clearDependents(f.id);
+              }
+            });
+          };
+          clearDependents(baseFieldId);
+        }
+        return newData;
+      });
       setErrors((prev) => {
         const newErrors = { ...prev };
         const err = validateField(field, storeValue);
         if (err) newErrors[fieldKey] = err;
         else delete newErrors[fieldKey];
+        // Clear errors for dependent children in the same dynamic row
+        if (form) {
+          const everyField: FormField[] = [
+            ...form.sections.flatMap((s) => s.fields),
+            ...getAllSubformFields(form.subforms || []),
+          ];
+          const separatorIdx = fieldKey.indexOf("__");
+          const instanceSuffix = separatorIdx !== -1 ? fieldKey.substring(separatorIdx) : "";
+          const baseFieldId = separatorIdx !== -1 ? fieldKey.substring(0, separatorIdx) : fieldKey;
+
+          const clearDepErrors = (parentBaseId: string) => {
+            everyField.forEach((f) => {
+              if (f.isDependent && f.parentFieldId === parentBaseId) {
+                const childKey = instanceSuffix ? `${f.id}${instanceSuffix}` : f.id;
+                delete newErrors[childKey];
+                clearDepErrors(f.id);
+              }
+            });
+          };
+          clearDepErrors(baseFieldId);
+        }
         return newErrors;
       });
     },
-    [toast],
+    [toast, form],
   );
 
   return {

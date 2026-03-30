@@ -30,17 +30,6 @@ import {
 } from "../ui/select";
 import { Slider } from "../ui/slider";
 
-// Resolve parent field value (handles dynamic instance keys)
-export function resolveParentValue(f: any, formData?: Record<string, any>) {
-  if (!f || !f.parentFieldId || !formData) return undefined;
-  if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
-  const possibleKeys = Object.keys(formData).filter(
-    (k) => k.includes("__") && k.includes(f.parentFieldId),
-  );
-  if (possibleKeys.length > 0) return formData[possibleKeys[0]];
-  return undefined;
-}
-
 interface FormRendererProps {
   field: FormField;
   value: any;
@@ -56,6 +45,9 @@ interface FormRendererProps {
   locationStatus?: Record<string, "idle" | "fetching" | "success" | "failed">;
   forceReadOnly?: boolean;
   idToLabel?: Record<string, string>;
+  // New props for decimal and percent
+  decimalConfigs?: Record<string, any>;
+  percentConfigs?: Record<string, any>;
 }
 
 export function FormRenderer({
@@ -72,6 +64,8 @@ export function FormRenderer({
   locationStatus,
   forceReadOnly = false,
   idToLabel = {},
+  decimalConfigs = {},
+  percentConfigs = {},
 }: FormRendererProps) {
   const parentValueRaw = field.isDependent
     ? resolveParentValue(field, formData)
@@ -81,7 +75,12 @@ export function FormRenderer({
     parentValueRaw !== undefined && parentValueRaw !== null
       ? String(parentValueRaw)
       : "";
+
   const fieldType = (field.type || "").toLowerCase();
+
+  // Get config for decimal or percent
+  const decimalConfig = decimalConfigs[field.id];
+  const percentConfig = percentConfigs[field.id];
 
   const isFieldVisible = () => {
     if (field.visible === false) return false;
@@ -90,7 +89,6 @@ export function FormRenderer({
   };
 
   const isFieldReadOnly = () => {
-    // Only respect the field's own readonly flag and explicit forceReadOnly=true
     if (field.readonly) return true;
     if (forceReadOnly === true) return true;
     return false;
@@ -109,15 +107,13 @@ export function FormRenderer({
 
   const baseOptions = Array.isArray(field.options) ? field.options : [];
   let effectiveOptions = baseOptions;
+
   if (field.isDependent) {
     const groups = field.dependentGroups || [];
-
-    // Build a list of candidate values to match against dependentGroups.parentValue
     const candidates: string[] = [];
     if (parentValue !== undefined && parentValue !== null)
       candidates.push(String(parentValue));
 
-    // If we have access to the parent field definition, add its option identities (value, id, label)
     const parentFieldDef = allFields?.find((f) => f.id === field.parentFieldId);
     if (parentFieldDef && Array.isArray(parentFieldDef.options)) {
       parentFieldDef.options.forEach((opt: any) => {
@@ -136,10 +132,43 @@ export function FormRenderer({
     effectiveOptions = matched?.options || [];
   }
 
-  // If this is a dependent field and parent hasn't been selected yet, don't render it
   if (field.isDependent && !parentValue) {
     return null;
   }
+
+  // Helper function to handle number-only input (for decimal and percent)
+  const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>, fieldId: string, isPercent: boolean = false) => {
+    let inputValue = e.target.value;
+
+    // Allow empty or valid number (including decimal point)
+    if (inputValue === "" || /^-?\d*\.?\d*$/.test(inputValue)) {
+      let numValue = inputValue === "" ? "" : parseFloat(inputValue);
+
+      // For percent field - enforce range
+      if (isPercent && percentConfig && percentConfig.enforceRange !== false) {
+        const min = percentConfig.min ?? 0;
+        const max = percentConfig.max ?? 100;
+        if (typeof numValue === "number") {
+          if (numValue < min) numValue = min;
+          if (numValue > max) numValue = max;
+        }
+      }
+
+      // For decimal field - apply min/max if configured
+      if (!isPercent && decimalConfig) {
+        if (typeof numValue === "number") {
+          if (decimalConfig.min !== null && numValue < decimalConfig.min) {
+            numValue = decimalConfig.min;
+          }
+          if (decimalConfig.max !== null && numValue > decimalConfig.max) {
+            numValue = decimalConfig.max;
+          }
+        }
+      }
+
+      handleFieldChange(fieldId, inputValue === "" ? "" : numValue);
+    }
+  };
 
   switch (fieldType) {
     case "phone":
@@ -156,15 +185,7 @@ export function FormRenderer({
             countryCallingCodeEditable={false}
             defaultCountry={field.defaultCountry || "IN"}
             preferredCountries={[
-              "IN",
-              "US",
-              "GB",
-              "AE",
-              "CA",
-              "AU",
-              "DE",
-              "FR",
-              "SA",
+              "IN", "US", "GB", "AE", "CA", "AU", "DE", "FR", "SA",
             ]}
             placeholder={field.placeholder || "Enter phone number"}
             value={phoneValue}
@@ -248,6 +269,71 @@ export function FormRenderer({
             <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           </div>
           <input type="hidden" name={field.id} value="" />
+        </div>
+      );
+    }
+
+    // ========== DECIMAL FIELD ==========
+    case "decimal": {
+      if (!isFieldVisible()) return null;
+
+      const decimals = decimalConfig?.decimals ?? 2;
+      const step = decimals === 0 ? "1" : `0.${"0".repeat(decimals - 1)}1`;
+
+      return (
+        <div className="relative">
+          <Input
+            {...fieldProps}
+            type="number"
+            step={step}
+            min={decimalConfig?.min ?? undefined}
+            max={decimalConfig?.max ?? undefined}
+            placeholder={field.placeholder || `0.${"0".repeat(decimals)}`}
+            value={value !== null && value !== undefined ? value : ""}
+            onChange={(e) => handleNumberChange(e, field.id, false)}
+            className={error ? "border-red-500" : ""}
+          />
+          {error && (
+            <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
+              <AlertCircle className="h-3 w-3" />
+              {error}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // ========== PERCENT FIELD ==========
+    case "percent": {
+      if (!isFieldVisible()) return null;
+
+      const decimals = percentConfig?.decimals ?? 2;
+      const step = decimals === 0 ? "1" : `0.${"0".repeat(decimals - 1)}1`;
+
+      return (
+        <div className="relative">
+          <Input
+            {...fieldProps}
+            type="number"
+            step={step}
+            min={percentConfig?.min ?? 0}
+            max={percentConfig?.max ?? 100}
+            placeholder={field.placeholder || `0.${"0".repeat(decimals)}`}
+            value={value !== null && value !== undefined ? value : ""}
+            onChange={(e) => handleNumberChange(e, field.id, true)}
+            className={`pr-8 ${error ? "border-red-500" : ""}`}
+          />
+          {percentConfig?.showSymbol !== false && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+              %
+            </span>
+          )}
+          {error && (
+            <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
+              <AlertCircle className="h-3 w-3" />
+              {error}
+            </p>
+          )}
         </div>
       );
     }
@@ -776,3 +862,13 @@ export function FormRenderer({
   }
 }
 
+// Helper function for resolving parent value (kept as is)
+export function resolveParentValue(f: any, formData?: Record<string, any>) {
+  if (!f || !f.parentFieldId || !formData) return undefined;
+  if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
+  const possibleKeys = Object.keys(formData).filter(
+    (k) => k.includes("__") && k.includes(f.parentFieldId),
+  );
+  if (possibleKeys.length > 0) return formData[possibleKeys[0]];
+  return undefined;
+}

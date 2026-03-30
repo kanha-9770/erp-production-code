@@ -76,6 +76,34 @@ ACCESS CONTROL RULES (CRITICAL - NEVER BYPASS):
 - NEVER show records outside the user's access scope.
 - If access is restricted, state the restriction factually in one line.
 
+AVAILABLE CAPABILITIES:
+You have tools to query the full ERP system including:
+- Organization overview & KPIs (users, records, modules, forms)
+- Organizational structure (modules, forms, fields, sections, subforms)
+- Form records from any form (with filters by status, date, etc.)
+- Module & form analytics (record counts, usage patterns)
+- Submission timelines & trends
+- User activity & profile details (logins, audit trail)
+- Record status breakdown across all forms
+- User directory with roles and departments
+- Audit logs for compliance & security
+- Attendance records (check-in/check-out, presence tracking)
+- Payroll data (salaries, deductions, payment status)
+- Employee directory (HR details, department, designation, contact)
+- Login history (security audit, failed attempts, IP tracking)
+- Detailed form structure (fields, sections, subforms, configuration)
+- Organization units & role hierarchy (departments, teams, org chart)
+- Role-permission matrix (who can access what)
+- Cross-form record search (find data by keyword across all forms)
+- Recent submissions (latest activity across all forms)
+
+Always use the most specific tool for the user's question. If the question requires data from multiple tools, call them in sequence.
+
+CRITICAL TOOL USAGE RULES:
+- When the user mentions a form by NAME (e.g., "show expenses data"), you MUST call findFormByName FIRST to get the formId, then use that formId in queryFormRecords or getFormDetails.
+- When calling discoverStructure, the response includes formId and moduleId for every form — use these IDs for subsequent queries.
+- NEVER guess or fabricate a formId. Always look it up first.
+
 RESPONSE PROTOCOL:
 Always transform answers into structured outputs. Choose the most appropriate format:
 
@@ -173,15 +201,17 @@ export async function POST(req: NextRequest) {
       }),
 
       discoverStructure: tool({
-        description: 'Discover the organization structure: modules, forms, fields, roles, units, and employee count. Use when user asks about what modules exist, what forms are available, or organizational hierarchy.',
+        description: 'Discover the organization structure: modules, forms (with IDs), fields, roles, units, and employee count. Use when user asks about what modules exist, what forms are available, or organizational hierarchy. IMPORTANT: This returns formId values you need for other tools like queryFormRecords and getFormDetails.',
         inputSchema: z.object({}),
         execute: async () => {
           const structure = await discoverOrgStructure(ctx);
           return {
             modules: structure.modules.map(m => ({
+              moduleId: m.id,
               name: m.name,
               formCount: m.forms.length,
               forms: m.forms.map(f => ({
+                formId: f.id,
                 name: f.name,
                 published: f.isPublished,
                 fieldCount: f.sections.reduce((s, sec) => s + sec.fields.length, 0),
@@ -199,8 +229,34 @@ export async function POST(req: NextRequest) {
         },
       }),
 
+      findFormByName: tool({
+        description: 'Find a form by its name (partial match) and get its ID. ALWAYS use this tool FIRST before calling queryFormRecords or getFormDetails when you only know the form name but not the formId. Returns matching forms with their IDs.',
+        inputSchema: z.object({
+          name: z.string().describe('Form name or partial name to search for'),
+        }),
+        execute: async ({ name }) => {
+          const forms = await prisma.form.findMany({
+            where: {
+              module: { organizationId: ctx.organizationId },
+              name: { contains: name, mode: 'insensitive' },
+            },
+            select: { id: true, name: true, isPublished: true, module: { select: { name: true } } },
+            take: 10,
+          });
+          if (forms.length === 0) return { error: `No forms found matching "${name}".`, forms: [] };
+          return {
+            forms: forms.map(f => ({
+              formId: f.id,
+              formName: f.name,
+              moduleName: f.module.name,
+              isPublished: f.isPublished,
+            })),
+          };
+        },
+      }),
+
       queryFormRecords: tool({
-        description: 'Query records from a specific form. Use when user asks about form submissions, records, data entries, or wants to see specific form data. You MUST provide the formId.',
+        description: 'Query records from a specific form. Use when user asks about form submissions, records, data entries, or wants to see specific form data. You MUST provide the formId — if you only know the form name, call findFormByName first to get the formId.',
         inputSchema: z.object({
           formId: z.string().describe('The form ID to query records from'),
           status: z.string().nullable().describe('Filter by status (e.g., submitted, pending, approved)'),
@@ -318,6 +374,537 @@ export async function POST(req: NextRequest) {
             select: { performedBy: true, action: true, module: true, recordName: true, details: true, createdAt: true },
           });
           return logs;
+        },
+      }),
+
+      // ─── Attendance ──────────────────────────────────────────────
+
+      getAttendanceInfo: tool({
+        description: 'Get attendance records. For regular users returns own attendance. For managers/admins returns team or org-wide attendance. Use when user asks about attendance, check-in, check-out, presence, or who is present today.',
+        inputSchema: z.object({
+          date: z.string().nullable().describe('Specific date (YYYY-MM-DD). Defaults to today.'),
+          userId: z.string().nullable().describe('Specific user ID. Null for current user or all (admin).'),
+          limit: z.number().nullable().describe('Max records (default 50)'),
+        }),
+        execute: async ({ date, userId: targetUserId, limit }) => {
+          const targetDate = date || new Date().toISOString().split('T')[0];
+          const where: any = {};
+
+          if (ctx.accessRole === 'user') {
+            where.userId = ctx.userId;
+          } else if (targetUserId) {
+            where.userId = targetUserId;
+          } else {
+            // Admin/manager: get all org users' attendance
+            const orgUserIds = (await prisma.user.findMany({
+              where: { organizationId: ctx.organizationId },
+              select: { id: true },
+            })).map(u => u.id);
+            where.userId = { in: orgUserIds };
+          }
+          where.date = targetDate;
+
+          const records = await prisma.attendance.findMany({
+            where,
+            include: { user: { select: { first_name: true, last_name: true, email: true } } },
+            take: limit ?? 50,
+            orderBy: { createdAt: 'desc' },
+          });
+
+          return {
+            date: targetDate,
+            total: records.length,
+            checkedIn: records.filter(r => r.checkedIn).length,
+            checkedOut: records.filter(r => r.checkedOut).length,
+            records: records.map(r => ({
+              userId: r.userId,
+              name: [r.user.first_name, r.user.last_name].filter(Boolean).join(' ') || r.user.email,
+              checkedIn: r.checkedIn,
+              checkInTime: r.checkInTime,
+              checkedOut: r.checkedOut,
+              checkOutTime: r.checkOutTime,
+              notes: r.notes,
+            })),
+          };
+        },
+      }),
+
+      // ─── Payroll ─────────────────────────────────────────────────
+
+      getPayrollSummary: tool({
+        description: 'Get payroll records and summary. Shows salary details, deductions, and payment status. Admin/manager only. Use when user asks about payroll, salaries, compensation, or payment status.',
+        inputSchema: z.object({
+          month: z.number().nullable().describe('Month number (1-12). Defaults to current month.'),
+          year: z.number().nullable().describe('Year (e.g. 2026). Defaults to current year.'),
+          status: z.string().nullable().describe('Filter by status: pending, processed, paid'),
+          limit: z.number().nullable().describe('Max records (default 50)'),
+        }),
+        execute: async ({ month, year, status, limit }) => {
+          if (ctx.accessRole === 'user') return { error: 'Access denied. Only managers and admins can view payroll data.' };
+          const now = new Date();
+          const targetMonth = month ?? (now.getMonth() + 1);
+          const targetYear = year ?? now.getFullYear();
+
+          // Get employee IDs belonging to this organization
+          const orgEmployeeIds = (await prisma.employee.findMany({
+            where: { user: { organizationId: ctx.organizationId } },
+            select: { id: true },
+          })).map(e => e.id);
+
+          if (orgEmployeeIds.length === 0) return { period: `${targetYear}-${String(targetMonth).padStart(2, '0')}`, totalRecords: 0, records: [] };
+
+          const where: any = { month: targetMonth, year: targetYear, employeeId: { in: orgEmployeeIds } };
+          if (status) where.status = status;
+
+          const records = await prisma.payrollRecord.findMany({
+            where,
+            take: limit ?? 50,
+            orderBy: { createdAt: 'desc' },
+          });
+
+          const totalGross = records.reduce((s, r) => s + Number(r.grossSalary), 0);
+          const totalNet = records.reduce((s, r) => s + Number(r.netSalary), 0);
+          const totalDeductions = records.reduce((s, r) => s + Number(r.deductions), 0);
+
+          return {
+            period: `${targetYear}-${String(targetMonth).padStart(2, '0')}`,
+            totalRecords: records.length,
+            totalGrossSalary: totalGross,
+            totalNetSalary: totalNet,
+            totalDeductions,
+            statusBreakdown: {
+              pending: records.filter(r => r.status === 'pending').length,
+              processed: records.filter(r => r.status === 'processed').length,
+              paid: records.filter(r => r.status === 'paid').length,
+            },
+            records: records.map(r => ({
+              employeeId: r.employeeId,
+              presentDays: r.presentDays,
+              leaveDays: Number(r.leaveDays),
+              baseSalary: Number(r.baseSalary),
+              grossSalary: Number(r.grossSalary),
+              deductions: Number(r.deductions),
+              netSalary: Number(r.netSalary),
+              overtimeHours: Number(r.overtimeHours),
+              status: r.status,
+              processedAt: r.processedAt?.toISOString(),
+              paidAt: r.paidAt?.toISOString(),
+            })),
+          };
+        },
+      }),
+
+      // ─── Employee Directory ──────────────────────────────────────
+
+      getEmployeeDirectory: tool({
+        description: 'Get employee directory with details like department, designation, contact, salary info, joining date. Admin/manager only. Use when user asks about employees, staff, team members, HR data, or employee details.',
+        inputSchema: z.object({
+          department: z.string().nullable().describe('Filter by department name'),
+          status: z.string().nullable().describe('Filter by status: ACTIVE, INACTIVE, ON_LEAVE'),
+          limit: z.number().nullable().describe('Max records (default 50)'),
+        }),
+        execute: async ({ department, status, limit }) => {
+          if (ctx.accessRole === 'user') return { error: 'Access denied. Only managers and admins can view the employee directory.' };
+          const where: any = { user: { organizationId: ctx.organizationId } };
+          if (department) where.department = department;
+          if (status) where.status = status;
+
+          const employees = await prisma.employee.findMany({
+            where,
+            include: { user: { select: { email: true, first_name: true, last_name: true, status: true } } },
+            take: limit ?? 50,
+            orderBy: { employeeName: 'asc' },
+          });
+
+          return {
+            total: employees.length,
+            employees: employees.map(e => ({
+              id: e.id,
+              name: e.employeeName,
+              email: e.user?.email,
+              department: e.department,
+              designation: e.designation,
+              gender: e.gender,
+              status: e.status,
+              dateOfJoining: e.dateOfJoining?.toISOString().split('T')[0],
+              dateOfLeaving: e.dateOfLeaving?.toISOString().split('T')[0],
+              companyName: e.companyName,
+              shiftType: e.shiftType,
+              inTime: e.inTime,
+              outTime: e.outTime,
+              totalSalary: e.totalSalary ? Number(e.totalSalary) : null,
+              givenSalary: e.givenSalary ? Number(e.givenSalary) : null,
+              personalContact: e.personalContact,
+              country: e.country,
+            })),
+          };
+        },
+      }),
+
+      // ─── Login History ───────────────────────────────────────────
+
+      getLoginHistory: tool({
+        description: 'Get login history showing who logged in, when, from where, and success/failure. Use for security audits, tracking suspicious activity, or checking user login patterns.',
+        inputSchema: z.object({
+          userId: z.string().nullable().describe('Specific user ID. Null for org-wide (admin only).'),
+          status: z.string().nullable().describe('Filter: "Success" or "Failed"'),
+          limit: z.number().nullable().describe('Max records (default 30)'),
+        }),
+        execute: async ({ userId: targetUserId, status, limit }) => {
+          if (ctx.accessRole === 'user' && targetUserId && targetUserId !== ctx.userId) {
+            return { error: 'Access denied. You can only view your own login history.' };
+          }
+
+          const orgUserIds = (await prisma.user.findMany({
+            where: { organizationId: ctx.organizationId },
+            select: { id: true },
+          })).map(u => u.id);
+
+          const where: any = {};
+          if (ctx.accessRole === 'user') {
+            where.userId = ctx.userId;
+          } else if (targetUserId) {
+            where.userId = targetUserId;
+          } else {
+            where.userId = { in: orgUserIds };
+          }
+          if (status) where.status = status;
+
+          const history = await prisma.loginHistory.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            take: limit ?? 30,
+            include: { user: { select: { first_name: true, last_name: true, email: true } } },
+          });
+
+          const failedCount = history.filter(h => h.status === 'Failed').length;
+
+          return {
+            total: history.length,
+            failedAttempts: failedCount,
+            successfulLogins: history.length - failedCount,
+            records: history.map(h => ({
+              email: h.email,
+              name: h.user ? [h.user.first_name, h.user.last_name].filter(Boolean).join(' ') : h.email,
+              status: h.status,
+              reason: h.reason,
+              ipAddress: h.ipAddress,
+              timestamp: h.createdAt.toISOString(),
+            })),
+          };
+        },
+      }),
+
+      // ─── Form Details ───────────────────────────────────────────
+
+      getFormDetails: tool({
+        description: 'Get detailed information about a specific form including all sections, fields, field types, subforms, and publishing status. Use when user asks about a specific form structure, what fields it has, or form configuration.',
+        inputSchema: z.object({
+          formId: z.string().describe('The form ID to get details for'),
+        }),
+        execute: async ({ formId }) => {
+          if (!ctx.allowedFormIds.includes(formId)) return { error: 'Access denied or form not found.' };
+
+          const form = await prisma.form.findUnique({
+            where: { id: formId },
+            include: {
+              module: { select: { name: true } },
+              sections: {
+                include: { fields: { orderBy: { order: 'asc' } } },
+                orderBy: { order: 'asc' },
+              },
+              subforms: {
+                include: {
+                  fields: { orderBy: { order: 'asc' } },
+                  childSubforms: { include: { fields: { orderBy: { order: 'asc' } } } },
+                },
+                orderBy: { order: 'asc' },
+              },
+            },
+          });
+
+          if (!form) return { error: 'Form not found.' };
+
+          return {
+            id: form.id,
+            name: form.name,
+            description: form.description,
+            moduleName: form.module.name,
+            isPublished: form.isPublished,
+            publishedAt: form.publishedAt?.toISOString(),
+            isEmployeeForm: form.isEmployeeForm,
+            isUserForm: form.isUserForm,
+            allowAnonymous: form.allowAnonymous,
+            requireLogin: form.requireLogin,
+            sections: form.sections.map(s => ({
+              id: s.id,
+              title: s.title,
+              description: s.description,
+              columns: s.columns,
+              fields: s.fields.map(f => ({
+                id: f.id,
+                label: f.label,
+                type: f.type,
+                description: f.description,
+              })),
+            })),
+            subforms: form.subforms?.map(sf => ({
+              id: sf.id,
+              name: sf.name,
+              fieldCount: sf.fields.length,
+              childSubformCount: sf.childSubforms?.length || 0,
+              fields: sf.fields.map(f => ({ id: f.id, label: f.label, type: f.type })),
+            })),
+          };
+        },
+      }),
+
+      // ─── User Details ───────────────────────────────────────────
+
+      getUserDetails: tool({
+        description: 'Get detailed information about a specific user including profile, roles, unit assignments, permissions, and employee record. Use when user asks about a specific person, their role, their permissions, or user profile details.',
+        inputSchema: z.object({
+          userId: z.string().nullable().describe('User ID to look up. Null for current user.'),
+        }),
+        execute: async ({ userId: targetUserId }) => {
+          const uid = targetUserId ?? ctx.userId;
+          if (ctx.accessRole === 'user' && uid !== ctx.userId) {
+            return { error: 'Access denied. You can only view your own details.' };
+          }
+
+          const user = await prisma.user.findUnique({
+            where: { id: uid },
+            select: {
+              id: true, email: true, first_name: true, last_name: true, phone: true,
+              status: true, department: true, location: true, avatar: true,
+              createdAt: true,
+              unitAssignments: {
+                include: {
+                  role: { select: { name: true, level: true, isAdmin: true } },
+                  unit: { select: { name: true } },
+                },
+              },
+              employee: {
+                select: {
+                  employeeName: true, designation: true, department: true,
+                  dateOfJoining: true, shiftType: true, status: true,
+                  totalSalary: true, givenSalary: true, companyName: true,
+                },
+              },
+            },
+          });
+
+          if (!user) return { error: 'User not found.' };
+
+          return {
+            id: user.id,
+            name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email,
+            email: user.email,
+            phone: user.phone,
+            status: user.status,
+            department: user.department,
+            location: user.location,
+            memberSince: user.createdAt.toISOString().split('T')[0],
+            roles: user.unitAssignments.map(a => ({
+              role: a.role.name,
+              unit: a.unit.name,
+              level: a.role.level,
+              isAdmin: a.role.isAdmin,
+            })),
+            employeeRecord: user.employee ? {
+              name: user.employee.employeeName,
+              designation: user.employee.designation,
+              department: user.employee.department,
+              dateOfJoining: user.employee.dateOfJoining?.toISOString().split('T')[0],
+              shiftType: user.employee.shiftType,
+              status: user.employee.status,
+              totalSalary: user.employee.totalSalary ? Number(user.employee.totalSalary) : null,
+              company: user.employee.companyName,
+            } : null,
+          };
+        },
+      }),
+
+      // ─── Org Units & Roles Hierarchy ─────────────────────────────
+
+      getOrgUnitsAndRoles: tool({
+        description: 'Get the full organizational unit hierarchy and role definitions with user counts per unit. Use when user asks about departments, teams, org chart, organizational structure, or role hierarchy.',
+        inputSchema: z.object({}),
+        execute: async () => {
+          const [units, roles] = await Promise.all([
+            prisma.organizationUnit.findMany({
+              where: { organizationId: ctx.organizationId, isActive: true },
+              include: {
+                parent: { select: { name: true } },
+                userAssignments: { select: { userId: true }, distinct: ['userId'] },
+              },
+              orderBy: [{ level: 'asc' }, { sortOrder: 'asc' }],
+            }),
+            prisma.role.findMany({
+              where: { organizationId: ctx.organizationId, isActive: true },
+              include: {
+                userAssignments: { select: { userId: true }, distinct: ['userId'] },
+              },
+              orderBy: { level: 'asc' },
+            }),
+          ]);
+
+          return {
+            units: units.map(u => ({
+              id: u.id,
+              name: u.name,
+              description: u.description,
+              parentUnit: u.parent?.name || null,
+              level: u.level,
+              memberCount: u.userAssignments.length,
+            })),
+            roles: roles.map(r => ({
+              id: r.id,
+              name: r.name,
+              description: r.description,
+              level: r.level,
+              isAdmin: r.isAdmin,
+              userCount: r.userAssignments.length,
+            })),
+          };
+        },
+      }),
+
+      // ─── Roles & Permissions ─────────────────────────────────────
+
+      getRolesAndPermissions: tool({
+        description: 'Get role-based permission matrix showing what each role can access (modules, forms, CRUD operations). Admin only. Use when user asks about permissions, access control, who can do what, or permission matrix.',
+        inputSchema: z.object({
+          roleId: z.string().nullable().describe('Specific role ID. Null for all roles.'),
+        }),
+        execute: async ({ roleId }) => {
+          if (ctx.accessRole === 'user') return { error: 'Access denied. Only admins can view permission details.' };
+
+          const where: any = { organizationId: ctx.organizationId };
+          if (roleId) where.id = roleId;
+
+          const roles = await prisma.role.findMany({
+            where: { ...where, isActive: true },
+            include: {
+              rolePermissions: {
+                include: {
+                  permission: { select: { name: true, category: true, resource: true } },
+                  module: { select: { name: true } },
+                  form: { select: { name: true } },
+                },
+              },
+            },
+            orderBy: { level: 'asc' },
+          });
+
+          return roles.map(r => ({
+            roleId: r.id,
+            roleName: r.name,
+            level: r.level,
+            isAdmin: r.isAdmin,
+            permissions: r.rolePermissions.map((p: any) => ({
+              permissionName: p.permission?.name,
+              category: p.permission?.category,
+              moduleName: p.module?.name,
+              formName: p.form?.name,
+              granted: p.granted,
+              canDelegate: p.canDelegate,
+            })),
+          }));
+        },
+      }),
+
+      // ─── Search Records ──────────────────────────────────────────
+
+      searchRecordsAcrossForms: tool({
+        description: 'Search records across all forms by keyword in record data. Use when user wants to find specific data entries, search for a name, value, or keyword across all form submissions.',
+        inputSchema: z.object({
+          keyword: z.string().describe('Search keyword to find in record data'),
+          limit: z.number().nullable().describe('Max records (default 20)'),
+        }),
+        execute: async ({ keyword, limit }) => {
+          const maxResults = limit ?? 20;
+          const results: any[] = [];
+          const tables = ['form_records', 'form_records_1', 'form_records_2', 'form_records_3', 'form_records_4', 'form_records_5', 'form_records_6', 'form_records_7', 'form_records_8', 'form_records_9', 'form_records_10', 'form_records_11', 'form_records_12', 'form_records_13', 'form_records_14', 'form_records_15'];
+
+          const accessFilter = ctx.accessRole === 'user' ? `AND fr.user_id = '${ctx.userId}'` : '';
+
+          for (const tableName of tables) {
+            if (results.length >= maxResults) break;
+            try {
+              const rows: any[] = await prisma.$queryRawUnsafe(`
+                SELECT fr.id, fr.form_id as "formId", fr.record_data as "recordData",
+                       fr.status, fr.submitted_at as "submittedAt",
+                       f.name as "formName", fm.name as "moduleName"
+                FROM "${tableName}" fr
+                JOIN forms f ON f.id = fr.form_id
+                JOIN form_modules fm ON fm.id = f.module_id
+                WHERE fm.organization_id = '${ctx.organizationId}'
+                  AND fr.record_data::text ILIKE '%${keyword.replace(/'/g, "''")}%'
+                  ${accessFilter}
+                ORDER BY fr.submitted_at DESC
+                LIMIT ${maxResults - results.length}
+              `);
+              results.push(...rows.map(r => ({
+                id: r.id,
+                formId: r.formId,
+                formName: r.formName,
+                moduleName: r.moduleName,
+                data: typeof r.recordData === 'string' ? JSON.parse(r.recordData) : r.recordData,
+                status: r.status,
+                submittedAt: new Date(r.submittedAt).toISOString(),
+              })));
+            } catch {}
+          }
+
+          return { keyword, total: results.length, results: results.slice(0, maxResults) };
+        },
+      }),
+
+      // ─── Recent Submissions ──────────────────────────────────────
+
+      getRecentSubmissions: tool({
+        description: 'Get the most recent form submissions across all forms. Use when user asks about latest activity, recent submissions, what was submitted recently, or newest records.',
+        inputSchema: z.object({
+          limit: z.number().nullable().describe('Max records (default 20)'),
+        }),
+        execute: async ({ limit }) => {
+          const maxResults = limit ?? 20;
+          const results: any[] = [];
+          const tables = ['form_records', 'form_records_1', 'form_records_2', 'form_records_3', 'form_records_4', 'form_records_5', 'form_records_6', 'form_records_7', 'form_records_8', 'form_records_9', 'form_records_10', 'form_records_11', 'form_records_12', 'form_records_13', 'form_records_14', 'form_records_15'];
+
+          const accessFilter = ctx.accessRole === 'user' ? `AND fr.user_id = '${ctx.userId}'` : '';
+
+          for (const tableName of tables) {
+            try {
+              const rows: any[] = await prisma.$queryRawUnsafe(`
+                SELECT fr.id, fr.form_id as "formId", fr.record_data as "recordData",
+                       fr.status, fr.submitted_at as "submittedAt", fr.submitted_by as "submittedBy",
+                       f.name as "formName", fm.name as "moduleName"
+                FROM "${tableName}" fr
+                JOIN forms f ON f.id = fr.form_id
+                JOIN form_modules fm ON fm.id = f.module_id
+                WHERE fm.organization_id = '${ctx.organizationId}'
+                  ${accessFilter}
+                ORDER BY fr.submitted_at DESC
+                LIMIT ${maxResults}
+              `);
+              results.push(...rows.map(r => ({
+                id: r.id,
+                formId: r.formId,
+                formName: r.formName,
+                moduleName: r.moduleName,
+                data: typeof r.recordData === 'string' ? JSON.parse(r.recordData) : r.recordData,
+                status: r.status,
+                submittedAt: new Date(r.submittedAt).toISOString(),
+                submittedBy: r.submittedBy,
+              })));
+            } catch {}
+          }
+
+          // Sort all results by submittedAt descending and take top N
+          results.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+          return { total: results.length, records: results.slice(0, maxResults) };
         },
       }),
     };
