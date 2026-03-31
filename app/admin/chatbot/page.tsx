@@ -414,7 +414,7 @@ export default function ERPChatbotPage() {
   );
 
   return (
-    <div className="-mx-6 -my-8 flex h-[calc(100vh-60px)] bg-background overflow-hidden">
+    <div className="mx-6 my-8 flex h-[calc(100vh-60px)] bg-background overflow-hidden">
 
       {/* ══════ DESKTOP SIDEBAR ══════ */}
       <aside
