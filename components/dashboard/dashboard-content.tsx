@@ -238,9 +238,8 @@ export function DashboardContent({ kpis, modules, timeSeries, setupMetrics }: Da
               {setupMetrics.setupItems.map((item) => (
                 <div key={item.name} className="flex items-center gap-2">
                   <div
-                    className={`h-2 w-2 rounded-full shrink-0 ${
-                      item.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30'
-                    }`}
+                    className={`h-2 w-2 rounded-full shrink-0 ${item.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                      }`}
                   />
                   <span className={`text-sm ${item.completed ? 'text-foreground' : 'text-muted-foreground'}`}>
                     {item.name}
