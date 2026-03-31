@@ -921,38 +921,6 @@ export async function POST(req: NextRequest) {
 
     return result.toUIMessageStreamResponse({
       originalMessages: messages,
-      onFinish: async ({ messages: allMessages, isAborted }) => {
-        if (isAborted || !conversationId) return;
-
-        try {
-          const lastMsg = allMessages[allMessages.length - 1];
-          if (lastMsg) {
-            const textContent = lastMsg.parts
-              ?.filter((p: any) => p.type === 'text')
-              .map((p: any) => p.text)
-              .join('') || '';
-
-            await prisma.chatMessage.create({
-              data: {
-                conversationId,
-                sender: lastMsg.role === 'user' ? 'user' : 'ai',
-                content: textContent,
-                // 🔥 SAVES FULL AI RESPONSE (text + tool cards)
-                metadata: {
-                  parts: lastMsg.parts || [{ type: 'text', text: textContent }],
-                },
-              },
-            });
-
-            await prisma.chatConversation.update({
-              where: { id: conversationId },
-              data: {},
-            });
-          }
-        } catch (e) {
-          console.error("onFinish save error:", e);
-        }
-      },
     });
   } catch (error: any) {
     console.error('[v0] ERP Chat route error:', error);

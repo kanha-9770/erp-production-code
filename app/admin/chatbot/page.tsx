@@ -47,26 +47,26 @@ function relativeDate(d: Date): string {
 /* ═══════════════════════════ TOOL META ═══════════════════════════ */
 
 const TOOL_META: Record<string, { icon: typeof Database; label: string }> = {
-  getKPISummary:            { icon: BarChart3,    label: "KPI Summary" },
-  discoverStructure:        { icon: Database,     label: "Organization Structure" },
-  findFormByName:           { icon: Search,       label: "Form Lookup" },
-  queryFormRecords:         { icon: FileText,     label: "Form Records" },
-  getModuleAnalytics:       { icon: BarChart3,    label: "Module Analytics" },
-  getSubmissionTimeline:    { icon: Clock,        label: "Submission Timeline" },
-  getUserActivity:          { icon: Users,        label: "User Activity" },
-  getStatusBreakdown:       { icon: BarChart3,    label: "Status Breakdown" },
-  listOrgUsers:             { icon: Users,        label: "Organization Users" },
-  getAuditLogs:             { icon: ShieldCheck,  label: "Audit Logs" },
-  getAttendanceInfo:        { icon: CalendarDays, label: "Attendance" },
-  getPayrollSummary:        { icon: Wallet,       label: "Payroll Summary" },
-  getEmployeeDirectory:     { icon: UserSearch,   label: "Employee Directory" },
-  getLoginHistory:          { icon: Fingerprint,  label: "Login History" },
-  getFormDetails:           { icon: FileText,     label: "Form Details" },
-  getUserDetails:           { icon: Users,        label: "User Details" },
-  getOrgUnitsAndRoles:      { icon: Building2,    label: "Org Units & Roles" },
-  getRolesAndPermissions:   { icon: Lock,         label: "Permissions Matrix" },
-  searchRecordsAcrossForms: { icon: Search,       label: "Record Search" },
-  getRecentSubmissions:     { icon: ListOrdered,  label: "Recent Submissions" },
+  getKPISummary: { icon: BarChart3, label: "KPI Summary" },
+  discoverStructure: { icon: Database, label: "Organization Structure" },
+  findFormByName: { icon: Search, label: "Form Lookup" },
+  queryFormRecords: { icon: FileText, label: "Form Records" },
+  getModuleAnalytics: { icon: BarChart3, label: "Module Analytics" },
+  getSubmissionTimeline: { icon: Clock, label: "Submission Timeline" },
+  getUserActivity: { icon: Users, label: "User Activity" },
+  getStatusBreakdown: { icon: BarChart3, label: "Status Breakdown" },
+  listOrgUsers: { icon: Users, label: "Organization Users" },
+  getAuditLogs: { icon: ShieldCheck, label: "Audit Logs" },
+  getAttendanceInfo: { icon: CalendarDays, label: "Attendance" },
+  getPayrollSummary: { icon: Wallet, label: "Payroll Summary" },
+  getEmployeeDirectory: { icon: UserSearch, label: "Employee Directory" },
+  getLoginHistory: { icon: Fingerprint, label: "Login History" },
+  getFormDetails: { icon: FileText, label: "Form Details" },
+  getUserDetails: { icon: Users, label: "User Details" },
+  getOrgUnitsAndRoles: { icon: Building2, label: "Org Units & Roles" },
+  getRolesAndPermissions: { icon: Lock, label: "Permissions Matrix" },
+  searchRecordsAcrossForms: { icon: Search, label: "Record Search" },
+  getRecentSubmissions: { icon: ListOrdered, label: "Recent Submissions" },
 };
 
 /* ═══════════════════════════ TOOL CARD ═══════════════════════════ */
@@ -156,10 +156,10 @@ function RenderMarkdown({ text }: { text: string }) {
     }
     if (inCodeBlock) { codeContent += line + "\n"; continue; }
 
-    if (line.startsWith("### "))       elements.push(<h3 key={i} className="font-semibold text-[13px] mt-3 mb-1">{processInline(line.slice(4))}</h3>);
-    else if (line.startsWith("## "))   elements.push(<h2 key={i} className="font-semibold text-sm mt-4 mb-1.5">{processInline(line.slice(3))}</h2>);
-    else if (line.startsWith("# "))    elements.push(<h1 key={i} className="font-bold text-base mt-4 mb-1.5">{processInline(line.slice(2))}</h1>);
-    else if (line.startsWith("---"))   elements.push(<hr key={i} className="my-3 border-border/50" />);
+    if (line.startsWith("### ")) elements.push(<h3 key={i} className="font-semibold text-[13px] mt-3 mb-1">{processInline(line.slice(4))}</h3>);
+    else if (line.startsWith("## ")) elements.push(<h2 key={i} className="font-semibold text-sm mt-4 mb-1.5">{processInline(line.slice(3))}</h2>);
+    else if (line.startsWith("# ")) elements.push(<h1 key={i} className="font-bold text-base mt-4 mb-1.5">{processInline(line.slice(2))}</h1>);
+    else if (line.startsWith("---")) elements.push(<hr key={i} className="my-3 border-border/50" />);
     else if (line.startsWith("|")) {
       const tableLines: string[] = [];
       let j = i;
@@ -240,6 +240,11 @@ export default function ERPChatbotPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
 
   const { messages, sendMessage, status, setMessages } = useChat({
     transport: new DefaultChatTransport({
@@ -248,6 +253,29 @@ export default function ERPChatbotPage() {
         body: { messages, conversationId: activeConversationId },
       }),
     }),
+    onFinish: ({ message }) => {
+      const convId = activeConversationIdRef.current;
+      if (!convId || message.role !== "assistant") return;
+      const text = getMessageText(message);
+      const serializableParts = message.parts
+        ?.filter((p: any) => p.type === "text" || (p.type === "tool-invocation" && p.state === "output-available"))
+        .map((p: any) => {
+          if (p.type === "text") return { type: "text", text: p.text };
+          if (p.type === "tool-invocation") {
+            return {
+              type: "tool-invocation",
+              state: "output-available",
+              toolInvocation: {
+                toolName: p.toolInvocation?.toolName || p.toolName || "",
+                output: p.toolInvocation?.output || p.output,
+              },
+            };
+          }
+          return null;
+        })
+        .filter(Boolean) || [{ type: "text", text }];
+      saveMessage(convId, "ai", text, serializableParts);
+    },
     onError: (error) => {
       const msg = error?.message || "Something went wrong";
       setChatError(msg.length > 200 ? msg.slice(0, 200) + "..." : msg);
@@ -381,11 +409,10 @@ export default function ERPChatbotPage() {
               <div
                 key={conv.id}
                 onClick={() => handleSelectConversation(conv.id)}
-                className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-0.5 ${
-                  activeConversationId === conv.id
-                    ? "bg-muted text-foreground"
-                    : "text-foreground/70 hover:bg-muted/50 hover:text-foreground"
-                }`}
+                className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-0.5 ${activeConversationId === conv.id
+                  ? "bg-muted text-foreground"
+                  : "text-foreground/70 hover:bg-muted/50 hover:text-foreground"
+                  }`}
               >
                 <p className="text-[13px] truncate flex-1 leading-tight">{conv.title || "Untitled"}</p>
                 <button
@@ -408,7 +435,8 @@ export default function ERPChatbotPage() {
         >
           <Settings className="h-3.5 w-3.5" />
           AI Settings
-        </Link>
+        </Link> 
+        
       </div>
     </div>
   );
@@ -418,9 +446,8 @@ export default function ERPChatbotPage() {
 
       {/* ══════ DESKTOP SIDEBAR ══════ */}
       <aside
-        className={`hidden md:flex flex-col flex-shrink-0 border-r border-border bg-muted/20 transition-all duration-200 ease-in-out ${
-          sidebarOpen ? "w-[260px]" : "w-0"
-        } overflow-hidden`}
+        className={`hidden md:flex flex-col flex-shrink-0 border-r border-border bg-muted/20 transition-all duration-200 ease-in-out ${sidebarOpen ? "w-[260px]" : "w-0"
+          } overflow-hidden`}
       >
         <div className="w-[260px] h-full">{sidebarContent}</div>
       </aside>

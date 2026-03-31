@@ -112,7 +112,8 @@ export async function getConversationMessages(conversationId: string) {
 export async function saveMessage(
   conversationId: string,
   role: 'user' | 'ai',
-  content: string
+  content: string,
+  parts?: any[]
 ) {
   const session = await getSession();
   if (!session?.user) return null;
@@ -122,7 +123,7 @@ export async function saveMessage(
       conversationId,
       sender: role,
       content,
-      metadata: {},
+      metadata: parts ? { parts } : {},
     },
   });
 }
