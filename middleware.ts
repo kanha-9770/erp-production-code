@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { matchRoute } from "@/lib/route-permissions";
+import { patternToRegex } from "@/lib/route-permissions";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // ✅ Public routes (no auth needed)
+  // Public routes (no auth needed)
   const publicRoutes = [
     "/login",
     "/register",
@@ -31,33 +31,46 @@ export function middleware(request: NextRequest) {
   // Read auth token
   const token = request.cookies.get("auth-token")?.value;
 
-  // ❌ Not logged in → redirect to login
+  // Not logged in → redirect to login
   if (!token) {
+    console.log(`[middleware] REDIRECT path=${pathname} reason="no auth-token" → /login`);
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // 🔒 Logged-in users should NOT access auth pages
+  // Logged-in users should NOT access auth pages
   if (
-    token &&
-    (pathname === "/login" || pathname === "/register" || pathname === "/signup")
+    pathname === "/login" || pathname === "/register" || pathname === "/signup"
   ) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // 🛡️ Lightweight route-based permission check using auth-meta cookie
+  // Route permission check using auth-meta cookie
+  // Only source of truth: DB route permissions (allowedRoutes / deniedRoutes)
+  // computed at login and stored in the cookie. No hardcoded admin checks.
   const authMetaRaw = request.cookies.get("auth-meta")?.value;
   if (authMetaRaw) {
     try {
       const authMeta = JSON.parse(authMetaRaw);
-      const rule = matchRoute(pathname);
 
-      if (rule?.requireAdmin && !authMeta.isAdmin) {
-        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      // Admin bypasses all route checks
+      if (!authMeta.isAdmin) {
+        const deniedRoutes: string[] = Array.isArray(authMeta.deniedRoutes) ? authMeta.deniedRoutes : [];
+
+        for (const pattern of deniedRoutes) {
+          if (patternToRegex(pattern).test(pathname)) {
+            console.warn(
+              `[middleware] DENIED path=${pathname} matchedPattern="${pattern}" roles=[${authMeta.roleNames}]`
+            );
+            return NextResponse.redirect(
+              new URL("/unauthorized", request.url)
+            );
+          }
+        }
       }
     } catch {
-      // Invalid auth-meta cookie — skip middleware check, let layout handle it
+      console.warn(`[middleware] path=${pathname} invalid auth-meta cookie, skipping`);
     }
   }
 

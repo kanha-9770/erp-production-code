@@ -37,6 +37,7 @@ import {
   useSyncRoutePermissionsMutation,
   useGetRouteAccessQuery,
   useUpdateRouteAccessMutation,
+  useRefreshAuthMetaMutation,
   type RouteRule,
 } from "@/lib/api/route-permissions"
 import { useGetRolesQuery } from "@/lib/api/permissions"
@@ -343,6 +344,7 @@ function RouteAccessMatrix({ route }: RouteAccessMatrixProps) {
     refetch: refetchAccess,
   } = useGetRouteAccessQuery(route.id)
   const [updateAccess] = useUpdateRouteAccessMutation()
+  const [refreshMeta] = useRefreshAuthMetaMutation()
 
   const roles: PermissionRole[] = useMemo(
     () => (rolesData?.success ? rolesData.data : []),
@@ -461,6 +463,12 @@ function RouteAccessMatrix({ route }: RouteAccessMatrixProps) {
       }).unwrap()
 
       await refetchAccess()
+      // Refresh auth-meta cookie so middleware picks up the new permissions
+      try {
+        await refreshMeta().unwrap()
+      } catch {
+        toast.warning("Permissions saved but cookie refresh failed. Users may need to re-login.")
+      }
       setChanges(new Map())
       toast.success(`${changes.size} change(s) saved`)
     } catch {

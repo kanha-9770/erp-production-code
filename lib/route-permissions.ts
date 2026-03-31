@@ -44,7 +44,7 @@ export const routePermissions: RoutePermissionRule[] = [
  *  - `**` matches any path segments (including nested)
  *  - `*`  matches a single path segment
  */
-function patternToRegex(pattern: string): RegExp {
+export function patternToRegex(pattern: string): RegExp {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape regex special chars (except * and ?)
     .replace(/\*\*/g, "§DOUBLESTAR§")       // placeholder for **

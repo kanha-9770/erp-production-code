@@ -110,6 +110,14 @@ export const routePermissionsApi = baseApi.injectEndpoints({
         "RoutePermissions",
       ],
     }),
+
+    /** Re-compute auth-meta cookie after route permissions change */
+    refreshAuthMeta: builder.mutation<{ success: boolean }, void>({
+      query: () => ({
+        url: "/auth/refresh-meta",
+        method: "POST",
+      }),
+    }),
   }),
 })
 
@@ -122,4 +130,5 @@ export const {
   useDeleteRoutePermissionMutation,
   useGetRouteAccessQuery,
   useUpdateRouteAccessMutation,
+  useRefreshAuthMetaMutation,
 } = routePermissionsApi

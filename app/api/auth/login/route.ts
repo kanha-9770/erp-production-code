@@ -6,6 +6,7 @@ import { verifyPassword, createSession, generateOTP } from "@/lib/auth"
 import { sendOTPEmail } from "@/lib/email"
 import { LoginSchema } from "@/lib/utils/validations"
 import { getRequestMeta, logAudit } from "@/lib/api-helpers"
+import { computeRouteMeta } from "@/lib/auth/route-meta"
 
 export async function POST(request: NextRequest) {
   try {
@@ -300,9 +301,10 @@ export async function POST(request: NextRequest) {
     const userWithRoles = await prisma.user.findUnique({
       where: { id: user.id },
       select: {
+        organizationId: true,
         unitAssignments: {
           select: {
-            role: { select: { name: true, isAdmin: true } },
+            role: { select: { id: true, name: true, isAdmin: true } },
           },
         },
       },
@@ -312,6 +314,12 @@ export async function POST(request: NextRequest) {
       (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
     ) ?? false
     const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
+    const roleIds = userWithRoles?.unitAssignments?.map((ua) => ua.role.id) ?? []
+
+    // Compute route access from DB-stored RoutePermission records
+    const { deniedRoutes, allowedRoutes } = isAdmin
+      ? { deniedRoutes: [], allowedRoutes: [] }
+      : await computeRouteMeta(user.id, userWithRoles?.organizationId ?? null, roleIds)
 
     const response = NextResponse.json({
       success: true,
@@ -335,13 +343,21 @@ export async function POST(request: NextRequest) {
     })
 
     // Set auth-meta cookie for lightweight middleware permission checks
-    response.cookies.set("auth-meta", JSON.stringify({ isAdmin, roleNames }), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60, // 7 days
-      path: "/",
-    })
+    response.cookies.set(
+      "auth-meta",
+      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes }),
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: "/",
+      }
+    )
+
+    console.log(
+      `[login] auth-meta set for user=${user.email} isAdmin=${isAdmin} roles=[${roleNames}] allowed=[${allowedRoutes}] denied=[${deniedRoutes}]`
+    )
 
     return response
   } catch (error) {

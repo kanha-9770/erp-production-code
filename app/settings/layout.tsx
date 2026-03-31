@@ -30,10 +30,13 @@ export default async function SettingsLayout({
     headersList.get("x-invoke-path") ||
     "/settings";
 
-  // Check route-level permissions
-  const { allowed } = await checkRoutePermission(session.user.id, pathname);
+  // Check route-level permissions (authoritative DB-backed check)
+  const { allowed, isAdmin } = await checkRoutePermission(session.user.id, pathname);
 
   if (!allowed) {
+    console.warn(
+      `[settings-layout] DENIED user=${session.user.email} path=${pathname} isAdmin=${isAdmin}`
+    );
     redirect("/unauthorized");
   }
 

@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { createSession } from "@/lib/auth"
 import { VerifyOTPSchema } from "@/lib/utils/validations"
+import { computeRouteMeta } from "@/lib/auth/route-meta"
 
 export async function POST(request: NextRequest) {
   try {
@@ -128,6 +129,45 @@ export async function POST(request: NextRequest) {
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: "/",
     })
+
+    // Set auth-meta cookie for middleware route permission checks
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        organizationId: true,
+        unitAssignments: {
+          select: {
+            role: { select: { id: true, name: true, isAdmin: true } },
+          },
+        },
+      },
+    })
+
+    const isAdmin = userWithRoles?.unitAssignments?.some(
+      (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+    ) ?? false
+    const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
+    const roleIds = userWithRoles?.unitAssignments?.map((ua) => ua.role.id) ?? []
+
+    const { deniedRoutes, allowedRoutes } = isAdmin
+      ? { deniedRoutes: [], allowedRoutes: [] }
+      : await computeRouteMeta(userId, userWithRoles?.organizationId ?? null, roleIds)
+
+    response.cookies.set(
+      "auth-meta",
+      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes }),
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60,
+        path: "/",
+      }
+    )
+
+    console.log(
+      `[verify-otp] auth-meta set for user=${userId} isAdmin=${isAdmin} roles=[${roleNames}] allowed=[${allowedRoutes}] denied=[${deniedRoutes}]`
+    )
 
     return response
   } catch (error: any) {
