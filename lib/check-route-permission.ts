@@ -2,6 +2,21 @@ import { prisma } from "@/lib/prisma";
 import { patternToRegex } from "@/lib/route-permissions";
 
 /**
+ * Routes that are always accessible to any logged-in user.
+ */
+const ALWAYS_OPEN_ROUTES = new Set([
+  "/",
+  "/profile",
+  "/profile/security",
+  "/profile/update-profile",
+  "/chatbot",
+  "/settings",
+  "/settings/permission",
+  "/settings/permission/roles",
+  "/settings/permission/route",
+]);
+
+/**
  * Server-side route permission checker (authoritative, DB-backed).
  * Used by layouts for real-time permission validation.
  *
@@ -90,10 +105,16 @@ export async function checkRoutePermission(
       `[check-route-perm] MATCHED pattern="${rp.pattern}" roleAccess=${rp.roleAccess.length} userAccess=${rp.userAccess.length}`
     );
 
-    // Route exists in DB but no roles/users granted = deny non-admins
+    // Route exists in DB but no access rules configured yet
     if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) {
+      if (ALWAYS_OPEN_ROUTES.has(pathname)) {
+        console.log(
+          `[check-route-perm] ALLOWED user=${user.email} path=${pathname} reason="always-open route" pattern="${rp.pattern}"`
+        );
+        return { allowed: true, isAdmin: false };
+      }
       console.warn(
-        `[check-route-perm] DENIED user=${user.email} path=${pathname} reason="route registered but no access rules granted" pattern="${rp.pattern}"`
+        `[check-route-perm] DENIED user=${user.email} path=${pathname} reason="no access rules granted" pattern="${rp.pattern}"`
       );
       return { allowed: false, isAdmin: false };
     }

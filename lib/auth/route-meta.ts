@@ -1,5 +1,22 @@
 import { prisma } from "@/lib/prisma";
 
+/**
+ * Routes that are always accessible to any logged-in user.
+ * These are never denied even if they exist in the RoutePermission table
+ * with no access rules configured.
+ */
+const ALWAYS_OPEN_ROUTES = new Set([
+  "/",
+  "/profile",
+  "/profile/security",
+  "/profile/update-profile",
+  "/chatbot",
+  "/settings",
+  "/settings/permission",
+  "/settings/permission/roles",
+  "/settings/permission/route",
+]);
+
 export interface RouteMetaResult {
   deniedRoutes: string[];
   allowedRoutes: string[];
@@ -46,10 +63,14 @@ export async function computeRouteMeta(
   const allowed: string[] = [];
 
   for (const rp of dbRoutePermissions) {
-    // Route exists in DB but no one granted = deny non-admins
+    // Route exists in DB but no access rules configured yet
     if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) {
-      denied.push(rp.pattern);
-      console.log(`[route-meta]   pattern="${rp.pattern}" → DENIED (no access rules granted)`);
+      if (ALWAYS_OPEN_ROUTES.has(rp.pattern)) {
+        console.log(`[route-meta]   pattern="${rp.pattern}" → OPEN (always-open route)`);
+      } else {
+        denied.push(rp.pattern);
+        console.log(`[route-meta]   pattern="${rp.pattern}" → DENIED (no access rules granted)`);
+      }
       continue;
     }
 
