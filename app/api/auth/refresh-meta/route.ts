@@ -4,11 +4,115 @@ import { validateSession } from "@/lib/auth";
 import { computeRouteMeta } from "@/lib/auth/route-meta";
 
 /**
+ * Shared: fetch user roles and compute the full auth-meta payload.
+ * Returns null if session/user is invalid.
+ */
+async function buildAuthMeta(token: string) {
+  const session = await validateSession(token);
+  if (!session) return null;
+
+  const userId = session.user.id;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      organizationId: true,
+      unitAssignments: {
+        select: {
+          role: { select: { id: true, name: true, isAdmin: true } },
+        },
+      },
+    },
+  });
+
+  if (!user) return null;
+
+  const isAdmin =
+    user.unitAssignments?.some(
+      (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+    ) ?? false;
+  const roleNames = user.unitAssignments?.map((ua) => ua.role.name) ?? [];
+  const roleIds = user.unitAssignments?.map((ua) => ua.role.id) ?? [];
+
+  // Admin gets full access — skip DB queries
+  if (isAdmin) {
+    return { isAdmin: true, roleNames, deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] };
+  }
+
+  const { deniedRoutes, allowedRoutes, allowedModuleIds } = await computeRouteMeta(
+    userId,
+    user.organizationId,
+    roleIds
+  );
+
+  return { isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds };
+}
+
+/** Set the auth-meta cookie on a response */
+function setAuthMetaCookie(
+  response: NextResponse,
+  meta: {
+    isAdmin: boolean;
+    roleNames: string[];
+    deniedRoutes: string[];
+    allowedRoutes: string[];
+    allowedModuleIds: string[];
+  }
+) {
+  response.cookies.set("auth-meta", JSON.stringify(meta), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60,
+    path: "/",
+  });
+}
+
+/**
+ * GET /api/auth/refresh-meta?callbackUrl=/some-page
+ *
+ * Called by middleware when auth-meta cookie is missing or invalid.
+ * Computes the cookie from DB, sets it, and redirects back.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const callbackUrl =
+      new URL(request.url).searchParams.get("callbackUrl") || "/";
+
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    const meta = await buildAuthMeta(token);
+    if (!meta) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("callbackUrl", callbackUrl);
+      const response = NextResponse.redirect(loginUrl);
+      response.cookies.delete("auth-token");
+      response.cookies.delete("auth-meta");
+      return response;
+    }
+
+    const response = NextResponse.redirect(new URL(callbackUrl, request.url));
+    setAuthMetaCookie(response, meta);
+
+    console.log(
+      `[refresh-meta/GET] set cookie isAdmin=${meta.isAdmin} roles=[${meta.roleNames}] allowedModules=${meta.allowedModuleIds.length} denied=${meta.deniedRoutes.length}`
+    );
+
+    return response;
+  } catch (error) {
+    console.error("Refresh meta GET error:", error);
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+}
+
+/**
  * POST /api/auth/refresh-meta
  *
- * Re-computes the auth-meta cookie (isAdmin, roleNames, deniedRoutes)
- * from the current DB state. Call this after route permissions are updated
- * so the middleware picks up the changes without requiring re-login.
+ * Called by the settings UI after route permissions are updated.
+ * Re-computes auth-meta cookie from current DB state.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -17,56 +121,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const session = await validateSession(token);
-    if (!session) {
+    const meta = await buildAuthMeta(token);
+    if (!meta) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const userId = session.user.id;
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        organizationId: true,
-        unitAssignments: {
-          select: {
-            role: { select: { id: true, name: true, isAdmin: true } },
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    const isAdmin =
-      user.unitAssignments?.some(
-        (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
-      ) ?? false;
-    const roleNames = user.unitAssignments?.map((ua) => ua.role.name) ?? [];
-    const roleIds = user.unitAssignments?.map((ua) => ua.role.id) ?? [];
-
-    const { deniedRoutes, allowedRoutes } = isAdmin
-      ? { deniedRoutes: [], allowedRoutes: [] }
-      : await computeRouteMeta(userId, user.organizationId, roleIds);
-
     const response = NextResponse.json({ success: true });
-
-    response.cookies.set(
-      "auth-meta",
-      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes }),
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60,
-        path: "/",
-      }
-    );
+    setAuthMetaCookie(response, meta);
 
     console.log(
-      `[refresh-meta] auth-meta refreshed for user=${userId} isAdmin=${isAdmin} roles=[${roleNames}] allowed=[${allowedRoutes}] denied=[${deniedRoutes}]`
+      `[refresh-meta/POST] set cookie isAdmin=${meta.isAdmin} roles=[${meta.roleNames}] allowedModules=${meta.allowedModuleIds.length} denied=${meta.deniedRoutes.length}`
     );
 
     return response;

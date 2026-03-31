@@ -149,13 +149,13 @@ export async function POST(request: NextRequest) {
     const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
     const roleIds = userWithRoles?.unitAssignments?.map((ua) => ua.role.id) ?? []
 
-    const { deniedRoutes, allowedRoutes } = isAdmin
-      ? { deniedRoutes: [], allowedRoutes: [] }
+    const { deniedRoutes, allowedRoutes, allowedModuleIds } = isAdmin
+      ? { deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] }
       : await computeRouteMeta(userId, userWithRoles?.organizationId ?? null, roleIds)
 
     response.cookies.set(
       "auth-meta",
-      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes }),
+      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
       {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     )
 
     console.log(
-      `[verify-otp] auth-meta set for user=${userId} isAdmin=${isAdmin} roles=[${roleNames}] allowed=[${allowedRoutes}] denied=[${deniedRoutes}]`
+      `[verify-otp] auth-meta set for user=${userId} isAdmin=${isAdmin} roles=[${roleNames}] allowedModules=${allowedModuleIds.length} denied=[${deniedRoutes}]`
     )
 
     return response

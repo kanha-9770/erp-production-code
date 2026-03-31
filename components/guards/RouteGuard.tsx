@@ -31,15 +31,8 @@ export function RouteGuard({
   children,
 }: RouteGuardProps) {
   const router = useRouter();
-  const { hasAnyPermission, isLoading, permissions, user } =
+  const { hasAnyPermission, isLoading, isAdmin } =
     usePermissionContext();
-
-  // Determine admin status from user's role assignments
-  const isAdmin =
-    (user as any)?.unitAssignments?.some(
-      (ua: any) =>
-        ua.role?.isAdmin || ua.role?.name?.toUpperCase() === "ADMIN"
-    ) ?? false;
 
   const isAllowed = (() => {
     if (isLoading) return null; // still loading

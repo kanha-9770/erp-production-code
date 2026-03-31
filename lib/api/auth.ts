@@ -87,6 +87,8 @@ export interface GetUserResponse {
     email_verified: boolean
     status: string
     createdAt: string
+    isAdmin: boolean
+    isOrgOwner?: boolean
     mobile?: string
     mobile_verified?: boolean
     avatar?: string
@@ -100,7 +102,7 @@ export interface GetUserResponse {
     }
     unitAssignments?: Array<{
       unit: { id: string; name: string }
-      role: { id: string; name: string }
+      role: { id: string; name: string; isAdmin?: boolean }
       notes?: string
     }>
     employee?: {

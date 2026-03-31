@@ -84,61 +84,45 @@ export async function PUT(request: NextRequest) {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Process role updates
+      // Process role updates — upsert granted value (true or false)
+      // Keeping granted:false records ensures the route stays restricted
+      // (deleting all records would make the route open to everyone)
       if (roleUpdates?.length) {
         for (const update of roleUpdates) {
-          if (update.granted) {
-            await tx.routeRoleAccess.upsert({
-              where: {
-                routePermissionId_roleId: {
-                  routePermissionId: routeId,
-                  roleId: update.roleId,
-                },
-              },
-              update: { granted: true },
-              create: {
-                routePermissionId: routeId,
-                roleId: update.roleId,
-                granted: true,
-              },
-            })
-          } else {
-            await tx.routeRoleAccess.deleteMany({
-              where: {
+          await tx.routeRoleAccess.upsert({
+            where: {
+              routePermissionId_roleId: {
                 routePermissionId: routeId,
                 roleId: update.roleId,
               },
-            })
-          }
+            },
+            update: { granted: update.granted },
+            create: {
+              routePermissionId: routeId,
+              roleId: update.roleId,
+              granted: update.granted,
+            },
+          })
         }
       }
 
-      // Process user updates
+      // Process user updates — upsert granted value (true or false)
       if (userUpdates?.length) {
         for (const update of userUpdates) {
-          if (update.granted) {
-            await tx.routeUserAccess.upsert({
-              where: {
-                routePermissionId_userId: {
-                  routePermissionId: routeId,
-                  userId: update.userId,
-                },
-              },
-              update: { granted: true },
-              create: {
-                routePermissionId: routeId,
-                userId: update.userId,
-                granted: true,
-              },
-            })
-          } else {
-            await tx.routeUserAccess.deleteMany({
-              where: {
+          await tx.routeUserAccess.upsert({
+            where: {
+              routePermissionId_userId: {
                 routePermissionId: routeId,
                 userId: update.userId,
               },
-            })
-          }
+            },
+            update: { granted: update.granted },
+            create: {
+              routePermissionId: routeId,
+              userId: update.userId,
+              granted: update.granted,
+            },
+          })
         }
       }
     })

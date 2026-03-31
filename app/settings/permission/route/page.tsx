@@ -2,33 +2,30 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
-  Route,
   Search,
   ChevronDown,
   ChevronRight,
-  Lock,
   RefreshCw,
-  CheckCircle2,
-  AlertCircle,
+  Save,
+  RotateCcw,
+  ShieldCheck,
+  ShieldX,
+  Globe,
+  UserCircle,
+  ChevronUp,
+  Info,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -44,15 +41,13 @@ import { useGetRolesQuery } from "@/lib/api/permissions"
 import { useGetAdminUsersQuery } from "@/lib/api/users"
 import type { PermissionRole, PermissionUser } from "@/types/permissions"
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 type ChangeKey = string
 const SEP = "::"
 function makeKey(prefix: "role" | "user", id: string): ChangeKey {
   return `${prefix}${SEP}${id}`
 }
-
-// ─── Categorize routes into groups for the sidebar ──────────────────────────
 
 interface RouteGroup {
   label: string
@@ -61,25 +56,19 @@ interface RouteGroup {
 }
 
 function groupRoutes(routes: RouteRule[]): RouteGroup[] {
-  const groups: Map<string, RouteRule[]> = new Map()
-
+  const groups = new Map<string, RouteRule[]>()
   for (const route of routes) {
-    const parts = route.pattern.split("/").filter(Boolean)
-    const prefix = parts[0] ?? "root"
+    const prefix = route.pattern.split("/").filter(Boolean)[0] ?? "root"
     if (!groups.has(prefix)) groups.set(prefix, [])
     groups.get(prefix)!.push(route)
   }
-
-  const result: RouteGroup[] = []
-  for (const [prefix, groupRoutes] of groups) {
-    result.push({
+  return [...groups.entries()]
+    .map(([prefix, rts]) => ({
       label: prefix === "root" ? "Root" : `/${prefix}`,
       prefix,
-      routes: groupRoutes.sort((a, b) => a.pattern.localeCompare(b.pattern)),
-    })
-  }
-
-  return result.sort((a, b) => a.label.localeCompare(b.label))
+      routes: rts.sort((a, b) => a.pattern.localeCompare(b.pattern)),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
 // ─── Page ───────────────────────────────────────────────────────────────────
@@ -90,23 +79,18 @@ export default function RoutePermissionsPage() {
   const [routes, setRoutes] = useState<RouteRule[]>([])
   const synced = useRef(false)
 
-  // Discover all static routes and sync to DB
   const { data: discoverData, isLoading: discovering } = useDiscoverRoutesQuery()
   const [syncRoutes, { isLoading: syncing }] = useSyncRoutePermissionsMutation()
 
-  // Auto-sync discovered routes into DB on first load
   useEffect(() => {
     if (synced.current || !discoverData?.success) return
     synced.current = true
-
     syncRoutes(discoverData.data)
       .unwrap()
-      .then((result) => {
-        if (result.success) {
-          setRoutes(result.data)
-          if (result.meta.created > 0) {
-            toast.success(`${result.meta.created} new route(s) synced`)
-          }
+      .then((r) => {
+        if (r.success) {
+          setRoutes(r.data)
+          if (r.meta.created > 0) toast.success(`${r.meta.created} new route(s) synced`)
         }
       })
       .catch(() => toast.error("Failed to sync routes"))
@@ -116,301 +100,233 @@ export default function RoutePermissionsPage() {
 
   const filteredRoutes = useMemo(() => {
     const q = sidebarSearch.trim().toLowerCase()
-    if (!q) return routes
-    return routes.filter((r) => r.pattern.toLowerCase().includes(q))
+    return q ? routes.filter((r) => r.pattern.toLowerCase().includes(q)) : routes
   }, [routes, sidebarSearch])
 
   const routeGroups = useMemo(() => groupRoutes(filteredRoutes), [filteredRoutes])
-
   const selectedRoute = routes.find((r) => r.id === selectedRouteId) ?? null
-
-  const handleRouteSelect = useCallback((routeId: string) => {
-    setSelectedRouteId(routeId)
-  }, [])
-
-  // ─── Render ───────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] text-muted-foreground">
-        <div className="relative h-12 w-12">
-          <div className="absolute inset-0 rounded-full border-4 border-primary/30 animate-pulse" />
-          <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center space-y-3">
+          <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            {discovering ? "Scanning routes..." : "Syncing..."}
+          </p>
         </div>
-        <p className="mt-5 text-base font-medium">
-          {discovering ? "Discovering routes..." : "Syncing routes..."}
-        </p>
       </div>
     )
   }
 
   return (
-    <div className="container mx-auto space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Sidebar */}
-        <div className="lg:col-span-1">
-          <RouteSidebar
-            routeGroups={routeGroups}
-            selectedRouteId={selectedRouteId}
-            search={sidebarSearch}
-            onSearchChange={setSidebarSearch}
-            onRouteSelect={handleRouteSelect}
-            totalCount={routes.length}
-          />
+    <TooltipProvider delayDuration={200}>
+      <div className="h-[calc(100vh-140px)] flex flex-col">
+        {/* Top bar */}
+        <div className="flex items-center justify-between pb-4">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Route Permissions</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Manage page-level access for roles and users
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5" />
+            <span>Admin role always has full access</span>
+          </div>
         </div>
 
-        {/* Matrix */}
-        <div className="lg:col-span-4">
-          {selectedRoute ? (
-            <RouteAccessMatrix route={selectedRoute} />
-          ) : (
-            <Card className="border-dashed border-border">
-              <CardContent className="flex flex-col items-center justify-center gap-3 py-16">
-                <Lock className="h-12 w-12 text-muted-foreground/60" />
-                <div className="text-center">
-                  <h3 className="font-semibold text-lg">No Route Selected</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Select a route from the sidebar to configure role and user access
+        {/* Main content */}
+        <div className="flex-1 flex gap-0 border rounded-lg overflow-hidden bg-background min-h-0">
+          {/* ── Left: Route list ──────────────────────────────────────────── */}
+          <div className="w-[280px] shrink-0 border-r flex flex-col bg-muted/30">
+            <div className="p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                  Routes
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                  {routes.length}
+                </span>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search..."
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                  className="pl-7 h-7 text-xs bg-background"
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            <ScrollArea className="flex-1">
+              <div className="py-1">
+                {routeGroups.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">
+                    {sidebarSearch ? "No matches" : "No routes"}
                   </p>
+                ) : (
+                  routeGroups.map((group) => (
+                    <RouteGroupItem
+                      key={group.prefix}
+                      group={group}
+                      selectedRouteId={selectedRouteId}
+                      onSelect={setSelectedRouteId}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* ── Right: Access panel ──────────────────────────────────────── */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {selectedRoute ? (
+              <AccessPanel route={selectedRoute} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center space-y-2">
+                  <Globe className="h-10 w-10 text-muted-foreground/40 mx-auto" />
+                  <p className="text-sm text-muted-foreground">Select a route to manage access</p>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+    </TooltipProvider>
+  )
+}
+
+// ─── Route Group (sidebar) ──────────────────────────────────────────────────
+
+function RouteGroupItem({
+  group,
+  selectedRouteId,
+  onSelect,
+}: {
+  group: RouteGroup
+  selectedRouteId: string | null
+  onSelect: (id: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 w-full px-3 py-1.5 text-left hover:bg-muted/60 transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-muted-foreground" />
+        )}
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex-1">
+          {group.label}
+        </span>
+        <span className="text-[10px] text-muted-foreground/60">{group.routes.length}</span>
+      </button>
+
+      {open && (
+        <div className="pb-1">
+          {group.routes.map((route) => {
+            const isActive = selectedRouteId === route.id
+            const granted = route.roleAccess.filter((r) => r.granted).length
+            return (
+              <button
+                key={route.id}
+                onClick={() => onSelect(route.id)}
+                className={cn(
+                  "flex items-center gap-2 w-full pl-7 pr-3 py-[5px] text-left transition-all",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted/80 text-foreground/80"
+                )}
+              >
+                <span className={cn(
+                  "h-1.5 w-1.5 rounded-full shrink-0",
+                  granted > 0 ? "bg-emerald-500" : "bg-orange-400"
+                )} />
+                <span className="font-mono text-[11px] truncate flex-1">
+                  {route.pattern}
+                </span>
+                {granted > 0 && (
+                  <span className={cn(
+                    "text-[10px] tabular-nums",
+                    isActive ? "text-primary-foreground/70" : "text-muted-foreground"
+                  )}>
+                    {granted}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
-// ─── Sidebar ────────────────────────────────────────────────────────────────
+// ─── Access Panel (right side) ──────────────────────────────────────────────
 
-interface RouteSidebarProps {
-  routeGroups: RouteGroup[]
-  selectedRouteId: string | null
-  search: string
-  onSearchChange: (v: string) => void
-  onRouteSelect: (id: string) => void
-  totalCount: number
-}
-
-function RouteSidebar({
-  routeGroups,
-  selectedRouteId,
-  search,
-  onSearchChange,
-  onRouteSelect,
-  totalCount,
-}: RouteSidebarProps) {
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-
-  // Expand all groups on first render
-  const didInit = useRef(false)
-  useEffect(() => {
-    if (!didInit.current && routeGroups.length > 0) {
-      setExpandedGroups(new Set(routeGroups.map((g) => g.prefix)))
-      didInit.current = true
-    }
-  }, [routeGroups])
-
-  const toggleGroup = (prefix: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev)
-      next.has(prefix) ? next.delete(prefix) : next.add(prefix)
-      return next
-    })
-  }
-
-  return (
-    <Card className="border shadow-sm overflow-hidden h-full flex flex-col">
-      {/* Header */}
-      <div className="p-3 border-b bg-muted/40 space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">
-            Routes
-            <Badge variant="secondary" className="ml-2 text-xs">
-              {totalCount}
-            </Badge>
-          </h3>
-        </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search routes..."
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9 h-9 text-sm"
-          />
-        </div>
-      </div>
-
-      {/* Grouped list */}
-      <ScrollArea className="flex-1">
-        <div className="p-2">
-          {routeGroups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground text-center">
-              <AlertCircle className="h-10 w-10 mb-3 opacity-70" />
-              <p className="text-sm font-medium">
-                {search ? "No matching routes" : "No routes found"}
-              </p>
-            </div>
-          ) : (
-            routeGroups.map((group) => (
-              <Collapsible
-                key={group.prefix}
-                open={expandedGroups.has(group.prefix)}
-                onOpenChange={() => toggleGroup(group.prefix)}
-              >
-                <CollapsibleTrigger className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/70 text-left">
-                  {expandedGroups.has(group.prefix) ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="text-sm font-semibold flex-1">{group.label}</span>
-                  <Badge variant="outline" className="text-xs px-2 py-0">
-                    {group.routes.length}
-                  </Badge>
-                </CollapsibleTrigger>
-
-                <CollapsibleContent>
-                  <div className="ml-4 pb-1">
-                    {group.routes.map((route) => {
-                      const isSelected = selectedRouteId === route.id
-                      const grantedRoles = route.roleAccess.filter((r) => r.granted).length
-                      return (
-                        <button
-                          key={route.id}
-                          onClick={() => onRouteSelect(route.id)}
-                          className={cn(
-                            "flex items-center gap-2 w-full p-2 pl-3 rounded-md text-sm transition-colors",
-                            isSelected
-                              ? "bg-primary/10 text-primary font-medium border-l-2 border-primary pl-[10px]"
-                              : "hover:bg-muted/60"
-                          )}
-                        >
-                          <Route className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <span className="font-mono text-xs truncate flex-1 text-left">
-                            {route.pattern}
-                          </span>
-                          {grantedRoles > 0 && (
-                            <Badge
-                              variant="secondary"
-                              className="text-[10px] px-1.5 py-0 shrink-0"
-                            >
-                              {grantedRoles}
-                            </Badge>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            ))
-          )}
-        </div>
-      </ScrollArea>
-    </Card>
-  )
-}
-
-// ─── Access Matrix ──────────────────────────────────────────────────────────
-
-interface RouteAccessMatrixProps {
-  route: RouteRule
-}
-
-function RouteAccessMatrix({ route }: RouteAccessMatrixProps) {
+function AccessPanel({ route }: { route: RouteRule }) {
   const [expandedRoles, setExpandedRoles] = useState<Set<string>>(new Set())
   const [changes, setChanges] = useState<Map<ChangeKey, boolean>>(new Map())
   const [saving, setSaving] = useState(false)
 
-  // Reset changes when route changes
-  const prevRouteId = useRef(route.id)
+  const prevId = useRef(route.id)
   useEffect(() => {
-    if (prevRouteId.current !== route.id) {
+    if (prevId.current !== route.id) {
       setChanges(new Map())
       setExpandedRoles(new Set())
-      prevRouteId.current = route.id
+      prevId.current = route.id
     }
   }, [route.id])
 
-  // Fetch roles, users, and current access
-  const { data: rolesData, isLoading: rolesLoading } = useGetRolesQuery()
-  const { data: usersData, isLoading: usersLoading } = useGetAdminUsersQuery()
-  const {
-    data: accessData,
-    isLoading: accessLoading,
-    refetch: refetchAccess,
-  } = useGetRouteAccessQuery(route.id)
+  const { data: rolesData, isLoading: rl } = useGetRolesQuery()
+  const { data: usersData, isLoading: ul } = useGetAdminUsersQuery()
+  const { data: accessData, isLoading: al, refetch } = useGetRouteAccessQuery(route.id)
   const [updateAccess] = useUpdateRouteAccessMutation()
   const [refreshMeta] = useRefreshAuthMetaMutation()
 
-  const roles: PermissionRole[] = useMemo(
-    () => (rolesData?.success ? rolesData.data : []),
-    [rolesData]
-  )
+  const roles: PermissionRole[] = useMemo(() => (rolesData?.success ? rolesData.data : []), [rolesData])
   const users: PermissionUser[] = useMemo(() => {
     if (!usersData?.success) return []
     return usersData.data as unknown as PermissionUser[]
   }, [usersData])
 
-  const filteredRoles = useMemo(
-    () => roles.filter((r) => r.name.toLowerCase() !== "admin"),
-    [roles]
-  )
+  const filteredRoles = useMemo(() => roles.filter((r) => r.name.toLowerCase() !== "admin"), [roles])
 
-  const roleAccessSet = useMemo(() => {
-    const set = new Set<string>()
-    if (accessData?.success) {
-      for (const ra of accessData.data.roleAccess) {
-        if (ra.granted) set.add(ra.roleId)
-      }
-    }
-    return set
+  const roleAccessMap = useMemo(() => {
+    const m = new Map<string, boolean>()
+    if (accessData?.success) accessData.data.roleAccess.forEach((ra) => m.set(ra.roleId, ra.granted))
+    return m
   }, [accessData])
 
-  const userAccessSet = useMemo(() => {
-    const set = new Set<string>()
-    if (accessData?.success) {
-      for (const ua of accessData.data.userAccess) {
-        if (ua.granted) set.add(ua.userId)
-      }
-    }
-    return set
+  const userAccessMap = useMemo(() => {
+    const m = new Map<string, boolean>()
+    if (accessData?.success) accessData.data.userAccess.forEach((ua) => m.set(ua.userId, ua.granted))
+    return m
   }, [accessData])
-
-  const loading = rolesLoading || usersLoading || accessLoading
-  const hasChanges = changes.size > 0
-
-  const toggleRole = (roleId: string) => {
-    setExpandedRoles((prev) => {
-      const next = new Set(prev)
-      next.has(roleId) ? next.delete(roleId) : next.add(roleId)
-      return next
-    })
-  }
 
   const hasRoleAccess = useCallback(
-    (roleId: string): boolean => {
-      const key = makeKey("role", roleId)
-      if (changes.has(key)) return changes.get(key)!
-      return roleAccessSet.has(roleId)
-    },
-    [changes, roleAccessSet]
+    (roleId: string) => changes.has(makeKey("role", roleId)) ? changes.get(makeKey("role", roleId))! : roleAccessMap.get(roleId) === true,
+    [changes, roleAccessMap]
   )
 
   const hasUserAccess = useCallback(
-    (userId: string): boolean => {
+    (userId: string) => {
       const key = makeKey("user", userId)
       if (changes.has(key)) return changes.get(key)!
-      if (userAccessSet.has(userId)) return true
-      // Inherit from role
-      const userRoleIds =
-        users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
+      if (userAccessMap.has(userId)) return userAccessMap.get(userId)!
+      const userRoleIds = users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
       return userRoleIds.some((rid) => hasRoleAccess(rid))
     },
-    [changes, userAccessSet, users, hasRoleAccess]
+    [changes, userAccessMap, users, hasRoleAccess]
   )
 
   const toggleAccess = useCallback(
@@ -418,42 +334,33 @@ function RouteAccessMatrix({ route }: RouteAccessMatrixProps) {
       const key = makeKey(prefix, id)
       setChanges((prev) => {
         const next = new Map(prev)
-        if (prev.has(key)) {
-          next.set(key, !prev.get(key)!)
-        } else {
-          const current =
-            prefix === "role" ? roleAccessSet.has(id) : userAccessSet.has(id)
-          next.set(key, !current)
-        }
+        const current = prev.has(key)
+          ? prev.get(key)!
+          : prefix === "role"
+            ? roleAccessMap.get(id) === true
+            : userAccessMap.get(id) === true
+        next.set(key, !current)
         return next
       })
     },
-    [roleAccessSet, userAccessSet]
+    [roleAccessMap, userAccessMap]
   )
 
-  const resetChanges = () => setChanges(new Map())
-
   const getUsersForRole = useCallback(
-    (roleId: string): PermissionUser[] =>
-      users.filter((u) => u.unitAssignments?.some((a) => a.roleId === roleId)),
+    (roleId: string) => users.filter((u) => u.unitAssignments?.some((a) => a.roleId === roleId)),
     [users]
   )
 
   const handleSave = async () => {
     if (changes.size === 0) return
     setSaving(true)
-
     try {
       const roleUpdates: Array<{ roleId: string; granted: boolean }> = []
       const userUpdates: Array<{ userId: string; granted: boolean }> = []
-
       changes.forEach((granted, key) => {
         const [prefix, id] = key.split(SEP)
-        if (prefix === "role") {
-          roleUpdates.push({ roleId: id, granted })
-        } else {
-          userUpdates.push({ userId: id, granted })
-        }
+        if (prefix === "role") roleUpdates.push({ roleId: id, granted })
+        else userUpdates.push({ userId: id, granted })
       })
 
       await updateAccess({
@@ -462,207 +369,224 @@ function RouteAccessMatrix({ route }: RouteAccessMatrixProps) {
         userUpdates: userUpdates.length ? userUpdates : undefined,
       }).unwrap()
 
-      await refetchAccess()
-      // Refresh auth-meta cookie so middleware picks up the new permissions
-      try {
-        await refreshMeta().unwrap()
-      } catch {
-        toast.warning("Permissions saved but cookie refresh failed. Users may need to re-login.")
-      }
+      await refetch()
+      try { await refreshMeta().unwrap() } catch {}
       setChanges(new Map())
-      toast.success(`${changes.size} change(s) saved`)
+      toast.success("Permissions saved")
     } catch {
-      toast.error("Failed to save access changes")
+      toast.error("Failed to save")
     } finally {
       setSaving(false)
     }
   }
 
+  const loading = rl || ul || al
+  const hasChanges = changes.size > 0
+  const grantedCount = [...roleAccessMap.values()].filter(Boolean).length
+
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] text-muted-foreground">
-        <div className="relative h-12 w-12">
-          <div className="absolute inset-0 rounded-full border-4 border-primary/30 animate-pulse" />
-          <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
-        </div>
-        <p className="mt-5 text-base font-medium">Loading access data...</p>
+      <div className="flex-1 flex items-center justify-center">
+        <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Route header */}
-      <Card className="border shadow-sm">
-        <CardHeader className="px-5 py-4 sm:px-6 sm:py-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="space-y-1">
-              <CardTitle className="text-xl font-semibold font-mono">
-                {route.pattern}
-              </CardTitle>
-              {route.description && (
-                <p className="text-sm text-muted-foreground">
-                  {route.description}
-                </p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              {route.redirectTo && (
-                <Badge variant="outline">Redirect: {route.redirectTo}</Badge>
-              )}
-              <Badge variant="secondary">
-                {roleAccessSet.size} role(s) granted
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Header */}
+      <div className="px-5 py-3 border-b flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <code className="text-sm font-semibold truncate">{route.pattern}</code>
+            {grantedCount > 0 ? (
+              <Badge variant="default" className="shrink-0 text-[10px] h-5 bg-emerald-600 hover:bg-emerald-600">
+                <ShieldCheck className="h-3 w-3 mr-1" />
+                {grantedCount} role{grantedCount !== 1 ? "s" : ""}
               </Badge>
-            </div>
+            ) : (
+              <Badge variant="destructive" className="shrink-0 text-[10px] h-5">
+                <ShieldX className="h-3 w-3 mr-1" />
+                No access
+              </Badge>
+            )}
           </div>
-        </CardHeader>
-      </Card>
-
-      {/* Access table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Route Access</CardTitle>
-          <CardDescription>
-            Control which roles and users can access this route. Expand a role to
-            override access for individual users.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {filteredRoles.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
-              <AlertCircle className="mx-auto h-10 w-10 opacity-70 mb-3" />
-              <p>No roles available (admin role excluded)</p>
-            </div>
-          ) : (
-            <ScrollArea className="h-[calc(100vh-420px)] min-h-[500px] rounded-md border">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background z-10">
-                  <TableRow>
-                    <TableHead className="min-w-[280px] font-semibold">
-                      Role / User
-                    </TableHead>
-                    <TableHead className="w-[120px] text-center font-semibold">
-                      Access
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredRoles.map((role) => {
-                    const usersInRole = getUsersForRole(role.id)
-                    const isExpanded = expandedRoles.has(role.id)
-                    const roleGranted = hasRoleAccess(role.id)
-
-                    return (
-                      <Collapsible
-                        key={role.id}
-                        open={isExpanded}
-                        onOpenChange={() => toggleRole(role.id)}
-                        asChild
-                      >
-                        <>
-                          {/* Role row */}
-                          <TableRow className="hover:bg-muted/60">
-                            <TableCell className="font-medium">
-                              <CollapsibleTrigger asChild>
-                                <button className="flex items-center gap-2 hover:text-primary focus:outline-none">
-                                  {isExpanded ? (
-                                    <ChevronDown className="h-4 w-4" />
-                                  ) : (
-                                    <ChevronRight className="h-4 w-4" />
-                                  )}
-                                  {role.name}
-                                  <Badge variant="outline" className="text-xs ml-1">
-                                    {usersInRole.length} user(s)
-                                  </Badge>
-                                </button>
-                              </CollapsibleTrigger>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Checkbox
-                                checked={roleGranted}
-                                disabled={saving}
-                                onCheckedChange={() => toggleAccess("role", role.id)}
-                              />
-                            </TableCell>
-                          </TableRow>
-
-                          {/* User rows */}
-                          <CollapsibleContent asChild>
-                            <>
-                              {usersInRole.length === 0 ? (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={2}
-                                    className="pl-12 text-sm text-muted-foreground italic"
-                                  >
-                                    No users in this role
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                usersInRole.map((user) => (
-                                  <TableRow
-                                    key={user.id}
-                                    className="bg-muted/30 hover:bg-muted/50"
-                                  >
-                                    <TableCell className="pl-12 text-sm">
-                                      {user.first_name} {user.last_name}
-                                      <div className="text-xs text-muted-foreground">
-                                        {user.email}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="text-center">
-                                      <Checkbox
-                                        checked={hasUserAccess(user.id)}
-                                        disabled={saving}
-                                        onCheckedChange={() =>
-                                          toggleAccess("user", user.id)
-                                        }
-                                      />
-                                    </TableCell>
-                                  </TableRow>
-                                ))
-                              )}
-                            </>
-                          </CollapsibleContent>
-                        </>
-                      </Collapsible>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+          {route.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{route.description}</p>
           )}
+        </div>
 
-          {/* Action bar */}
-          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-end border-t pt-6">
-            <Button
-              variant="outline"
-              disabled={!hasChanges || saving}
-              onClick={resetChanges}
-            >
-              Reset Changes
-            </Button>
-            <Button disabled={!hasChanges || saving} onClick={handleSave}>
-              {saving ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Save Access
-                  {hasChanges && (
-                    <Badge variant="secondary" className="ml-2">
-                      {changes.size}
-                    </Badge>
+        {/* Save actions */}
+        <div className="flex items-center gap-2 shrink-0">
+          {hasChanges && (
+            <>
+              <Badge variant="outline" className="text-[10px] h-5 border-amber-300 text-amber-600 bg-amber-50 dark:bg-amber-950/30">
+                {changes.size} unsaved
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs px-2"
+                disabled={saving}
+                onClick={() => setChanges(new Map())}
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                Reset
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            className="h-7 text-xs px-3"
+            disabled={!hasChanges || saving}
+            onClick={handleSave}
+          >
+            {saving ? (
+              <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <Save className="h-3 w-3 mr-1" />
+            )}
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Role list */}
+      <ScrollArea className="flex-1">
+        <div className="divide-y">
+          {filteredRoles.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-16">No roles found</p>
+          ) : (
+            filteredRoles.map((role) => {
+              const usersInRole = getUsersForRole(role.id)
+              const isExpanded = expandedRoles.has(role.id)
+              const roleGranted = hasRoleAccess(role.id)
+              const isChanged = changes.has(makeKey("role", role.id))
+
+              return (
+                <div key={role.id}>
+                  {/* Role row */}
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 px-5 py-3 transition-colors",
+                      isChanged && "bg-amber-50/80 dark:bg-amber-950/20"
+                    )}
+                  >
+                    {/* Expand toggle */}
+                    <button
+                      onClick={() => {
+                        setExpandedRoles((prev) => {
+                          const n = new Set(prev)
+                          n.has(role.id) ? n.delete(role.id) : n.add(role.id)
+                          return n
+                        })
+                      }}
+                      className="p-0.5 rounded hover:bg-muted transition-colors"
+                    >
+                      {isExpanded ? (
+                        <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+
+                    {/* Role info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{role.name}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {usersInRole.length} user{usersInRole.length !== 1 ? "s" : ""}
+                        </span>
+                        {isChanged && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Status indicator */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className={cn(
+                          "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                          roleGranted
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                            : "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
+                        )}>
+                          {roleGranted ? "Allowed" : "Denied"}
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" className="text-xs">
+                        {roleGranted
+                          ? `${role.name} can access this route`
+                          : `${role.name} cannot access this route`}
+                      </TooltipContent>
+                    </Tooltip>
+
+                    {/* Switch */}
+                    <Switch
+                      checked={roleGranted}
+                      disabled={saving}
+                      onCheckedChange={() => toggleAccess("role", role.id)}
+                    />
+                  </div>
+
+                  {/* Expanded: users in role */}
+                  {isExpanded && (
+                    <div className="bg-muted/30 border-t">
+                      {usersInRole.length === 0 ? (
+                        <p className="text-xs text-muted-foreground pl-14 py-3 italic">
+                          No users in this role
+                        </p>
+                      ) : (
+                        usersInRole.map((user, idx) => {
+                          const userGranted = hasUserAccess(user.id)
+                          const userChanged = changes.has(makeKey("user", user.id))
+                          return (
+                            <div
+                              key={user.id}
+                              className={cn(
+                                "flex items-center gap-3 pl-14 pr-5 py-2.5",
+                                idx < usersInRole.length - 1 && "border-b border-muted/50",
+                                userChanged && "bg-amber-50/60 dark:bg-amber-950/15"
+                              )}
+                            >
+                              <UserCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium truncate">
+                                  {user.first_name} {user.last_name}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground truncate">
+                                  {user.email}
+                                </p>
+                              </div>
+                              {userChanged && (
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                              )}
+                              <Switch
+                                checked={userGranted}
+                                disabled={saving}
+                                onCheckedChange={() => toggleAccess("user", user.id)}
+                                className="scale-90"
+                              />
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
                   )}
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* Footer */}
+      <div className="px-5 py-2 border-t bg-muted/20">
+        <p className="text-[10px] text-muted-foreground">
+          Changes apply to your session instantly. Other users must re-login.
+        </p>
+      </div>
     </div>
   )
 }

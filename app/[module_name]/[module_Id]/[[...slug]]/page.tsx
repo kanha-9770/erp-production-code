@@ -13,6 +13,7 @@ import {
   useUpdateRecordMutation,
 } from "@/lib/api/records";
 import RecordsDisplay from "@/components/modules/recordsDisplay";
+import { usePermissionContext } from "@/context/PermissionContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types — imported from shared type files (Week 1 refactor)
@@ -49,6 +50,9 @@ export default function ModulePage({
   const { module_name, module_Id, slug } = params;
 
   const moduleId = module_Id;
+
+  // Check module-level VIEW permission — redirect if user has no access
+  const { hasPermission: checkModulePermission, isLoading: permCtxLoading } = usePermissionContext();
 
   // ── Core state ──────────────────────────────────────────────────────────────
   const [selectedModule, setSelectedModule] = useState<FormModule | null>(null);
@@ -709,10 +713,25 @@ export default function ModulePage({
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────────
-  if (moduleLoading || loading) {
+  if (moduleLoading || loading || permCtxLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen px-4">
         <Loader2 className="h-8 w-8 md:h-10 md:w-10 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  // Block access if user doesn't have VIEW permission on this module
+  if (!checkModulePermission("VIEW", moduleId)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen px-4 gap-4">
+        <Lock className="h-12 w-12 text-muted-foreground" />
+        <div className="text-center">
+          <h2 className="text-lg font-semibold">Access Denied</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            You don&apos;t have permission to access this module.
+          </p>
+        </div>
       </div>
     );
   }

@@ -128,18 +128,15 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const { data: userData, isLoading: isUserLoading } = useGetUserQuery();
 
-  // Now it's safe to use userData
-  const isAdmin =
-    userData?.user?.unitAssignments?.some(
-      (ua: any) => ua.role?.name?.toUpperCase() === "ADMIN",
-    ) ?? false;
+  // Use isAdmin directly from /api/auth/me (checks role.isAdmin, org owner, role name)
+  const isAdmin = userData?.user?.isAdmin ?? false;
 
   const organizationId = userData?.user?.organization?.id ?? null;
 
   const { modules, isLoading, error, createModuleOptimistic } =
     useOptimisticModules(organizationId);
 
-  // Real permission check from context
+  // Real permission check from context (uses same isAdmin from API)
   const { hasPermission: checkPermission, hasAnyPermission } = usePermissionContext();
 
   const [view, setView] = useState<ViewType>("modules");
@@ -280,16 +277,34 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       }
     });
 
-    const sortModules = (items: typeof roots) => {
+    type ModuleNode = FormModule & { children: ModuleNode[] };
+
+    const sortModules = (items: ModuleNode[]): ModuleNode[] => {
       const sorted = [...items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       sorted.forEach((item) => {
-        if (item.children.length > 0) sortModules(item.children);
+        if (item.children.length > 0) item.children = sortModules(item.children);
       });
       return sorted;
     };
 
-    return sortModules(roots);
-  }, [modules]);
+    // Filter modules by VIEW permission — admins see everything,
+    // non-admins only see modules they (or their children) have access to.
+    const filterByPermission = (items: ModuleNode[]): ModuleNode[] => {
+      if (isAdmin) return items;
+      return items
+        .map((mod) => {
+          const filteredChildren = filterByPermission(mod.children);
+          const hasAccess = checkPermission("VIEW", mod.id);
+          if (hasAccess || filteredChildren.length > 0) {
+            return { ...mod, children: filteredChildren };
+          }
+          return null;
+        })
+        .filter(Boolean) as ModuleNode[];
+    };
+
+    return filterByPermission(sortModules(roots as ModuleNode[]));
+  }, [modules, isAdmin, checkPermission]);
 
   // ─── Only one create handler ────────────────────────────────────────
   const handleCreateModule = async () => {

@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { AdminNav } from '@/components/layout/admin-nav';
 import { validateSession } from '@/lib/auth';
-import { cookies } from 'next/headers';
+import { checkRoutePermission } from '@/lib/check-route-permission';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
@@ -29,11 +30,21 @@ export default async function AdminLayout({
     redirect('/login');
   }
 
-  // Check if user has admin role
-  const isAdmin = (session.user as any).unitAssignments?.some(
-    (ua: any) => ua.role?.isAdmin || ua.role?.name?.toUpperCase() === 'ADMIN'
+  // Get current pathname
+  const headersList = headers();
+  const pathname =
+    headersList.get('x-next-pathname') ||
+    headersList.get('x-invoke-path') ||
+    '/admin';
+
+  // Check route permission (DB-backed) — allows admin OR users with explicit route grant
+  const { allowed, isAdmin } = await checkRoutePermission(session.user.id, pathname);
+
+  console.log(
+    `[admin-layout] user=${session.user.email} path=${pathname} allowed=${allowed} isAdmin=${isAdmin}`
   );
-  if (!isAdmin) {
+
+  if (!allowed) {
     redirect('/unauthorized');
   }
 
