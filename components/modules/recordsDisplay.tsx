@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Dialog,
-  DialogContent,        
+  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,

@@ -903,3 +903,271 @@ export async function getRolesAnalytics() {
     totalPermissions,
   };
 }
+
+// ============================================================
+// Helper: get permitted module IDs for a user (role + user-level)
+// ============================================================
+async function getPermittedModuleIds(userId: string, roleIds: string[]): Promise<string[]> {
+  const allowedSet = new Set<string>();
+
+  // Role-level VIEW permissions on modules
+  if (roleIds.length > 0) {
+    const roleModulePerms = await prisma.rolePermission.findMany({
+      where: {
+        roleId: { in: roleIds },
+        granted: true,
+        moduleId: { not: null },
+        permission: { name: 'VIEW' },
+      },
+      select: { moduleId: true },
+    });
+    for (const rmp of roleModulePerms) {
+      if (rmp.moduleId) allowedSet.add(rmp.moduleId);
+    }
+  }
+
+  // User-level module permissions (override role-level)
+  const userModulePerms = await prisma.userPermission.findMany({
+    where: {
+      userId,
+      isActive: true,
+      moduleId: { not: null },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    select: { moduleId: true, canView: true, granted: true },
+  });
+
+  for (const ump of userModulePerms) {
+    if (!ump.moduleId) continue;
+    if (ump.canView && ump.granted) {
+      allowedSet.add(ump.moduleId);
+    } else {
+      allowedSet.delete(ump.moduleId);
+    }
+  }
+
+  return [...allowedSet];
+}
+
+// ============================================================
+// User-specific Dashboard Data  (permission-filtered)
+// ============================================================
+export async function getUserDashboardData(dateRange: string) {
+  const session = await requireAuth();
+  const userId = session.user.id;
+  const orgId = session.user.organizationId;
+  const { startDate, endDate } = getDateRange(dateRange);
+
+  // Get user info
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      employee: {
+        select: {
+          employeeName: true,
+          department: true,
+          designation: true,
+          status: true,
+          dateOfJoining: true,
+        },
+      },
+      unitAssignments: {
+        include: {
+          role: { select: { id: true, name: true, isAdmin: true, isActive: true } },
+          unit: { select: { id: true, name: true, isActive: true } },
+        },
+      },
+    },
+  });
+
+  // Get user's role IDs for permission lookup (only active roles in active units)
+  const roleIds = user?.unitAssignments
+    .filter((ua) => ua.role.isActive && ua.unit.isActive)
+    .map((ua) => ua.role.id) || [];
+
+  // Get modules the user has VIEW permission for
+  const permittedModuleIds = await getPermittedModuleIds(userId, roleIds);
+
+  // Fetch only permitted modules
+  const modules = await prisma.formModule.findMany({
+    where: {
+      isActive: true,
+      ...(orgId && { organizationId: orgId }),
+      ...(permittedModuleIds.length > 0
+        ? { id: { in: permittedModuleIds } }
+        : { id: { in: [] } }), // no permissions = no modules
+    },
+    include: {
+      forms: {
+        select: {
+          id: true,
+          name: true,
+          isPublished: true,
+          _count: {
+            select: {
+              records1: true, records2: true, records3: true, records4: true,
+              records5: true, records6: true, records7: true, records8: true,
+              records9: true, records10: true, records11: true, records12: true,
+              records13: true, records14: true, records15: true,
+              sections: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: { sortOrder: 'asc' },
+  });
+
+  // Collect permitted form IDs for scoping submissions/time series
+  const permittedFormIds = modules.flatMap((m) => m.forms.map((f) => f.id));
+
+  const formattedModules = modules.map((m) => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    icon: m.icon,
+    color: m.color,
+    moduleType: m.moduleType,
+    forms: m.forms.map((f) => {
+      const totalRecords =
+        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
+        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
+        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
+        f._count.records13 + f._count.records14 + f._count.records15;
+      return { id: f.id, name: f.name, isPublished: f.isPublished, totalRecords, sectionCount: f._count.sections };
+    }),
+    totalRecords: m.forms.reduce((sum, f) => {
+      return sum +
+        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
+        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
+        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
+        f._count.records13 + f._count.records14 + f._count.records15;
+    }, 0),
+  }));
+
+  // Count user's submissions only in permitted forms
+  let mySubmissions = 0;
+  if (permittedFormIds.length > 0) {
+    for (let t = 1; t <= 15; t++) {
+      const model = `formRecord${t}` as keyof typeof prisma;
+      mySubmissions += await (prisma[model] as any).count({
+        where: {
+          userId,
+          formId: { in: permittedFormIds },
+          submittedAt: { gte: startDate, lte: endDate },
+        },
+      });
+    }
+  }
+
+  // User's attendance in period
+  const myAttendance = await prisma.attendance.count({
+    where: {
+      userId,
+      createdAt: { gte: startDate, lte: endDate },
+    },
+  });
+
+  // User's recent activity (audit logs)
+  const myActivityCount = await prisma.auditLog.count({
+    where: {
+      userId,
+      createdAt: { gte: startDate, lte: endDate },
+    },
+  });
+
+  // User's login count
+  const myLoginCount = await prisma.loginHistory.count({
+    where: {
+      userId,
+      status: 'Success',
+      createdAt: { gte: startDate, lte: endDate },
+    },
+  });
+
+  // User's submission time series scoped to permitted forms
+  const timeSeries: Record<string, number> = {};
+  if (permittedFormIds.length > 0) {
+    for (let t = 1; t <= 15; t++) {
+      const model = `formRecord${t}` as keyof typeof prisma;
+      const records = await (prisma[model] as any).findMany({
+        where: {
+          userId,
+          formId: { in: permittedFormIds },
+          submittedAt: { gte: startDate, lte: endDate },
+        },
+        select: { submittedAt: true },
+      });
+      records.forEach((r: any) => {
+        const d = new Date(r.submittedAt).toISOString().split('T')[0];
+        timeSeries[d] = (timeSeries[d] || 0) + 1;
+      });
+    }
+  }
+
+  const myTimeSeries = Object.entries(timeSeries)
+    .map(([date, count]) => ({ date, submissions: count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Recent audit logs for the user
+  const recentActivity = await prisma.auditLog.findMany({
+    where: {
+      userId,
+      createdAt: { gte: startDate, lte: endDate },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+    select: {
+      id: true,
+      action: true,
+      module: true,
+      recordName: true,
+      createdAt: true,
+    },
+  });
+
+  return {
+    user: {
+      name: [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || user?.email || '',
+      email: user?.email || '',
+      department: user?.employee?.department || user?.department || '-',
+      designation: user?.employee?.designation || '-',
+      status: user?.employee?.status || user?.status || '-',
+      dateOfJoining: user?.employee?.dateOfJoining?.toLocaleDateString() || '-',
+      roles: user?.unitAssignments.map((ua) => ({
+        roleName: ua.role.name,
+        unitName: ua.unit.name,
+      })) || [],
+    },
+    stats: {
+      mySubmissions,
+      myAttendance,
+      myActivityCount,
+      myLoginCount,
+    },
+    modules: formattedModules,
+    timeSeries: myTimeSeries,
+    recentActivity: recentActivity.map((a) => ({
+      id: a.id,
+      action: a.action,
+      module: a.module,
+      recordName: a.recordName,
+      timestamp: a.createdAt.toLocaleString(),
+    })),
+  };
+}
+
+// ============================================================
+// Check if current user is admin  (server-side helper)
+// ============================================================
+export async function checkIsAdmin(): Promise<boolean> {
+  const session = await requireAuth();
+  const user = session.user;
+
+  const isOrgOwner = !!(user as any).ownedOrganization;
+  const hasAdminRole = user.unitAssignments.some(
+    (ua: any) => ua.role.isAdmin || ua.role.name.toLowerCase().includes('admin')
+  );
+
+  return isOrgOwner || hasAdminRole;
+}

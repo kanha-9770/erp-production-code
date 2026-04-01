@@ -208,7 +208,7 @@ function SectionPermissionTable({ sectionId }: { sectionId: string }) {
 
   return (
     <div className="space-y-4">
-      <ScrollArea className="max-h-[400px] rounded-md border">
+      <ScrollArea className="max-h-full rounded-md border">
         <Table>
           <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow>
