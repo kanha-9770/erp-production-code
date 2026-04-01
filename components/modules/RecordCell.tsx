@@ -677,9 +677,15 @@ export const RecordCell = memo(function RecordCell({
       });
   };
 
+  // Detect URL fields — these should show links, not images
+  const isUrlField = useMemo(() => {
+    const type = (fieldDef.type || "").toLowerCase();
+    return type === "url" || type === "link";
+  }, [fieldDef.type]);
+
   const images = useMemo(() => getValidImages(actualValue), [actualValue]);
   const hasImages = images.length > 0;
-  const isImageColumn = isImageField(fieldDef.label) || hasImages;
+  const isImageColumn = !isUrlField && (isImageField(fieldDef.label) || hasImages);
   const hasComments = (comments.get(cellKey) || []).length > 0;
   const isDynamicRows =
     fieldDef.id.startsWith("_dynamicRows_") && Array.isArray(actualValue);
@@ -796,6 +802,17 @@ export const RecordCell = memo(function RecordCell({
               <span className={cn("text-sm leading-tight py-2 flex-1", isWrapTextEnabled || isExpanded ? "whitespace-normal break-words" : "whitespace-nowrap overflow-hidden text-ellipsis")}>
                 {displayText || "View on Google Maps"}
               </span>
+            </a>
+          ) : isUrlField && displayText ? (
+            <a
+              href={displayText.startsWith("http") ? displayText : `https://${displayText}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full text-sm text-blue-600 hover:text-blue-700 hover:underline leading-tight py-2 truncate block"
+              onClick={(e) => e.stopPropagation()}
+              title={displayText}
+            >
+              {displayText}
             </a>
           ) : (
             <div className="relative group w-full h-full">

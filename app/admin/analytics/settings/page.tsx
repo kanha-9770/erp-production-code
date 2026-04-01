@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Settings, 
-  Bell, 
-  Eye, 
-  Database, 
+import {
+  Settings,
+  Bell,
+  Eye,
+  Database,
   Shield,
   Save,
   AlertCircle,
@@ -60,10 +60,10 @@ export default function AnalyticsSettingsPage() {
       setSaveStatus('saving');
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       setSaveStatus('saved');
       toast.success('Settings saved successfully');
-      
+
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
       toast.error('Failed to save settings');
