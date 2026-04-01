@@ -110,25 +110,13 @@ export function FormRenderer({
 
   if (field.isDependent) {
     const groups = field.dependentGroups || [];
-    const candidates: string[] = [];
-    if (parentValue !== undefined && parentValue !== null)
-      candidates.push(String(parentValue));
-
-    const parentFieldDef = allFields?.find((f) => f.id === field.parentFieldId);
-    if (parentFieldDef && Array.isArray(parentFieldDef.options)) {
-      parentFieldDef.options.forEach((opt: any) => {
-        if (opt.value !== undefined) candidates.push(String(opt.value));
-        if (opt.id !== undefined) candidates.push(String(opt.id));
-        if (opt.label !== undefined) candidates.push(String(opt.label));
-      });
-    }
-    const uniq = Array.from(
-      new Set(candidates.map((c) => String(c).toLowerCase())),
-    );
-
-    const matched = groups.find((g) =>
-      uniq.includes(String(g.parentValue).toLowerCase()),
-    );
+    const matched = parentValue
+      ? groups.find(
+          (g) =>
+            String(g.parentValue).toLowerCase() ===
+            String(parentValue).toLowerCase(),
+        )
+      : undefined;
     effectiveOptions = matched?.options || [];
   }
 

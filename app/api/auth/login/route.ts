@@ -345,7 +345,7 @@ export async function POST(request: NextRequest) {
     // Set auth-meta cookie for lightweight middleware permission checks
     response.cookies.set(
       "auth-meta",
-      JSON.stringify({ isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
+      JSON.stringify({ v: 2, isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
       {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",

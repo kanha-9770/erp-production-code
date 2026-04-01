@@ -120,7 +120,7 @@ export function useOptimisticModules(organizationId: string | null) {
         refetch()
       } catch {
         patch.undo()
-        throw new Error("Move failed")
+        refetch()
       }
     },
     [patchModules, moveFormApi, refetch]
@@ -178,7 +178,7 @@ export function useOptimisticModules(organizationId: string | null) {
         refetch()
       } catch {
         patch.undo()
-        throw new Error("Move failed")
+        refetch()
       }
     },
     [patchModules, moveModuleApi, refetch]

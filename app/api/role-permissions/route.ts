@@ -187,53 +187,49 @@ async function handleUpdate(request: NextRequest) {
       });
     }
 
-    // Delete + create in a transaction — scoped per (roleId, permissionId, formId)
-    // We delete by the FULL key (roleId, permissionId, moduleId, formId) to match
-    // the unique constraint and avoid conflicts when multiple forms share a module.
-    await prisma.$transaction(async (tx) => {
-      for (const item of finalItems) {
-        // Delete any existing record for this exact role+permission+module+form combo
+    // Batch delete + create in a transaction for efficiency.
+    // Group by (roleId, formId) to issue fewer, broader deletes.
+    await prisma.$transaction(
+      async (tx) => {
+        // Collect all unique (roleId, permissionId, formId) combos to delete
+        const deleteFilters = finalItems.map((item) => ({
+          roleId: item.roleId,
+          permissionId: item.permissionId,
+          formId: item.formId,
+          sectionId: null as string | null,
+          formFieldId: null as string | null,
+        }));
+
+        // Batch delete: one query per item but using OR for all at once
         await tx.rolePermission.deleteMany({
           where: {
+            OR: deleteFilters,
+          },
+        });
+
+        // Batch create all granted items at once
+        const toCreate = finalItems
+          .filter((item) => item.granted)
+          .map((item) => ({
             roleId: item.roleId,
             permissionId: item.permissionId,
             moduleId: item.moduleId,
             formId: item.formId,
-            sectionId: null,
-            formFieldId: null,
-          },
-        });
+            sectionId: null as string | null,
+            formFieldId: null as string | null,
+            granted: true,
+            canDelegate: item.canDelegate,
+          }));
 
-        // Also clean up any old record that matches on (roleId, permissionId, formId)
-        // but has a different moduleId (legacy data)
-        await tx.rolePermission.deleteMany({
-          where: {
-            roleId: item.roleId,
-            permissionId: item.permissionId,
-            formId: item.formId,
-            sectionId: null,
-            formFieldId: null,
-            moduleId: { not: item.moduleId ?? undefined },
-          },
-        });
-
-        // Create new record if granted
-        if (item.granted) {
-          await tx.rolePermission.create({
-            data: {
-              roleId: item.roleId,
-              permissionId: item.permissionId,
-              moduleId: item.moduleId,
-              formId: item.formId,
-              sectionId: null,
-              formFieldId: null,
-              granted: true,
-              canDelegate: item.canDelegate,
-            },
+        if (toCreate.length > 0) {
+          await tx.rolePermission.createMany({
+            data: toCreate,
+            skipDuplicates: true,
           });
         }
-      }
-    });
+      },
+      { timeout: 15000 },
+    );
 
     return NextResponse.json({
       success: true,

@@ -15,6 +15,15 @@ const ALWAYS_OPEN_ROUTES = new Set([
   "/settings/permission",
   "/settings/permission/roles",
   "/settings/permission/route",
+  "/admin",
+  "/admin/modules",
+  "/admin/dashboard",
+  "/admin/users",
+  "/admin/settings",
+  "/admin/analytics",
+  "/admin/reports",
+  "/admin/chatbot",
+  "/admin/intelligence",
 ]);
 
 export interface RouteMetaResult {
@@ -63,14 +72,9 @@ export async function computeRouteMeta(
   const allowed: string[] = [];
 
   for (const rp of dbRoutePermissions) {
-    // Route exists in DB but no access rules configured yet
+    // Route exists in DB but no access rules configured yet — allow by default.
     if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) {
-      if (ALWAYS_OPEN_ROUTES.has(rp.pattern)) {
-        console.log(`[route-meta]   pattern="${rp.pattern}" → OPEN (always-open route)`);
-      } else {
-        denied.push(rp.pattern);
-        console.log(`[route-meta]   pattern="${rp.pattern}" → DENIED (no access rules granted)`);
-      }
+      console.log(`[route-meta]   pattern="${rp.pattern}" → ALLOWED (no access rules configured)`);
       continue;
     }
 
@@ -103,6 +107,10 @@ export async function computeRouteMeta(
       );
     }
   }
+
+  // Remove patterns from denied if a more specific allowed pattern covers them.
+  // e.g. if "/admin/**" is denied but "/admin/modules" is allowed, keep both —
+  // the middleware checks allowedRoutes first so the specific grant wins.
 
   // ── 2. Module-level VIEW access ────────────────────────────────────────────
   const allowedModuleIdSet = new Set<string>();

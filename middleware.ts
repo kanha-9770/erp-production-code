@@ -65,6 +65,7 @@ export function middleware(request: NextRequest) {
   }
 
   let authMeta: {
+    v?: number;
     isAdmin?: boolean;
     roleNames?: string[];
     deniedRoutes?: string[];
@@ -76,6 +77,14 @@ export function middleware(request: NextRequest) {
     authMeta = JSON.parse(authMetaRaw);
   } catch {
     console.log(`[MW] step=4 path=${pathname} INVALID auth-meta cookie → redirecting to refresh`);
+    const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
+    refreshUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(refreshUrl);
+  }
+
+  // Force refresh if cookie is from an older version (missing v field)
+  if (!authMeta.v || authMeta.v < 2) {
+    console.log(`[MW] step=4 path=${pathname} STALE auth-meta (v=${authMeta.v ?? 0}) → refreshing`);
     const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);

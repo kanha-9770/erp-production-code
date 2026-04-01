@@ -89,6 +89,7 @@ export interface GetUserResponse {
     createdAt: string
     isAdmin: boolean
     isOrgOwner?: boolean
+    allowedRoutes?: string[]
     mobile?: string
     mobile_verified?: boolean
     avatar?: string

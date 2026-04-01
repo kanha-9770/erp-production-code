@@ -23,6 +23,20 @@ export async function GET(request: NextRequest) {
     )
     const isAdmin = isOrgOwner || hasAdminRole
 
+    // Read allowed routes from auth-meta cookie so client can gate UI features
+    let allowedRoutes: string[] = []
+    try {
+      const authMetaRaw = request.cookies.get("auth-meta")?.value
+      if (authMetaRaw) {
+        const authMeta = JSON.parse(authMetaRaw)
+        allowedRoutes = Array.isArray(authMeta.allowedRoutes)
+          ? authMeta.allowedRoutes
+          : []
+      }
+    } catch {
+      // ignore parse errors
+    }
+
     return NextResponse.json({
       success: true,
       user: {
@@ -49,6 +63,7 @@ export async function GET(request: NextRequest) {
               name: session.user.organization.name,
             }
           : null,
+        allowedRoutes,
         unitAssignments: session.user.unitAssignments.map((ua) => ({
           unit: {
             id: ua.unit.id,

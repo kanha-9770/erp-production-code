@@ -146,10 +146,10 @@ export default function ModuleSidebar({
 
       if (type === "form") {
         // Optimistic update is handled by onMoveForm
-        await onMoveForm(id, targetId).catch(() => { });
+        await onMoveForm(id, targetId)?.catch(() => { });
       } else if (type === "module") {
         // Optimistic update is handled by onMoveModule
-        await onMoveModule(id, targetId).catch(() => { });
+        await onMoveModule(id, targetId)?.catch(() => { });
       }
 
       setDrag({ type: null, id: null, over: null, position: null, isDragging: false, dragOffset: { x: 0, y: 0 } });

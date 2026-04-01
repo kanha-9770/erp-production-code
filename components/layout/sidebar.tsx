@@ -131,6 +131,27 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   // Use isAdmin directly from /api/auth/me (checks role.isAdmin, org owner, role name)
   const isAdmin = userData?.user?.isAdmin ?? false;
 
+  // Check if user has route-level access to admin/modules (DB-backed route permissions)
+  const allowedRoutes: string[] = (userData?.user as any)?.allowedRoutes ?? [];
+  const canManageModules = isAdmin || allowedRoutes.some((pattern: string) => {
+    // Match patterns like "/admin/**" or "/admin/modules"
+    if (pattern === "/admin/modules") return true;
+    if (pattern === "/admin/**") return true;
+    try {
+      const regex = new RegExp(
+        "^" +
+          pattern
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, ".*")
+            .replace(/\*/g, "[^/]+") +
+          "$"
+      );
+      return regex.test("/admin/modules");
+    } catch {
+      return false;
+    }
+  });
+
   const organizationId = userData?.user?.organization?.id ?? null;
 
   const { modules, isLoading, error, createModuleOptimistic } =
@@ -376,9 +397,30 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
   ];
 
-  // Filter nav items based on permissions
+  // Filter nav items based on permissions — admin or route-level grants
   const iconButtons = allIconButtons.filter((btn) => {
-    if (btn.requireAdmin && !isAdmin) return false;
+    if (btn.requireAdmin && !isAdmin) {
+      // Check if user has route-level access for this specific route
+      if (btn.route) {
+        return allowedRoutes.some((pattern: string) => {
+          if (pattern === btn.route) return true;
+          try {
+            const regex = new RegExp(
+              "^" +
+                pattern
+                  .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+                  .replace(/\*\*/g, ".*")
+                  .replace(/\*/g, "[^/]+") +
+                "$"
+            );
+            return regex.test(btn.route!);
+          } catch {
+            return false;
+          }
+        });
+      }
+      return false;
+    }
     return true;
   });
 
@@ -479,7 +521,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
             <Sliders className="h-4 w-4" />
           </div>
           <div className="flex items-center gap-1">
-            {isAdmin && (
+            {canManageModules && (
               <button
                 onClick={() => setIsCreateDialogOpen(true)}
                 className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black hover:text-white transition-colors"

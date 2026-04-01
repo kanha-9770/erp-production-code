@@ -182,7 +182,7 @@ export const modulesApi = baseApi.injectEndpoints({
     moveModule: builder.mutation<ApiResponse, { moduleId: string; parentId: string | null }>({
       query: ({ moduleId, parentId }) => ({
         url: `/modules/${moduleId}`,
-        method: "PATCH",
+        method: "PUT",
         body: { parentId },
       }),
       invalidatesTags: [{ type: "Module" }, "OrgModules"],

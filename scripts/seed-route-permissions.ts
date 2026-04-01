@@ -61,7 +61,6 @@ const STATIC_ROUTES: { pattern: string; description: string }[] = [
   { pattern: "/settings/profiles", description: "Profile settings" },
   { pattern: "/settings/users", description: "Users list" },
   { pattern: "/settings/users/user-management", description: "User management" },
-
   // ─── Standalone ────────────────────────────────────────────────────────
   { pattern: "/StandaloneTable", description: "Standalone table view" },
 ];

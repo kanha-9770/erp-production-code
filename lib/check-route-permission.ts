@@ -97,9 +97,16 @@ export async function checkRoutePermission(
     `[check-route-perm] user=${user.email} path=${pathname} roles=[${roleNames}] roleIds=[${roleIds}] dbRoutes=${dbRoutePermissions.length}`
   );
 
+  // Collect all matching patterns — check ALL of them so a specific grant
+  // (e.g. "/admin/modules") is not shadowed by a broad deny ("/admin/**").
+  let hasAnyMatch = false;
+  let bestAllowed = false;
+
   for (const rp of dbRoutePermissions) {
     const regex = patternToRegex(rp.pattern);
     if (!regex.test(pathname)) continue;
+
+    hasAnyMatch = true;
 
     console.log(
       `[check-route-perm] MATCHED pattern="${rp.pattern}" roleAccess=${rp.roleAccess.length} userAccess=${rp.userAccess.length}`
@@ -111,21 +118,19 @@ export async function checkRoutePermission(
         console.log(
           `[check-route-perm] ALLOWED user=${user.email} path=${pathname} reason="always-open route" pattern="${rp.pattern}"`
         );
-        return { allowed: true, isAdmin: false };
+        bestAllowed = true;
       }
-      console.warn(
-        `[check-route-perm] DENIED user=${user.email} path=${pathname} reason="no access rules granted" pattern="${rp.pattern}"`
-      );
-      return { allowed: false, isAdmin: false };
+      continue;
     }
 
-    // User-level override
+    // User-level override (most specific — if found, it wins)
     const userEntry = rp.userAccess.find((ua) => ua.userId === userId);
     if (userEntry) {
       console.log(
-        `[check-route-perm] ${userEntry.granted ? "ALLOWED" : "DENIED"} user=${user.email} path=${pathname} reason="userAccess" granted=${userEntry.granted}`
+        `[check-route-perm] ${userEntry.granted ? "ALLOWED" : "DENIED"} user=${user.email} path=${pathname} reason="userAccess" granted=${userEntry.granted} pattern="${rp.pattern}"`
       );
-      return { allowed: userEntry.granted, isAdmin: false };
+      if (userEntry.granted) bestAllowed = true;
+      continue;
     }
 
     // Role-level check
@@ -133,20 +138,19 @@ export async function checkRoutePermission(
     const hasRoleAccess = matchingRoles.some((ra) => ra.granted);
 
     console.log(
-      `[check-route-perm] roleCheck: totalRoleAccess=${rp.roleAccess.length} matchingUserRoles=${matchingRoles.length} hasGrant=${hasRoleAccess} roleAccessDetails=${JSON.stringify(rp.roleAccess)} userRoleIds=[${roleIds}]`
+      `[check-route-perm] roleCheck: pattern="${rp.pattern}" totalRoleAccess=${rp.roleAccess.length} matchingUserRoles=${matchingRoles.length} hasGrant=${hasRoleAccess} userRoleIds=[${roleIds}]`
     );
 
     if (hasRoleAccess) {
-      console.log(
-        `[check-route-perm] ALLOWED user=${user.email} path=${pathname} reason="roleAccess" pattern="${rp.pattern}"`
-      );
-      return { allowed: true, isAdmin: false };
+      bestAllowed = true;
     }
+  }
 
-    console.warn(
-      `[check-route-perm] DENIED user=${user.email} path=${pathname} reason="no grant for user's roles" pattern="${rp.pattern}"`
+  if (hasAnyMatch) {
+    console.log(
+      `[check-route-perm] ${bestAllowed ? "ALLOWED" : "DENIED"} user=${user.email} path=${pathname} reason="${bestAllowed ? "grant found across matching patterns" : "no grant for user's roles in any matching pattern"}"`
     );
-    return { allowed: false, isAdmin: false };
+    return { allowed: bestAllowed, isAdmin: false };
   }
 
   // No DB rule matched → open

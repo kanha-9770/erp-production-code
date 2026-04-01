@@ -36,7 +36,7 @@ async function buildAuthMeta(token: string) {
 
   // Admin gets full access — skip DB queries
   if (isAdmin) {
-    return { isAdmin: true, roleNames, deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] };
+    return { v: 2, isAdmin: true, roleNames, deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] };
   }
 
   const { deniedRoutes, allowedRoutes, allowedModuleIds } = await computeRouteMeta(
@@ -45,7 +45,7 @@ async function buildAuthMeta(token: string) {
     roleIds
   );
 
-  return { isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds };
+  return { v: 2, isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds };
 }
 
 /** Set the auth-meta cookie on a response */
