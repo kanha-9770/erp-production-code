@@ -44,7 +44,6 @@ const STATIC_ROUTES: { pattern: string; description: string }[] = [
   { pattern: "/payroll", description: "Payroll" },
 
   // ─── Profile ───────────────────────────────────────────────────────────
-  { pattern: "/profile", description: "User profile" },
   { pattern: "/profile/security", description: "Security settings" },
   { pattern: "/profile/update-profile", description: "Update profile" },
 
