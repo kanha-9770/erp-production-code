@@ -438,7 +438,7 @@ export default function LookupConfigurationDialog({
         const mr = await triggerGetMasterData().unwrap();
         if (mr.dropdowns) setMasterDropdowns(mr.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name })));
       } catch { /* noop */ }
-      setSelectedFields([{
+      const masterField: SelectedField = {
         fieldName: configSourceId,
         label: config.label || configSourceId,
         displayField: config.fieldMapping?.display || "value",
@@ -447,7 +447,39 @@ export default function LookupConfigurationDialog({
         searchable: config.searchable !== false,
         useIdField: false,
         isMaster: true,
-      }]);
+      };
+      const masterSelectedFields = [masterField];
+
+      // Restore dependency for master type
+      if (config.dependency && config.dependency.parentFieldLabel) {
+        let loadedMasters: MasterDropdown[] = [];
+        try {
+          const mr2 = await triggerGetMasterData().unwrap();
+          if (mr2.dropdowns) loadedMasters = mr2.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name }));
+        } catch { /* noop */ }
+        const parentMaster = loadedMasters.find(m => m.name === config.dependency.parentFieldLabel);
+        if (parentMaster) {
+          const parentField: SelectedField = {
+            fieldName: parentMaster.id,
+            label: parentMaster.name,
+            displayField: "value",
+            valueField: "value",
+            multiple: false,
+            searchable: true,
+            useIdField: false,
+            isMaster: true,
+          };
+          masterSelectedFields.unshift(parentField);
+          setDependencies([{
+            childFieldName: masterField.fieldName,
+            parentFieldName: parentMaster.id,
+            valueMappings: config.dependency.valueMappings || [],
+          }]);
+          loadDependencyValues([parentField, masterField]);
+        }
+      }
+
+      setSelectedFields(masterSelectedFields);
       setStep("mapping");
       return;
     }
@@ -478,10 +510,14 @@ export default function LookupConfigurationDialog({
     setSelectedSectionId("all");
 
     // 3) Master dropdowns for context
+    let loadedMasterDropdowns: MasterDropdown[] = [];
     if (moduleId) {
       try {
         const r = await triggerGetMasterDataByModule(moduleId).unwrap();
-        if (r.dropdowns) setMasterDropdowns(r.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name })));
+        if (r.dropdowns) {
+          loadedMasterDropdowns = r.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name }));
+          setMasterDropdowns(loadedMasterDropdowns);
+        }
       } catch { setMasterDropdowns([]); }
     }
 
@@ -534,9 +570,71 @@ export default function LookupConfigurationDialog({
 
     console.log("[LookupReconfig] Fields loaded:", fields.length, "Matched:", !!hit, "SelectedField:", selectedField, "sourceFields set:", fields.map(f => f.name));
 
-    setSelectedFields([selectedField]);
+    // 7) Restore dependency if present
+    const allSelectedFields = [selectedField];
 
-    // 7) Show mapping step
+    if (config.dependency && config.dependency.parentFieldLabel) {
+      const parentLabel = config.dependency.parentFieldLabel;
+      // Find the parent field in loaded sourceFields
+      const parentHit = fields.find(f => f.label === parentLabel)
+                     || fields.find(f => f.name === parentLabel);
+
+      if (parentHit) {
+        // Add the parent field to selectedFields so dependency UI appears (needs 2+ fields)
+        const parentSelectedField: SelectedField = {
+          fieldName: parentHit.name,
+          label: parentHit.label,
+          displayField: parentHit.name,
+          valueField: "id",
+          multiple: false,
+          searchable: true,
+          useIdField: config.useIdField || false,
+          isMaster: false,
+        };
+        // Parent goes first, child second (matches typical order)
+        allSelectedFields.unshift(parentSelectedField);
+
+        // Reconstruct the dependency entry
+        const restoredDep: FieldDependency = {
+          childFieldName: selectedField.fieldName,
+          parentFieldName: parentHit.name,
+          valueMappings: config.dependency.valueMappings || [],
+        };
+        setDependencies([restoredDep]);
+
+        // Load dependency values for parent and child so the mapping matrix populates
+        loadDependencyValues([parentSelectedField, selectedField]);
+      } else {
+        // Parent field not found in source fields — check if it's a master dropdown
+        const parentMaster = loadedMasterDropdowns.find(m => m.name === parentLabel);
+        if (parentMaster) {
+          const parentSelectedField: SelectedField = {
+            fieldName: parentMaster.id,
+            label: parentMaster.name,
+            displayField: "value",
+            valueField: "value",
+            multiple: false,
+            searchable: true,
+            useIdField: false,
+            isMaster: true,
+          };
+          allSelectedFields.unshift(parentSelectedField);
+
+          const restoredDep: FieldDependency = {
+            childFieldName: selectedField.fieldName,
+            parentFieldName: parentMaster.id,
+            valueMappings: config.dependency.valueMappings || [],
+          };
+          setDependencies([restoredDep]);
+
+          loadDependencyValues([parentSelectedField, selectedField]);
+        }
+      }
+    }
+
+    setSelectedFields(allSelectedFields);
+
+    // 8) Show mapping step
     setStep("mapping");
   };
 
