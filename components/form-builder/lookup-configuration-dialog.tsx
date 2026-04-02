@@ -480,7 +480,7 @@ export default function LookupConfigurationDialog({
       }
 
       setSelectedFields(masterSelectedFields);
-      setStep("mapping");
+      setStep("selection");
       return;
     }
 
@@ -634,8 +634,8 @@ export default function LookupConfigurationDialog({
 
     setSelectedFields(allSelectedFields);
 
-    // 8) Show mapping step
-    setStep("mapping");
+    // 8) Show selection step so user can see previously selected modules & fields
+    setStep("selection");
   };
 
   const handleFieldToggle = (field: SourceField) => {
