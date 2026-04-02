@@ -1136,6 +1136,8 @@ export class DatabaseModules {
     width?: string;
     order?: number;
     lookup?: any;
+    isDependent?: boolean;
+    parentFieldId?: string | null;
   }): Promise<FormField> {
     try {
       const field = await prisma.formField.create({
@@ -1154,6 +1156,8 @@ export class DatabaseModules {
           width: data.width || "full",
           order: data.order || 0,
           lookup: data.lookup, // Store complete lookup configuration
+          isDependent: data.isDependent ?? false,
+          parentFieldId: data.parentFieldId ?? null,
         },
       });
 

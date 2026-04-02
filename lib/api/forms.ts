@@ -31,6 +31,8 @@ interface CreateFieldArgs {
   order?: number
   lookup?: any
   formula?: any
+  isDependent?: boolean
+  parentFieldId?: string | null
   rollup?: any
 }
 

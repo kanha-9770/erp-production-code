@@ -426,6 +426,7 @@ export function usePublicForm({
     if (!field.isDependent || !field.parentFieldId) {
       return true;
     }
+
     const parentValueRaw = getParentValue(field, formData);
     const parentValue = Array.isArray(parentValueRaw)
       ? parentValueRaw[0]
@@ -435,6 +436,15 @@ export function usePublicForm({
     if (!parentValue) {
       return false;
     }
+
+    // Lookup fields use lookup.dependency.valueMappings (not dependentGroups)
+    const lookupDep = (field.lookup as any)?.dependency;
+    if (field.type === "lookup" && lookupDep?.valueMappings?.length) {
+      return lookupDep.valueMappings.some(
+        (m: any) => m.parentValue === parentValue,
+      );
+    }
+
     return !!field.dependentGroups?.some(
       (group) => group.parentValue === parentValue,
     );
@@ -1338,9 +1348,19 @@ export function usePublicForm({
           ...getAllSubformFields(form.subforms || []),
         ];
         const clearDependents = (parentId: string) => {
+          const parentField = everyField.find((f) => f.id === parentId);
+          const parentLabel = parentField?.label;
           everyField.forEach((f) => {
-            if (f.isDependent && f.parentFieldId === parentId) {
-              newData[f.id] = "";
+            const isChild =
+              (f.isDependent && f.parentFieldId === parentId) ||
+              // Also catch lookup fields linked via dependency.parentFieldLabel
+              (f.type === "lookup" &&
+                (f.lookup as any)?.dependency?.parentFieldLabel &&
+                (f.lookup as any).dependency.parentFieldLabel === parentLabel &&
+                f.id !== parentId);
+            if (isChild) {
+              // Use null for lookup fields, empty string for others
+              newData[f.id] = f.type === "lookup" ? null : "";
               // Recursively clear grandchildren
               clearDependents(f.id);
             }

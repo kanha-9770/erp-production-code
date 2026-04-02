@@ -993,8 +993,12 @@ export default function FormBuilderPage() {
     try {
       const updatedForm = JSON.parse(JSON.stringify(form));
       const createdFieldIds: string[] = [];
+      // Map from index in lookupFields → saved DB field ID (for dependent linking)
+      const indexToSavedId: Record<number, string> = {};
 
-      for (const fieldData of lookupFields) {
+      // Pass 1: Create all fields (without parentFieldId for dependent ones)
+      for (let idx = 0; idx < lookupFields.length; idx++) {
+        const fieldData = lookupFields[idx];
         const result = await createFieldMutation({
           sectionId: pendingLookupSubformId ? undefined : pendingLookupSectionId,
           subformId: pendingLookupSubformId,
@@ -1010,6 +1014,7 @@ export default function FormBuilderPage() {
           width: fieldData.width,
           order: fieldData.order,
           lookup: fieldData.lookup,
+          isDependent: (fieldData as any).isDependent || false,
         }).unwrap();
 
         if (!result.success)
@@ -1017,6 +1022,7 @@ export default function FormBuilderPage() {
 
         const savedFieldId = result.data.id;
         createdFieldIds.push(savedFieldId);
+        indexToSavedId[idx] = savedFieldId;
 
         const fullField: FormField = {
           id: savedFieldId,
@@ -1035,6 +1041,7 @@ export default function FormBuilderPage() {
           width: fieldData.width || "full",
           order: fieldData.order ?? 999,
           lookup: fieldData.lookup || null,
+          isDependent: (fieldData as any).isDependent || false,
           formula: null,
           conditional: null,
           styling: null,
@@ -1078,6 +1085,47 @@ export default function FormBuilderPage() {
             section.fields.push(fullField);
             section.fields.sort((a: { order: number; }, b: { order: number; }) => a.order - b.order);
             section.fields.forEach((f: any, i: number) => (f.order = i));
+          }
+        }
+      }
+
+      // Pass 2: Link dependent child fields to their parent field IDs
+      for (let idx = 0; idx < lookupFields.length; idx++) {
+        const fieldData = lookupFields[idx] as any;
+        if (fieldData.isDependent && fieldData._parentFieldIndex !== undefined) {
+          const parentSavedId = indexToSavedId[fieldData._parentFieldIndex];
+          const childSavedId = indexToSavedId[idx];
+          if (parentSavedId && childSavedId) {
+            await updateFieldMutation({
+              fieldId: childSavedId,
+              body: { parentFieldId: parentSavedId, isDependent: true },
+            }).unwrap();
+
+            // Update optimistic form data with parentFieldId
+            const updateFieldInForm = (fields: any[]) => {
+              for (const f of fields) {
+                if (f.id === childSavedId) {
+                  f.parentFieldId = parentSavedId;
+                  f.isDependent = true;
+                  return true;
+                }
+              }
+              return false;
+            };
+
+            if (pendingLookupSubformId) {
+              const walkSubforms = (subforms: Subform[]): boolean => {
+                for (const sf of subforms) {
+                  if (sf.id === pendingLookupSubformId && updateFieldInForm(sf.fields || [])) return true;
+                  if (sf.childSubforms && walkSubforms(sf.childSubforms)) return true;
+                }
+                return false;
+              };
+              updatedForm.sections.forEach((section: any) => walkSubforms(section.subforms || []));
+            } else {
+              const section = updatedForm.sections.find((s: any) => s.id === pendingLookupSectionId);
+              if (section) updateFieldInForm(section.fields || []);
+            }
           }
         }
       }

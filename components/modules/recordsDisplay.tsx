@@ -571,11 +571,43 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     if (fieldDef.type === "lookup" && fieldDef.lookup?.sourceId) {
       const depConfig = fd.lookup?.dependency;
       let parentVal: string | undefined;
-      if (depConfig?.parentFieldLabel && record.processedData) {
-        const parentPd = record.processedData.find(
-          (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
-        );
-        parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+
+      if (depConfig?.parentFieldLabel || fd.isDependent) {
+        // Find parent field definition by parentFieldId or by parentFieldLabel
+        let parentFieldDef: any = null;
+        if (fd.parentFieldId) {
+          parentFieldDef = enhancedFormFields.find(
+            (f: any) => f.id === fd.parentFieldId || f.originalId === fd.parentFieldId,
+          );
+        }
+        if (!parentFieldDef && depConfig?.parentFieldLabel) {
+          parentFieldDef = enhancedFormFields.find(
+            (f: any) => f.label === depConfig.parentFieldLabel && f.id !== fieldDef.id,
+          );
+        }
+
+        if (parentFieldDef) {
+          // Check pendingChanges first for most up-to-date value
+          const parentPending = pendingChanges.get(`${record.id}-${parentFieldDef.id}`);
+          if (parentPending) {
+            parentVal = parentPending.value != null ? String(parentPending.value) : undefined;
+          } else if (record.processedData) {
+            const parentPd = record.processedData.find(
+              (pd: any) =>
+                pd.fieldId === (parentFieldDef.originalId || parentFieldDef.id) ||
+                pd.fieldLabel === parentFieldDef.label,
+            );
+            parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+          }
+        }
+
+        // Final fallback: search processedData directly by label
+        if (parentVal === undefined && depConfig?.parentFieldLabel && record.processedData) {
+          const parentPd = record.processedData.find(
+            (pd: any) => pd.fieldLabel === depConfig.parentFieldLabel,
+          );
+          parentVal = parentPd?.value != null ? String(parentPd.value) : undefined;
+        }
       }
 
       return (
@@ -609,6 +641,29 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
               const newPending = new Map(pendingChanges);
               newPending.set(`${record.id}-${fieldDef.id}`, change);
+
+              // Clear dependent children when this lookup changes
+              enhancedFormFields.forEach((childField: any) => {
+                if (
+                  childField.id !== fieldDef.id &&
+                  ((childField.isDependent &&
+                    childField.parentFieldId === (fieldDef.originalId || fieldDef.id)) ||
+                    childField.lookup?.dependency?.parentFieldLabel === fieldDef.label)
+                ) {
+                  const childChange: PendingChange = {
+                    recordId: actualRecordId,
+                    fieldId: childField.id,
+                    originalFieldId: childField.originalId || childField.id,
+                    value: null,
+                    originalValue: "",
+                    fieldType: childField.type,
+                    fieldLabel: childField.label,
+                    sectionId: childField.sectionId,
+                  };
+                  newPending.set(`${record.id}-${childField.id}`, childChange);
+                }
+              });
+
               setPendingChanges(newPending);
 
               // Save immediately with explicit map — no setTimeout to avoid stale closures

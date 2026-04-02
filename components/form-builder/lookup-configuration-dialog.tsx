@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -99,12 +99,31 @@ interface SelectedField {
   isMaster?: boolean;
 }
 
+interface InitialLookupConfig {
+  sourceId?: string;
+  sourceType?: "form" | "module" | "master" | "static";
+  multiple?: boolean;
+  searchable?: boolean;
+  useIdField?: boolean;
+  idFieldName?: string;
+  fieldMapping?: {
+    display?: string;
+    value?: string;
+    store?: string;
+    description?: string;
+  };
+  dependency?: any;
+  label?: string;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (fields: Partial<FormField>[]) => void;
   sectionId: string;
   subformId?: string;
+  /** Pass existing lookup config to open in edit/reconfigure mode */
+  initialConfig?: InitialLookupConfig | null;
 }
 
 export default function LookupConfigurationDialog({
@@ -113,6 +132,7 @@ export default function LookupConfigurationDialog({
   onConfirm,
   sectionId,
   subformId,
+  initialConfig,
 }: Props) {
   const { toast } = useToast();
 
@@ -179,15 +199,27 @@ export default function LookupConfigurationDialog({
     (selectedFormId || selectedSectionId === "all")
   );
 
+  const isEditMode = !!initialConfig;
+  const editInitRef = useRef(false);
+  const userNavigatedBack = useRef(false);
+
   /* ===================== EFFECTS ===================== */
   useEffect(() => {
     if (open) {
-      loadInitialData();
-      resetSelection();
+      editInitRef.current = false;
+      userNavigatedBack.current = false;
+      console.log("[LookupReconfig] Dialog opened. initialConfig:", initialConfig);
+      if (initialConfig) {
+        runEditInit(initialConfig);
+      } else {
+        loadInitialData();
+        resetSelection();
+      }
     }
   }, [open]);
 
   useEffect(() => {
+    if (editInitRef.current && !userNavigatedBack.current) return;
     if (selectedFormId && selectedFormId !== "none") {
       fetchSections(selectedFormId);
     } else {
@@ -197,6 +229,7 @@ export default function LookupConfigurationDialog({
   }, [selectedFormId]);
 
   useEffect(() => {
+    if (editInitRef.current && !userNavigatedBack.current) return;
     const sourceId =
       selectedFormId && selectedFormId !== "none"
         ? selectedFormId
@@ -209,6 +242,7 @@ export default function LookupConfigurationDialog({
   }, [selectedFormId, selectedModuleId, selectedSectionId]);
 
   useEffect(() => {
+    if (editInitRef.current && !userNavigatedBack.current) return;
     if (selectedModuleId) {
       fetchMasterDropdowns(selectedModuleId);
     } else {
@@ -368,6 +402,144 @@ export default function LookupConfigurationDialog({
     setMasterDataValues({});
   };
 
+  /* ===================== EDIT-MODE INIT ===================== */
+  const runEditInit = async (config: NonNullable<typeof initialConfig>) => {
+    if (editInitRef.current) return;
+    editInitRef.current = true;
+
+    const configSourceId = config.sourceId || "";
+    const isMasterType = config.sourceType === "master";
+
+    console.log("[LookupReconfig] Starting edit init with config:", JSON.stringify(config, null, 2));
+
+    // Clean slate
+    resetSelection();
+    setSections([]);
+    setSourceFields([]);
+
+    // 1) Load all lookup sources
+    setLoading(true);
+    let loadedSources: LookupSource[] = [];
+    try {
+      const res = await triggerGetLookupSources().unwrap();
+      if (res.success) { loadedSources = res.data || []; setSources(loadedSources); }
+    } catch {
+      toast({ title: "Error", description: "Failed to load sources", variant: "destructive" });
+      setLoading(false); editInitRef.current = false; return;
+    }
+    setLoading(false);
+
+    const loadedModules = loadedSources.filter(s => s.type === "module");
+
+    // ─── MASTER TYPE ───
+    if (isMasterType) {
+      if (loadedModules.length > 0) setSelectedModuleId(loadedModules[0].id);
+      try {
+        const mr = await triggerGetMasterData().unwrap();
+        if (mr.dropdowns) setMasterDropdowns(mr.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name })));
+      } catch { /* noop */ }
+      setSelectedFields([{
+        fieldName: configSourceId,
+        label: config.label || configSourceId,
+        displayField: config.fieldMapping?.display || "value",
+        valueField: config.fieldMapping?.value || "value",
+        multiple: config.multiple || false,
+        searchable: config.searchable !== false,
+        useIdField: false,
+        isMaster: true,
+      }]);
+      setStep("mapping");
+      return;
+    }
+
+    // ─── FORM / MODULE TYPE ───
+
+    // 2) Resolve module + form from sourceId
+    let moduleId = "";
+    let formId = "";
+    const exact = loadedSources.find(s => s.id === configSourceId);
+    const match = exact || loadedSources.find((s: any) => s.key === configSourceId.replace(/^(form_|module_)/, ""));
+
+    if (match) {
+      if (match.type === "form") {
+        const parent = loadedSources.find(s => s.id === match.parentId && s.type === "module");
+        moduleId = parent?.id || "";
+        formId = match.id;
+      } else if (match.type === "module") {
+        moduleId = match.id;
+        formId = "none";
+      }
+    }
+
+    console.log("[LookupReconfig] Resolved:", { configSourceId, matchType: match?.type, moduleId, formId, sourcesCount: loadedSources.length });
+
+    setSelectedModuleId(moduleId);
+    setSelectedFormId(formId);
+    setSelectedSectionId("all");
+
+    // 3) Master dropdowns for context
+    if (moduleId) {
+      try {
+        const r = await triggerGetMasterDataByModule(moduleId).unwrap();
+        if (r.dropdowns) setMasterDropdowns(r.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name })));
+      } catch { setMasterDropdowns([]); }
+    }
+
+    // 4) Sections (if form)
+    if (formId && formId !== "none") {
+      try {
+        const sr = await triggerGetLookupSections(formId).unwrap();
+        if (sr.success) setSections(sr.data || []);
+      } catch { /* noop */ }
+    }
+
+    // 5) Source fields (critical for mapping dropdowns)
+    const srcId = formId && formId !== "none" ? formId : moduleId;
+    let fields: SourceField[] = [];
+    if (srcId) {
+      setLoadingFields(true);
+      try {
+        const fr = await triggerGetLookupFieldsWithSection({ sourceId: srcId, sectionId: "all" }).unwrap();
+        if (fr.success) {
+          const raw = Array.isArray(fr.data) ? fr.data : fr.data?.fields || [];
+          fields = raw.map((f: any) => typeof f === "string" ? { name: f, label: f, type: "text" } : f);
+          setSourceFields(fields);
+        }
+      } catch {
+        toast({ title: "Error", description: "Failed to fetch fields", variant: "destructive" });
+      } finally {
+        setLoadingFields(false);
+      }
+    }
+
+    // 6) Pre-populate selected field(s) from existing config
+    const store = config.fieldMapping?.store || "";
+    const display = config.fieldMapping?.display || "name";
+    const value = config.fieldMapping?.value || "id";
+    const hit = fields.find(f => f.name === store)
+             || fields.find(f => f.name === display)
+             || fields.find(f => f.label === config.label)
+             || fields.find(f => f.name === config.label);
+
+    const selectedField = {
+      fieldName: hit?.name || store || display,
+      label: config.label || hit?.label || store || display,
+      displayField: display,
+      valueField: value,
+      multiple: config.multiple || false,
+      searchable: config.searchable !== false,
+      useIdField: config.useIdField || false,
+      isMaster: false,
+    };
+
+    console.log("[LookupReconfig] Fields loaded:", fields.length, "Matched:", !!hit, "SelectedField:", selectedField, "sourceFields set:", fields.map(f => f.name));
+
+    setSelectedFields([selectedField]);
+
+    // 7) Show mapping step
+    setStep("mapping");
+  };
+
   const handleFieldToggle = (field: SourceField) => {
     const isSelected = selectedFields.some(
       (f) => f.fieldName === field.name && !f.isMaster
@@ -429,6 +601,12 @@ export default function LookupConfigurationDialog({
             }
           : undefined;
 
+        // Mark child fields as dependent so the builder can link them after creation
+        const isChild = !!dep;
+        const parentIndex = isChild
+          ? selectedFields.findIndex((f) => f.fieldName === dep!.parentFieldName)
+          : -1;
+
         if (field.isMaster) {
           return {
             sectionId: subformId ? undefined : sectionId,
@@ -440,6 +618,8 @@ export default function LookupConfigurationDialog({
             valueField: field.valueField,
             multiple: field.multiple,
             searchable: field.searchable,
+            isDependent: isChild,
+            _parentFieldIndex: parentIndex >= 0 ? parentIndex : undefined,
             lookup: {
               sourceId: field.fieldName,
               sourceType: "master",
@@ -472,6 +652,8 @@ export default function LookupConfigurationDialog({
           valueField: field.valueField,
           multiple: field.multiple,
           searchable: field.searchable,
+          isDependent: isChild,
+          _parentFieldIndex: parentIndex >= 0 ? parentIndex : undefined,
           lookup: {
             sourceId:
               selectedFormId && selectedFormId !== "none"
@@ -527,10 +709,13 @@ export default function LookupConfigurationDialog({
               </div>
               <div>
                 <DialogTitle className="text-xl">
-                  Lookup Configuration
+                  {isEditMode ? "Reconfigure Lookup" : "Lookup Configuration"}
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground">
-                  Select source data to create lookup fields
+                  {isEditMode
+                    ? "Modify the data source and field mapping for this lookup"
+                    : "Select source data to create lookup fields"
+                  }
                 </p>
               </div>
             </div>
@@ -990,7 +1175,7 @@ export default function LookupConfigurationDialog({
 
             <div className="flex gap-3">
               {step === "mapping" && (
-                <Button variant="outline" onClick={() => setStep("selection")}>
+                <Button variant="outline" onClick={() => { userNavigatedBack.current = true; setStep("selection"); }}>
                   <ChevronLeft className="h-4 w-4 mr-2" /> Back
                 </Button>
               )}
@@ -1008,8 +1193,10 @@ export default function LookupConfigurationDialog({
                   onClick={onFinalConfirm}
                   className="bg-green-600 hover:bg-green-700 text-white px-8"
                 >
-                  Create {selectedFields.length} Field
-                  {selectedFields.length !== 1 ? "s" : ""}
+                  {isEditMode
+                    ? `Update Field${selectedFields.length !== 1 ? "s" : ""}`
+                    : `Create ${selectedFields.length} Field${selectedFields.length !== 1 ? "s" : ""}`
+                  }
                 </Button>
               )}
             </div>

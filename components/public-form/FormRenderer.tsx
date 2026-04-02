@@ -67,14 +67,18 @@ export function FormRenderer({
   decimalConfigs = {},
   percentConfigs = {},
 }: FormRendererProps) {
-  const parentValueRaw = field.isDependent
-    ? resolveParentValue(field, formData)
+  // Resolve parent value for dependent fields (dropdowns and lookup fields)
+  const hasLookupDependency = field.type === "lookup" && !!field.lookup?.dependency;
+  const shouldResolveParent = field.isDependent || hasLookupDependency;
+  const parentValueRaw = shouldResolveParent
+    ? resolveParentValue(field, formData, allFields)
     : undefined;
 
   const parentValue =
     parentValueRaw !== undefined && parentValueRaw !== null
       ? String(parentValueRaw)
       : "";
+
 
   const fieldType = (field.type || "").toLowerCase();
 
@@ -580,6 +584,11 @@ export function FormRenderer({
           }
           disabled={submitting || submitted || isFieldReadOnly()}
           error={error}
+          parentValue={
+            field.lookup?.dependency
+              ? (parentValue || undefined)
+              : undefined
+          }
         />
       );
 
@@ -850,13 +859,44 @@ export function FormRenderer({
   }
 }
 
-// Helper function for resolving parent value (kept as is)
-export function resolveParentValue(f: any, formData?: Record<string, any>) {
-  if (!f || !f.parentFieldId || !formData) return undefined;
-  if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
-  const possibleKeys = Object.keys(formData).filter(
-    (k) => k.includes("__") && k.includes(f.parentFieldId),
-  );
-  if (possibleKeys.length > 0) return formData[possibleKeys[0]];
+// Helper function for resolving parent value
+export function resolveParentValue(
+  f: any,
+  formData?: Record<string, any>,
+  allFields?: any[],
+) {
+  if (!f || !formData) return undefined;
+
+  // 1. Resolve by parentFieldId (primary — set on dependent fields)
+  if (f.parentFieldId) {
+    if (formData[f.parentFieldId] !== undefined) return formData[f.parentFieldId];
+    // Check dynamic subform instance keys
+    const possibleKeys = Object.keys(formData).filter(
+      (k) => k.includes("__") && k.includes(f.parentFieldId),
+    );
+    if (possibleKeys.length > 0) return formData[possibleKeys[0]];
+  }
+
+  // 2. For lookup fields: resolve by parentFieldLabel from dependency config
+  //    Find the parent field by its label in allFields, then look up its value in formData
+  if (f.lookup?.dependency?.parentFieldLabel) {
+    const parentLabel = f.lookup.dependency.parentFieldLabel;
+
+    // Try to find the parent field in allFields to get its ID
+    if (allFields?.length) {
+      const parentField = allFields.find(
+        (pf: any) => pf.label === parentLabel && pf.id !== f.id,
+      );
+      if (parentField) {
+        if (formData[parentField.id] !== undefined) return formData[parentField.id];
+        // Check subform instance keys
+        const possibleKeys = Object.keys(formData).filter(
+          (k) => k.includes("__") && k.includes(parentField.id),
+        );
+        if (possibleKeys.length > 0) return formData[possibleKeys[0]];
+      }
+    }
+  }
+
   return undefined;
 }

@@ -66,12 +66,14 @@ import {
   Loader2,
   Save,
   Hash,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { FormField, FieldOption } from "@/types/form-builder";
 import { useLazyGetFormFullQuery } from "@/lib/api/forms";
 import { useLazyGetLookupSourcesQuery, useLazyGetLookupFieldsQuery } from "@/lib/api/lookup";
+import LookupConfigurationDialog from "@/components/form-builder/lookup-configuration-dialog";
 
 export interface DependentOptionGroup {
   parentValue: string;
@@ -365,6 +367,7 @@ export default function FieldSettings({
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showLookupReconfigure, setShowLookupReconfigure] = useState(false);
 
   const [triggerGetFormFull] = useLazyGetFormFullQuery();
   const [triggerGetLookupSources] = useLazyGetLookupSourcesQuery();
@@ -528,6 +531,27 @@ export default function FieldSettings({
     };
     handleFieldUpdate({ lookup: newLookup });
     setSourceOpen(false);
+  };
+
+  const handleLookupReconfigure = (fields: Partial<FormField>[]) => {
+    if (fields.length > 0) {
+      const reconfiguredField = fields[0];
+      handleFieldUpdate({
+        lookup: reconfiguredField.lookup || null,
+        label: reconfiguredField.label || localField.label,
+        options: reconfiguredField.options || localField.options,
+        isDependent: (reconfiguredField as any).isDependent || false,
+      });
+      // Reload available fields for the new source
+      if (reconfiguredField.lookup?.sourceId) {
+        loadAvailableFields(reconfiguredField.lookup.sourceId);
+      }
+      toast({
+        title: "Lookup Reconfigured",
+        description: "Lookup configuration updated. Click Save to apply.",
+      });
+    }
+    setShowLookupReconfigure(false);
   };
 
   const handleSave = async () => {
@@ -815,10 +839,23 @@ export default function FieldSettings({
                 {localField.type === "lookup" && (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Lookup Configuration</CardTitle>
-                      <CardDescription>
-                        Configure the data source and field mapping for this lookup field
-                      </CardDescription>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle>Lookup Configuration</CardTitle>
+                          <CardDescription>
+                            Configure the data source and field mapping for this lookup field
+                          </CardDescription>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowLookupReconfigure(true)}
+                          className="h-8 text-xs gap-1.5 border-blue-200 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Reconfigure
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-6">
                       <div className="space-y-2">
@@ -1617,6 +1654,27 @@ export default function FieldSettings({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {localField.type === "lookup" && (
+        <LookupConfigurationDialog
+          open={showLookupReconfigure}
+          onOpenChange={setShowLookupReconfigure}
+          onConfirm={handleLookupReconfigure}
+          sectionId={localField.sectionId || ""}
+          subformId={localField.subformId || undefined}
+          initialConfig={localField.lookup ? {
+            sourceId: localField.lookup.sourceId,
+            sourceType: localField.lookup.sourceType,
+            multiple: localField.lookup.multiple,
+            searchable: localField.lookup.searchable,
+            useIdField: localField.lookup.useIdField,
+            idFieldName: localField.lookup.idFieldName,
+            fieldMapping: localField.lookup.fieldMapping,
+            dependency: localField.lookup.dependency,
+            label: localField.label,
+          } : null}
+        />
+      )}
     </>
   );
 }
