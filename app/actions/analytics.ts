@@ -129,11 +129,13 @@ export async function getOrganizationKPIs(dateRange: string) {
 export async function getFormModules() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
 
   const modules = await prisma.formModule.findMany({
     where: {
       isActive: true,
       ...(orgId && { organizationId: orgId }),
+      ...(!ctx.isAdmin && { id: { in: ctx.permittedModuleIds && ctx.permittedModuleIds.length > 0 ? ctx.permittedModuleIds : [] } }),
     },
     include: {
       forms: {
@@ -211,7 +213,13 @@ export async function getFormModules() {
 export async function getModuleDeepAnalytics(moduleId: string, dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
+
+  // Non-admin: check if user has permission for this module
+  if (!ctx.isAdmin && ctx.permittedModuleIds !== null && !ctx.permittedModuleIds.includes(moduleId)) {
+    return null;
+  }
 
   const module = await prisma.formModule.findUnique({
     where: { id: moduleId },
@@ -305,13 +313,24 @@ export async function getModuleDeepAnalytics(moduleId: string, dateRange: string
 export async function getFormMetrics(dateRange: string, selectedModuleIds?: string[]) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
+
+  // For non-admin: intersect selected modules with permitted modules
+  let effectiveModuleIds = selectedModuleIds;
+  if (!ctx.isAdmin && ctx.permittedModuleIds !== null) {
+    const permitted = new Set(ctx.permittedModuleIds);
+    effectiveModuleIds = effectiveModuleIds
+      ? effectiveModuleIds.filter((id) => permitted.has(id))
+      : ctx.permittedModuleIds;
+    if (effectiveModuleIds.length === 0) return [];
+  }
 
   const modules = await prisma.formModule.findMany({
     where: {
       isActive: true,
       ...(orgId && { organizationId: orgId }),
-      ...(selectedModuleIds && selectedModuleIds.length > 0 && { id: { in: selectedModuleIds } }),
+      ...(effectiveModuleIds && effectiveModuleIds.length > 0 && { id: { in: effectiveModuleIds } }),
     },
     include: {
       forms: { select: { id: true, name: true } },
@@ -369,11 +388,14 @@ export async function getFormMetrics(dateRange: string, selectedModuleIds?: stri
 export async function getUserAnalytics(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
 
   const users = await prisma.user.findMany({
     where: {
       ...(orgId && { organizationId: orgId }),
+      // Non-admin: only see own user data
+      ...(!ctx.isAdmin && { id: ctx.userId }),
     },
     include: {
       employee: { select: { employeeName: true, department: true, designation: true, status: true } },
@@ -442,11 +464,14 @@ export async function getAuditTrail(dateRange: string, limit: number = 50, offse
 }) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
 
   const where: any = {
     createdAt: { gte: startDate, lte: endDate },
     ...(orgId && { organizationId: orgId }),
+    // Non-admin: only see own audit logs
+    ...(!ctx.isAdmin && { userId: ctx.userId }),
     ...(filters?.action && { action: filters.action }),
     ...(filters?.module && { module: filters.module }),
     ...(filters?.userId && { userId: filters.userId }),
@@ -501,23 +526,36 @@ export async function getAuditTrail(dateRange: string, limit: number = 50, offse
 export async function getOrganizationSetupMetrics() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
-  const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+  const ctx = await getPermissionContext(session);
+
+  const orgUserIds = ctx.isAdmin && orgId ? await getOrgUserIds(orgId) : [];
 
   const [org, totalUsers, totalModules, totalForms, totalAuditLogs, totalRoles, totalUnits, totalEmployees] =
     await Promise.all([
       orgId ? prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, createdAt: true } }) : null,
-      orgId ? prisma.user.count({ where: { organizationId: orgId } }) : prisma.user.count(),
-      prisma.formModule.count({ where: { ...(orgId && { organizationId: orgId }), isActive: true } }),
-      // Forms belonging to org modules
-      orgId
-        ? prisma.form.count({ where: { module: { organizationId: orgId } } })
-        : prisma.form.count(),
-      prisma.auditLog.count({ where: { ...(orgId && { organizationId: orgId }) } }),
+      // Non-admin: count 1 (self); Admin: all org users
+      ctx.isAdmin
+        ? (orgId ? prisma.user.count({ where: { organizationId: orgId } }) : prisma.user.count())
+        : Promise.resolve(1),
+      // Non-admin: count only permitted modules
+      ctx.isAdmin
+        ? prisma.formModule.count({ where: { ...(orgId && { organizationId: orgId }), isActive: true } })
+        : Promise.resolve(ctx.permittedModuleIds?.length || 0),
+      // Non-admin: count only permitted forms
+      ctx.isAdmin
+        ? (orgId ? prisma.form.count({ where: { module: { organizationId: orgId } } }) : prisma.form.count())
+        : Promise.resolve(ctx.permittedFormIds?.length || 0),
+      // Non-admin: only own audit logs
+      ctx.isAdmin
+        ? prisma.auditLog.count({ where: { ...(orgId && { organizationId: orgId }) } })
+        : prisma.auditLog.count({ where: { userId: ctx.userId } }),
       orgId ? prisma.role.count({ where: { organizationId: orgId } }) : 0,
       orgId ? prisma.organizationUnit.count({ where: { organizationId: orgId } }) : 0,
-      orgId && orgUserIds.length > 0
-        ? prisma.employee.count({ where: { userId: { in: orgUserIds } } })
-        : prisma.employee.count(),
+      ctx.isAdmin
+        ? (orgId && orgUserIds.length > 0
+            ? prisma.employee.count({ where: { userId: { in: orgUserIds } } })
+            : prisma.employee.count())
+        : prisma.employee.count({ where: { userId: ctx.userId } }),
     ]);
 
   const setupItems = [
@@ -553,9 +591,20 @@ export async function getOrganizationSetupMetrics() {
 export async function getSubmissionTimeSeries(dateRange: string, selectedModuleIds?: string[]) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
 
-  const orgFormIds = await getOrgFormIds(orgId, selectedModuleIds);
+  // For non-admin: intersect selected modules with permitted modules
+  let effectiveModuleIds = selectedModuleIds;
+  if (!ctx.isAdmin && ctx.permittedModuleIds !== null) {
+    const permitted = new Set(ctx.permittedModuleIds);
+    effectiveModuleIds = effectiveModuleIds
+      ? effectiveModuleIds.filter((id) => permitted.has(id))
+      : ctx.permittedModuleIds;
+    if (effectiveModuleIds.length === 0) return [];
+  }
+
+  const orgFormIds = await getOrgFormIds(orgId, effectiveModuleIds);
 
   if (orgFormIds.length === 0) return [];
 
@@ -587,6 +636,7 @@ export async function getSubmissionTimeSeries(dateRange: string, selectedModuleI
 export async function getActionBreakdown(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
 
   const breakdown = await prisma.auditLog.groupBy({
@@ -594,6 +644,8 @@ export async function getActionBreakdown(dateRange: string) {
     where: {
       ...(orgId && { organizationId: orgId }),
       createdAt: { gte: startDate, lte: endDate },
+      // Non-admin: only own actions
+      ...(!ctx.isAdmin && { userId: ctx.userId }),
     },
     _count: true,
   });
@@ -614,17 +666,19 @@ export async function globalSearch(query: string, filters?: {
 }) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
 
   if (!query || query.length < 2) return { results: [], total: 0 };
 
   const searchType = filters?.type || 'all';
   const results: any[] = [];
 
-  // Search Users (org-scoped)
+  // Search Users (org-scoped; non-admin: only own user)
   if (searchType === 'all' || searchType === 'users') {
     const users = await prisma.user.findMany({
       where: {
         ...(orgId && { organizationId: orgId }),
+        ...(!ctx.isAdmin && { id: ctx.userId }),
         OR: [
           { email: { contains: query, mode: 'insensitive' } },
           { username: { contains: query, mode: 'insensitive' } },
@@ -651,11 +705,14 @@ export async function globalSearch(query: string, filters?: {
     );
   }
 
-  // Search Form Modules (org-scoped)
+  // Search Form Modules (org-scoped; non-admin: only permitted modules)
   if (searchType === 'all' || searchType === 'modules') {
     const modules = await prisma.formModule.findMany({
       where: {
         ...(orgId && { organizationId: orgId }),
+        ...(!ctx.isAdmin && ctx.permittedModuleIds !== null && {
+          id: { in: ctx.permittedModuleIds.length > 0 ? ctx.permittedModuleIds : [] },
+        }),
         OR: [
           { name: { contains: query, mode: 'insensitive' } },
           { description: { contains: query, mode: 'insensitive' } },
@@ -678,11 +735,14 @@ export async function globalSearch(query: string, filters?: {
     );
   }
 
-  // Search Forms (org-scoped via module)
+  // Search Forms (org-scoped via module; non-admin: only permitted forms)
   if (searchType === 'all' || searchType === 'forms') {
     const forms = await prisma.form.findMany({
       where: {
         ...(orgId && { module: { organizationId: orgId } }),
+        ...(!ctx.isAdmin && ctx.permittedFormIds !== null && {
+          id: { in: ctx.permittedFormIds.length > 0 ? ctx.permittedFormIds : [] },
+        }),
         OR: [
           { name: { contains: query, mode: 'insensitive' } },
           { description: { contains: query, mode: 'insensitive' } },
@@ -702,12 +762,16 @@ export async function globalSearch(query: string, filters?: {
     );
   }
 
-  // Search Employees (org-scoped via userId)
+  // Search Employees (org-scoped via userId; non-admin: only own employee)
   if (searchType === 'all' || searchType === 'employees') {
-    const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+    const employeeUserFilter = !ctx.isAdmin
+      ? { userId: ctx.userId }
+      : orgId
+        ? { userId: { in: (await getOrgUserIds(orgId)) } }
+        : {};
     const employees = await prisma.employee.findMany({
       where: {
-        ...(orgId && orgUserIds.length > 0 && { userId: { in: orgUserIds } }),
+        ...employeeUserFilter,
         OR: [
           { employeeName: { contains: query, mode: 'insensitive' } },
           { department: { contains: query, mode: 'insensitive' } },
@@ -729,11 +793,12 @@ export async function globalSearch(query: string, filters?: {
     );
   }
 
-  // Search Audit Logs (org-scoped)
+  // Search Audit Logs (org-scoped; non-admin: only own audit logs)
   if (searchType === 'all' || searchType === 'audit') {
     const audits = await prisma.auditLog.findMany({
       where: {
         ...(orgId && { organizationId: orgId }),
+        ...(!ctx.isAdmin && { userId: ctx.userId }),
         OR: [
           { action: { contains: query, mode: 'insensitive' } },
           { module: { contains: query, mode: 'insensitive' } },
@@ -767,10 +832,17 @@ export async function globalSearch(query: string, filters?: {
 export async function getLoginAnalytics(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
   const { startDate, endDate } = getDateRange(dateRange);
 
-  const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
-  const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  // Non-admin: only own login data; Admin: all org users
+  let userFilter: any = {};
+  if (!ctx.isAdmin) {
+    userFilter = { userId: ctx.userId };
+  } else {
+    const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+    userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  }
 
   const [loginHistory, successCount, failedCount] = await Promise.all([
     prisma.loginHistory.findMany({
@@ -820,9 +892,16 @@ export async function getLoginAnalytics(dateRange: string) {
 export async function getEmployeeAnalytics() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
-  const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+  const ctx = await getPermissionContext(session);
 
-  const employeeWhere = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  // Non-admin: only own employee data; Admin: all org employees
+  let employeeWhere: any = {};
+  if (!ctx.isAdmin) {
+    employeeWhere = { userId: ctx.userId };
+  } else {
+    const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+    employeeWhere = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  }
 
   const [employees, departmentBreakdown] = await Promise.all([
     prisma.employee.findMany({
@@ -871,12 +950,23 @@ export async function getEmployeeAnalytics() {
 export async function getRolesAnalytics() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const ctx = await getPermissionContext(session);
 
   if (!orgId) return { roles: [], totalRoles: 0, totalPermissions: 0 };
 
+  // Non-admin: only see roles they are assigned to
+  const userRoleIds = !ctx.isAdmin
+    ? session.user.unitAssignments
+        ?.filter((ua: any) => ua.role?.isActive)
+        ?.map((ua: any) => ua.role.id) || []
+    : null;
+
   const [roles, totalPermissions] = await Promise.all([
     prisma.role.findMany({
-      where: { organizationId: orgId },
+      where: {
+        organizationId: orgId,
+        ...(userRoleIds !== null && { id: { in: userRoleIds } }),
+      },
       include: {
         rolePermissions: { select: { id: true } },
         userAssignments: { select: { id: true } },
@@ -947,6 +1037,46 @@ async function getPermittedModuleIds(userId: string, roleIds: string[]): Promise
   }
 
   return [...allowedSet];
+}
+
+// ============================================================
+// Permission context: determines what the current user can see
+// ============================================================
+async function getPermissionContext(session: any) {
+  const userId = session.user.id;
+  const orgId = session.user.organizationId;
+
+  // Check admin via role flag OR role name containing 'admin'
+  const hasAdminRole = session.user.unitAssignments?.some(
+    (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes('admin')
+  ) || false;
+
+  // Check if user owns the organization
+  const isOrgOwner = orgId
+    ? !!(await prisma.organization.findFirst({ where: { id: orgId, ownerId: userId }, select: { id: true } }))
+    : false;
+
+  const isAdmin = hasAdminRole || isOrgOwner;
+
+  if (isAdmin) {
+    return { userId, orgId, isAdmin: true as const, permittedModuleIds: null as string[] | null, permittedFormIds: null as string[] | null };
+  }
+
+  const roleIds = session.user.unitAssignments
+    ?.filter((ua: any) => ua.role?.isActive && ua.unit?.isActive)
+    ?.map((ua: any) => ua.role.id) || [];
+
+  const permittedModuleIds = await getPermittedModuleIds(userId, roleIds);
+
+  const permittedModules = permittedModuleIds.length > 0
+    ? await prisma.formModule.findMany({
+        where: { id: { in: permittedModuleIds }, isActive: true },
+        select: { forms: { select: { id: true } } },
+      })
+    : [];
+  const permittedFormIds = permittedModules.flatMap((m) => m.forms.map((f) => f.id));
+
+  return { userId, orgId, isAdmin: false as const, permittedModuleIds, permittedFormIds };
 }
 
 // ============================================================

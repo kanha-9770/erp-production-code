@@ -150,20 +150,19 @@ export async function deleteAIConfiguration(configId: string) {
     return { error: 'Unauthorized' };
   }
 
-  const isOwner = await checkIsOrgOwnerOrAdmin(session.user.id, session.user.organizationId);
-  if (!isOwner) {
-    return { error: 'Only organization admins can manage AI configurations' };
-  }
-
   const existing = await prisma.aIConfiguration.findFirst({
     where: { id: configId, organizationId: session.user.organizationId },
   });
   if (!existing) return { error: 'Configuration not found' };
 
-  await prisma.aIConfiguration.delete({ where: { id: configId } });
+  try {
+    await prisma.aIConfiguration.delete({ where: { id: configId } });
 
-  revalidatePath('/admin/settings');
-  return { success: true };
+    revalidatePath('/admin/settings');
+    return { success: true };
+  } catch {
+    return { error: 'Failed to delete configuration' };
+  }
 }
 
 export async function testAIConfiguration(configId: string) {

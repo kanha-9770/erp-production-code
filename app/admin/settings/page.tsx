@@ -394,12 +394,16 @@ export default function AISettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    const result = await deleteAIConfiguration(id);
-    if ('error' in result) {
-      toast.error(result.error);
-    } else {
-      toast.success('Configuration deleted');
-      loadConfigs();
+    try {
+      const result = await deleteAIConfiguration(id);
+      if ('error' in result) {
+        toast.error(result.error);
+      } else {
+        toast.success('Configuration deleted');
+        loadConfigs();
+      }
+    } catch {
+      toast.error('Failed to delete configuration');
     }
   };
 

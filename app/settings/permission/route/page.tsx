@@ -123,7 +123,7 @@ export default function RoutePermissionsPage() {
     <TooltipProvider delayDuration={200}>
       <div className="h-[calc(100vh-140px)] flex flex-col">
         {/* Top bar */}
-        <div className="flex items-center justify-between pb-4">
+        <div className="flex items-center justify-between py-4 px-6">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Route Permissions</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -137,10 +137,10 @@ export default function RoutePermissionsPage() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 flex gap-0 border rounded-lg overflow-hidden bg-background min-h-0">
+        <div className="flex-1 flex gap-0 border overflow-hidden bg-background min-h-0">
           {/* ── Left: Route list ──────────────────────────────────────────── */}
           <div className="w-[280px] shrink-0 border-r flex flex-col bg-muted/30">
-            <div className="p-3 space-y-2">
+            <div className="py-4 px-6 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
                   Routes
@@ -218,7 +218,7 @@ function RouteGroupItem({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 w-full px-3 py-1.5 text-left hover:bg-muted/60 transition-colors"
+        className="flex items-center gap-1.5 w-full px-6 py-1.5 text-left hover:bg-muted/60 transition-colors"
       >
         {open ? (
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -241,7 +241,7 @@ function RouteGroupItem({
                 key={route.id}
                 onClick={() => onSelect(route.id)}
                 className={cn(
-                  "flex items-center gap-2 w-full pl-7 pr-3 py-[5px] text-left transition-all",
+                  "flex items-center gap-2 w-full pl-10 pr-6 py-[5px] text-left transition-all",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted/80 text-foreground/80"
@@ -370,7 +370,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
       }).unwrap()
 
       await refetch()
-      try { await refreshMeta().unwrap() } catch {}
+      try { await refreshMeta().unwrap() } catch { }
       setChanges(new Map())
       toast.success("Permissions saved")
     } catch {

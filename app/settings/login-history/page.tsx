@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Search, Download, Filter } from "lucide-react"
+import { jsPDF } from "jspdf"
+import autoTable from "jspdf-autotable"
 
 interface LoginEntry {
   id: number
@@ -59,6 +61,40 @@ export default function LoginHistoryPage() {
     return "Other Browser"
   }
 
+  const exportToPDF = () => {
+    const doc = new jsPDF()
+    doc.setFontSize(18)
+    doc.text("Login History", 14, 20)
+    doc.setFontSize(10)
+    doc.setTextColor(100)
+    doc.text(`Exported on ${new Date().toLocaleString()}`, 14, 28)
+    doc.text(`Total records: ${filteredData.length}`, 14, 34)
+
+    autoTable(doc, {
+      startY: 40,
+      head: [["User", "Email", "IP Address", "Browser", "Status", "Reason", "Login Time"]],
+      body: filteredData.map((entry) => [
+        entry.userFullName || "Unknown User",
+        entry.email,
+        entry.ipAddress || "Unknown",
+        formatUserAgent(entry.userAgent),
+        entry.status,
+        entry.reason || "-",
+        new Date(entry.createdAt).toLocaleString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [41, 37, 36] },
+    })
+
+    doc.save("login-history.pdf")
+  }
+
   const getInitials = (name: string | null | undefined) => {
     if (!name) return "?"
     return name
@@ -80,7 +116,7 @@ export default function LoginHistoryPage() {
                 Track all login attempts and the IP address of the device used for login
               </CardDescription>
             </div>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={exportToPDF} disabled={loading || filteredData.length === 0}>
               <Download className="w-4 h-4 mr-2" />
               Export
             </Button>
