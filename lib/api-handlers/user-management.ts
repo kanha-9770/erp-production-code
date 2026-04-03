@@ -118,9 +118,9 @@ export const UserManagementHandlers = {
       const body = await request.json();
       const { email, first_name, last_name, department, password, unitId, roleId } = body;
 
-      if (!email || !first_name || !last_name)
+      if (!email || !first_name)
         return NextResponse.json(
-          { error: "Email, first name, and last name are required" },
+          { error: "Email, first name, are required" },
           { status: 400 }
         );
 

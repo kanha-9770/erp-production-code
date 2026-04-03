@@ -1,5 +1,10 @@
 // "use client"
+
 // import React, { useState, useEffect, useCallback } from 'react';
+// import { useGetUserQuery } from "@/lib/api/auth";
+// import { useGetUsersQuery, useDeleteUserMutation, useCreateUserMutation, useUpdateUserMutation } from "@/lib/api/users";
+// import { useGetRolesQuery } from "@/lib/api/permissions";
+// import { useGetOrganizationUnitsQuery } from "@/lib/api/organization";
 
 // // --- Types ---
 // export interface Unit {
@@ -82,78 +87,63 @@
 //   const [units, setUnits] = useState<Unit[]>([]);
 //   const [roles, setRoles] = useState<Role[]>([]);
 
-//   const fetchInitialData = useCallback(async () => {
-//     let fetchedUnits: Unit[] = [];
-//     let fetchedRoles: Role[] = [];
-//     let adminStatus = false;
-//     let orgId: string | null = null;
+//   const [deleteUser] = useDeleteUserMutation();
+//   const [createUser] = useCreateUserMutation();
+//   const [updateUser] = useUpdateUserMutation();
+//   const { data: orgUnitsData } = useGetOrganizationUnitsQuery();
 
-//     // 1. Organization units
-//     try {
-//       const unitsRes = await fetch('/api/organization-units', { credentials: 'include' });
-//       if (unitsRes.ok) {
-//         const payload = await unitsRes.json();
-//         fetchedUnits = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
-//       }
-//     } catch (err) {
-//       console.warn("Org units error:", err);
+//   // RTK Query hooks for initial data
+//   const { data: sessionData } = useGetUserQuery();
+//   const { data: rolesData } = useGetRolesQuery();
+//   const { data: usersData, refetch: refetchUsers } = useGetUsersQuery();
+
+//   // Process session data
+//   useEffect(() => {
+//     if (sessionData) {
+//       const session = sessionData;
+//       const adminStatus = session?.user?.isAdmin === true
+//         || (session?.user as any)?.isOrgOwner === true
+//         || session?.user?.unitAssignments?.some(
+//             (ua: any) => ua?.role?.isAdmin === true || ua?.role?.name?.toLowerCase().includes('admin')
+//           )
+//         || false;
+//       const orgId = session?.user?.organization?.id || null;
+//       setIsAdmin(adminStatus);
+//       setOrganizationId(orgId);
 //     }
+//   }, [sessionData]);
 
-//     // 2. Roles
-//     try {
-//       const rolesRes = await fetch('/api/role', { credentials: 'include' });
-//       if (rolesRes.ok) {
-//         const payload = await rolesRes.json();
-//         const raw = payload?.success ? payload.data : (Array.isArray(payload) ? payload : []);
-//         fetchedRoles = raw.map((r: any) => ({
-//           id: r.id,
-//           name: r.name,
-//           isAdmin: !!r.isAdmin,
-//           level: r.level ?? 0,
-//         }));
-//       }
-//     } catch (err) {
-//       console.warn("Roles error:", err);
+//   // Process roles data
+//   useEffect(() => {
+//     if (rolesData) {
+//       const raw = rolesData?.success ? rolesData.data : (Array.isArray(rolesData) ? rolesData : []);
+//       const fetchedRoles = raw.map((r: any) => ({
+//         id: r.id,
+//         name: r.name,
+//         isAdmin: !!r.isAdmin,
+//         level: r.level ?? 0,
+//       }));
+//       setRoles(fetchedRoles);
 //     }
+//   }, [rolesData]);
 
-//     // 3. Session
-//     try {
-//       const sessionRes = await fetch('/api/auth/me', { credentials: 'include' });
-//       if (sessionRes.ok) {
-//         const session = await sessionRes.json();
-//         adminStatus = session?.user?.unitAssignments?.some(
-//           (ua: any) => ua?.role?.isAdmin === true
-//         ) ?? false;
-//         orgId = session?.user?.organization?.id || null;
-//       }
-//     } catch (err) {
-//       console.warn("Session error:", err);
+//   // Fetch organization units via RTK Query
+//   useEffect(() => {
+//     if (orgUnitsData) {
+//       const fetchedUnits = (orgUnitsData as any)?.success ? (orgUnitsData as any).data : (Array.isArray(orgUnitsData) ? orgUnitsData : []);
+//       setUnits(fetchedUnits);
 //     }
+//   }, [orgUnitsData]);
 
-//     const finalAdmin = adminStatus || true;
+//   // Process users data
+//   useEffect(() => {
+//     if (usersData) {
+//       const rawUsers = Array.isArray(usersData)
+//         ? usersData
+//         : (usersData as any)?.data ?? (usersData as any)?.users ?? [];
 
-//     setUnits(fetchedUnits);
-//     setRoles(fetchedRoles);
-//     setIsAdmin(finalAdmin);
-//     setOrganizationId(orgId);
-//   }, []);
+//       console.log('RAW USERS FROM API:', rawUsers.length, rawUsers);
 
-//   const fetchUsers = useCallback(async () => {
-//     try {
-//       setLoading(true);
-//       const res = await fetch('/api/users', { credentials: 'include' });
-//       if (!res.ok) throw new Error(`Users fetch failed: ${res.status}`);
-
-//       const data = await res.json();
-//       const rawUsers = Array.isArray(data)
-//         ? data
-//         : data?.data ?? data?.users ?? [];
-
-//       // === DEBUG LOGS (open browser console to see exactly what's happening) ===
-//       console.log('📥 RAW USERS FROM API:', rawUsers.length, rawUsers);
-
-//       // 🔥 PERFECT FILTER: Hide ANY user who has at least one admin role
-//       // (Works even if backend sometimes returns isAdmin as string or missing field)
 //       const filteredUsers = rawUsers.filter((user: any) => {
 //         const hasAdminRole = user.unitAssignments?.some((ua: any) => {
 //           const roleIsAdmin = ua?.role?.isAdmin === true || ua?.role?.isAdmin === 'true';
@@ -164,33 +154,12 @@
 //         return !hasAdminRole;
 //       });
 
-//       console.log('✅ FILTERED NON-ADMIN USERS:', filteredUsers.length);
-//       console.table(
-//         filteredUsers.map((u: any) => ({
-//           id: u.id,
-//           name: `${u.first_name} ${u.last_name}`,
-//           email: u.email,
-//           assignments: u.unitAssignments?.length || 0,
-//           hasAdminRole: u.unitAssignments?.some((ua: any) =>
-//             ua?.role?.isAdmin === true ||
-//             String(ua?.role?.name || '').toLowerCase().includes('admin')
-//           )
-//         }))
-//       );
+//       console.log('FILTERED NON-ADMIN USERS:', filteredUsers.length);
 
 //       setUsers(filteredUsers);
-//     } catch (err) {
-//       console.error("Failed to fetch users:", err);
-//       setUsers([]);
-//     } finally {
 //       setLoading(false);
 //     }
-//   }, []);
-
-//   useEffect(() => {
-//     fetchInitialData();
-//     fetchUsers();
-//   }, [fetchInitialData, fetchUsers]);
+//   }, [usersData]);
 
 //   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
 //     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -202,33 +171,25 @@
 //       alert("Cannot create user: organization ID not available. Please log in again.");
 //       return;
 //     }
-//     if (!formData.email || !formData.first_name || !formData.last_name) {
-//       alert("Email, First Name, and Last Name are required");
+//     if (!formData.email || !formData.first_name) {
+//       alert("Email, First Name, are required");
 //       return;
 //     }
 
 //     try {
 //       const payload = { ...formData, organizationId };
-//       const url = isEditing && editId ? `/api/users/${editId}` : '/api/users';
-//       const method = isEditing && editId ? 'PUT' : 'POST';
 
-//       const res = await fetch(url, {
-//         method,
-//         headers: { 'Content-Type': 'application/json' },
-//         credentials: 'include',
-//         body: JSON.stringify(payload),
-//       });
-
-//       if (!res.ok) {
-//         const errData = await res.json().catch(() => ({}));
-//         throw new Error(errData.error || `Failed (${res.status})`);
+//       if (isEditing && editId) {
+//         await updateUser({ userId: editId, body: payload }).unwrap();
+//       } else {
+//         await createUser(payload).unwrap();
 //       }
 
 //       setFormData({});
 //       setIsEditing(false);
 //       setEditId(null);
 //       setShowForm(false);
-//       fetchUsers(); // refresh filtered list
+//       refetchUsers();
 //     } catch (err: any) {
 //       console.error("User save error:", err);
 //       alert("Could not save user: " + (err.message || "Unknown error"));
@@ -252,9 +213,8 @@
 //   const handleDelete = async (id: string) => {
 //     if (!confirm('Delete this user permanently?')) return;
 //     try {
-//       const res = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
-//       if (!res.ok) throw new Error('Delete failed');
-//       fetchUsers();
+//       await deleteUser(id).unwrap();
+//       refetchUsers();
 //     } catch (err) {
 //       console.error("Delete error:", err);
 //       alert("Could not delete user");
@@ -318,7 +278,6 @@
 //           </div>
 
 //           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-//             {/* Form fields unchanged - same as before */}
 //             <div className="space-y-1">
 //               <label className="text-sm font-semibold text-slate-700 ml-1">Email Address *</label>
 //               <input name="email" type="email" placeholder="name@company.com" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.email || ''} onChange={handleInputChange} required />
@@ -332,8 +291,8 @@
 //               <input name="first_name" placeholder="First Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.first_name || ''} onChange={handleInputChange} required />
 //             </div>
 //             <div className="space-y-1">
-//               <label className="text-sm font-semibold text-slate-700 ml-1">Last Name *</label>
-//               <input name="last_name" placeholder="Last Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.last_name || ''} onChange={handleInputChange} required />
+//               <label className="text-sm font-semibold text-slate-700 ml-1">Last Name <span className="font-normal text-slate-400">(optional)</span></label>
+//               <input name="last_name" placeholder="Last Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.last_name || ''} onChange={handleInputChange} />
 //             </div>
 
 //             <div className="space-y-1">
@@ -386,12 +345,12 @@
 //       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
 //         {users.length > 0 ? (
 //           <div className="overflow-x-auto">
-//             <table className="w-full text-left border-collapse">
+//             <table className="w-full text-left border-collapse min-w-[900px]">
 //               <thead className="bg-slate-50 border-b border-slate-200">
 //                 <tr>
 //                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th>
-//                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Department</th>
-//                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Roles</th>
+//                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Department</th>
+//                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Roles</th>
 //                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
 //                 </tr>
 //               </thead>
@@ -409,19 +368,24 @@
 //                         </div>
 //                       </div>
 //                     </td>
-//                     <td className="px-6 py-4 whitespace-nowrap hidden md:table-cell">
-//                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200">{user.department}</span>
+//                     <td className="px-6 py-4 whitespace-nowrap">
+//                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200">
+//                         {user.department || '—'}
+//                       </span>
 //                     </td>
-//                     <td className="px-6 py-4 whitespace-nowrap hidden sm:table-cell">
+//                     <td className="px-6 py-4">
 //                       <div className="flex flex-wrap gap-1">
 //                         {user.unitAssignments.map((ua, idx) => (
-//                           <div key={ua.id || idx} className="flex flex-col">
+//                           <div key={ua.id || idx} className="flex flex-col mb-1">
 //                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${ua.role.isAdmin ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
 //                               {ua.role.name}
 //                             </span>
 //                             <span className="text-[10px] text-slate-400 mt-0.5 italic">{ua.unit.name}</span>
 //                           </div>
 //                         ))}
+//                         {user.unitAssignments.length === 0 && (
+//                           <span className="text-xs text-slate-500 italic">No assignments</span>
+//                         )}
 //                       </div>
 //                     </td>
 //                     <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -540,9 +504,11 @@ const UserManagement: React.FC = () => {
   const [roles, setRoles] = useState<Role[]>([]);
 
   const [deleteUser] = useDeleteUserMutation();
-  const [createUser] = useCreateUserMutation();
-  const [updateUser] = useUpdateUserMutation();
+  const [createUser, { isLoading: isCreating }] = useCreateUserMutation();
+  const [updateUser, { isLoading: isUpdating }] = useUpdateUserMutation();
   const { data: orgUnitsData } = useGetOrganizationUnitsQuery();
+
+  const isSaving = isCreating || isUpdating;
 
   // RTK Query hooks for initial data
   const { data: sessionData } = useGetUserQuery();
@@ -623,8 +589,8 @@ const UserManagement: React.FC = () => {
       alert("Cannot create user: organization ID not available. Please log in again.");
       return;
     }
-    if (!formData.email || !formData.first_name || !formData.last_name) {
-      alert("Email, First Name, and Last Name are required");
+    if (!formData.email || !formData.first_name) {
+      alert("Email, First Name, are required");
       return;
     }
 
@@ -722,6 +688,7 @@ const UserManagement: React.FC = () => {
             <button
               onClick={() => { setShowForm(false); setIsEditing(false); setFormData({}); }}
               className="text-slate-400 hover:text-slate-600 transition"
+              disabled={isSaving}
             >
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -732,24 +699,24 @@ const UserManagement: React.FC = () => {
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-700 ml-1">Email Address *</label>
-              <input name="email" type="email" placeholder="name@company.com" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.email || ''} onChange={handleInputChange} required />
+              <input name="email" type="email" placeholder="name@company.com" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.email || ''} onChange={handleInputChange} required disabled={isSaving} />
             </div>
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-700 ml-1">Department</label>
-              <input name="department" placeholder="e.g. Engineering" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.department || ''} onChange={handleInputChange} />
+              <input name="department" placeholder="e.g. Engineering" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.department || ''} onChange={handleInputChange} disabled={isSaving} />
             </div>
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-700 ml-1">First Name *</label>
-              <input name="first_name" placeholder="First Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.first_name || ''} onChange={handleInputChange} required />
+              <input name="first_name" placeholder="First Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.first_name || ''} onChange={handleInputChange} required disabled={isSaving} />
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-semibold text-slate-700 ml-1">Last Name *</label>
-              <input name="last_name" placeholder="Last Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.last_name || ''} onChange={handleInputChange} required />
+              <label className="text-sm font-semibold text-slate-700 ml-1">Last Name <span className="font-normal text-slate-400">(optional)</span></label>
+              <input name="last_name" placeholder="Last Name" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition" value={formData.last_name || ''} onChange={handleInputChange} disabled={isSaving} />
             </div>
 
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-700 ml-1">Organization Unit *</label>
-              <select name="unitId" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition bg-white" value={formData.unitId || ''} onChange={handleInputChange} required>
+              <select name="unitId" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition bg-white" value={formData.unitId || ''} onChange={handleInputChange} required disabled={isSaving}>
                 <option value="">Select Unit</option>
                 {units.map(unit => (
                   <option key={unit.id} value={unit.id}>
@@ -761,7 +728,7 @@ const UserManagement: React.FC = () => {
 
             <div className="space-y-1">
               <label className="text-sm font-semibold text-slate-700 ml-1">System Role *</label>
-              <select name="roleId" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition bg-white" value={formData.roleId || ''} onChange={handleInputChange} required>
+              <select name="roleId" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition bg-white" value={formData.roleId || ''} onChange={handleInputChange} required disabled={isSaving}>
                 <option value="">Select Role</option>
                 {roles.map(role => (
                   <option key={role.id} value={role.id}>
@@ -781,13 +748,31 @@ const UserManagement: React.FC = () => {
                 value={formData.password || ''}
                 onChange={handleInputChange}
                 required={!isEditing}
+                disabled={isSaving}
               />
             </div>
 
             <div className="md:col-span-2 flex justify-end gap-3 mt-4">
-              <button type="button" onClick={() => { setShowForm(false); setIsEditing(false); setFormData({}); }} className="px-6 py-2.5 border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-50 transition">Cancel</button>
-              <button type="submit" className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-md transition-all active:scale-95">
-                {isEditing ? 'Update User' : 'Create User'}
+              <button 
+                type="button" 
+                onClick={() => { setShowForm(false); setIsEditing(false); setFormData({}); }} 
+                className="px-6 py-2.5 border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-50 transition"
+                disabled={isSaving}
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                disabled={isSaving}
+                className={`px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}
+              >
+                {isSaving && (
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {isSaving ? (isEditing ? 'Updating...' : 'Creating...') : (isEditing ? 'Update User' : 'Create User')}
               </button>
             </div>
           </form>
