@@ -15,8 +15,10 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-  closestCorners,
-  UniqueIdentifier,
+  type DragOverEvent,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { createPortal } from "react-dom";
@@ -52,6 +54,8 @@ import {
   useCreateFieldMutation,
   useUpdateFieldMutation,
   useCreateSubformMutation,
+  useUpdateSubformMutation,
+  useCreateSectionMutation,
   useSaveFormMutation,
   useUpdateSectionMutation,
 } from "@/lib/api/forms";
@@ -105,6 +109,8 @@ export default function FormBuilderPage() {
   const [createFieldMutation] = useCreateFieldMutation();
   const [updateFieldMutation] = useUpdateFieldMutation();
   const [createSubformMutation] = useCreateSubformMutation();
+  const [updateSubformMutation] = useUpdateSubformMutation();
+  const [createSectionMutation] = useCreateSectionMutation();
   const [saveFormMutation, { isLoading: saving }] = useSaveFormMutation();
   const [updateSectionMutation] = useUpdateSectionMutation();
 
@@ -130,6 +136,11 @@ export default function FormBuilderPage() {
   const [activePaletteItem, setActivePaletteItem] = useState<
     (typeof fieldTypes)[0] | null
   >(null);
+  const [activeDragItem, setActiveDragItem] = useState<{
+    type: "Field" | "Section" | "Subform";
+    data: any;
+  } | null>(null);
+  const [activeOverId, setActiveOverId] = useState<string | null>(null);
   const [subformHierarchyMap, setSubformHierarchyMap] = useState<
     Map<string, SubformHierarchy>
   >(new Map());
@@ -141,6 +152,30 @@ export default function FormBuilderPage() {
       },
     }),
   );
+
+  // Custom collision detection:
+  // - pointerWithin: only detects droppables the pointer is ACTUALLY inside
+  //   (prevents drops while still hovering over the palette sidebar)
+  // - When nested droppables match (subform inside section inside canvas),
+  //   prioritize the smallest/most-specific one
+  // - Fallback to rectIntersection for edge cases (pointer between items)
+  const formBuilderCollision: CollisionDetection = useCallback((args) => {
+    const pw = pointerWithin(args);
+
+    if (pw.length > 0) {
+      // Sort by droppable area ascending → smallest (most specific) first
+      return [...pw].sort((a, b) => {
+        const aRect = a.data?.droppableContainer?.rect.current;
+        const bRect = b.data?.droppableContainer?.rect.current;
+        if (!aRect || !bRect) return 0;
+        return (aRect.width * aRect.height) - (bRect.width * bRect.height);
+      });
+    }
+
+    // Fallback: only if pointer isn't inside any droppable
+    // Use rectIntersection which requires actual bounding-box overlap
+    return rectIntersection(args);
+  }, []);
 
   const openPermissionDialog = (resource: { type: string; id: string }) => {
     setSelectedResource(resource);
@@ -282,17 +317,35 @@ export default function FormBuilderPage() {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    if (event.active.data.current?.type === "PaletteField") {
-      setActivePaletteItem(event.active.data.current.fieldData);
+    const { active } = event;
+    const type = active.data.current?.type;
+
+    if (type === "PaletteField") {
+      setActivePaletteItem(active.data.current!.fieldData);
+      setActiveDragItem(null);
+    } else if (type === "Field" || type === "Section" || type === "Subform") {
+      setActivePaletteItem(null);
+      setActiveDragItem({
+        type,
+        data: active.data.current?.field || active.data.current?.section || active.data.current?.subform,
+      });
     } else {
       setActivePaletteItem(null);
+      setActiveDragItem(null);
     }
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event;
+    setActiveOverId(over?.id ? String(over.id) : null);
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
     setActivePaletteItem(null);
+    setActiveDragItem(null);
+    setActiveOverId(null);
 
     if (!over) return;
 
@@ -361,11 +414,11 @@ export default function FormBuilderPage() {
 
           if (targetSubform) {
             const allItems = [
-              ...(targetSubform.fields || []).sort(
+              ...[...(targetSubform.fields || [])].sort(
                 (a: { order: number }, b: { order: number }) =>
                   a.order - b.order,
               ),
-              ...(targetSubform.childSubforms || []).sort(
+              ...[...(targetSubform.childSubforms || [])].sort(
                 (a: { order: number }, b: { order: number }) =>
                   a.order - b.order,
               ),
@@ -413,11 +466,61 @@ export default function FormBuilderPage() {
           ];
           insertIndex = allItems.length;
         }
+      } else if (over.data.current?.type === "Canvas" || over.id === "form-canvas") {
+        // Dropped on canvas - subform and new-section create at top level
+        if (fieldType === "subform") {
+          await createSubform(undefined, undefined);
+          return;
+        } else if (fieldType === "new-section") {
+          if (!form) return;
+          const allItems = [
+            ...(form.sections || []),
+            ...(form.subforms || []).filter((s: any) => !s.parentSectionId && !s.parentSubformId),
+          ];
+          const maxOrder = Math.max(...allItems.map((s: any) => s.order ?? 0), -1);
+          const newSectionData = {
+            formId: form.id,
+            title: `Section ${(form.sections || []).length + 1}`,
+            description: "",
+            order: maxOrder + 1,
+            columns: 1,
+          };
+          try {
+            const result = await createSectionMutation(newSectionData).unwrap();
+            if (result.success) {
+              const newSection = {
+                ...result.data,
+                fields: [],
+                visible: true,
+                collapsible: false,
+                collapsed: false,
+                conditional: null,
+                styling: null,
+              };
+              optimisticFormUpdate({
+                ...form,
+                sections: [...(form.sections || []), newSection],
+              });
+            }
+          } catch {
+            fetchForm();
+          }
+          return;
+        } else {
+          return;
+        }
       } else {
         return;
       }
 
-      if (!sectionId && !subformId) return;
+      if (!sectionId && !subformId) {
+        // Allow subform creation at top level (canvas drop)
+        if (fieldType === "subform") {
+          await createSubform(undefined, undefined);
+          return;
+        }
+        return;
+      }
 
       if (fieldType === "subform") {
         await createSubform(sectionId, subformId);
@@ -425,6 +528,9 @@ export default function FormBuilderPage() {
         setPendingLookupSectionId(sectionId);
         setPendingLookupSubformId(subformId);
         setIsLookupDialogOpen(true);
+      } else if (fieldType === "new-section") {
+        // new-section dropped on an existing target, ignore
+        return;
       } else {
         await createSingleField(fieldType, sectionId, subformId, insertIndex);
       }
@@ -476,11 +582,11 @@ export default function FormBuilderPage() {
             for (const sf of subforms) {
               if (sf.id === targetSubformId) {
                 const allItems = [
-                  ...(sf.fields || []).sort(
+                  ...[...(sf.fields || [])].sort(
                     (a: { order: number }, b: { order: number }) =>
                       a.order - b.order,
                   ),
-                  ...(sf.childSubforms || []).sort(
+                  ...[...(sf.childSubforms || [])].sort(
                     (a: { order: number }, b: { order: number }) =>
                       a.order - b.order,
                   ),
@@ -570,10 +676,8 @@ export default function FormBuilderPage() {
           targetIndex,
         );
       }
-    } else if (active.data.current?.type === "Subform") {
-      handleReorderItem(event);
-    } else if (active.data.current?.type === "Section") {
-      handleReorderSection(event);
+    } else if (active.data.current?.type === "Subform" || active.data.current?.type === "Section") {
+      handleReorderUnified(event);
     }
   };
 
@@ -927,6 +1031,8 @@ export default function FormBuilderPage() {
         id: _tempId,
         createdAt: _ca,
         updatedAt: _ua,
+        fields: _fields,
+        childSubforms: _children,
         ...subformData
       } = newSubform;
       const result = await createSubformMutation(subformData as any).unwrap();
@@ -1009,60 +1115,159 @@ export default function FormBuilderPage() {
 
     if (activeContainer !== overContainer) return;
 
-    const sectionId = activeContainer;
-    const section = form.sections.find((s: { id: any }) => s.id === sectionId);
-    if (!section) return;
+    const containerId = activeContainer;
 
-    // Only reordering fields (no subforms inside section)
-    const sortedFields = [...(section.fields || [])].sort(
-      (a, b) => a.order - b.order,
-    );
-    const oldIndex = sortedFields.findIndex((i) => i.id === active.id);
-    let newIndex = sortedFields.findIndex((i) => i.id === over.id);
+    // Check if it's a section
+    const section = form.sections.find((s: { id: any }) => s.id === containerId);
+    if (section) {
+      const sortedFields = [...(section.fields || [])].sort(
+        (a, b) => a.order - b.order,
+      );
+      const oldIndex = sortedFields.findIndex((i) => i.id === active.id);
+      let newIndex = sortedFields.findIndex((i) => i.id === over.id);
 
-    const activeCenter = active.rect.current.translated
-      ? active.rect.current.translated.top +
-        active.rect.current.translated.height / 2
-      : 0;
-    const overCenter = over.rect.top + over.rect.height / 2;
-    const isAfter = activeCenter > overCenter;
-    newIndex += isAfter ? 1 : 0;
+      const activeCenter = active.rect.current.translated
+        ? active.rect.current.translated.top +
+          active.rect.current.translated.height / 2
+        : 0;
+      const overCenter = over.rect.top + over.rect.height / 2;
+      const isAfter = activeCenter > overCenter;
+      newIndex += isAfter ? 1 : 0;
 
-    const newFields = arrayMove(sortedFields, oldIndex, newIndex);
-    newFields.forEach((f, idx) => (f.order = idx));
+      const newFields = arrayMove(sortedFields, oldIndex, newIndex);
+      newFields.forEach((f, idx) => (f.order = idx));
 
-    const updatedSections = form.sections.map((s: { id: any }) =>
-      s.id === sectionId ? { ...s, fields: newFields } : s,
-    );
+      const updatedSections = form.sections.map((s: { id: any }) =>
+        s.id === containerId ? { ...s, fields: newFields } : s,
+      );
 
-    optimisticFormUpdate({ ...form, sections: updatedSections });
+      optimisticFormUpdate({ ...form, sections: updatedSections });
 
-    newFields.forEach((f) =>
-      updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
-    );
+      newFields.forEach((f) =>
+        updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
+      );
+      return;
+    }
+
+    // Check if it's a subform
+    const findAndReorderSubform = (subforms: Subform[]): Subform[] | null => {
+      for (let i = 0; i < subforms.length; i++) {
+        if (subforms[i].id === containerId) {
+          const sf = subforms[i];
+          const sortedFields = [...(sf.fields || [])].sort(
+            (a: { order: number }, b: { order: number }) => a.order - b.order,
+          );
+          const oldIndex = sortedFields.findIndex((f) => f.id === active.id);
+          let newIndex = sortedFields.findIndex((f) => f.id === over!.id);
+
+          if (oldIndex === -1 || newIndex === -1) return null;
+
+          const activeCenter = active.rect.current.translated
+            ? active.rect.current.translated.left +
+              active.rect.current.translated.width / 2
+            : 0;
+          const overCenter = over!.rect.left + over!.rect.width / 2;
+          const isAfter = activeCenter > overCenter;
+          newIndex += isAfter ? 1 : 0;
+
+          const newFields = arrayMove(sortedFields, oldIndex, newIndex);
+          newFields.forEach((f: any, idx: number) => (f.order = idx));
+
+          const updatedSubforms = [...subforms];
+          updatedSubforms[i] = { ...sf, fields: newFields };
+
+          // Persist order
+          newFields.forEach((f: any) =>
+            updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
+          );
+
+          return updatedSubforms;
+        }
+        if (subforms[i].childSubforms) {
+          const result = findAndReorderSubform(subforms[i].childSubforms);
+          if (result) {
+            const updatedSubforms = [...subforms];
+            updatedSubforms[i] = { ...subforms[i], childSubforms: result };
+            return updatedSubforms;
+          }
+        }
+      }
+      return null;
+    };
+
+    // Search in top-level subforms
+    const updatedSubforms = findAndReorderSubform(form.subforms || []);
+    if (updatedSubforms) {
+      optimisticFormUpdate({ ...form, subforms: updatedSubforms });
+      return;
+    }
+
+    // Search in section subforms
+    for (const sec of form.sections) {
+      if (sec.subforms) {
+        const result = findAndReorderSubform(sec.subforms);
+        if (result) {
+          const updatedSections = form.sections.map((s: any) =>
+            s.id === sec.id ? { ...s, subforms: result } : s,
+          );
+          optimisticFormUpdate({ ...form, sections: updatedSections });
+          return;
+        }
+      }
+    }
   };
 
-  const handleReorderSection = (event: DragEndEvent) => {
+  const handleReorderUnified = (event: DragEndEvent) => {
     if (!form) return;
 
     const { active, over } = event;
-    if (!over) return;
+    if (!over || active.id === over.id) return;
 
-    const oldIndex = form.sections.findIndex(
-      (s: { id: UniqueIdentifier }) => s.id === active.id,
+    // Build a unified list of sections + top-level subforms sorted by order
+    const topSubforms = (form.subforms || []).filter(
+      (s: any) => !s.parentSectionId && !s.parentSubformId,
     );
-    const newIndex = form.sections.findIndex(
-      (s: { id: UniqueIdentifier }) => s.id === over.id,
-    );
+    type UnifiedItem = { id: string; order: number; _type: "section" | "subform" };
+    const unified: UnifiedItem[] = [
+      ...(form.sections || []).map((s: any) => ({ id: s.id, order: s.order ?? 0, _type: "section" as const })),
+      ...topSubforms.map((s: any) => ({ id: s.id, order: s.order ?? 0, _type: "subform" as const })),
+    ].sort((a, b) => a.order - b.order);
 
-    const newSections = arrayMove(form.sections, oldIndex, newIndex);
-    newSections.forEach((s, index) => (s.order = index));
+    const oldIndex = unified.findIndex((u) => u.id === active.id);
+    const newIndex = unified.findIndex((u) => u.id === over.id);
 
-    optimisticFormUpdate({ ...form, sections: newSections });
+    if (oldIndex === -1 || newIndex === -1) return;
 
-    newSections.forEach((s) =>
-      updateSectionMutation({ sectionId: s.id, body: { order: s.order } }),
-    );
+    const reordered = arrayMove(unified, oldIndex, newIndex);
+    reordered.forEach((u, idx) => (u.order = idx));
+
+    // Apply new orders to sections
+    const newSections = form.sections.map((s: any) => {
+      const match = reordered.find((u) => u.id === s.id);
+      return match ? { ...s, order: match.order } : s;
+    });
+
+    // Apply new orders to top-level subforms
+    const newSubforms = (form.subforms || []).map((s: any) => {
+      const match = reordered.find((u) => u.id === s.id);
+      return match ? { ...s, order: match.order } : s;
+    });
+
+    optimisticFormUpdate({ ...form, sections: newSections, subforms: newSubforms });
+
+    // Persist section orders
+    reordered
+      .filter((u) => u._type === "section")
+      .forEach((u) =>
+        updateSectionMutation({ sectionId: u.id, body: { order: u.order } }),
+      );
+
+    // Persist subform orders
+    reordered
+      .filter((u) => u._type === "subform")
+      .forEach((u) =>
+        updateSubformMutation({ subformId: u.id, body: { order: u.order } }),
+      );
   };
 
   const handleLookupFieldsConfirm = async (
@@ -1453,8 +1658,9 @@ export default function FormBuilderPage() {
     <FormBuilderContext.Provider value={{ openPermissionDialog }}>
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={formBuilderCollision}
         onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
         <div className="flex h-screen bg-gray-50 font-sans">
@@ -1536,22 +1742,43 @@ export default function FormBuilderPage() {
             <main className="flex-1 overflow-y-auto">
               <FormCanvas
                 form={form}
-                onFormUpdate={handleFormUpdate}
-                hasOtherEmployeeForm={form?.isEmployeeForm === false}
-                subformHierarchyMap={subformHierarchyMap}
-                getSubformPath={getSubformPath}
-                getFullSubformPath={getFullSubformPath}
-                getParentChildDisplay={getParentChildDisplay}
-                getAncestorPaths={getAncestorPaths}
+  onFormUpdate={handleFormUpdate}
+  hasOtherEmployeeForm={false}
+                activeOverId={activeOverId}
+                isDragging={!!(activePaletteItem || activeDragItem)}
               />
             </main>
           </div>
         </div>
         {typeof window !== "undefined" &&
           createPortal(
-            <DragOverlay style={{ zIndex: 10000 }}>
+            <DragOverlay
+              dropAnimation={{
+                duration: 200,
+                easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)",
+              }}
+              style={{ zIndex: 10000 }}
+            >
               {activePaletteItem && (
                 <PaletteItemDragOverlay fieldType={activePaletteItem} />
+              )}
+              {activeDragItem?.type === "Field" && (
+                <div className="bg-white border-2 border-blue-400 rounded-lg shadow-2xl px-4 py-3 min-w-[200px] opacity-90">
+                  <p className="text-sm font-semibold text-blue-900">{activeDragItem.data?.label || "Field"}</p>
+                  <p className="text-xs text-blue-600">{activeDragItem.data?.type}</p>
+                </div>
+              )}
+              {activeDragItem?.type === "Section" && (
+                <div className="bg-white border-2 border-indigo-400 rounded-lg shadow-2xl px-5 py-4 min-w-[280px] opacity-90">
+                  <p className="text-sm font-bold text-indigo-900">{activeDragItem.data?.title || "Section"}</p>
+                  <p className="text-xs text-indigo-500 mt-0.5">{activeDragItem.data?.fields?.length || 0} fields</p>
+                </div>
+              )}
+              {activeDragItem?.type === "Subform" && (
+                <div className="bg-white border-2 border-violet-400 rounded-lg shadow-2xl px-5 py-4 min-w-[280px] opacity-90">
+                  <p className="text-sm font-bold text-violet-900">{activeDragItem.data?.name || "Subform"}</p>
+                  <p className="text-xs text-violet-500 mt-0.5">{activeDragItem.data?.fields?.length || 0} fields</p>
+                </div>
               )}
             </DragOverlay>,
             document.body,

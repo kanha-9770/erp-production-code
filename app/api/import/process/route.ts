@@ -7,33 +7,111 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { v4 as uuidv4 } from "uuid";
 import { transformToStructuredData } from "@/lib/utils/form-utils";
 
+// ── Increase body-size limit for this route (Next.js 14+) ──
+export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes max for large imports
+
 const normalizeKey = (str: string): string => {
   return String(str)
     .replace(/[\u2018\u2019]/g, "'")
     .trim();
 };
 
-// Direct insert into the correct sharded table (avoids per-row getFormRecordTable lookups)
-async function insertRecord(tableName: string, data: Record<string, any>): Promise<any> {
-  switch (tableName) {
-    case "form_records_1":  return prisma.formRecord1.create({ data });
-    case "form_records_2":  return prisma.formRecord2.create({ data });
-    case "form_records_3":  return prisma.formRecord3.create({ data });
-    case "form_records_4":  return prisma.formRecord4.create({ data });
-    case "form_records_5":  return prisma.formRecord5.create({ data });
-    case "form_records_6":  return prisma.formRecord6.create({ data });
-    case "form_records_7":  return prisma.formRecord7.create({ data });
-    case "form_records_8":  return prisma.formRecord8.create({ data });
-    case "form_records_9":  return prisma.formRecord9.create({ data });
-    case "form_records_10": return prisma.formRecord10.create({ data });
-    case "form_records_11": return prisma.formRecord11.create({ data });
-    case "form_records_12": return prisma.formRecord12.create({ data });
-    case "form_records_13": return prisma.formRecord13.create({ data });
-    case "form_records_14": return prisma.formRecord14.create({ data: data as any });
-    case "form_records_15": return prisma.formRecord15.create({ data: data as any });
-    default: throw new Error(`Invalid table name: ${tableName}`);
+// ── Batch insert helper ─────────────────────────────────────
+// Uses createMany where possible (single SQL), falls back to
+// individual creates only for tables that need special handling.
+async function batchInsertRecords(
+  tableName: string,
+  records: Record<string, any>[]
+): Promise<{ success: number; failed: number }> {
+  if (records.length === 0) return { success: 0, failed: 0 };
+
+  try {
+    switch (tableName) {
+      case "form_records_1":
+        await prisma.formRecord1.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_2":
+        await prisma.formRecord2.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_3":
+        await prisma.formRecord3.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_4":
+        await prisma.formRecord4.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_5":
+        await prisma.formRecord5.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_6":
+        await prisma.formRecord6.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_7":
+        await prisma.formRecord7.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_8":
+        await prisma.formRecord8.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_9":
+        await prisma.formRecord9.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_10":
+        await prisma.formRecord10.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_11":
+        await prisma.formRecord11.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_12":
+        await prisma.formRecord12.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_13":
+        await prisma.formRecord13.createMany({ data: records, skipDuplicates: true });
+        break;
+      case "form_records_14":
+        await prisma.formRecord14.createMany({ data: records as any, skipDuplicates: true });
+        break;
+      case "form_records_15":
+        await prisma.formRecord15.createMany({ data: records as any, skipDuplicates: true });
+        break;
+      default:
+        throw new Error(`Invalid table name: ${tableName}`);
+    }
+    return { success: records.length, failed: 0 };
+  } catch (err: any) {
+    // If createMany fails (e.g. constraint violation on one row),
+    // fall back to individual inserts so we don't lose the whole batch
+    console.warn(`[PROCESS] Batch insert failed for ${tableName}, falling back to individual inserts:`, err.message);
+    let success = 0, failed = 0;
+    for (const record of records) {
+      try {
+        switch (tableName) {
+          case "form_records_1":  await prisma.formRecord1.create({ data: record }); break;
+          case "form_records_2":  await prisma.formRecord2.create({ data: record }); break;
+          case "form_records_3":  await prisma.formRecord3.create({ data: record }); break;
+          case "form_records_4":  await prisma.formRecord4.create({ data: record }); break;
+          case "form_records_5":  await prisma.formRecord5.create({ data: record }); break;
+          case "form_records_6":  await prisma.formRecord6.create({ data: record }); break;
+          case "form_records_7":  await prisma.formRecord7.create({ data: record }); break;
+          case "form_records_8":  await prisma.formRecord8.create({ data: record }); break;
+          case "form_records_9":  await prisma.formRecord9.create({ data: record }); break;
+          case "form_records_10": await prisma.formRecord10.create({ data: record }); break;
+          case "form_records_11": await prisma.formRecord11.create({ data: record }); break;
+          case "form_records_12": await prisma.formRecord12.create({ data: record }); break;
+          case "form_records_13": await prisma.formRecord13.create({ data: record }); break;
+          case "form_records_14": await prisma.formRecord14.create({ data: record as any }); break;
+          case "form_records_15": await prisma.formRecord15.create({ data: record as any }); break;
+        }
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    return { success, failed };
   }
 }
+
+// ── Batch size for DB inserts ───────────────────────────────
+const DB_BATCH_SIZE = 50;
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,12 +128,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payload = JSON.parse(bodyText);
-    const { importJobId, rows } = payload;
+    let payload: any;
+    try {
+      payload = JSON.parse(bodyText);
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
+
+    const { importJobId, rows, chunkIndex, totalChunks } = payload;
 
     if (!importJobId || !Array.isArray(rows)) {
       return NextResponse.json(
-        { success: false, error: "Invalid payload" },
+        { success: false, error: "Invalid payload: importJobId and rows[] required" },
         { status: 400 }
       );
     }
@@ -175,23 +262,28 @@ export async function POST(request: NextRequest) {
       field: fieldIdMap.get(m.targetFieldId),
     }));
 
-    // === 9. Mark job as processing ===
-    await prisma.importJob.update({
-      where: { id: importJobId },
-      data: { status: "PROCESSING", totalRows: rows.length, startedAt: new Date() },
-    });
+    // === 9. Mark job as processing (only on first chunk or non-chunked) ===
+    const isFirstChunk = !chunkIndex || chunkIndex === 0;
+    if (isFirstChunk) {
+      await prisma.importJob.update({
+        where: { id: importJobId },
+        data: { status: "PROCESSING", startedAt: new Date() },
+      });
+    }
 
-    // === 10. Process rows ===
-    let successCount = 0,
-      failedCount = 0,
-      skippedCount = 0;
-
-    const userAgent =
-      request.headers.get("user-agent") || "Unknown";
+    // === 10. Transform all rows into insert-ready records ===
+    const userAgent = request.headers.get("user-agent") || "Unknown";
     const ipAddress =
       request.headers.get("x-forwarded-for") ||
       request.headers.get("x-real-ip") ||
       "Unknown";
+
+    let successCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+
+    // Prepare all valid records first (fast in-memory transform)
+    const insertBatch: Record<string, any>[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -229,7 +321,6 @@ export async function POST(request: NextRequest) {
         // Transform to structured data matching manual submission format
         const structuredRecordData = transformToStructuredData(form, recordData, "system");
 
-        // Build insert params
         const recordId = uuidv4();
         const now = new Date();
         const insertData: Record<string, any> = {
@@ -244,49 +335,66 @@ export async function POST(request: NextRequest) {
           updatedAt: now,
         };
 
-        // Add organizationId only for form_records_14
         if (targetTable === "form_records_14" && organizationId) {
           insertData.organizationId = organizationId;
         }
 
-        // Insert directly into the target table (no redundant table lookup per row)
-        await insertRecord(targetTable, insertData);
-
-        // Track event (non-blocking — don't let tracking failure break the import)
-        DatabaseService.trackFormEvent(
-          job.formId,
-          "submit",
-          {
-            recordId,
-            userId: importingUserId,
-            fieldsCount: Object.keys(structuredRecordData).length,
-            submissionSource: "import",
-            hasEmployeeId: false,
-            hasAmount: false,
-            hasDate: false,
-          },
-          undefined,
-          userAgent,
-          ipAddress
-        ).catch(() => {});
-
-        successCount++;
+        insertBatch.push(insertData);
       } catch (err: any) {
         failedCount++;
-        console.error(`[PROCESS] Row ${i + 1} insert failed:`, err.message);
+        console.error(`[PROCESS] Row ${i + 1} transform failed:`, err.message);
       }
     }
 
-    // === 12. Finalize job ===
-    const finalStatus = successCount > 0 ? "COMPLETED" : "FAILED";
+    // === 11. Batch insert in chunks of DB_BATCH_SIZE ===
+    for (let offset = 0; offset < insertBatch.length; offset += DB_BATCH_SIZE) {
+      const batch = insertBatch.slice(offset, offset + DB_BATCH_SIZE);
+      const result = await batchInsertRecords(targetTable, batch);
+      successCount += result.success;
+      failedCount += result.failed;
+    }
+
+    // === 12. Track events (non-blocking) ===
+    DatabaseService.trackFormEvent(
+      job.formId,
+      "submit",
+      {
+        userId: importingUserId,
+        fieldsCount: mappings.length,
+        submissionSource: "import",
+        rowsProcessed: successCount,
+        rowsFailed: failedCount,
+        rowsSkipped: skippedCount,
+        chunkIndex: chunkIndex ?? 0,
+      },
+      undefined,
+      userAgent,
+      ipAddress
+    ).catch(() => {});
+
+    // === 13. Update job progress ===
+    const isLastChunk = !totalChunks || (chunkIndex !== undefined && chunkIndex >= totalChunks - 1);
+
+    if (isLastChunk) {
+      // Final chunk: mark job as completed
+      const finalStatus = successCount > 0 ? "COMPLETED" : "FAILED";
+      await prisma.importJob.update({
+        where: { id: importJobId },
+        data: {
+          status: finalStatus,
+          completedAt: new Date(),
+        },
+      });
+    }
+
+    // Always increment counters atomically
     await prisma.importJob.update({
       where: { id: importJobId },
       data: {
-        status: finalStatus,
-        processedRows: rows.length,
-        successRows: successCount,
-        failedRows: failedCount,
-        completedAt: new Date(),
+        processedRows: { increment: rows.length },
+        successRows: { increment: successCount },
+        failedRows: { increment: failedCount },
+        ...(isFirstChunk ? { totalRows: job.totalRows || rows.length } : {}),
       },
     });
 
@@ -295,8 +403,9 @@ export async function POST(request: NextRequest) {
       successCount,
       failedCount,
       skippedCount,
-      status: finalStatus,
-      message: `Imported ${successCount} records into "${targetTable}"`,
+      chunkIndex: chunkIndex ?? 0,
+      isLastChunk,
+      message: `Chunk processed: ${successCount} inserted, ${failedCount} failed, ${skippedCount} skipped`,
     });
   } catch (error: any) {
     console.error("[PROCESS] Unhandled error:", error);

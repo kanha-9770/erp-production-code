@@ -1031,6 +1031,13 @@ export const fieldTypes = [
     description: "Detect objects in images/videos",
   },
   {
+    id: "subform",
+    name: "Subform",
+    icon: Layers,
+    category: "Other",
+    description: "Drag to add a table-style subform",
+  },
+  {
     id: "new-section",
     name: "New Section",
     icon: Layers,
@@ -1068,26 +1075,17 @@ function PaletteItem({ fieldType }: PaletteItemProps) {
       },
     });
 
-  const style = {
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 9999 : 1,
-  };
-
   const IconComponent = fieldType.icon;
 
   return (
     <Card
       ref={setNodeRef}
-      style={style}
       {...listeners}
       {...attributes}
-      className={`cursor-grab hover:cursor-grabbing transition-all duration-200 hover:shadow-md hover:scale-105 border border-gray-100 ${
+      className={`cursor-grab hover:cursor-grabbing transition-all duration-150 border border-gray-100 ${
         isDragging
-          ? "shadow-2xl scale-110 rotate-3 border-blue-400 bg-blue-50"
-          : "hover:border-blue-300"
+          ? "opacity-30 border-dashed border-blue-300 bg-blue-50/30 shadow-none"
+          : "hover:shadow-md hover:border-blue-300 hover:scale-[1.02]"
       }`}
     >
       <CardContent className="px-2 py-1">
@@ -1116,19 +1114,17 @@ export function PaletteItemDragOverlay({
 }) {
   const IconComponent = fieldType.icon;
   return (
-    <Card className="palette-item-drag-overlay border-2 border-blue-500 shadow-2xl bg-blue-50 rotate-6 scale-110">
-      <CardContent className="p-4">
-        <div className="flex items-center space-x-3">
-          <div className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
-            <IconComponent className="w-5 h-5 text-blue-600" />
-          </div>
-          <div className="flex-1">
-            <p className="font-semibold text-blue-900">{fieldType.name}</p>
-            <p className="text-sm text-blue-700">{fieldType.description}</p>
-          </div>
+    <div className="bg-white border-2 border-blue-500 shadow-2xl rounded-lg px-4 py-3 min-w-[180px] max-w-[240px] rotate-2 pointer-events-none">
+      <div className="flex items-center space-x-3">
+        <div className="flex-shrink-0 p-1.5 bg-blue-100 rounded-md">
+          <IconComponent className="w-4 h-4 text-blue-600" />
         </div>
-      </CardContent>
-    </Card>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-blue-900 truncate">{fieldType.name}</p>
+          <p className="text-xs text-blue-500 truncate">{fieldType.description}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 

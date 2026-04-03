@@ -177,7 +177,7 @@ export const formsApi = baseApi.injectEndpoints({
       }),
     }),
 
-    processImport: builder.mutation<ApiResponse, { importJobId: string; rows: Record<string, any>[] }>({
+    processImport: builder.mutation<ApiResponse, { importJobId: string; rows: Record<string, any>[]; chunkIndex?: number; totalChunks?: number }>({
       query: (body) => ({
         url: "/import/process",
         method: "POST",

@@ -40,6 +40,7 @@ export default function ImportPage() {
   const [mappings, setMappings] = useState<{ sourceColumn: string; targetFieldId: string }[]>([])
   const [importResult, setImportResult] = useState<{ success: number; failed: number; skipped: number } | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; percent: number } | null>(null)
 
   // RTK Query
   const { data: modulesData, isLoading: loadingModules } = useGetPermittedModulesQuery()
@@ -93,9 +94,12 @@ export default function ImportPage() {
     setStep("map")
   }
 
+  const CHUNK_SIZE = 200 // Rows per chunk — balances payload size vs HTTP overhead
+
   const handleImport = async () => {
     if (!uploadedFile || mappings.length === 0 || !selectedFormId) return
     setIsProcessing(true)
+    setImportProgress(null)
 
     try {
       // Step 1: Create import job
@@ -118,31 +122,60 @@ export default function ImportPage() {
         mappings: mappings.map((m) => ({ sourceColumn: m.sourceColumn, targetFieldId: m.targetFieldId })),
       }).unwrap()
 
-      // Step 3: Convert ALL rows to objects and process
+      // Step 3: Convert all rows to objects
       const { headers, allRows } = uploadedFile.preview
-      const rowObjects = (allRows || uploadedFile.preview.rows).map((row) => {
+      const allDataRows = allRows || uploadedFile.preview.rows
+      const rowObjects = allDataRows.map((row) => {
         const obj: Record<string, string> = {}
         headers.forEach((h, i) => { obj[h] = row[i] || "" })
         return obj
       })
 
-      const processResult = await processImport({
-        importJobId,
-        rows: rowObjects,
-      }).unwrap()
+      // Step 4: Send rows in chunks
+      const totalRows = rowObjects.length
+      const totalChunks = Math.ceil(totalRows / CHUNK_SIZE)
+      let totalSuccess = 0
+      let totalFailed = 0
+      let totalSkipped = 0
+
+      setImportProgress({ current: 0, total: totalRows, percent: 0 })
+
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        const start = chunkIdx * CHUNK_SIZE
+        const end = Math.min(start + CHUNK_SIZE, totalRows)
+        const chunkRows = rowObjects.slice(start, end)
+
+        const chunkResult = await processImport({
+          importJobId,
+          rows: chunkRows,
+          chunkIndex: chunkIdx,
+          totalChunks,
+        }).unwrap()
+
+        totalSuccess += chunkResult.successCount || 0
+        totalFailed += chunkResult.failedCount || 0
+        totalSkipped += chunkResult.skippedCount || 0
+
+        setImportProgress({
+          current: end,
+          total: totalRows,
+          percent: Math.round((end / totalRows) * 100),
+        })
+      }
 
       setImportResult({
-        success: processResult.successCount || 0,
-        failed: processResult.failedCount || 0,
-        skipped: processResult.skippedCount || 0,
+        success: totalSuccess,
+        failed: totalFailed,
+        skipped: totalSkipped,
       })
       setStep("result")
-      toast({ title: "Import Complete", description: `${processResult.successCount} records imported successfully` })
+      toast({ title: "Import Complete", description: `${totalSuccess} records imported successfully` })
     } catch (error: any) {
       const errorMsg = error?.data?.error || error?.data?.details || error?.message || "Something went wrong"
       toast({ title: "Import Failed", description: errorMsg, variant: "destructive" })
     } finally {
       setIsProcessing(false)
+      setImportProgress(null)
     }
   }
 
@@ -153,6 +186,7 @@ export default function ImportPage() {
     setUploadedFile(null)
     setMappings([])
     setImportResult(null)
+    setImportProgress(null)
   }
 
   const getMappingForColumn = (col: string) => mappings.find((m) => m.sourceColumn === col)?.targetFieldId || ""
@@ -422,8 +456,24 @@ export default function ImportPage() {
                 })}
               </div>
 
+              {/* Progress bar for chunked import */}
+              {isProcessing && importProgress && (
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Importing {importProgress.current} of {importProgress.total} rows...</span>
+                    <span className="font-medium">{importProgress.percent}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                      style={{ width: `${importProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-                <Button variant="outline" size="sm" onClick={() => setStep("upload")}>
+                <Button variant="outline" size="sm" onClick={() => setStep("upload")} disabled={isProcessing}>
                   <ArrowLeft className="h-4 w-4 mr-1" /> Back
                 </Button>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">

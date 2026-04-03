@@ -102,10 +102,10 @@ interface SectionComponentProps {
     updates: Partial<FormField>,
   ) => Promise<void>;
   onDeleteField: (fieldId: string) => void;
-  onAddSubform?: (sectionId: string) => void; // ← NEW PROP
   isOverlay?: boolean;
   isDeleting?: boolean;
   formId: string;
+  isExternalDragging?: boolean;
 }
 
 export default function SectionComponent({
@@ -114,10 +114,10 @@ export default function SectionComponent({
   onDeleteSection,
   onUpdateField,
   onDeleteField,
-  onAddSubform,
   isOverlay = false,
   isDeleting = false,
   formId,
+  isExternalDragging = false,
 }: SectionComponentProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -148,7 +148,7 @@ export default function SectionComponent({
   } = useSortable({
     id: section.id,
     data: { type: "Section", section },
-    disabled: isOverlay || isEditingTitle || isDeleting,
+    disabled: isOverlay || isEditingTitle || isDeleting || showDeleteDialog || showSettings || showPermissionsDialog,
   });
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -548,9 +548,6 @@ export default function SectionComponent({
                   >
                     {section.collapsible ? "Disable" : "Enable"} collapsible
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onAddSubform?.(section.id)}>
-                    <Layers className="mr-2 h-4 w-4" /> Add Subform here
-                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => createField("text")}>
                     <Type className="mr-2 h-4 w-4" /> Text field
@@ -587,10 +584,12 @@ export default function SectionComponent({
           <CardContent className="pt-1 pb-6">
             <div
               ref={setDroppableRef}
-              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all ${
+              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all duration-200 ${
                 isOver
-                  ? "border-primary bg-primary/5"
-                  : "border-muted-foreground/30"
+                  ? "border-blue-500 bg-blue-50/60 shadow-inner ring-2 ring-blue-200/50"
+                  : isExternalDragging
+                    ? "border-blue-300/60 bg-blue-50/20"
+                    : "border-muted-foreground/30"
               }`}
             >
               {section.fields.length > 0 ? (
@@ -612,25 +611,20 @@ export default function SectionComponent({
                   </div>
                 </SortableContext>
               ) : (
-                <div className="flex flex-col items-center justify-center min-h-[180px] text-muted-foreground">
-                  <Plus className="h-10 w-10 mb-3 opacity-50" />
-                  <p className="text-sm font-medium">Empty section</p>
-                  <p className="text-xs mt-1">Drag & drop fields here</p>
+                <div className={`flex flex-col items-center justify-center min-h-[140px] transition-all duration-200 ${
+                  isOver
+                    ? "text-blue-600"
+                    : isExternalDragging
+                      ? "text-blue-400"
+                      : "text-muted-foreground"
+                }`}>
+                  <Plus className={`h-8 w-8 mb-2 transition-transform duration-200 ${isOver ? "scale-125" : ""}`} />
+                  <p className="text-sm font-medium">{isOver ? "Drop here" : "Empty section"}</p>
+                  <p className="text-xs mt-1">{isOver ? "Release to add field" : "Drag & drop fields here"}</p>
                 </div>
               )}
             </div>
 
-            <div className="mt-6 flex justify-center">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => onAddSubform?.(section.id)}
-              >
-                <Layers className="h-4 w-4" />
-                Add Subform under this section
-              </Button>
-            </div>
           </CardContent>
         )}
       </Card>

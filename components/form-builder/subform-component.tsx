@@ -7,8 +7,6 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { DndContext, closestCenter } from "@dnd-kit/core";   // ← added DndContext & closestCenter
-import { arrayMove } from "@dnd-kit/sortable";               // ← added arrayMove
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -46,6 +44,7 @@ import {
   ShieldCheck,
   Loader2,
   AlertCircle,
+  GripVertical,
 } from "lucide-react";
 import FieldSettings from "@/components/form-builder/field-settings";
 import type { FormField, Subform } from "@/types/form-builder";
@@ -198,6 +197,25 @@ export default function SubformComponent({
   const [updateSubform] = useUpdateSubformMutation();
   const [triggerGetFormFields] = useLazyGetFormFieldsQuery();
 
+  // ── Sortable for reordering subforms alongside sections ──────────────
+  const {
+    attributes: sortableAttributes,
+    listeners: sortableListeners,
+    setNodeRef: setSortableRef,
+    transform: sortableTransform,
+    transition: sortableTransition,
+    isDragging: isSortableDragging,
+  } = useSortable({
+    id: subform.id,
+    data: { type: "Subform", subform },
+  });
+
+  const sortableStyle = {
+    transform: CSS.Transform.toString(sortableTransform),
+    transition: sortableTransition,
+    opacity: isSortableDragging ? 0.4 : 1,
+  };
+
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: `subform-dropzone-${subform.id}`,
     data: {
@@ -332,125 +350,129 @@ export default function SubformComponent({
 
   const sortableIds = subform.fields.map((f) => f.id);
 
-  // ── Handle drag end → reorder fields and update parent ──────────────────────
-  const handleDragEnd = (event) => {
-    const { active, over } = event;
-
-    if (active.id !== over?.id) {
-      const oldIndex = subform.fields.findIndex((f) => f.id === active.id);
-      const newIndex = subform.fields.findIndex((f) => f.id === over.id);
-
-      if (oldIndex !== -1 && newIndex !== -1) {
-        const newFields = arrayMove(subform.fields, oldIndex, newIndex);
-
-        // Update parent component with new order
-        onUpdateSubform({ fields: newFields });
-
-        // Optional: you can also persist the order to backend here
-        // e.g. send PATCH request with new order indices
-      }
-    }
-  };
-
   return (
-    <div className="mb-8">
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2">
+    <div
+      ref={setSortableRef}
+      style={sortableStyle}
+      className="mb-4"
+    >
+      {/* ── Subform Card ── */}
+      <div className={`rounded-lg border bg-white shadow-sm transition-all duration-200 ${
+        isSortableDragging ? "shadow-xl ring-2 ring-blue-300" : "hover:shadow-md"
+      }`}>
+        {/* ── Header ── */}
+        <div className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 rounded-t-lg">
+          {/* Drag handle */}
+          <button
+            {...sortableAttributes}
+            {...sortableListeners}
+            className="flex-shrink-0 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-slate-200/60 text-slate-400 hover:text-slate-600 transition-colors"
+            tabIndex={-1}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6"
+            className="h-6 w-6 flex-shrink-0"
             onClick={() => setIsExpanded(!isExpanded)}
           >
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
-          {/* ── Inline-editable subform name ── */}
-          <InlineEdit
-            value={subform.name}
-            onSave={handleSaveSubformName}
-            className="text-base font-semibold text-[#374151]"
-            inputClassName="text-base font-semibold"
-            placeholder="Subform name"
-          />
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setShowSubformSettings(true)}>
-              <Settings className="mr-2 h-4 w-4" /> Visibility Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled>
-              <Copy className="mr-2 h-4 w-4" /> Duplicate
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => setShowDeleteDialog(true)}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete subform
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
 
-      {isExpanded && (
-        <div
-          className={`border rounded-[4px] overflow-hidden shadow-sm transition-all duration-200 ${isOver ? "border-blue-400 bg-blue-50/50 ring-2 ring-blue-200" : "border-slate-300 bg-white"
+          <div className="flex-1 min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+            <InlineEdit
+              value={subform.name}
+              onSave={handleSaveSubformName}
+              className="text-sm font-semibold text-slate-700"
+              inputClassName="text-sm font-semibold"
+              placeholder="Subform name"
+            />
+          </div>
+
+          <span className="text-[11px] text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full flex-shrink-0">
+            {subform.fields?.length || 0} fields
+          </span>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowSubformSettings(true)}>
+                <Settings className="mr-2 h-4 w-4" /> Visibility Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled>
+                <Copy className="mr-2 h-4 w-4" /> Duplicate
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete subform
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* ── Body ── */}
+        {isExpanded && (
+          <div
+            className={`overflow-hidden transition-all duration-200 ${
+              isOver ? "bg-blue-50/40 ring-2 ring-inset ring-blue-200" : ""
             }`}
-        >
-          <DndContext
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
           >
-            <div
-              ref={setDroppableRef}
-              className="overflow-x-auto overflow-y-hidden"
-              style={{ scrollbarWidth: "thin" }}
-            >
-              <div className="inline-flex w-[20rem]">
-                <div className="flex border-b border-slate-200">
-                  <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
-                    {subform.fields.map((field) => (
-                      <TabularFieldHeader
-                        key={field.id}
-                        field={field}
-                        onUpdate={onUpdateField}
-                        onDelete={() => onDeleteField(field.id)}
-                        onCopy={() => onCopyField?.(field)}
-                      />
-                    ))}
-                  </SortableContext>
-                  <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">
-                          Add Field
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent>
-                        <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-                <div className="flex min-w-full h-12 bg-white">
-                  {subform.fields.map((f) => (
-                    <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
+          <div
+            ref={setDroppableRef}
+            className="overflow-x-auto overflow-y-hidden"
+            style={{ scrollbarWidth: "thin" }}
+          >
+            <div className="inline-flex w-[20rem]">
+              <div className="flex border-b border-slate-200">
+                <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
+                  {subform.fields.map((field) => (
+                    <TabularFieldHeader
+                      key={field.id}
+                      field={field}
+                      subformId={subform.id}
+                      formId={formId}
+                      onUpdate={onUpdateField}
+                      onDelete={() => onDeleteField(field.id)}
+                      onCopy={() => onCopyField?.(field)}
+                    />
                   ))}
-                  <div className="min-w-[140px]" />
+                </SortableContext>
+                <div className="flex items-center justify-center min-w-[140px] border-l border-slate-200 bg-white p-4 h-[90px]">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="link" className="text-[#515ada] font-normal hover:no-underline">
+                        Add Field
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem onClick={() => addField("text")}>Single Line</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => addField("textarea")}>Multi-Line</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => addField("number")}>Number</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
+              <div className="flex min-w-full h-12 bg-white">
+                {subform.fields.map((f) => (
+                  <div key={f.id} className="min-w-[280px] border-r border-slate-100" />
+                ))}
+                <div className="min-w-[140px]" />
+              </div>
             </div>
-          </DndContext>
+          </div>
         </div>
-      )}
+        )}
+      </div>
 
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
@@ -772,7 +794,7 @@ export default function SubformComponent({
   );
 }
 
-function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
+function TabularFieldHeader({ field, subformId, formId, onUpdate, onDelete, onCopy }: any) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
   const { toast } = useToast();
@@ -837,7 +859,10 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
     id: field.id,
     data: {
       type: "Field",
-      field: field,
+      field: { ...field, subformId },
+      sortable: {
+        containerId: subformId,
+      },
     },
   });
 
@@ -906,6 +931,7 @@ function TabularFieldHeader({ field, onUpdate, onDelete, onCopy }: any) {
           field={field}
           open={showSettings}
           onOpenChange={setShowSettings}
+          formId={formId}
           onUpdate={(updates) => onUpdate(field.id, updates)}
         />
       )}
