@@ -806,7 +806,7 @@ export class DatabaseRecords {
           // May not exist in unified table yet — ignore
         }
       } else {
-        await prisma.formRecord.delete({ where: { id: recordId } })
+        await prisma.formRecord.deleteMany({ where: { id: recordId } })
       }
     } catch (error: any) {
       console.error("Database error deleting form record:", error)
