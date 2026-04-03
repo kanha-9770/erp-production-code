@@ -1,5 +1,11 @@
 "use client";
-import { useEffect, useState, createContext, useContext, useCallback } from "react";
+import {
+  useEffect,
+  useState,
+  createContext,
+  useContext,
+  useCallback,
+} from "react";
 import { useParams } from "next/navigation";
 import {
   DndContext,
@@ -210,7 +216,9 @@ export default function FormBuilderPage() {
     const hierarchy = subformHierarchyMap.get(subformId);
     if (!hierarchy) return "";
 
-    const section = form.sections.find((s: { id: string; }) => s.id === hierarchy.sectionId);
+    const section = form.sections.find(
+      (s: { id: string }) => s.id === hierarchy.sectionId,
+    );
     const sectionName = section?.title || "Unknown Section";
 
     return `${sectionName} → ${hierarchy.path}`;
@@ -296,11 +304,16 @@ export default function FormBuilderPage() {
 
       if (over.data.current?.isSectionDropzone) {
         sectionId = over.data.current.sectionId;
-        const section = form?.sections.find((s: { id: string | undefined; }) => s.id === sectionId);
+        const section = form?.sections.find(
+          (s: { id: string | undefined }) => s.id === sectionId,
+        );
         if (section) {
           insertIndex = section.fields.length;
         }
-      } else if (over.data.current?.isSubformDropzone || over.data.current?.type === "SubformDropzone") {
+      } else if (
+        over.data.current?.isSubformDropzone ||
+        over.data.current?.type === "SubformDropzone"
+      ) {
         const targetSubform = over.data.current.subform;
         if (targetSubform) {
           subformId = targetSubform.id;
@@ -335,7 +348,8 @@ export default function FormBuilderPage() {
           }
           if (!targetSubform && form?.sections) {
             for (const section of form.sections) {
-              if (section.subforms) {  // Only check if subforms exist
+              if (section.subforms) {
+                // Only check if subforms exist
                 targetSubform = findSubform(section.subforms);
                 if (targetSubform) {
                   sectionId = section.id;
@@ -347,14 +361,21 @@ export default function FormBuilderPage() {
 
           if (targetSubform) {
             const allItems = [
-              ...(targetSubform.fields || []).sort((a: { order: number; }, b: { order: number; }) => a.order - b.order),
-              ...(targetSubform.childSubforms || []).sort((a: { order: number; }, b: { order: number; }) => a.order - b.order),
+              ...(targetSubform.fields || []).sort(
+                (a: { order: number }, b: { order: number }) =>
+                  a.order - b.order,
+              ),
+              ...(targetSubform.childSubforms || []).sort(
+                (a: { order: number }, b: { order: number }) =>
+                  a.order - b.order,
+              ),
             ];
             insertIndex = allItems.findIndex((i) => i.id === itemId);
             if (insertIndex === -1) insertIndex = allItems.length;
 
             const activeCenter = active.rect.current.translated
-              ? active.rect.current.translated.top + active.rect.current.translated.height / 2
+              ? active.rect.current.translated.top +
+                active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -362,14 +383,19 @@ export default function FormBuilderPage() {
           }
         } else if (sectionId) {
           // Field is in a section
-          const section = form?.sections.find((s: { id: string | undefined; }) => s.id === sectionId);
+          const section = form?.sections.find(
+            (s: { id: string | undefined }) => s.id === sectionId,
+          );
           if (section) {
-            const sortedFields = [...(section.fields || [])].sort((a, b) => a.order - b.order);
+            const sortedFields = [...(section.fields || [])].sort(
+              (a, b) => a.order - b.order,
+            );
             insertIndex = sortedFields.findIndex((f) => f.id === itemId);
             if (insertIndex === -1) insertIndex = sortedFields.length;
 
             const activeCenter = active.rect.current.translated
-              ? active.rect.current.translated.top + active.rect.current.translated.height / 2
+              ? active.rect.current.translated.top +
+                active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -411,11 +437,16 @@ export default function FormBuilderPage() {
 
       if (over.data.current?.isSectionDropzone) {
         targetSectionId = over.data.current.sectionId;
-        const targetSection = form?.sections.find((s: { id: string | undefined; }) => s.id === targetSectionId);
+        const targetSection = form?.sections.find(
+          (s: { id: string | undefined }) => s.id === targetSectionId,
+        );
         if (targetSection) {
           targetIndex = targetSection.fields.length;
         }
-      } else if (over.data.current?.isSubformDropzone || over.data.current?.type === "SubformDropzone") {
+      } else if (
+        over.data.current?.isSubformDropzone ||
+        over.data.current?.type === "SubformDropzone"
+      ) {
         const targetSubform = over.data.current.subform;
         if (targetSubform) {
           targetSectionId = targetSubform.sectionId;
@@ -439,15 +470,26 @@ export default function FormBuilderPage() {
           over.data.current?.field?.id || over.data.current?.subform?.id;
 
         if (targetSubformId) {
-          const findSubformAndIndex = (subforms: Subform[]): { subform: Subform; index: number } | null => {
+          const findSubformAndIndex = (
+            subforms: Subform[],
+          ): { subform: Subform; index: number } | null => {
             for (const sf of subforms) {
               if (sf.id === targetSubformId) {
                 const allItems = [
-                  ...(sf.fields || []).sort((a: { order: number; }, b: { order: number; }) => a.order - b.order),
-                  ...(sf.childSubforms || []).sort((a: { order: number; }, b: { order: number; }) => a.order - b.order),
+                  ...(sf.fields || []).sort(
+                    (a: { order: number }, b: { order: number }) =>
+                      a.order - b.order,
+                  ),
+                  ...(sf.childSubforms || []).sort(
+                    (a: { order: number }, b: { order: number }) =>
+                      a.order - b.order,
+                  ),
                 ];
                 const idx = allItems.findIndex((i) => i.id === itemId);
-                return { subform: sf, index: idx === -1 ? allItems.length : idx };
+                return {
+                  subform: sf,
+                  index: idx === -1 ? allItems.length : idx,
+                };
               }
               if (sf.childSubforms) {
                 const found = findSubformAndIndex(sf.childSubforms);
@@ -479,21 +521,27 @@ export default function FormBuilderPage() {
             targetIndex = targetData.index;
 
             const activeCenter = active.rect.current.translated
-              ? active.rect.current.translated.top + active.rect.current.translated.height / 2
+              ? active.rect.current.translated.top +
+                active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
             targetIndex += isAfter ? 1 : 0;
           }
         } else if (targetSectionId) {
-          const targetSection = form?.sections.find((s: { id: string | undefined; }) => s.id === targetSectionId);
+          const targetSection = form?.sections.find(
+            (s: { id: string | undefined }) => s.id === targetSectionId,
+          );
           if (targetSection) {
-            const sortedFields = [...(targetSection.fields || [])].sort((a, b) => a.order - b.order);
+            const sortedFields = [...(targetSection.fields || [])].sort(
+              (a, b) => a.order - b.order,
+            );
             targetIndex = sortedFields.findIndex((f) => f.id === itemId);
             if (targetIndex === -1) targetIndex = sortedFields.length;
 
             const activeCenter = active.rect.current.translated
-              ? active.rect.current.translated.top + active.rect.current.translated.height / 2
+              ? active.rect.current.translated.top +
+                active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -571,7 +619,9 @@ export default function FormBuilderPage() {
             if (subform.id === subformId) {
               subform.fields = subform.fields || [];
               subform.fields.splice(insertionIndex, 0, newField);
-              subform.fields.forEach((f: { order: any; }, idx: any) => (f.order = idx));
+              subform.fields.forEach(
+                (f: { order: any }, idx: any) => (f.order = idx),
+              );
               return true;
             }
             if (subform.childSubforms && addToSubform(subform.childSubforms)) {
@@ -584,7 +634,10 @@ export default function FormBuilderPage() {
         let added = false;
         if (sectionId) {
           for (const section of updatedForm.sections) {
-            if (section.id === sectionId && addToSubform(section.subforms || [])) {
+            if (
+              section.id === sectionId &&
+              addToSubform(section.subforms || [])
+            ) {
               added = true;
               break;
             }
@@ -595,7 +648,9 @@ export default function FormBuilderPage() {
         }
         if (!added) return;
       } else if (sectionId) {
-        const section = updatedForm.sections.find((s: any) => s.id === sectionId);
+        const section = updatedForm.sections.find(
+          (s: any) => s.id === sectionId,
+        );
         if (section) {
           section.fields = section.fields || [];
           section.fields.splice(insertionIndex, 0, newField);
@@ -615,7 +670,7 @@ export default function FormBuilderPage() {
               return {
                 ...sub,
                 fields: sub.fields.map((f: any) =>
-                  f.id === tempId ? { ...f, id: result.data.id } : f
+                  f.id === tempId ? { ...f, id: result.data.id } : f,
                 ),
               };
             }
@@ -647,7 +702,7 @@ export default function FormBuilderPage() {
               return {
                 ...s,
                 fields: s.fields.map((f: any) =>
-                  f.id === tempId ? { ...f, id: result.data.id } : f
+                  f.id === tempId ? { ...f, id: result.data.id } : f,
                 ),
               };
             }
@@ -733,7 +788,7 @@ export default function FormBuilderPage() {
                     },
                   },
                 }
-              : f
+              : f,
           );
 
         updatedForm.sections = updatedForm.sections.map((s: any) => ({
@@ -745,7 +800,9 @@ export default function FormBuilderPage() {
           subforms.map((sf: any) => ({
             ...sf,
             fields: updateFieldInList(sf.fields),
-            childSubforms: sf.childSubforms ? updateSubforms(sf.childSubforms) : [],
+            childSubforms: sf.childSubforms
+              ? updateSubforms(sf.childSubforms)
+              : [],
           }));
 
         if (updatedForm.subforms) {
@@ -789,9 +846,11 @@ export default function FormBuilderPage() {
           level = parentHierarchy.level + 1;
         }
       } else {
-        const section = form.sections.find((s: { id: string | undefined; }) => s.id === sectionId);
+        const section = form.sections.find(
+          (s: { id: string | undefined }) => s.id === sectionId,
+        );
         if (section) {
-          nextPath = `${(section.subforms || []).filter((sub: { parentSubformId: any; }) => !sub.parentSubformId).length + 1}`;
+          nextPath = `${(section.subforms || []).filter((sub: { parentSubformId: any }) => !sub.parentSubformId).length + 1}`;
         }
       }
 
@@ -802,7 +861,9 @@ export default function FormBuilderPage() {
         name: `Subform ${nextPath}`,
         order: parentSubformId
           ? 0
-          : (form.subforms || []).filter((s: { parentSubformId: any; }) => !s.parentSubformId).length || 0,
+          : (form.subforms || []).filter(
+              (s: { parentSubformId: any }) => !s.parentSubformId,
+            ).length || 0,
         columns: 1,
         visible: true,
         collapsible: true,
@@ -834,7 +895,10 @@ export default function FormBuilderPage() {
         let added = false;
         if (sectionId) {
           for (const section of updatedForm.sections) {
-            if (section.id === sectionId && addToSubform(section.subforms || [])) {
+            if (
+              section.id === sectionId &&
+              addToSubform(section.subforms || [])
+            ) {
               added = true;
               break;
             }
@@ -845,7 +909,9 @@ export default function FormBuilderPage() {
         }
         if (!added) return;
       } else if (sectionId) {
-        const section = updatedForm.sections.find((s: any) => s.id === sectionId);
+        const section = updatedForm.sections.find(
+          (s: any) => s.id === sectionId,
+        );
         if (section) {
           section.subforms = section.subforms || [];
           section.subforms.push(newSubform);
@@ -857,7 +923,12 @@ export default function FormBuilderPage() {
 
       optimisticFormUpdate(updatedForm);
 
-      const { id: _tempId, createdAt: _ca, updatedAt: _ua, ...subformData } = newSubform;
+      const {
+        id: _tempId,
+        createdAt: _ca,
+        updatedAt: _ua,
+        ...subformData
+      } = newSubform;
       const result = await createSubformMutation(subformData as any).unwrap();
 
       if (result.success) {
@@ -869,8 +940,10 @@ export default function FormBuilderPage() {
             if (sub.id === parentSubformId && sub.childSubforms) {
               return {
                 ...sub,
-                childSubforms: sub.childSubforms.map((child: { id: string; }) =>
-                  child.id === tempId ? { ...child, id: result.data.id } : child
+                childSubforms: sub.childSubforms.map((child: { id: string }) =>
+                  child.id === tempId
+                    ? { ...child, id: result.data.id }
+                    : child,
                 ),
               };
             }
@@ -937,16 +1010,19 @@ export default function FormBuilderPage() {
     if (activeContainer !== overContainer) return;
 
     const sectionId = activeContainer;
-    const section = form.sections.find((s: { id: any; }) => s.id === sectionId);
+    const section = form.sections.find((s: { id: any }) => s.id === sectionId);
     if (!section) return;
 
     // Only reordering fields (no subforms inside section)
-    const sortedFields = [...(section.fields || [])].sort((a, b) => a.order - b.order);
+    const sortedFields = [...(section.fields || [])].sort(
+      (a, b) => a.order - b.order,
+    );
     const oldIndex = sortedFields.findIndex((i) => i.id === active.id);
     let newIndex = sortedFields.findIndex((i) => i.id === over.id);
 
     const activeCenter = active.rect.current.translated
-      ? active.rect.current.translated.top + active.rect.current.translated.height / 2
+      ? active.rect.current.translated.top +
+        active.rect.current.translated.height / 2
       : 0;
     const overCenter = over.rect.top + over.rect.height / 2;
     const isAfter = activeCenter > overCenter;
@@ -955,14 +1031,14 @@ export default function FormBuilderPage() {
     const newFields = arrayMove(sortedFields, oldIndex, newIndex);
     newFields.forEach((f, idx) => (f.order = idx));
 
-    const updatedSections = form.sections.map((s: { id: any; }) =>
-      s.id === sectionId ? { ...s, fields: newFields } : s
+    const updatedSections = form.sections.map((s: { id: any }) =>
+      s.id === sectionId ? { ...s, fields: newFields } : s,
     );
 
     optimisticFormUpdate({ ...form, sections: updatedSections });
 
     newFields.forEach((f) =>
-      updateFieldMutation({ fieldId: f.id, body: { order: f.order } })
+      updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
     );
   };
 
@@ -972,8 +1048,12 @@ export default function FormBuilderPage() {
     const { active, over } = event;
     if (!over) return;
 
-    const oldIndex = form.sections.findIndex((s: { id: UniqueIdentifier; }) => s.id === active.id);
-    const newIndex = form.sections.findIndex((s: { id: UniqueIdentifier; }) => s.id === over.id);
+    const oldIndex = form.sections.findIndex(
+      (s: { id: UniqueIdentifier }) => s.id === active.id,
+    );
+    const newIndex = form.sections.findIndex(
+      (s: { id: UniqueIdentifier }) => s.id === over.id,
+    );
 
     const newSections = arrayMove(form.sections, oldIndex, newIndex);
     newSections.forEach((s, index) => (s.order = index));
@@ -981,7 +1061,7 @@ export default function FormBuilderPage() {
     optimisticFormUpdate({ ...form, sections: newSections });
 
     newSections.forEach((s) =>
-      updateSectionMutation({ sectionId: s.id, body: { order: s.order } })
+      updateSectionMutation({ sectionId: s.id, body: { order: s.order } }),
     );
   };
 
@@ -1000,7 +1080,9 @@ export default function FormBuilderPage() {
       for (let idx = 0; idx < lookupFields.length; idx++) {
         const fieldData = lookupFields[idx];
         const result = await createFieldMutation({
-          sectionId: pendingLookupSubformId ? undefined : pendingLookupSectionId,
+          sectionId: pendingLookupSubformId
+            ? undefined
+            : pendingLookupSectionId,
           subformId: pendingLookupSubformId,
           type: fieldData.type as string,
           label: fieldData.label || "Untitled",
@@ -1026,7 +1108,9 @@ export default function FormBuilderPage() {
 
         const fullField: FormField = {
           id: savedFieldId,
-          sectionId: pendingLookupSubformId ? undefined : pendingLookupSectionId,
+          sectionId: pendingLookupSubformId
+            ? undefined
+            : pendingLookupSectionId,
           subformId: pendingLookupSubformId,
           type: fieldData.type as any,
           label: fieldData.label || "Untitled",
@@ -1055,8 +1139,13 @@ export default function FormBuilderPage() {
               if (subform.id === pendingLookupSubformId) {
                 subform.fields = subform.fields || [];
                 subform.fields.push(fullField);
-                subform.fields.sort((a: { order: number; }, b: { order: number; }) => a.order - b.order);
-                subform.fields.forEach((f: { order: any; }, i: any) => (f.order = i));
+                subform.fields.sort(
+                  (a: { order: number }, b: { order: number }) =>
+                    a.order - b.order,
+                );
+                subform.fields.forEach(
+                  (f: { order: any }, i: any) => (f.order = i),
+                );
                 return true;
               }
               if (subform.childSubforms && addToSubform(subform.childSubforms))
@@ -1083,7 +1172,9 @@ export default function FormBuilderPage() {
           if (section) {
             section.fields = section.fields || [];
             section.fields.push(fullField);
-            section.fields.sort((a: { order: number; }, b: { order: number; }) => a.order - b.order);
+            section.fields.sort(
+              (a: { order: number }, b: { order: number }) => a.order - b.order,
+            );
             section.fields.forEach((f: any, i: number) => (f.order = i));
           }
         }
@@ -1092,7 +1183,10 @@ export default function FormBuilderPage() {
       // Pass 2: Link dependent child fields to their parent field IDs
       for (let idx = 0; idx < lookupFields.length; idx++) {
         const fieldData = lookupFields[idx] as any;
-        if (fieldData.isDependent && fieldData._parentFieldIndex !== undefined) {
+        if (
+          fieldData.isDependent &&
+          fieldData._parentFieldIndex !== undefined
+        ) {
           const parentSavedId = indexToSavedId[fieldData._parentFieldIndex];
           const childSavedId = indexToSavedId[idx];
           if (parentSavedId && childSavedId) {
@@ -1116,14 +1210,23 @@ export default function FormBuilderPage() {
             if (pendingLookupSubformId) {
               const walkSubforms = (subforms: Subform[]): boolean => {
                 for (const sf of subforms) {
-                  if (sf.id === pendingLookupSubformId && updateFieldInForm(sf.fields || [])) return true;
-                  if (sf.childSubforms && walkSubforms(sf.childSubforms)) return true;
+                  if (
+                    sf.id === pendingLookupSubformId &&
+                    updateFieldInForm(sf.fields || [])
+                  )
+                    return true;
+                  if (sf.childSubforms && walkSubforms(sf.childSubforms))
+                    return true;
                 }
                 return false;
               };
-              updatedForm.sections.forEach((section: any) => walkSubforms(section.subforms || []));
+              updatedForm.sections.forEach((section: any) =>
+                walkSubforms(section.subforms || []),
+              );
             } else {
-              const section = updatedForm.sections.find((s: any) => s.id === pendingLookupSectionId);
+              const section = updatedForm.sections.find(
+                (s: any) => s.id === pendingLookupSectionId,
+              );
               if (section) updateFieldInForm(section.fields || []);
             }
           }
@@ -1196,11 +1299,18 @@ export default function FormBuilderPage() {
         const removeFromSubform = (subforms: Subform[]): boolean => {
           for (const subform of subforms) {
             if (subform.id === sourceSubformId) {
-              subform.fields = (subform.fields || []).filter((f: { id: any; }) => f.id !== field.id);
-              subform.fields.forEach((f: { order: any; }, idx: any) => (f.order = idx));
+              subform.fields = (subform.fields || []).filter(
+                (f: { id: any }) => f.id !== field.id,
+              );
+              subform.fields.forEach(
+                (f: { order: any }, idx: any) => (f.order = idx),
+              );
               return true;
             }
-            if (subform.childSubforms && removeFromSubform(subform.childSubforms)) {
+            if (
+              subform.childSubforms &&
+              removeFromSubform(subform.childSubforms)
+            ) {
               return true;
             }
           }
@@ -1220,10 +1330,16 @@ export default function FormBuilderPage() {
           removeFromSubform(updatedForm.subforms || []);
         }
       } else if (sourceSectionId) {
-        const sourceSection = updatedForm.sections.find((s: any) => s.id === sourceSectionId);
+        const sourceSection = updatedForm.sections.find(
+          (s: any) => s.id === sourceSectionId,
+        );
         if (sourceSection) {
-          sourceSection.fields = (sourceSection.fields || []).filter((f: any) => f.id !== field.id);
-          sourceSection.fields.forEach((f: any, idx: number) => (f.order = idx));
+          sourceSection.fields = (sourceSection.fields || []).filter(
+            (f: any) => f.id !== field.id,
+          );
+          sourceSection.fields.forEach(
+            (f: any, idx: number) => (f.order = idx),
+          );
         }
       }
 
@@ -1241,7 +1357,9 @@ export default function FormBuilderPage() {
             if (subform.id === targetSubformId) {
               subform.fields = subform.fields || [];
               subform.fields.splice(targetIndex, 0, movedField);
-              subform.fields.forEach((f: { order: any; }, idx: any) => (f.order = idx));
+              subform.fields.forEach(
+                (f: { order: any }, idx: any) => (f.order = idx),
+              );
               return true;
             }
             if (subform.childSubforms && addToSubform(subform.childSubforms)) {
@@ -1254,7 +1372,10 @@ export default function FormBuilderPage() {
         let added = false;
         if (targetSectionId) {
           for (const section of updatedForm.sections) {
-            if (section.id === targetSectionId && addToSubform(section.subforms || [])) {
+            if (
+              section.id === targetSectionId &&
+              addToSubform(section.subforms || [])
+            ) {
               added = true;
               break;
             }
@@ -1265,11 +1386,15 @@ export default function FormBuilderPage() {
         }
         if (!added) return;
       } else if (targetSectionId) {
-        const targetSection = updatedForm.sections.find((s: any) => s.id === targetSectionId);
+        const targetSection = updatedForm.sections.find(
+          (s: any) => s.id === targetSectionId,
+        );
         if (targetSection) {
           targetSection.fields = targetSection.fields || [];
           targetSection.fields.splice(targetIndex, 0, movedField);
-          targetSection.fields.forEach((f: any, idx: number) => (f.order = idx));
+          targetSection.fields.forEach(
+            (f: any, idx: number) => (f.order = idx),
+          );
         }
       }
 
@@ -1408,10 +1533,11 @@ export default function FormBuilderPage() {
                 </Button>
               </div>
             </header>
-            <main className="flex-1 overflow-y-auto ">
+            <main className="flex-1 overflow-y-auto">
               <FormCanvas
                 form={form}
                 onFormUpdate={handleFormUpdate}
+                hasOtherEmployeeForm={form?.isEmployeeForm === false}
                 subformHierarchyMap={subformHierarchyMap}
                 getSubformPath={getSubformPath}
                 getFullSubformPath={getFullSubformPath}
@@ -1421,8 +1547,7 @@ export default function FormBuilderPage() {
             </main>
           </div>
         </div>
-        {
-          typeof window !== "undefined" &&
+        {typeof window !== "undefined" &&
           createPortal(
             <DragOverlay style={{ zIndex: 10000 }}>
               {activePaletteItem && (
@@ -1430,8 +1555,7 @@ export default function FormBuilderPage() {
               )}
             </DragOverlay>,
             document.body,
-          )
-        }
+          )}
         <PublishFormDialog
           form={form}
           open={isPublishDialogOpen}
@@ -1460,76 +1584,77 @@ export default function FormBuilderPage() {
             }}
             formId={formId}
             fieldId={pendingFormulaFieldId}
-            fieldLabel={
-              (() => {
-                if (!form) return "Formula";
-                const findField = (fields: FormField[]): string | null => {
-                  for (const f of fields) {
-                    if (f.id === pendingFormulaFieldId) return f.label;
-                  }
-                  return null;
-                };
-                for (const s of form.sections) {
-                  const label = findField(s.fields);
+            fieldLabel={(() => {
+              if (!form) return "Formula";
+              const findField = (fields: FormField[]): string | null => {
+                for (const f of fields) {
+                  if (f.id === pendingFormulaFieldId) return f.label;
+                }
+                return null;
+              };
+              for (const s of form.sections) {
+                const label = findField(s.fields);
+                if (label) return label;
+              }
+              const searchSubforms = (subs: Subform[]): string | null => {
+                for (const sf of subs) {
+                  const label = findField(sf.fields);
                   if (label) return label;
+                  if (sf.childSubforms) {
+                    const found = searchSubforms(sf.childSubforms);
+                    if (found) return found;
+                  }
                 }
-                const searchSubforms = (subs: Subform[]): string | null => {
+                return null;
+              };
+              return searchSubforms(form.subforms || []) || "Formula";
+            })()}
+            initialConfig={(() => {
+              if (!form) return null;
+              const findField = (fields: FormField[]): FormField | null => {
+                for (const f of fields) {
+                  if (f.id === pendingFormulaFieldId) return f;
+                }
+                return null;
+              };
+              let found: FormField | null = null;
+              for (const s of form.sections) {
+                found = findField(s.fields);
+                if (found) break;
+              }
+              if (!found) {
+                const searchSubforms = (subs: Subform[]): FormField | null => {
                   for (const sf of subs) {
-                    const label = findField(sf.fields);
-                    if (label) return label;
+                    const f = findField(sf.fields);
+                    if (f) return f;
                     if (sf.childSubforms) {
-                      const found = searchSubforms(sf.childSubforms);
-                      if (found) return found;
+                      const r = searchSubforms(sf.childSubforms);
+                      if (r) return r;
                     }
                   }
                   return null;
                 };
-                return searchSubforms(form.subforms || []) || "Formula";
-              })()
-            }
-            initialConfig={
-              (() => {
-                if (!form) return null;
-                const findField = (fields: FormField[]): FormField | null => {
-                  for (const f of fields) {
-                    if (f.id === pendingFormulaFieldId) return f;
-                  }
-                  return null;
-                };
-                let found: FormField | null = null;
-                for (const s of form.sections) {
-                  found = findField(s.fields);
-                  if (found) break;
-                }
-                if (!found) {
-                  const searchSubforms = (subs: Subform[]): FormField | null => {
-                    for (const sf of subs) {
-                      const f = findField(sf.fields);
-                      if (f) return f;
-                      if (sf.childSubforms) {
-                        const r = searchSubforms(sf.childSubforms);
-                        if (r) return r;
-                      }
-                    }
-                    return null;
-                  };
-                  found = searchSubforms(form.subforms || []);
-                }
-                if (!found) return null;
-                const fc = (found as any).properties?.formulaConfig;
-                const fRel = (found as any).formula;
-                if (!fRel && !fc) return null;
-                return {
-                  fieldLabel: found.label,
-                  expression: fRel?.expression ?? fc?.expression ?? "",
-                  returnType: (fRel?.returnType ?? fc?.returnType ?? "Number") as any,
-                  decimalPlaces: (found as any).decimalPlaces ?? fc?.decimalPlaces ?? 2,
-                  blankPreference: (fRel?.blankPreference ?? fc?.blankPreference ?? "Empty") as any,
-                  visibleInForm: fc?.visibleInForm ?? true,
-                  sources: fc?.sources,
-                };
-              })()
-            }
+                found = searchSubforms(form.subforms || []);
+              }
+              if (!found) return null;
+              const fc = (found as any).properties?.formulaConfig;
+              const fRel = (found as any).formula;
+              if (!fRel && !fc) return null;
+              return {
+                fieldLabel: found.label,
+                expression: fRel?.expression ?? fc?.expression ?? "",
+                returnType: (fRel?.returnType ??
+                  fc?.returnType ??
+                  "Number") as any,
+                decimalPlaces:
+                  (found as any).decimalPlaces ?? fc?.decimalPlaces ?? 2,
+                blankPreference: (fRel?.blankPreference ??
+                  fc?.blankPreference ??
+                  "Empty") as any,
+                visibleInForm: fc?.visibleInForm ?? true,
+                sources: fc?.sources,
+              };
+            })()}
             onSave={handleFormulaSave}
           />
         )}
@@ -1538,7 +1663,7 @@ export default function FormBuilderPage() {
           onOpenChange={setIsPermissionDialogOpen}
           resource={selectedResource}
         />
-      </DndContext >
-    </FormBuilderContext.Provider >
+      </DndContext>
+    </FormBuilderContext.Provider>
   );
 }
