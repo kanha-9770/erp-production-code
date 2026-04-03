@@ -301,11 +301,12 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     type ModuleNode = FormModule & { children: ModuleNode[] };
 
     const sortModules = (items: ModuleNode[]): ModuleNode[] => {
-      const sorted = [...items].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      sorted.forEach((item) => {
-        if (item.children.length > 0) item.children = sortModules(item.children);
-      });
-      return sorted;
+      return [...items]
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((item) => ({
+          ...item,
+          children: item.children.length > 0 ? sortModules(item.children) : item.children,
+        }));
     };
 
     // Filter modules by VIEW permission — admins see everything,
