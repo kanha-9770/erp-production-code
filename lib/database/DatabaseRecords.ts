@@ -798,10 +798,16 @@ export class DatabaseRecords {
           throw new Error(`Invalid table name: ${tableName}`)
       }
 
-      // Also delete from unified table (non-blocking sync)
+      // Also delete from unified table and related indexed fields
+      try {
+        await prisma.formRecordField.deleteMany({ where: { recordId } })
+      } catch {
+        // Indexed fields may not exist — ignore
+      }
+
       if (tableName !== "form_records_unified") {
         try {
-          await prisma.formRecord.delete({ where: { id: recordId } })
+          await prisma.formRecord.deleteMany({ where: { id: recordId } })
         } catch {
           // May not exist in unified table yet — ignore
         }
