@@ -116,20 +116,20 @@ function SortableValueItem({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-1.5 group/item rounded-lg border bg-white px-1.5 py-1 transition-all duration-150",
-        isDragging ? "shadow-lg border-blue-300 bg-blue-50 z-50 opacity-90" : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+        "flex items-center gap-1.5 group/item rounded-lg border bg-white px-2 py-1 transition-all duration-150",
+        isDragging ? "shadow-lg border-blue-300 bg-blue-50/80 z-50 ring-2 ring-blue-200/50" : "border-gray-200/80 hover:border-gray-300 hover:shadow-sm"
       )}
     >
       <button
         {...attributes}
         {...listeners}
-        className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 transition-colors p-0.5 rounded hover:bg-gray-100"
+        className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 transition-colors p-0.5 rounded-md hover:bg-gray-100"
         title="Drag to reorder"
         type="button"
       >
         <GripVertical className="h-3.5 w-3.5" />
       </button>
-      <span className="flex-shrink-0 text-[10px] font-semibold text-gray-400 w-4 text-center select-none">
+      <span className="flex-shrink-0 text-[10px] font-bold text-gray-300 w-4 text-center select-none tabular-nums">
         {vi + 1}
       </span>
       <Input
@@ -142,7 +142,7 @@ function SortableValueItem({
       />
       <button
         onClick={() => onDelete(rowId, vi)}
-        className="flex-shrink-0 opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-red-500 transition-all p-0.5 rounded hover:bg-red-50"
+        className="flex-shrink-0 opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-red-500 transition-all p-0.5 rounded-md hover:bg-red-50"
         title="Remove value"
         type="button"
       >
@@ -178,15 +178,15 @@ function ColumnHeader({
   return (
     <div
       className={cn(
-        "relative h-10 border-r border-gray-200/80 flex items-center text-xs font-semibold px-3 cursor-pointer select-none group transition-colors duration-150",
+        "relative h-11 border-r border-gray-200/60 flex items-center text-xs font-semibold px-3.5 cursor-pointer select-none group transition-colors duration-150",
         flex ? "flex-1 min-w-0" : "flex-shrink-0",
-        isActive ? "text-blue-700 bg-blue-50/50" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
+        isActive ? "text-blue-700 bg-blue-50/40" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50/60"
       )}
       style={flex ? { minWidth: `${minWidth}px` } : { width: `${width}px`, minWidth: `${minWidth}px` }}
       onClick={() => onSort(fieldId)}
     >
-      <div className="flex items-center justify-between w-full gap-1 overflow-hidden">
-        <span className="truncate text-[11px] uppercase tracking-wider font-semibold">{label}</span>
+      <div className="flex items-center justify-between w-full gap-1.5 overflow-hidden">
+        <span className="truncate text-[10.5px] uppercase tracking-widest font-bold">{label}</span>
         {isActive && (
           <span className="flex-shrink-0 text-blue-500">
             {sortOrder === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -214,20 +214,20 @@ function ValueBadges({ values, maxShow = 3 }: { values: { id: string; value: str
   const remaining = filled.length - maxShow
 
   return (
-    <div className="flex items-center gap-1 flex-wrap overflow-hidden max-h-[28px]">
+    <div className="flex items-center gap-1.5 flex-wrap overflow-hidden max-h-[28px]">
       {shown.map((v, i) => (
         <Badge
           key={v.id}
           variant="secondary"
-          className="text-[11px] px-1.5 py-0 h-[22px] font-normal bg-gray-100 text-gray-700 border-gray-200 truncate max-w-[120px]"
+          className="text-[11px] px-2 py-0.5 h-[22px] font-medium bg-gray-50 text-gray-600 border-gray-200/80 truncate max-w-[130px] rounded-md"
           title={v.value}
         >
           {v.value}
         </Badge>
       ))}
       {remaining > 0 && (
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-[22px] font-medium bg-blue-50 text-blue-600 border-blue-200 flex-shrink-0">
-          +{remaining} more
+        <Badge variant="secondary" className="text-[10px] px-2 py-0.5 h-[22px] font-semibold bg-blue-50 text-blue-600 border-blue-200/80 flex-shrink-0 rounded-md">
+          +{remaining}
         </Badge>
       )}
     </div>
@@ -736,57 +736,57 @@ export function DynamicMasters() {
       case "module":
         return isEditing ? (
           <Select value={row.module_id} onValueChange={(v) => updateRow(rowId, "module_id", v)}>
-            <SelectTrigger className="h-7 text-xs w-full border-gray-200"><SelectValue placeholder="Select Module" /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20"><SelectValue placeholder="Select Module" /></SelectTrigger>
             <SelectContent>
               {modules.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
             </SelectContent>
           </Select>
         ) : (
-          <span className="truncate text-[13px]" title={row.module_name}>{row.module_name || <span className="text-gray-300 italic">--</span>}</span>
+          <span className="truncate text-[13px] text-gray-700" title={row.module_name}>{row.module_name || <span className="text-gray-300 italic text-xs">--</span>}</span>
         )
       case "level2":
         return isEditing ? (
           <Select value={row.level2_id} onValueChange={(v) => updateRow(rowId, "level2_id", v)} disabled={!row.module_id}>
-            <SelectTrigger className="h-7 text-xs w-full border-gray-200"><SelectValue placeholder="Level 2" /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 disabled:opacity-40"><SelectValue placeholder="Level 2" /></SelectTrigger>
             <SelectContent>
               {row.module_id && findNode(row.module_id, modules)?.children?.map((c: any) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
         ) : (
-          <span className="truncate text-[13px]" title={row.level2_name}>{row.level2_name || <span className="text-gray-300 italic">--</span>}</span>
+          <span className="truncate text-[13px] text-gray-700" title={row.level2_name}>{row.level2_name || <span className="text-gray-300 italic text-xs">--</span>}</span>
         )
       case "level3":
         return isEditing ? (
           <Select value={row.level3_id} onValueChange={(v) => updateRow(rowId, "level3_id", v)} disabled={!row.level2_id}>
-            <SelectTrigger className="h-7 text-xs w-full border-gray-200"><SelectValue placeholder="Level 3" /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 disabled:opacity-40"><SelectValue placeholder="Level 3" /></SelectTrigger>
             <SelectContent>
               {row.level2_id && findNode(row.level2_id, modules)?.children?.map((c: any) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
         ) : (
-          <span className="truncate text-[13px]" title={row.level3_name}>{row.level3_name || <span className="text-gray-300 italic">--</span>}</span>
+          <span className="truncate text-[13px] text-gray-700" title={row.level3_name}>{row.level3_name || <span className="text-gray-300 italic text-xs">--</span>}</span>
         )
       case "level4":
         return isEditing ? (
           <Select value={row.level4_id} onValueChange={(v) => updateRow(rowId, "level4_id", v)} disabled={!row.level3_id}>
-            <SelectTrigger className="h-7 text-xs w-full border-gray-200"><SelectValue placeholder="Level 4" /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 disabled:opacity-40"><SelectValue placeholder="Level 4" /></SelectTrigger>
             <SelectContent>
               {row.level3_id && findNode(row.level3_id, modules)?.children?.map((c: any) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
         ) : (
-          <span className="truncate text-[13px]" title={row.level4_name}>{row.level4_name || <span className="text-gray-300 italic">--</span>}</span>
+          <span className="truncate text-[13px] text-gray-700" title={row.level4_name}>{row.level4_name || <span className="text-gray-300 italic text-xs">--</span>}</span>
         )
       case "form":
         return isEditing ? (
           <Select value={row.form_id} onValueChange={(v) => updateRow(rowId, "form_id", v)} disabled={!getDeepestId(row)}>
-            <SelectTrigger className="h-7 text-xs w-full border-gray-200"><SelectValue placeholder="Select Form" /></SelectTrigger>
+            <SelectTrigger className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20 disabled:opacity-40"><SelectValue placeholder="Select Form" /></SelectTrigger>
             <SelectContent>
               {getFormOptions(getDeepestId(row)).map((f: any) => (<SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>))}
             </SelectContent>
           </Select>
         ) : (
-          <span className="truncate text-[13px]" title={row.form_name}>{row.form_name || <span className="text-gray-300 italic">--</span>}</span>
+          <span className="truncate text-[13px] text-gray-700" title={row.form_name}>{row.form_name || <span className="text-gray-300 italic text-xs">--</span>}</span>
         )
       case "dropdown":
         return isEditing ? (
@@ -794,11 +794,11 @@ export function DynamicMasters() {
             value={row.master_data_type_name}
             onChange={(e) => updateRow(rowId, "master_data_type_name", e.target.value)}
             placeholder="e.g. Leave Type, Gender"
-            className="h-7 text-xs w-full border-gray-200"
+            className="h-8 text-xs w-full border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/20"
           />
         ) : (
-          <span className="truncate text-[13px] font-medium" title={row.master_data_type_name}>
-            {row.master_data_type_name || <span className="text-gray-300 italic">--</span>}
+          <span className="truncate text-[13px] font-semibold text-gray-800" title={row.master_data_type_name}>
+            {row.master_data_type_name || <span className="text-gray-300 italic text-xs font-normal">--</span>}
           </span>
         )
       case "values":
@@ -810,9 +810,14 @@ export function DynamicMasters() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center p-20 gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <span className="text-sm text-gray-500 font-medium">Loading master data...</span>
+      <div className="flex flex-col items-center justify-center p-24 gap-4">
+        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center shadow-sm">
+          <Loader2 className="w-7 h-7 animate-spin text-blue-600" />
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-semibold text-gray-700">Loading master data</p>
+          <p className="text-xs text-gray-400 mt-1">Fetching your dropdown configurations...</p>
+        </div>
       </div>
     )
   }
@@ -825,23 +830,23 @@ export function DynamicMasters() {
       <div className="min-h-screen bg-gray-50/50 px-4 py-5 sm:px-6 lg:px-8">
         <div className="mx-auto w-full max-w-screen-2xl">
           {/* ==================== HEADER ==================== */}
-          <div className="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm">
-                <LayoutGrid className="h-4.5 w-4.5 text-white" />
+          <div className="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-200">
+                <LayoutGrid className="h-5 w-5 text-white" />
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900 tracking-tight">Master Dropdowns</h1>
-                <p className="text-xs text-gray-500 mt-0.5">Manage dropdown values for forms across modules</p>
+                <p className="text-[13px] text-gray-500 mt-0.5">Manage dropdown values for forms across modules</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               {hasSelection && (
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={() => setBulkDeleteDialogOpen(true)}
-                  className="h-8 text-xs shadow-sm"
+                  className="h-9 text-xs shadow-sm font-medium px-3.5"
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                   Delete {selectedRecords.size} selected
@@ -849,32 +854,32 @@ export function DynamicMasters() {
               )}
               <Button
                 onClick={addNewRow}
-                className="h-8 bg-blue-600 hover:bg-blue-700 text-white text-xs shadow-sm"
+                className="h-9 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs shadow-md shadow-blue-200/50 font-medium px-4 transition-all duration-200"
                 size="sm"
               >
-                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Dropdown
+                <Plus className="w-4 h-4 mr-1.5" /> Add Dropdown
               </Button>
             </div>
           </div>
 
           {/* ==================== FILTERS ==================== */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-4">
-            <div className="p-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-3">
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm mb-4">
+            <div className="p-3.5 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-3">
               <div className="flex-1 min-w-0">
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                   <Input
                     placeholder="Search by dropdown name..."
                     value={recordSearchQuery}
                     onChange={(e) => { setRecordSearchQuery(e.target.value); setCurrentPage(1) }}
-                    className="pl-8 h-8 text-xs border-gray-200 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 rounded-lg transition-all"
+                    className="pl-9 h-9 text-sm border-gray-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 rounded-lg transition-all"
                   />
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <Select value={selectedModuleFilter} onValueChange={(v) => { setSelectedModuleFilter(v); setCurrentPage(1) }}>
-                  <SelectTrigger className="h-8 text-xs rounded-lg border-gray-200 min-w-[170px]">
-                    <Filter className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                  <SelectTrigger className="h-9 text-xs rounded-lg border-gray-200 min-w-[170px] bg-white">
+                    <Filter className="h-3.5 w-3.5 mr-1.5 text-gray-400 flex-shrink-0" />
                     <SelectValue placeholder="All Modules" />
                   </SelectTrigger>
                   <SelectContent>
@@ -885,7 +890,7 @@ export function DynamicMasters() {
                   </SelectContent>
                 </Select>
                 <Select value={recordsPerPage.toString()} onValueChange={(value) => { setRecordsPerPage(Number(value)); setCurrentPage(1) }}>
-                  <SelectTrigger className="h-8 text-xs rounded-lg border-gray-200 min-w-[120px]">
+                  <SelectTrigger className="h-9 text-xs rounded-lg border-gray-200 min-w-[120px] bg-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -904,16 +909,16 @@ export function DynamicMasters() {
                         variant="outline"
                         size="sm"
                         onClick={() => setShowColumnMenu(!showColumnMenu)}
-                        className={cn("h-8 w-8 p-0 border-gray-200", showColumnMenu && "bg-gray-100")}
+                        className={cn("h-9 w-9 p-0 border-gray-200 rounded-lg transition-all", showColumnMenu && "bg-blue-50 border-blue-200 text-blue-600")}
                       >
-                        <Columns3 className="h-3.5 w-3.5 text-gray-500" />
+                        <Columns3 className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom"><p className="text-xs">Toggle columns</p></TooltipContent>
                   </Tooltip>
                   {showColumnMenu && (
-                    <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-lg border border-gray-200 shadow-lg z-50 py-1">
-                      <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                    <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl border border-gray-200 shadow-xl shadow-gray-200/50 z-50 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                      <div className="px-3.5 py-2 text-[11px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
                         Visible Columns
                       </div>
                       {ALL_COLUMNS.map(col => {
@@ -924,8 +929,8 @@ export function DynamicMasters() {
                           <button
                             key={col.id}
                             className={cn(
-                              "w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors",
-                              alwaysShow && "opacity-60 cursor-default"
+                              "w-full flex items-center gap-2.5 px-3.5 py-2 text-xs hover:bg-gray-50 transition-colors",
+                              alwaysShow && "opacity-50 cursor-default"
                             )}
                             onClick={() => {
                               if (alwaysShow) return
@@ -939,11 +944,11 @@ export function DynamicMasters() {
                             disabled={alwaysShow}
                           >
                             {isHidden || !hasData ? (
-                              <EyeOff className="h-3 w-3 text-gray-300" />
+                              <EyeOff className="h-3.5 w-3.5 text-gray-300" />
                             ) : (
-                              <Eye className="h-3 w-3 text-blue-500" />
+                              <Eye className="h-3.5 w-3.5 text-blue-500" />
                             )}
-                            <span className={cn("text-gray-700", (isHidden || !hasData) && "text-gray-400")}>{col.label}</span>
+                            <span className={cn("text-gray-700 font-medium", (isHidden || !hasData) && "text-gray-400 font-normal")}>{col.label}</span>
                             {!hasData && <span className="text-[10px] text-gray-300 ml-auto">no data</span>}
                           </button>
                         )
@@ -955,26 +960,26 @@ export function DynamicMasters() {
             </div>
 
             {hasActiveFilters && (
-              <div className="px-3 pb-3 flex flex-wrap items-center gap-1.5">
+              <div className="px-3.5 pb-3.5 flex flex-wrap items-center gap-2">
                 {recordSearchQuery && (
-                  <Badge variant="secondary" className="gap-1 text-[11px] font-normal pl-2 pr-1 py-0.5 bg-blue-50 text-blue-700 border-blue-200">
+                  <Badge variant="secondary" className="gap-1.5 text-[11px] font-medium pl-2.5 pr-1.5 py-1 bg-blue-50 text-blue-700 border-blue-200 rounded-lg">
                     Search: &quot;{recordSearchQuery}&quot;
                     <button onClick={() => setRecordSearchQuery("")} className="ml-0.5 hover:bg-blue-200 rounded-full p-0.5 transition-colors">
-                      <X className="h-2.5 w-2.5" />
+                      <X className="h-3 w-3" />
                     </button>
                   </Badge>
                 )}
                 {selectedModuleFilter !== "all" && (
-                  <Badge variant="secondary" className="gap-1 text-[11px] font-normal pl-2 pr-1 py-0.5 bg-blue-50 text-blue-700 border-blue-200">
+                  <Badge variant="secondary" className="gap-1.5 text-[11px] font-medium pl-2.5 pr-1.5 py-1 bg-blue-50 text-blue-700 border-blue-200 rounded-lg">
                     Module: {getModuleName(selectedModuleFilter)}
                     <button onClick={() => setSelectedModuleFilter("all")} className="ml-0.5 hover:bg-blue-200 rounded-full p-0.5 transition-colors">
-                      <X className="h-2.5 w-2.5" />
+                      <X className="h-3 w-3" />
                     </button>
                   </Badge>
                 )}
                 <button
                   onClick={() => { setRecordSearchQuery(""); setSelectedModuleFilter("all") }}
-                  className="text-[11px] text-gray-500 hover:text-red-600 font-medium px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors"
+                  className="text-[11px] text-gray-500 hover:text-red-600 font-medium px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
                 >
                   Clear all
                 </button>
@@ -983,13 +988,13 @@ export function DynamicMasters() {
           </div>
 
           {/* ==================== TABLE ==================== */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
             <div className="overflow-auto h-[68vh] sm:h-[72vh] max-h-[72vh]" ref={tableContainerRef}>
               <div className="min-w-full" style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
                 {/* ===== TABLE HEADER ===== */}
-                <div className="flex bg-gray-50/80 border-b border-gray-200 sticky top-0 z-20 backdrop-blur-sm">
+                <div className="flex bg-gradient-to-b from-gray-50 to-gray-100/80 border-b border-gray-200 sticky top-0 z-20 backdrop-blur-sm">
                   {/* Checkbox col */}
-                  <div className="h-10 w-10 border-r border-gray-200/80 flex items-center justify-center flex-shrink-0">
+                  <div className="h-11 w-11 border-r border-gray-200/60 flex items-center justify-center flex-shrink-0">
                     <Checkbox
                       checked={selectedRecords.size === paginatedRecords.length && paginatedRecords.length > 0}
                       onCheckedChange={(checked) => {
@@ -1001,7 +1006,7 @@ export function DynamicMasters() {
                   </div>
 
                   {/* # col */}
-                  <div className="w-10 h-10 border-r border-gray-200/80 flex items-center justify-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex-shrink-0">
+                  <div className="w-11 h-11 border-r border-gray-200/60 flex items-center justify-center text-[10px] font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">
                     #
                   </div>
 
@@ -1022,23 +1027,40 @@ export function DynamicMasters() {
                   ))}
 
                   {/* Actions col */}
-                  <div className="w-24 h-10 border-r border-gray-200/80 flex items-center justify-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex-shrink-0">
+                  <div className="w-28 h-11 border-r border-gray-200/60 flex items-center justify-center text-[10px] font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">
                     Actions
                   </div>
                 </div>
 
                 {/* ===== TABLE BODY ===== */}
                 {paginatedRecords.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-gray-400 min-h-[200px] gap-3">
-                    <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
-                      <AlertCircle className="h-6 w-6 text-gray-300" />
+                  <div className="flex flex-col items-center justify-center py-20 text-gray-400 min-h-[250px] gap-4">
+                    <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center shadow-sm">
+                      {hasActiveFilters ? (
+                        <Search className="h-7 w-7 text-gray-300" />
+                      ) : (
+                        <LayoutGrid className="h-7 w-7 text-gray-300" />
+                      )}
                     </div>
-                    <p className="text-sm font-medium text-gray-500">
-                      {hasActiveFilters ? "No records match your filters" : "No dropdowns yet"}
-                    </p>
+                    <div className="text-center">
+                      <p className="text-sm font-semibold text-gray-600">
+                        {hasActiveFilters ? "No records match your filters" : "No dropdowns yet"}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1 max-w-[250px]">
+                        {hasActiveFilters
+                          ? "Try adjusting your search or filter criteria"
+                          : "Create your first dropdown to get started"
+                        }
+                      </p>
+                    </div>
                     {!hasActiveFilters && (
-                      <Button variant="outline" size="sm" onClick={addNewRow} className="text-xs h-7">
-                        <Plus className="h-3 w-3 mr-1" /> Create your first dropdown
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={addNewRow}
+                        className="text-xs h-8 mt-1 border-blue-200 text-blue-600 hover:bg-blue-50 rounded-lg font-medium px-4"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1.5" /> Create your first dropdown
                       </Button>
                     )}
                   </div>
@@ -1057,14 +1079,14 @@ export function DynamicMasters() {
                         <div
                           key={rowId}
                           className={cn(
-                            "flex transition-colors duration-100 border-b border-gray-100 last:border-b-0",
-                            isSelected && "bg-blue-50/60",
-                            isEditing && "bg-amber-50/30",
-                            !isSelected && !isEditing && "hover:bg-gray-50/60"
+                            "group/row flex transition-all duration-150 border-b border-gray-100/80 last:border-b-0",
+                            isSelected && "bg-blue-50/50 border-blue-100/50",
+                            isEditing && "bg-amber-50/20 border-amber-100/50",
+                            !isSelected && !isEditing && "hover:bg-gray-50/50"
                           )}
                         >
                           {/* Checkbox */}
-                          <div className="w-10 min-h-[44px] border-r border-gray-100 flex items-center justify-center flex-shrink-0">
+                          <div className="w-11 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center flex-shrink-0">
                             <Checkbox
                               checked={isSelected}
                               onCheckedChange={(checked) => {
@@ -1078,7 +1100,7 @@ export function DynamicMasters() {
                           </div>
 
                           {/* Row number */}
-                          <div className="w-10 min-h-[44px] border-r border-gray-100 flex items-center justify-center text-xs font-medium text-gray-400 flex-shrink-0">
+                          <div className="w-11 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center text-xs font-semibold text-gray-300 flex-shrink-0 tabular-nums">
                             {num}
                           </div>
 
@@ -1090,19 +1112,19 @@ export function DynamicMasters() {
                                 <div
                                   key={col.id}
                                   className={cn(
-                                    "border-r border-gray-100 px-3 text-sm text-gray-700 overflow-hidden",
+                                    "border-r border-gray-100/60 px-3.5 text-sm text-gray-700 overflow-hidden",
                                     getCellClass(col),
-                                    isEditing ? "py-2.5 min-h-[44px]" : "min-h-[44px] flex items-center"
+                                    isEditing ? "py-3 min-h-[46px]" : "min-h-[46px] flex items-center"
                                   )}
                                   style={getCellStyle(col)}
                                 >
                                   {isEditing ? (
-                                    <div className="w-full space-y-2">
+                                    <div className="w-full space-y-2.5">
                                       {/* Import button */}
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        className="w-full text-[11px] h-7 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50"
+                                        className="w-full text-[11px] h-7 border-dashed border-gray-300 text-gray-500 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50/50 rounded-lg transition-all duration-200"
                                         onClick={() => {
                                           const input = document.createElement("input")
                                           input.type = "file"
@@ -1181,7 +1203,7 @@ export function DynamicMasters() {
                                         size="sm"
                                         variant="ghost"
                                         onClick={() => addValue(rowId)}
-                                        className="h-7 text-[11px] w-full text-blue-600 hover:text-blue-700 hover:bg-blue-50 border border-dashed border-blue-200"
+                                        className="h-7 text-[11px] w-full text-blue-600 hover:text-blue-700 hover:bg-blue-50 border border-dashed border-blue-300 rounded-lg transition-all duration-200 font-medium"
                                       >
                                         <Plus className="w-3 h-3 mr-1" /> Add Value
                                       </Button>
@@ -1189,7 +1211,7 @@ export function DynamicMasters() {
                                   ) : (
                                     <div className="w-full overflow-hidden">
                                       {row.values.length > 0 ? (
-                                        <div className="flex items-center gap-1.5 w-full overflow-hidden">
+                                        <div className="flex items-center gap-2 w-full overflow-hidden">
                                           <div className="flex-1 min-w-0 overflow-hidden">
                                             <ValueBadges values={row.values} maxShow={isValuesExpanded ? 999 : 3} />
                                           </div>
@@ -1203,14 +1225,14 @@ export function DynamicMasters() {
                                                   return next
                                                 })
                                               }}
-                                              className="flex-shrink-0 text-[10px] text-blue-500 hover:text-blue-700 font-medium hover:underline"
+                                              className="flex-shrink-0 text-[10px] text-blue-500 hover:text-blue-700 font-semibold px-1.5 py-0.5 rounded-md hover:bg-blue-50 transition-colors"
                                             >
-                                              {isValuesExpanded ? "less" : "all"}
+                                              {isValuesExpanded ? "Less" : "View all"}
                                             </button>
                                           )}
                                         </div>
                                       ) : (
-                                        <span className="text-gray-300 italic text-[13px]">--</span>
+                                        <span className="text-gray-300 italic text-xs">--</span>
                                       )}
                                     </div>
                                   )}
@@ -1223,7 +1245,7 @@ export function DynamicMasters() {
                               <div
                                 key={col.id}
                                 className={cn(
-                                  "border-r border-gray-100 px-3 text-sm text-gray-700 min-h-[44px] flex items-center overflow-hidden",
+                                  "border-r border-gray-100/60 px-3.5 text-sm text-gray-700 min-h-[46px] flex items-center overflow-hidden",
                                   getCellClass(col)
                                 )}
                                 style={getCellStyle(col)}
@@ -1236,8 +1258,8 @@ export function DynamicMasters() {
                           })}
 
                           {/* Actions */}
-                          <div className="w-24 min-h-[44px] border-r border-gray-100 flex items-center justify-center flex-shrink-0 px-1">
-                            <div className="flex gap-1 w-full justify-center">
+                          <div className="w-28 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center flex-shrink-0 px-2">
+                            <div className="flex gap-1.5 w-full justify-center">
                               {isEditing ? (
                                 <>
                                   <Tooltip>
@@ -1246,10 +1268,10 @@ export function DynamicMasters() {
                                         size="sm"
                                         onClick={() => saveRow(rowId)}
                                         disabled={isProcessing}
-                                        className="h-7 px-2.5 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                                        className="h-7.5 px-3 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm rounded-lg font-medium"
                                       >
                                         {isProcessing ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                         ) : (
                                           <>
                                             <Save className="w-3 h-3 mr-1" />
@@ -1267,7 +1289,7 @@ export function DynamicMasters() {
                                         size="sm"
                                         onClick={() => cancelRow(rowId)}
                                         disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                                        className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
                                       >
                                         <X className="w-3.5 h-3.5" />
                                       </Button>
@@ -1276,7 +1298,7 @@ export function DynamicMasters() {
                                   </Tooltip>
                                 </>
                               ) : (
-                                <>
+                                <div className="flex gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150">
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <Button
@@ -1284,7 +1306,7 @@ export function DynamicMasters() {
                                         variant="ghost"
                                         onClick={() => startEdit(rowId)}
                                         disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                        className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                                       >
                                         <Edit2 className="w-3.5 h-3.5" />
                                       </Button>
@@ -1298,7 +1320,7 @@ export function DynamicMasters() {
                                         variant="ghost"
                                         onClick={() => deleteRow(rowId)}
                                         disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                        className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                                       >
                                         {isProcessing ? (
                                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1309,7 +1331,7 @@ export function DynamicMasters() {
                                     </TooltipTrigger>
                                     <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
                                   </Tooltip>
-                                </>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -1321,18 +1343,18 @@ export function DynamicMasters() {
                     {Array.from({ length: numDummyRows }).map((_, dummyIndex) => (
                       <div
                         key={`dummy-${dummyIndex}`}
-                        className="flex h-11 border-b border-gray-50 bg-white last:border-b-0"
+                        className="flex h-[46px] border-b border-gray-50/50 bg-white last:border-b-0"
                       >
-                        <div className="w-10 border-r border-gray-50 flex-shrink-0" />
-                        <div className="w-10 border-r border-gray-50 flex-shrink-0" />
+                        <div className="w-11 border-r border-gray-50/50 flex-shrink-0" />
+                        <div className="w-11 border-r border-gray-50/50 flex-shrink-0" />
                         {visibleColumns.map(col => (
                           <div
                             key={col.id}
-                            className={cn("border-r border-gray-50", getCellClass(col))}
+                            className={cn("border-r border-gray-50/50", getCellClass(col))}
                             style={getCellStyle(col)}
                           />
                         ))}
-                        <div className="w-24 border-r border-gray-50 flex-shrink-0" />
+                        <div className="w-28 border-r border-gray-50/50 flex-shrink-0" />
                       </div>
                     ))}
                   </>
@@ -1342,56 +1364,57 @@ export function DynamicMasters() {
 
             {/* ===== PAGINATION FOOTER ===== */}
             {totalRecords > 0 && (
-              <div className="border-t border-gray-200 px-4 py-2.5 flex items-center justify-between bg-gray-50/50">
-                <div className="text-xs text-gray-500">
-                  <span className="font-medium text-gray-700">{startIdx + 1}</span>
+              <div className="border-t border-gray-200 px-5 py-3 flex items-center justify-between bg-gradient-to-r from-gray-50/80 to-white">
+                <div className="text-[13px] text-gray-500">
+                  Showing{" "}
+                  <span className="font-semibold text-gray-700">{startIdx + 1}</span>
                   {" - "}
-                  <span className="font-medium text-gray-700">{Math.min(endIdx, totalRecords)}</span>
+                  <span className="font-semibold text-gray-700">{Math.min(endIdx, totalRecords)}</span>
                   {" of "}
-                  <span className="font-medium text-gray-700">{totalRecords}</span>
+                  <span className="font-semibold text-gray-700">{totalRecords}</span>
                   {" records"}
                   {hiddenCount > 0 && (
-                    <span className="ml-2 text-gray-400">({hiddenCount} column{hiddenCount > 1 ? "s" : ""} hidden)</span>
+                    <span className="ml-2 text-gray-400 text-xs">({hiddenCount} column{hiddenCount > 1 ? "s" : ""} hidden)</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => setCurrentPage(1)}
                     disabled={currentPage === 1}
-                    className="h-7 w-7 p-0 text-gray-400"
+                    className="h-8 w-8 p-0 text-gray-400 border-gray-200 disabled:opacity-30 rounded-lg"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                     <ChevronLeft className="h-3.5 w-3.5 -ml-2" />
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                     disabled={currentPage === 1}
-                    className="h-7 w-7 p-0 text-gray-400"
+                    className="h-8 w-8 p-0 text-gray-400 border-gray-200 disabled:opacity-30 rounded-lg"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </Button>
-                  <span className="text-xs text-gray-500 px-2 min-w-[80px] text-center">
-                    Page <span className="font-medium text-gray-700">{currentPage}</span> of <span className="font-medium text-gray-700">{totalPages}</span>
+                  <span className="text-[13px] text-gray-500 px-3 min-w-[90px] text-center tabular-nums">
+                    Page <span className="font-semibold text-gray-700">{currentPage}</span> of <span className="font-semibold text-gray-700">{totalPages}</span>
                   </span>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                     disabled={currentPage >= totalPages}
-                    className="h-7 w-7 p-0 text-gray-400"
+                    className="h-8 w-8 p-0 text-gray-400 border-gray-200 disabled:opacity-30 rounded-lg"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => setCurrentPage(totalPages)}
                     disabled={currentPage >= totalPages}
-                    className="h-7 w-7 p-0 text-gray-400"
+                    className="h-8 w-8 p-0 text-gray-400 border-gray-200 disabled:opacity-30 rounded-lg"
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                     <ChevronRight className="h-3.5 w-3.5 -ml-2" />
@@ -1404,19 +1427,22 @@ export function DynamicMasters() {
 
         {/* ==================== DELETE DIALOG ==================== */}
         <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <DialogContent className="sm:max-w-[400px]">
+          <DialogContent className="sm:max-w-[420px] rounded-xl">
             <DialogHeader>
-              <DialogTitle className="text-base">Delete Dropdown</DialogTitle>
-              <DialogDescription className="text-sm">
+              <div className="mx-auto h-12 w-12 rounded-full bg-red-50 flex items-center justify-center mb-2">
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </div>
+              <DialogTitle className="text-base text-center">Delete Dropdown</DialogTitle>
+              <DialogDescription className="text-sm text-center">
                 This dropdown and all its values will be permanently removed. This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)} disabled={processingRows.has(rowToDelete || "")} className="w-full sm:w-auto">
+            <DialogFooter className="gap-2 sm:gap-2 mt-2">
+              <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(false)} disabled={processingRows.has(rowToDelete || "")} className="w-full sm:w-auto rounded-lg h-9">
                 Cancel
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => rowToDelete && handleConfirmDelete(rowToDelete)} disabled={processingRows.has(rowToDelete || "")} className="w-full sm:w-auto">
-                {processingRows.has(rowToDelete || "") ? (<><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Deleting...</>) : "Delete"}
+              <Button variant="destructive" size="sm" onClick={() => rowToDelete && handleConfirmDelete(rowToDelete)} disabled={processingRows.has(rowToDelete || "")} className="w-full sm:w-auto rounded-lg h-9 font-medium">
+                {processingRows.has(rowToDelete || "") ? (<><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Deleting...</>) : "Delete Dropdown"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1424,20 +1450,23 @@ export function DynamicMasters() {
 
         {/* ==================== BULK DELETE DIALOG ==================== */}
         <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
-          <DialogContent className="sm:max-w-[400px]">
+          <DialogContent className="sm:max-w-[420px] rounded-xl">
             <DialogHeader>
-              <DialogTitle className="text-base">Delete Selected Dropdowns</DialogTitle>
-              <DialogDescription className="text-sm">
+              <div className="mx-auto h-12 w-12 rounded-full bg-red-50 flex items-center justify-center mb-2">
+                <AlertCircle className="h-5 w-5 text-red-500" />
+              </div>
+              <DialogTitle className="text-base text-center">Delete Selected Dropdowns</DialogTitle>
+              <DialogDescription className="text-sm text-center">
                 You are about to delete{" "}
                 <span className="font-semibold text-red-600">{selectedRecords.size}</span>{" "}
                 dropdown(s). This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="outline" size="sm" onClick={() => setBulkDeleteDialogOpen(false)} disabled={isBulkDeleting} className="w-full sm:w-auto">
+            <DialogFooter className="gap-2 sm:gap-2 mt-2">
+              <Button variant="outline" size="sm" onClick={() => setBulkDeleteDialogOpen(false)} disabled={isBulkDeleting} className="w-full sm:w-auto rounded-lg h-9">
                 Cancel
               </Button>
-              <Button variant="destructive" size="sm" onClick={handleBulkDelete} disabled={isBulkDeleting} className="w-full sm:w-auto">
+              <Button variant="destructive" size="sm" onClick={handleBulkDelete} disabled={isBulkDeleting} className="w-full sm:w-auto rounded-lg h-9 font-medium">
                 {isBulkDeleting ? (<><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Deleting...</>) : `Delete ${selectedRecords.size} Records`}
               </Button>
             </DialogFooter>

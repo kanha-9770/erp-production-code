@@ -155,6 +155,7 @@ export default function LookupConfigurationDialog({
 
   const [loading, setLoading] = useState(false);
   const [loadingFields, setLoadingFields] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
 
   // Dependency configuration
   const [dependencies, setDependencies] = useState<FieldDependency[]>([]);
@@ -212,9 +213,12 @@ export default function LookupConfigurationDialog({
       if (initialConfig) {
         runEditInit(initialConfig);
       } else {
+        setEditLoading(false);
         loadInitialData();
         resetSelection();
       }
+    } else {
+      setEditLoading(false);
     }
   }, [open]);
 
@@ -331,7 +335,7 @@ export default function LookupConfigurationDialog({
   };
 
   /* ===================== FETCH VALUES FOR DEPENDENCY ===================== */
-  const fetchFieldValues = async (field: SelectedField): Promise<string[]> => {
+  const fetchFieldValues = async (field: SelectedField, sourceIdOverride?: string): Promise<string[]> => {
     if (masterDataValues[field.fieldName]?.length) {
       return masterDataValues[field.fieldName];
     }
@@ -354,9 +358,9 @@ export default function LookupConfigurationDialog({
     }
 
     try {
-      const sourceId = selectedFormId && selectedFormId !== "none"
-        ? selectedFormId
-        : selectedModuleId;
+      // Use override if provided (needed during runEditInit where state isn't committed yet)
+      const sourceId = sourceIdOverride
+        || (selectedFormId && selectedFormId !== "none" ? selectedFormId : selectedModuleId);
       if (!sourceId) return [];
 
       const result = await triggerGetLookupData({ sourceId, limit: "200" }).unwrap();
@@ -381,10 +385,10 @@ export default function LookupConfigurationDialog({
     return [];
   };
 
-  const loadDependencyValues = async (fields: SelectedField[]) => {
+  const loadDependencyValues = async (fields: SelectedField[], sourceIdOverride?: string) => {
     setLoadingValues(true);
     try {
-      await Promise.all(fields.map((f) => fetchFieldValues(f)));
+      await Promise.all(fields.map((f) => fetchFieldValues(f, sourceIdOverride)));
     } finally {
       setLoadingValues(false);
     }
@@ -406,14 +410,21 @@ export default function LookupConfigurationDialog({
   const runEditInit = async (config: NonNullable<typeof initialConfig>) => {
     if (editInitRef.current) return;
     editInitRef.current = true;
+    setEditLoading(true);
 
     const configSourceId = config.sourceId || "";
     const isMasterType = config.sourceType === "master";
 
     console.log("[LookupReconfig] Starting edit init with config:", JSON.stringify(config, null, 2));
 
-    // Clean slate
-    resetSelection();
+    // Clean slate (but DON'T set step yet — keep loading overlay visible)
+    setSelectedModuleId("");
+    setSelectedFormId("");
+    setSelectedSectionId("all");
+    setSelectedFields([]);
+    setFieldSearch("");
+    setDependencies([]);
+    setMasterDataValues({});
     setSections([]);
     setSourceFields([]);
 
@@ -425,7 +436,7 @@ export default function LookupConfigurationDialog({
       if (res.success) { loadedSources = res.data || []; setSources(loadedSources); }
     } catch {
       toast({ title: "Error", description: "Failed to load sources", variant: "destructive" });
-      setLoading(false); editInitRef.current = false; return;
+      setLoading(false); setEditLoading(false); editInitRef.current = false; return;
     }
     setLoading(false);
 
@@ -481,6 +492,7 @@ export default function LookupConfigurationDialog({
 
       setSelectedFields(masterSelectedFields);
       setStep("selection");
+      setEditLoading(false);
       return;
     }
 
@@ -571,7 +583,7 @@ export default function LookupConfigurationDialog({
     console.log("[LookupReconfig] Fields loaded:", fields.length, "Matched:", !!hit, "SelectedField:", selectedField, "sourceFields set:", fields.map(f => f.name));
 
     // 7) Restore dependency if present
-    const allSelectedFields = [selectedField];
+    const allSelectedFields: SelectedField[] = [selectedField];
 
     if (config.dependency && config.dependency.parentFieldLabel) {
       const parentLabel = config.dependency.parentFieldLabel;
@@ -603,7 +615,8 @@ export default function LookupConfigurationDialog({
         setDependencies([restoredDep]);
 
         // Load dependency values for parent and child so the mapping matrix populates
-        loadDependencyValues([parentSelectedField, selectedField]);
+        // Pass srcId directly since React state (selectedFormId/selectedModuleId) isn't committed yet
+        loadDependencyValues([parentSelectedField, selectedField], srcId);
       } else {
         // Parent field not found in source fields — check if it's a master dropdown
         const parentMaster = loadedMasterDropdowns.find(m => m.name === parentLabel);
@@ -627,15 +640,16 @@ export default function LookupConfigurationDialog({
           };
           setDependencies([restoredDep]);
 
-          loadDependencyValues([parentSelectedField, selectedField]);
+          loadDependencyValues([parentSelectedField, selectedField], srcId);
         }
       }
     }
 
     setSelectedFields(allSelectedFields);
 
-    // 8) Show selection step so user can see previously selected modules & fields
+    // 8) Show selection step with all previous config restored
     setStep("selection");
+    setEditLoading(false);
   };
 
   const handleFieldToggle = (field: SourceField) => {
@@ -829,7 +843,7 @@ export default function LookupConfigurationDialog({
         </DialogHeader>
 
         {/* DROPDOWNS */}
-        <div className="px-6 py-5 bg-muted/20 border-b shrink-0">
+        <div className={cn("px-6 py-5 bg-muted/20 border-b shrink-0 transition-opacity duration-200", editLoading && "opacity-40 pointer-events-none")}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Module */}
             <div className="space-y-2">
@@ -931,7 +945,15 @@ export default function LookupConfigurationDialog({
 
         {/* MAIN BODY */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {step === "selection" ? (
+          {editLoading ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-foreground">Loading previous configuration...</p>
+                <p className="text-xs text-muted-foreground mt-1">Restoring your module, form, and field selections</p>
+              </div>
+            </div>
+          ) : step === "selection" ? (
             <div className="h-full flex flex-col">
               {isReadyToShowFields && (
                 <div className="px-6 py-3 border-b bg-muted/5 flex items-center justify-between shrink-0">
@@ -1280,7 +1302,7 @@ export default function LookupConfigurationDialog({
 
               {step === "selection" ? (
                 <Button
-                  disabled={selectedFields.length === 0 || !isReadyToShowFields}
+                  disabled={editLoading || selectedFields.length === 0 || !isReadyToShowFields}
                   onClick={() => setStep("mapping")}
                   className="px-8"
                 >

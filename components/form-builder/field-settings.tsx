@@ -337,7 +337,7 @@ interface FieldSettingsProps {
   field: FormField;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUpdate: (updates: Partial<FormField>) => void;
+  onUpdate: (updates: Partial<FormField>) => void | Promise<void>;
   formId?: string;
 }
 
@@ -557,13 +557,9 @@ export default function FieldSettings({
   const handleSave = async () => {
     setSaving(true);
     try {
-      onUpdate(localField);
+      await onUpdate(localField);
       setHasChanges(false);
       onOpenChange(false);
-      toast({
-        title: "Success",
-        description: "Field settings saved successfully",
-      });
     } catch (error) {
       toast({
         title: "Error",
