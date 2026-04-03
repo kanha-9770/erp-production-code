@@ -5,67 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { v4 as uuidv4 } from "uuid";
+import { transformToStructuredData } from "@/lib/utils/form-utils";
 
 const normalizeKey = (str: string): string => {
   return String(str)
     .replace(/[\u2018\u2019]/g, "'")
     .trim();
 };
-
-// Build field metadata map from form sections (done once, not per row)
-function buildFieldMap(form: any): Record<string, any> {
-  const map: Record<string, any> = {};
-  let fieldOrder = 0;
-  for (const section of form.sections || []) {
-    for (const field of section.fields || []) {
-      map[field.id] = {
-        ...field,
-        sectionId: section.id,
-        sectionTitle: section.title,
-        order: fieldOrder++,
-      };
-    }
-  }
-  return map;
-}
-
-// Transform raw field values into structured record data with metadata
-function transformToStructuredData(
-  fieldMetaMap: Record<string, any>,
-  recordData: Record<string, any>
-): Record<string, any> {
-  const structured: Record<string, any> = {};
-  for (const [fieldId, value] of Object.entries(recordData)) {
-    const def = fieldMetaMap[fieldId];
-    if (def) {
-      structured[fieldId] = {
-        fieldId,
-        label: def.label,
-        type: def.type,
-        value,
-        sectionId: def.sectionId,
-        sectionTitle: def.sectionTitle,
-        order: def.order,
-        placeholder: def.placeholder,
-        description: def.description,
-        validation: def.validation || {},
-        options: def.options || [],
-        lookup: def.lookup || null,
-      };
-    } else {
-      structured[fieldId] = {
-        fieldId,
-        label: fieldId,
-        type: "text",
-        value,
-        sectionId: null,
-        sectionTitle: "Unknown",
-        order: 999,
-      };
-    }
-  }
-  return structured;
-}
 
 // Direct insert into the correct sharded table (avoids per-row getFormRecordTable lookups)
 async function insertRecord(tableName: string, data: Record<string, any>): Promise<any> {
@@ -235,10 +181,7 @@ export async function POST(request: NextRequest) {
       data: { status: "PROCESSING", totalRows: rows.length, startedAt: new Date() },
     });
 
-    // === 10. Build field metadata map ONCE ===
-    const fieldMetaMap = buildFieldMap(form);
-
-    // === 11. Process rows ===
+    // === 10. Process rows ===
     let successCount = 0,
       failedCount = 0,
       skippedCount = 0;
@@ -283,8 +226,8 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Transform to structured data with field metadata
-        const structuredRecordData = transformToStructuredData(fieldMetaMap, recordData);
+        // Transform to structured data matching manual submission format
+        const structuredRecordData = transformToStructuredData(form, recordData, "system");
 
         // Build insert params
         const recordId = uuidv4();
