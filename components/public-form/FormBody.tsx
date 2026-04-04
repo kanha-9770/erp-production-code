@@ -239,18 +239,18 @@ function SubformBlock({
 
   return (
     <div
-      className={`rounded-lg border border-gray-200 shadow-sm ${colorScheme.leftBorder} ${colorScheme.bg} ${level > 0 ? "ml-8 mt-6" : ""}`}
+      className={`rounded-lg border ${colorScheme.leftBorder} ${colorScheme.bg} ${level > 0 ? "ml-6 mt-5" : ""}`}
     >
       {/* Header */}
-      <div className="p-4 border-b bg-white/80">
+      <div className="px-4 py-3 border-b bg-background/60">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 flex-1">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => toggleSubform(subform.id)}
-              className="h-6 w-6 p-0 text-gray-500 hover:text-gray-700"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground shrink-0"
             >
               {isCollapsed ? (
                 <ChevronRight className="w-4 h-4" />
@@ -258,59 +258,40 @@ function SubformBlock({
                 <ChevronDown className="w-4 h-4" />
               )}
             </Button>
-            <Layers className={`w-5 h-5 ${colorScheme.accent}`} />
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h4 className="text-base font-semibold">{subform.name}</h4>
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${colorScheme.levelBadge}`}
-                >
-                  Level {level}
-                </Badge>
-                <Badge variant="outline" className="text-xs">
-                  {visibleFields.length} field
-                  {visibleFields.length !== 1 ? "s" : ""}
-                </Badge>
-                {visibleChildSubforms.length > 0 && (
-                  <Badge variant="outline" className="text-xs">
-                    {visibleChildSubforms.length} nested
-                  </Badge>
-                )}
-                {instances.length > 0 && (
+            <Layers className={`w-4 h-4 shrink-0 ${colorScheme.accent}`} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="text-sm font-semibold truncate">{subform.name}</h4>
+                {level > 0 && (
                   <Badge
                     variant="outline"
-                    className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                    className={`text-[10px] leading-none px-1.5 py-0.5 ${colorScheme.levelBadge}`}
                   >
-                    +{instances.length} row{instances.length !== 1 ? "s" : ""}
+                    L{level}
                   </Badge>
                 )}
+                <span className="text-[11px] text-muted-foreground">
+                  {visibleFields.length} field{visibleFields.length !== 1 ? "s" : ""}
+                  {visibleChildSubforms.length > 0 && ` · ${visibleChildSubforms.length} nested`}
+                  {instances.length > 0 && ` · +${instances.length} row${instances.length !== 1 ? "s" : ""}`}
+                </span>
               </div>
-              {level > 0 && (
-                <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
-                  Path:{" "}
+              {level > 0 && pathParts.length > 1 && (
+                <div className="flex items-center gap-0.5 mt-0.5 text-[11px] text-muted-foreground">
                   {pathParts.map((p, i) => (
                     <span key={i} className="flex items-center">
-                      <span
-                        className={
-                          i === pathParts.length - 1
-                            ? "font-medium text-gray-700"
-                            : ""
-                        }
-                      >
+                      <span className={i === pathParts.length - 1 ? "font-medium text-foreground" : ""}>
                         {p}
                       </span>
                       {i < pathParts.length - 1 && (
-                        <ChevronRight className="w-3 h-3 mx-1" />
+                        <ChevronRight className="w-3 h-3 mx-0.5" />
                       )}
                     </span>
                   ))}
                 </div>
               )}
               {subform.description && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  {subform.description}
-                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{subform.description}</p>
               )}
             </div>
           </div>
@@ -321,9 +302,9 @@ function SubformBlock({
               size="sm"
               onClick={() => addSubformRow(subform.id)}
               disabled={submitting || submitted || effectiveViewOnly}
-              className="ml-2 whitespace-nowrap"
+              className="ml-2 h-7 text-xs whitespace-nowrap shrink-0"
             >
-              <span className="mr-1">+</span> Add Row
+              + Add Row
             </Button>
           )}
         </div>
@@ -331,7 +312,7 @@ function SubformBlock({
 
       {/* Body */}
       {!isCollapsed && (
-        <div className="p-5 space-y-6">
+        <div className="p-4 space-y-4">
           {/* Child subforms + fields interleaved */}
           {hasChildSubforms ? (
             allItems.length > 0 ? (
@@ -349,7 +330,7 @@ function SubformBlock({
                     )}
                   </FieldWrapper>
                 ) : (
-                  <div key={item.id} className="ml-4 mt-4">
+                  <div key={item.id} className="mt-3">
                     <SubformBlock
                       subform={item.item as Subform}
                       level={level + 1}
@@ -371,18 +352,18 @@ function SubformBlock({
               <div
                 className={
                   hasChildSubforms
-                    ? "mt-6 pt-6 border-t-2 border-dashed border-gray-300 space-y-4"
-                    : "space-y-4"
+                    ? "mt-4 pt-4 border-t border-dashed space-y-3"
+                    : "space-y-3"
                 }
               >
                 {hasChildSubforms && (
-                  <p className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                    <span className="text-blue-600">Additional Rows</span>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Additional Rows
                   </p>
                 )}
-                <div className="overflow-x-auto custom-scrollbar w-full">
+                <div className="overflow-x-auto custom-scrollbar w-full rounded-md border">
                   {/* Header */}
-                  <div className="flex min-w-max border-b border-slate-200">
+                  <div className="flex min-w-max border-b bg-muted/50">
                     {visibleFields
                       .filter((field) => {
                         if (field.type === "formula") {
@@ -394,26 +375,26 @@ function SubformBlock({
                       .map((field) => (
                         <div
                           key={field.id}
-                          className={`p-4 border-r border-slate-200 flex flex-col justify-between ${
+                          className={`px-3 py-2 border-r border-border/60 flex flex-col justify-between ${
                             field.type === "hidden"
-                              ? "hidden p-0 min-w joseph-0"
-                              : "min-w-[280px] bg-[#f8f9fb]"
+                              ? "hidden p-0 min-w-0"
+                              : "min-w-[260px]"
                           }`}
                         >
-                          <span className="font-medium text-[#374151] text-[15px] truncate">
-                            {field.label}{" "}
+                          <span className="font-medium text-foreground text-xs truncate">
+                            {field.label}
                             {field.validation?.required && (
-                              <span className="text-red-500">*</span>
+                              <span className="text-red-500 ml-0.5">*</span>
                             )}
                           </span>
-                          <div className="text-[#a1b0cb] text-[13px]">
+                          <span className="text-[11px] text-muted-foreground mt-0.5">
                             {getFieldTypeLabel(field.type)}
-                          </div>
+                          </span>
                         </div>
                       ))}
                     {removeSubformRow && (
-                      <div className="min-w-[140px] border-l border-slate-200 bg-[#f8f9fb] p-4">
-                        <span className="font-medium text-[#374151] text-[15px]">
+                      <div className="min-w-[100px] border-l border-border/60 bg-muted/50 px-3 py-2">
+                        <span className="font-medium text-foreground text-xs">
                           Actions
                         </span>
                       </div>
@@ -429,9 +410,9 @@ function SubformBlock({
                           key={isOriginal ? "original" : instanceId}
                           className={`flex min-w-max ${
                             isOriginal && !hasChildSubforms
-                              ? "bg-white"
-                              : "bg-blue-50/40"
-                          } border-b border-slate-200`}
+                              ? "bg-background"
+                              : "bg-muted/20"
+                          } border-b border-border/40 last:border-b-0`}
                         >
                           {visibleFields.map((field) => {
                             const fieldKey = isOriginal
@@ -440,22 +421,22 @@ function SubformBlock({
                             return (
                               <div
                                 key={field.id}
-                                className={`p-4 border-r border-slate-200 ${
+                                className={`px-3 py-2.5 border-r border-border/40 ${
                                   field.type === "hidden"
                                     ? "hidden p-0 min-w-0"
-                                    : "min-w-[280px]"
+                                    : "min-w-[260px]"
                                 }`}
                               >
                                 {field.description &&
                                   field.type !== "hidden" && (
-                                    <p className="text-xs text-muted-foreground mb-2">
+                                    <p className="text-[11px] text-muted-foreground mb-1.5">
                                       {field.description}
                                     </p>
                                   )}
                                 {renderFieldItem(field, fieldKey, effectiveViewOnly)}
                                 {errors[fieldKey] && (
-                                  <p className="text-sm text-red-500 mt-2 flex items-center gap-1">
-                                    <AlertCircle className="h-3 w-3" />
+                                  <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3 shrink-0" />
                                     {errors[fieldKey]}
                                   </p>
                                 )}
@@ -463,7 +444,7 @@ function SubformBlock({
                             );
                           })}
                           {removeSubformRow && (
-                            <div className="min-w-[140px] p-4 border-r border-slate-200 flex items-center">
+                            <div className="min-w-[100px] px-3 py-2.5 border-r border-border/40 flex items-center">
                               {(hasChildSubforms || rowIndex > 0) && (
                                 <Button
                                   type="button"
@@ -486,8 +467,8 @@ function SubformBlock({
                       );
                     })
                   ) : (
-                    <div className="flex min-w-max h-12 bg-white text-center justify-center items-center">
-                      <div className="w-full text-gray-600">No rows yet</div>
+                    <div className="flex min-w-max h-10 bg-background text-center justify-center items-center">
+                      <span className="text-xs text-muted-foreground">No rows yet</span>
                     </div>
                   )}
                 </div>
@@ -569,11 +550,11 @@ function EmptySubform({
   colorScheme: (typeof NESTING_COLORS)[number];
 }) {
   return (
-    <div className="border-2 border-dashed rounded-lg p-8 text-center border-gray-300 bg-gray-50/50">
+    <div className="border border-dashed rounded-md py-6 text-center">
       <Layers
-        className={`w-8 h-8 mx-auto mb-3 ${colorScheme.accent} opacity-70`}
+        className={`w-5 h-5 mx-auto mb-2 ${colorScheme.accent} opacity-60`}
       />
-      <p className="text-sm text-gray-600">
+      <p className="text-xs text-muted-foreground">
         No fields or nested subforms yet
       </p>
     </div>
@@ -610,7 +591,7 @@ export function FormBody(props: FormBodyProps) {
   }
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-6">
       {rootItems.map((item, index) => {
         if (item.type === "section") {
           const section = item.data;
@@ -621,18 +602,18 @@ export function FormBody(props: FormBodyProps) {
           return (
             <div
               key={section.id}
-              className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden"
+              className="rounded-lg border bg-card text-card-foreground overflow-hidden"
             >
               {/* Section header */}
-              <div className="bg-muted/50 px-6 py-4 border-b">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold">
+              <div className="bg-muted/40 px-5 py-3 border-b">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-[11px] font-semibold shrink-0">
                     {index + 1}
                   </div>
-                  <div>
-                    <h3 className="text-xl font-semibold">{section.title}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold leading-tight truncate">{section.title}</h3>
                     {section.description && (
-                      <p className="text-sm text-muted-foreground mt-1">
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-normal">
                         {section.description}
                       </p>
                     )}
@@ -641,9 +622,9 @@ export function FormBody(props: FormBodyProps) {
               </div>
 
               {/* Section fields */}
-              <div className="p-6">
+              <div className="p-5">
                 <div
-                  className="grid gap-x-6 gap-y-5 items-start"
+                  className="grid gap-x-5 gap-y-4 items-start"
                   style={{
                     gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
                   }}
@@ -698,7 +679,7 @@ export function FormBody(props: FormBodyProps) {
                       (it as any).parentSectionId === section.id,
                   )
                   .map((it) => (
-                    <div key={it.data.id} className="mt-10">
+                    <div key={it.data.id} className="mt-5">
                       <SubformBlock
                         subform={it.data as Subform}
                         level={1}
@@ -715,7 +696,7 @@ export function FormBody(props: FormBodyProps) {
         // Top-level subform (no parent section)
         if (item.type === "subform" && !(item as any).parentSectionId) {
           return (
-            <div key={item.data.id} className="mt-8">
+            <div key={item.data.id} className="mt-5">
               <SubformBlock
                 subform={item.data as Subform}
                 level={0}
