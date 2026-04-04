@@ -1741,6 +1741,48 @@ export function PublicFormDialog({
           });
         }
       }
+
+      // Auto-fill dependent lookup fields based on autoFillValue mappings
+      if (form) {
+        const allFields: FormField[] = [];
+        form.sections.forEach((section) => {
+          allFields.push(...section.fields);
+        });
+        const getAllSubformFields = (subforms: Subform[]): FormField[] => {
+          let fields: FormField[] = [];
+          subforms.forEach((subform) => {
+            fields = [...fields, ...subform.fields];
+            if (subform.childSubforms?.length) {
+              fields = [...fields, ...getAllSubformFields(subform.childSubforms)];
+            }
+          });
+          return fields;
+        };
+        allFields.push(...getAllSubformFields(form.subforms || []));
+
+        const changedField = allFields.find((f) => f.id === fieldId);
+        if (changedField) {
+          // Find all lookup fields that have a dependency pointing to this field
+          allFields.forEach((f) => {
+            if (
+              f.id !== fieldId &&
+              f.type === "lookup" &&
+              f.lookup?.dependency?.parentFieldLabel === changedField.label
+            ) {
+              const depMappings = f.lookup.dependency.valueMappings;
+              if (depMappings && Array.isArray(depMappings)) {
+                const mapping = depMappings.find(
+                  (m: any) => m.parentValue === String(storeValue)
+                );
+                if (mapping?.autoFillValue) {
+                  newData[f.id] = mapping.autoFillValue;
+                }
+              }
+            }
+          });
+        }
+      }
+
       return newData;
     });
     setErrors((prev) => {

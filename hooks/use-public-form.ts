@@ -1402,6 +1402,35 @@ export function usePublicForm({
           });
         }
       }
+
+      // Auto-fill dependent lookup fields based on autoFillValue mappings
+      if (form) {
+        const allLookupFields: FormField[] = [
+          ...form.sections.flatMap((s) => s.fields),
+          ...getAllSubformFields(form.subforms || []),
+        ];
+        const changedField = allLookupFields.find((f) => f.id === fieldId);
+        if (changedField) {
+          allLookupFields.forEach((f) => {
+            if (
+              f.id !== fieldId &&
+              f.type === "lookup" &&
+              (f.lookup as any)?.dependency?.parentFieldLabel === changedField.label
+            ) {
+              const depMappings = (f.lookup as any).dependency.valueMappings;
+              if (depMappings && Array.isArray(depMappings)) {
+                const mapping = depMappings.find(
+                  (m: any) => m.parentValue === String(storeValue)
+                );
+                if (mapping?.autoFillValue) {
+                  newData[f.id] = mapping.autoFillValue;
+                }
+              }
+            }
+          });
+        }
+      }
+
       return newData;
     });
     setErrors((prev) => {

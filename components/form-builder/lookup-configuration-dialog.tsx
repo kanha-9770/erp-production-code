@@ -80,6 +80,7 @@ interface SourceField {
 interface ValueMapping {
   parentValue: string;
   allowedChildValues: string[];
+  autoFillValue?: string;
 }
 
 interface FieldDependency {
@@ -565,9 +566,9 @@ export default function LookupConfigurationDialog({
     const display = config.fieldMapping?.display || "name";
     const value = config.fieldMapping?.value || "id";
     const hit = fields.find(f => f.name === store)
-             || fields.find(f => f.name === display)
-             || fields.find(f => f.label === config.label)
-             || fields.find(f => f.name === config.label);
+      || fields.find(f => f.name === display)
+      || fields.find(f => f.label === config.label)
+      || fields.find(f => f.name === config.label);
 
     const selectedField = {
       fieldName: hit?.name || store || display,
@@ -589,7 +590,7 @@ export default function LookupConfigurationDialog({
       const parentLabel = config.dependency.parentFieldLabel;
       // Find the parent field in loaded sourceFields
       const parentHit = fields.find(f => f.label === parentLabel)
-                     || fields.find(f => f.name === parentLabel);
+        || fields.find(f => f.name === parentLabel);
 
       if (parentHit) {
         // Add the parent field to selectedFields so dependency UI appears (needs 2+ fields)
@@ -708,9 +709,9 @@ export default function LookupConfigurationDialog({
         const dep = dependencies.find((d) => d.childFieldName === field.fieldName);
         const dependencyConfig = dep
           ? {
-              parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
-              valueMappings: dep.valueMappings,
-            }
+            parentFieldLabel: selectedFields.find((f) => f.fieldName === dep.parentFieldName)?.label || dep.parentFieldName,
+            valueMappings: dep.valueMappings,
+          }
           : undefined;
 
         // Mark child fields as dependent so the builder can link them after creation
@@ -1201,15 +1202,12 @@ export default function LookupConfigurationDialog({
                     const childField = selectedFields.find((f) => f.fieldName === dep.childFieldName);
                     const parentValues = masterDataValues[dep.parentFieldName] || [];
                     const childValues = masterDataValues[dep.childFieldName] || [];
-                    const assignedChildValues = new Set<string>();
-                    dep.valueMappings.forEach((m) => m.allowedChildValues.forEach((v) => assignedChildValues.add(v)));
-
                     return (
                       <div key={depIdx} className="border rounded-xl p-4 space-y-3 bg-amber-50/50">
                         <div className="flex items-center gap-2 text-xs font-medium">
                           <span className="text-muted-foreground">When</span>
                           <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">{parentField?.label}</Badge>
-                          <span className="text-muted-foreground">changes, filter</span>
+                          <span className="text-muted-foreground">changes, filter & auto-fill</span>
                           <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">{childField?.label}</Badge>
                         </div>
 
@@ -1224,12 +1222,14 @@ export default function LookupConfigurationDialog({
                                 <TableRow>
                                   <TableHead className="w-[180px] text-xs">When {parentField?.label} =</TableHead>
                                   <TableHead className="text-xs">Show these {childField?.label}</TableHead>
+                                  <TableHead className="w-[180px] text-xs">Auto Fill Value</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
                                 {parentValues.map((pVal) => {
                                   const mapping = dep.valueMappings.find((m) => m.parentValue === pVal);
                                   const currentAllowed = mapping?.allowedChildValues || [];
+                                  const currentAutoFill = mapping?.autoFillValue || "";
                                   return (
                                     <TableRow key={pVal}>
                                       <TableCell className="font-medium text-xs align-top py-2">{pVal}</TableCell>
@@ -1237,15 +1237,13 @@ export default function LookupConfigurationDialog({
                                         <div className="flex flex-wrap gap-1.5">
                                           {childValues.map((cVal) => {
                                             const isChecked = currentAllowed.includes(cVal);
-                                            const isAssignedElsewhere = !isChecked && assignedChildValues.has(cVal);
                                             return (
                                               <label key={cVal} className={cn(
                                                 "flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] cursor-pointer transition-colors",
                                                 isChecked ? "bg-primary/10 border-primary text-primary font-medium"
-                                                  : isAssignedElsewhere ? "opacity-40 cursor-not-allowed"
-                                                    : "hover:bg-muted/30"
+                                                  : "hover:bg-muted/30"
                                               )}>
-                                                <Checkbox checked={isChecked} disabled={isAssignedElsewhere} className="h-3 w-3"
+                                                <Checkbox checked={isChecked} className="h-3 w-3"
                                                   onCheckedChange={(checked) => {
                                                     setDependencies((prev) => prev.map((d, i) => {
                                                       if (i !== depIdx) return d;
@@ -1256,7 +1254,13 @@ export default function LookupConfigurationDialog({
                                                           ? d.valueMappings.map((m) => m.parentValue === pVal ? { ...m, allowedChildValues: [...m.allowedChildValues, cVal] } : m)
                                                           : [...d.valueMappings, { parentValue: pVal, allowedChildValues: [cVal] }];
                                                       } else {
-                                                        newMappings = d.valueMappings.map((m) => m.parentValue === pVal ? { ...m, allowedChildValues: m.allowedChildValues.filter((v) => v !== cVal) } : m).filter((m) => m.allowedChildValues.length > 0);
+                                                        newMappings = d.valueMappings.map((m) => {
+                                                          if (m.parentValue !== pVal) return m;
+                                                          const newAllowed = m.allowedChildValues.filter((v) => v !== cVal);
+                                                          // Clear autoFillValue if it was the removed child value
+                                                          const newAutoFill = m.autoFillValue === cVal ? undefined : m.autoFillValue;
+                                                          return { ...m, allowedChildValues: newAllowed, autoFillValue: newAutoFill };
+                                                        }).filter((m) => m.allowedChildValues.length > 0);
                                                       }
                                                       return { ...d, valueMappings: newMappings };
                                                     }));
@@ -1267,6 +1271,38 @@ export default function LookupConfigurationDialog({
                                             );
                                           })}
                                         </div>
+                                      </TableCell>
+                                      <TableCell className="align-top py-2">
+                                        {currentAllowed.length > 0 ? (
+                                          <Select
+                                            value={currentAutoFill || "__none__"}
+                                            onValueChange={(v) => {
+                                              setDependencies((prev) => prev.map((d, i) => {
+                                                if (i !== depIdx) return d;
+                                                return {
+                                                  ...d,
+                                                  valueMappings: d.valueMappings.map((m) =>
+                                                    m.parentValue === pVal
+                                                      ? { ...m, autoFillValue: v === "__none__" ? undefined : v }
+                                                      : m
+                                                  ),
+                                                };
+                                              }));
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-7 text-[11px]">
+                                              <SelectValue placeholder="No auto-fill" />
+                                            </SelectTrigger>
+                                            <SelectContent position="popper" className="z-[100]">
+                                              <SelectItem value="__none__">No auto-fill</SelectItem>
+                                              {currentAllowed.map((cVal) => (
+                                                <SelectItem key={cVal} value={cVal}>{cVal}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        ) : (
+                                          <span className="text-[11px] text-muted-foreground">Select values first</span>
+                                        )}
                                       </TableCell>
                                     </TableRow>
                                   );

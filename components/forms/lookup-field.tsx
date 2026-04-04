@@ -25,6 +25,7 @@ interface LookupDependencyConfig {
   valueMappings: {
     parentValue: string;
     allowedChildValues: string[];
+    autoFillValue?: string;
   }[];
 }
 
@@ -151,6 +152,11 @@ export function LookupField({
           if (existingOption) {
             return existingOption;
           }
+          // Also try case-insensitive match
+          const ciMatch = options.find(
+            (opt) => String(opt.storeValue).toLowerCase() === String(val).toLowerCase()
+          );
+          if (ciMatch) return ciMatch;
           return {
             id: `custom-${String(val)}`,
             label: String(val),
@@ -165,18 +171,37 @@ export function LookupField({
         const existingOption = options.find((opt) => opt.storeValue === value);
         if (existingOption) {
           setSelectedOptions([existingOption]);
-        } else if (allowCustomValues) {
-          const customOption = {
-            id: `custom-${String(value)}`,
-            label: String(value),
-            value: String(value),
-            storeValue: value,
-            isCustom: true,
-            type: "text",
-          };
-          setSelectedOptions([customOption]);
+        } else {
+          // Try case-insensitive match
+          const ciMatch = options.find(
+            (opt) => String(opt.storeValue).toLowerCase() === String(value).toLowerCase()
+          );
+          if (ciMatch) {
+            setSelectedOptions([ciMatch]);
+          } else {
+            // Always show the saved value even if allowCustomValues is false
+            const fallbackOption = {
+              id: `custom-${String(value)}`,
+              label: String(value),
+              value: String(value),
+              storeValue: value,
+              isCustom: true,
+              type: "text",
+            };
+            setSelectedOptions([fallbackOption]);
+          }
         }
       }
+    } else if (value && options.length === 0 && !allowCustomValues) {
+      // Options not loaded yet but we have a saved value — show it as-is
+      setSelectedOptions([{
+        id: `custom-${String(value)}`,
+        label: String(value),
+        value: String(value),
+        storeValue: value,
+        isCustom: true,
+        type: "text",
+      }]);
     } else if (!value) {
       setSelectedOptions([]);
     }
@@ -241,54 +266,69 @@ export function LookupField({
               description: null,
             };
 
+            // Helper: find field data object from a record item by key name
+            const findFieldData = (key: string) => {
+              if (!key) return null;
+              // 1) Exact key match
+              if (item[key] && typeof item[key] === "object" && item[key]?.field_value !== undefined) return item[key];
+              // 2) Case-insensitive key match
+              const keyLower = key.toLowerCase();
+              const caseKey = Object.keys(item).find(
+                (k) => k.toLowerCase() === keyLower && typeof item[k] === "object" && item[k]?.field_value !== undefined
+              );
+              if (caseKey) return item[caseKey];
+              // 3) Search by field_label (exact)
+              const byLabel = Object.values(item).find(
+                (val: any) => val?.field_label === key
+              );
+              if (byLabel) return byLabel;
+              // 4) Search by field_label (case-insensitive)
+              const byLabelCI = Object.values(item).find(
+                (val: any) => typeof val?.field_label === "string" && val.field_label.toLowerCase() === keyLower
+              );
+              if (byLabelCI) return byLabelCI;
+              // 5) Search by field_id
+              const byId = Object.values(item).find(
+                (val: any) => val?.field_id === key
+              );
+              if (byId) return byId;
+              return null;
+            };
+
             const fieldData =
+              findFieldData(mapping.display) ||
               item[mapping.display] ||
-              Object.values(item).find(
-                (val: any) => val?.field_label === mapping.display
-              ) ||
-              Object.values(item).find(
-                (val: any) => val?.field_id === mapping.display
-              ) ||
               item["New Text"] ||
               {};
 
             const storeData =
+              findFieldData(mapping.store) ||
               item[mapping.store] ||
-              Object.values(item).find(
-                (val: any) => val?.field_label === mapping.store
-              ) ||
-              Object.values(item).find(
-                (val: any) => val?.field_id === mapping.store
-              ) ||
               fieldData;
 
             let fieldValue =
-              fieldData.field_value ?? item[mapping.display] ?? "Unknown";
+              fieldData.field_value ?? (typeof item[mapping.display] === "string" ? item[mapping.display] : undefined);
             let storeValue = storeData.field_value ?? fieldValue;
 
-            if (fieldValue === undefined) {
-              console.log(
-                `Undefined field_value for display: ${mapping.display}`,
-                { item, fieldData }
-              );
-              fieldValue = `Item ${item.record_id}`;
+            // Fallback: try to find any meaningful value from the record
+            if (fieldValue === undefined || fieldValue === null) {
+              const firstField = Object.values(item).find(
+                (val: any) => val && typeof val === "object" && val.field_value !== undefined && val.field_value !== null && String(val.field_value).trim() !== ""
+              ) as any;
+              if (firstField) {
+                fieldValue = firstField.field_value;
+                if (storeValue === undefined || storeValue === null) {
+                  storeValue = fieldValue;
+                }
+              } else {
+                fieldValue = `Item ${item.record_id || "unknown"}`;
+                if (storeValue === undefined || storeValue === null) {
+                  storeValue = fieldValue;
+                }
+              }
             }
 
-            if (storeValue === undefined) {
-              console.log(`Undefined storeValue for store: ${mapping.store}`, {
-                item,
-                storeData,
-              });
-              storeValue = fieldValue;
-            }
-
-            let displayLabel = fieldValue;
-            if (displayLabel === "Unknown") {
-              // Fallback to meaningful label if no value found
-              displayLabel = item._formName
-                ? `${item._formName} (${new Date(item.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })})`
-                : `Record ${item.record_id.slice(0, 8)}`;
-            }
+            let displayLabel = String(fieldValue);
 
             const fieldType = fieldData.field_type || "text";
             const storeType = storeData.field_type || fieldType;
@@ -431,7 +471,7 @@ export function LookupField({
       return `${selectedOptions.length} selected`;
     }
 
-    return selectedOptions[0].storeValue;
+    return selectedOptions[0].label || selectedOptions[0].storeValue;
   };
 
   // Use dependency-filtered options for display
