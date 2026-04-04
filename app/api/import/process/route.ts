@@ -337,6 +337,7 @@ export async function POST(request: NextRequest) {
           updatedAt: now,
         };
 
+        // form_records_14 has organizationId column — set it directly
         if (targetTable === "form_records_14" && organizationId) {
           insertData.organizationId = organizationId;
         }
@@ -358,13 +359,14 @@ export async function POST(request: NextRequest) {
 
     // === 11b. Dual-write to unified FormRecord table (non-blocking) ===
     // This keeps the unified table in sync for forms that use it.
+    // Always set organizationId here — the unified table supports it regardless of sharded table.
     if (insertBatch.length > 0) {
       try {
         const unifiedRecords = insertBatch.map((rec) => ({
           id: rec.id,
           formId: rec.formId,
           recordData: rec.recordData,
-          organizationId: rec.organizationId || null,
+          organizationId: organizationId || null,
           submittedBy: rec.submittedBy,
           submittedAt: rec.submittedAt,
           status: rec.status,

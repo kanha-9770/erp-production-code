@@ -154,12 +154,18 @@ export async function GET(
     form.subforms?.forEach((sf: any) => buildSubformLookups(sf));
 
     // ────────────────────────────────────────────────
-    // 5. Build WHERE clause — org-scoped + optional filters
+    // 5. Build WHERE clause — org-scoped where possible
     // ────────────────────────────────────────────────
     const whereClause: any = { formId: form.id };
 
-    // Always scope to user's organization when available
-    if (userOrgId) {
+    // Only add organizationId filter for tables that actually have the column:
+    // - form_records_14 (employee forms) has organizationId
+    // - The unified form_records table has organizationId
+    // - Tables 1-13, 15 do NOT have organizationId
+    const storageTable = (form.tableMapping as any)?.storageTable || "";
+    const tableSupportsOrg = storageTable === "form_records_14";
+
+    if (userOrgId && tableSupportsOrg) {
       whereClause.organizationId = userOrgId;
     }
 
