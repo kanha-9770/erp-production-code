@@ -1,18 +1,17 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import {
   Upload,
   X,
-  CheckCircle,
   Play,
   FileIcon,
   Loader2,
   ImageIcon,
   VideoIcon,
+  Paperclip,
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -80,6 +79,11 @@ export function FileUploadZone({
     return "file";
   };
 
+  const getFileName = (url: string) => {
+    const name = url.split("/").pop()?.split("?")[0] || "file";
+    return name.length > 25 ? name.substring(0, 22) + "..." : name;
+  };
+
   const uploadFile = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const formData = new FormData();
@@ -123,7 +127,7 @@ export function FileUploadZone({
 
   const handleFiles = async (files: FileList | File[]) => {
     const validFiles: File[] = [];
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const fileSizeMB = file.size / (1024 * 1024);
@@ -168,20 +172,19 @@ export function FileUploadZone({
 
     try {
       for (let i = 0; i < validFiles.length; i++) {
-        // Update progress context if multiple
         const url = await uploadFile(validFiles[i]);
         uploadedUrls.push(url);
-        
+
         if (!allowMultiple) {
           onUploadComplete(url);
-          break; // Only one if not multiple
+          break;
         }
       }
 
       if (allowMultiple && uploadedUrls.length > 0) {
         onUploadComplete([...currentList, ...uploadedUrls]);
       }
-      
+
       toast({
         title: "Success",
         description: `${uploadedUrls.length} file(s) uploaded successfully!`,
@@ -227,205 +230,194 @@ export function FileUploadZone({
 
   const removeFile = (urlToRemove: string) => {
     if (Array.isArray(currentValue)) {
-      onUploadComplete(currentValue.filter(url => url !== urlToRemove));
+      onUploadComplete(currentValue.filter((url) => url !== urlToRemove));
     } else {
       onClear?.();
     }
   };
 
-  const renderSinglePreview = (url: string, index: number) => {
-    const fileType = getFileTypeFromUrl(url);
-    const isImage = fileType === "image" || fieldType === "image";
-    const isVideo = fileType === "video" || fieldType === "video";
+  const urls = Array.isArray(currentValue)
+    ? currentValue
+    : currentValue
+      ? [currentValue]
+      : [];
+  const hasFiles = urls.length > 0;
 
-    return (
-      <div key={`${url}-${index}`} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col items-center justify-center min-h-[150px]">
-        {/* Clickable preview area */}
-        <div
-          className="cursor-pointer w-full h-full flex items-center justify-center"
-          onClick={() => {
-            setSelectedPreviewUrl(url);
-            setIsPreviewOpen(true);
-          }}
-        >
-          {isImage ? (
-            <img
-              src={url}
-              alt={`Preview ${index}`}
-              className="w-full h-full object-cover aspect-square hover:scale-105 transition-transform duration-300"
-            />
-          ) : isVideo ? (
-            <div className="relative w-full h-full aspect-square bg-black">
-              <video
-                src={url}
-                className="w-full h-full object-cover"
-                muted
-              />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/50 transition-colors">
-                <Play className="h-10 w-10 text-white opacity-80" />
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 flex flex-col items-center justify-center w-full h-full">
-              <FileIcon className="h-10 w-10 text-blue-500 mb-2" />
-              <p className="text-[10px] text-gray-500 font-medium text-center break-all line-clamp-2 px-2">
-                {url.split("/").pop() || "File"}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Action Overlay */}
-        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              removeFile(url);
-            }}
-            disabled={disabled}
-            className="bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-full shadow-md transition-colors"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* Success indicator */}
-        <div className="absolute top-1 left-1 bg-green-500 text-white p-1 rounded-full shadow-sm z-10 pointer-events-none">
-          <CheckCircle className="h-3 w-3" />
-        </div>
-      </div>
-    );
+  const fieldTypeIcon = () => {
+    switch (fieldType) {
+      case "image":
+        return <ImageIcon className="h-4 w-4 text-muted-foreground shrink-0" />;
+      case "video":
+        return <VideoIcon className="h-4 w-4 text-muted-foreground shrink-0" />;
+      default:
+        return <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />;
+    }
   };
 
-  const renderPreviews = () => {
-    if (!currentValue) return null;
-    
-    const urls = Array.isArray(currentValue) ? currentValue : [currentValue];
-    if (urls.length === 0) return null;
-
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-4">
-        {urls.map((url, idx) => renderSinglePreview(url, idx))}
-        
-        {allowMultiple && !disabled && !isUploading && (
-          <div 
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center aspect-square cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
-          >
-            <Plus className="h-8 w-8 text-gray-400 group-hover:text-blue-500 mb-1" />
-            <span className="text-xs text-gray-500 group-hover:text-blue-600">Add More</span>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderUploadZone = () => {
-    if (isUploading) {
-      return (
-        <div className="space-y-4 py-8 bg-gray-50 rounded-xl border-2 border-dashed border-blue-200">
-          <div className="flex items-center justify-center">
-            <Loader2 className="h-10 w-10 text-blue-500 animate-spin" />
-          </div>
-          <p className="text-sm text-gray-700 text-center font-medium">
-            Uploading files...
-          </p>
-          <div className="max-w-xs mx-auto space-y-2">
-            <Progress value={uploadProgress} className="h-2" />
-            <p className="text-[10px] text-gray-500 text-center">
-              Current file: {uploadProgress.toFixed(0)}%
-            </p>
-          </div>
-        </div>
-      );
+  const placeholderText = () => {
+    if (isUploading) return "Uploading...";
+    if (!hasFiles) {
+      switch (fieldType) {
+        case "image":
+          return allowMultiple ? "Choose images..." : "Choose an image...";
+        case "video":
+          return "Choose a video...";
+        case "signature":
+          return "Upload signature...";
+        default:
+          return allowMultiple ? "Choose files..." : "Choose a file...";
+      }
     }
-
-    // If not multiple and has value, don't show zone (preview handles it)
-    if (!allowMultiple && currentValue) return null;
-
-    // If multiple and has values, show smaller upload zone or just the "Add More" in grid
-    // For now, if we have values, the "Add More" box in the grid is enough, but a small drop zone might be nice.
-    const hasValues = Array.isArray(currentValue) ? currentValue.length > 0 : !!currentValue;
-    
-    if (hasValues && allowMultiple) {
-      return (
-         <div
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={cn(
-            "border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer mt-4",
-            isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/20",
-            disabled && "opacity-50 cursor-not-allowed pointer-events-none"
-          )}
-        >
-          <p className="text-sm text-gray-500">
-            <span className="font-medium text-blue-600">Drop more files</span> or click to upload
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={cn(
-          "border-2 border-dashed rounded-xl p-10 text-center transition-all duration-300 cursor-pointer",
-          isDragging
-            ? "border-blue-500 bg-blue-50 scale-[1.01] shadow-md"
-            : "border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50/40",
-          disabled && "opacity-50 cursor-not-allowed pointer-events-none"
-        )}
-      >
-        <div className="flex justify-center mb-4">
-          {fieldType === "image" && <ImageIcon className="h-10 w-10 text-blue-500" />}
-          {fieldType === "video" && <VideoIcon className="h-10 w-10 text-blue-500" />}
-          {(fieldType === "file" || fieldType === "signature") && (
-            <Upload className="h-10 w-10 text-blue-500" />
-          )}
-        </div>
-
-        <p className="font-bold text-gray-900 text-lg mb-1">
-          {allowMultiple ? "Upload many photos" : "Upload a photo"}
-        </p>
-        <p className="text-sm text-gray-500 mb-6">
-          Drag and drop here or click to browse
-        </p>
-
-        <Button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            fileInputRef.current?.click();
-          }}
-          disabled={disabled || isUploading}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-8 h-12"
-        >
-          <Upload className="h-5 w-5 mr-2" />
-          Select {allowMultiple ? "Files" : (fieldType === "image" ? "Image" : fieldType === "video" ? "Video" : "File")}
-        </Button>
-
-        <p className="text-[11px] text-gray-400 mt-4 uppercase tracking-wider font-semibold">
-          Max size: {maxSize}MB • Supported: {getAcceptTypes()}
-        </p>
-      </div>
-    );
+    const count = urls.length;
+    return `${count} file${count > 1 ? "s" : ""} selected`;
   };
 
   return (
     <>
-      <div className="w-full">
-        {renderPreviews()}
-        {renderUploadZone()}
+      <div className="w-full space-y-2">
+        {/* Single-line input bar — matches Input component style */}
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className={cn(
+            "flex h-8 w-full items-center rounded-md border bg-background text-sm transition-colors",
+            isDragging
+              ? "border-primary ring-2 ring-primary/20"
+              : "border-input",
+            disabled && "opacity-50 cursor-not-allowed",
+            !disabled && "hover:border-muted-foreground/40"
+          )}
+        >
+          {/* Left icon */}
+          <div className="flex items-center pl-3">
+            {isUploading ? (
+              <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+            ) : (
+              fieldTypeIcon()
+            )}
+          </div>
 
-        {/* Single hidden file input — shared by all click/drop triggers */}
+          {/* Text area — clickable */}
+          <button
+            type="button"
+            onClick={() => !disabled && !isUploading && fileInputRef.current?.click()}
+            disabled={disabled || isUploading}
+            className={cn(
+              "flex-1 h-full px-2 text-left truncate bg-transparent outline-none",
+              hasFiles ? "text-foreground" : "text-muted-foreground",
+              disabled ? "cursor-not-allowed" : "cursor-pointer"
+            )}
+          >
+            {placeholderText()}
+          </button>
+
+          {/* Upload progress inline */}
+          {isUploading && (
+            <div className="flex items-center gap-2 pr-2 shrink-0">
+              <Progress value={uploadProgress} className="h-1 w-16" />
+              <span className="text-[10px] text-muted-foreground tabular-nums w-7 text-right">
+                {uploadProgress.toFixed(0)}%
+              </span>
+            </div>
+          )}
+
+          {/* Right action buttons */}
+          {!isUploading && (
+            <div className="flex items-center shrink-0 border-l border-input">
+              {hasFiles && allowMultiple && !disabled && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-primary transition-colors"
+                  title="Add more files"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => !disabled && fileInputRef.current?.click()}
+                disabled={disabled}
+                className={cn(
+                  "flex items-center justify-center h-full px-2.5 text-muted-foreground transition-colors rounded-r-md",
+                  disabled ? "cursor-not-allowed" : "hover:text-primary hover:bg-muted/50"
+                )}
+                title="Browse files"
+              >
+                <Upload className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Compact preview strip — only when files exist */}
+        {hasFiles && (
+          <div className="flex flex-wrap gap-1.5">
+            {urls.map((url, idx) => {
+              const fileType = getFileTypeFromUrl(url);
+              const isImage = fileType === "image" || fieldType === "image";
+              const isVideo = fileType === "video" || fieldType === "video";
+
+              return (
+                <div
+                  key={`${url}-${idx}`}
+                  className="group relative inline-flex items-center gap-1.5 h-7 pl-1 pr-1.5 rounded-md border bg-muted/40 text-xs max-w-[180px] hover:bg-muted/60 transition-colors"
+                >
+                  {/* Thumbnail or icon */}
+                  {isImage ? (
+                    <img
+                      src={url}
+                      alt={`File ${idx + 1}`}
+                      className="h-5 w-5 rounded object-cover shrink-0 cursor-pointer"
+                      onClick={() => {
+                        setSelectedPreviewUrl(url);
+                        setIsPreviewOpen(true);
+                      }}
+                    />
+                  ) : isVideo ? (
+                    <div
+                      className="relative h-5 w-5 rounded bg-black shrink-0 cursor-pointer flex items-center justify-center"
+                      onClick={() => {
+                        setSelectedPreviewUrl(url);
+                        setIsPreviewOpen(true);
+                      }}
+                    >
+                      <Play className="h-2.5 w-2.5 text-white" />
+                    </div>
+                  ) : (
+                    <FileIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  )}
+
+                  {/* File name */}
+                  <span
+                    className="truncate text-muted-foreground cursor-pointer"
+                    onClick={() => {
+                      setSelectedPreviewUrl(url);
+                      setIsPreviewOpen(true);
+                    }}
+                  >
+                    {getFileName(url)}
+                  </span>
+
+                  {/* Remove */}
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={() => removeFile(url)}
+                      className="shrink-0 text-muted-foreground/60 hover:text-destructive transition-colors ml-auto"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Hidden file input */}
         <input
           ref={fileInputRef}
           type="file"
@@ -437,10 +429,10 @@ export function FileUploadZone({
         />
       </div>
 
-      {/* Lightbox / Popup */}
+      {/* Lightbox */}
       {isPreviewOpen && selectedPreviewUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setIsPreviewOpen(false)}
         >
           <div
@@ -449,43 +441,39 @@ export function FileUploadZone({
           >
             <button
               onClick={() => setIsPreviewOpen(false)}
-              className="absolute -top-12 right-0 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-all"
+              className="absolute -top-10 right-0 bg-white/10 hover:bg-white/20 text-white rounded-full p-1.5 transition-colors"
               aria-label="Close"
             >
-              <X className="h-6 w-6" />
+              <X className="h-5 w-5" />
             </button>
 
             {getFileTypeFromUrl(selectedPreviewUrl) === "image" || fieldType === "image" ? (
               <img
                 src={selectedPreviewUrl}
                 alt="Full size preview"
-                className="max-w-[95vw] max-h-[85vh] object-contain rounded shadow-2xl"
+                className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg"
               />
             ) : getFileTypeFromUrl(selectedPreviewUrl) === "video" || fieldType === "video" ? (
               <video
                 src={selectedPreviewUrl}
                 controls
                 autoPlay
-                className="max-w-[95vw] max-h-[85vh] object-contain rounded shadow-2xl"
+                className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg"
               />
             ) : (
-              <div className="bg-white rounded-xl p-10 max-w-lg text-center shadow-2xl">
-                <FileIcon className="h-16 w-16 text-blue-500 mx-auto mb-6" />
-                <h3 className="text-xl font-semibold mb-3">Preview not supported</h3>
+              <div className="bg-background rounded-xl p-8 max-w-sm text-center shadow-xl">
+                <FileIcon className="h-10 w-10 text-primary mx-auto mb-4" />
+                <h3 className="text-base font-semibold mb-2">Preview not available</h3>
                 <a
                   href={selectedPreviewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition"
+                  className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
                 >
                   Download File
                 </a>
               </div>
             )}
-            
-            <p className="text-white/60 text-center mt-4 text-xs break-all px-10">
-              {selectedPreviewUrl}
-            </p>
           </div>
         </div>
       )}

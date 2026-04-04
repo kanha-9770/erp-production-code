@@ -510,44 +510,55 @@ function FieldWrapper({
   error?: string;
   children: React.ReactNode;
 }) {
+  const showLabel =
+    field.type !== "checkbox" &&
+    field.type !== "switch" &&
+    field.type !== "hidden";
+  const showDescription = !!field.description && field.type !== "hidden";
+  const showError =
+    !!error &&
+    field.type !== "phone" &&
+    field.type !== "phone-input" &&
+    field.type !== "address";
+
   return (
     <div
-      className={`space-y-2 ${
+      className={`flex flex-col ${
         field.isDependent ? "mt-6 p-4 border rounded-lg bg-muted/30" : ""
       }`}
     >
-      {field.type !== "checkbox" &&
-        field.type !== "switch" &&
-        field.type !== "hidden" && (
-          <Label
-            htmlFor={field.id}
-            className="text-sm font-medium flex items-center gap-2"
-          >
-            {field.label}
-            {field.type === "formula" && (
-              <Badge variant="outline" className="text-xs font-normal">
-                <Calculator className="h-3 w-3 mr-1" />
-                Auto
-              </Badge>
-            )}
-            {field.validation?.required && field.type !== "formula" && (
-              <span className="text-red-500">*</span>
-            )}
-          </Label>
-        )}
-      {field.description && field.type !== "hidden" && (
-        <p className="text-xs text-muted-foreground">{field.description}</p>
+      {/* Label area — fixed structure so inputs align across grid columns */}
+      {showLabel && (
+        <Label
+          htmlFor={field.id}
+          className="text-sm font-medium flex items-center gap-2 mb-1 min-h-[20px]"
+        >
+          {field.label}
+          {field.type === "formula" && (
+            <Badge variant="outline" className="text-xs font-normal">
+              <Calculator className="h-3 w-3 mr-1" />
+              Auto
+            </Badge>
+          )}
+          {field.validation?.required && field.type !== "formula" && (
+            <span className="text-red-500">*</span>
+          )}
+        </Label>
       )}
+      {showDescription && (
+        <p className="text-xs text-muted-foreground mb-1.5 leading-normal">{field.description}</p>
+      )}
+
+      {/* Input area */}
       {children}
-      {error &&
-        field.type !== "phone" &&
-        field.type !== "phone-input" &&
-        field.type !== "address" && (
-          <p className="text-sm text-red-500 flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" />
-            {error}
-          </p>
-        )}
+
+      {/* Error area */}
+      {showError && (
+        <p className="text-sm text-red-500 flex items-center gap-1 mt-1.5">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -632,7 +643,7 @@ export function FormBody(props: FormBodyProps) {
               {/* Section fields */}
               <div className="p-6">
                 <div
-                  className="grid gap-8"
+                  className="grid gap-x-6 gap-y-5 items-start"
                   style={{
                     gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
                   }}

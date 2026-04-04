@@ -4,7 +4,6 @@ import type React from "react"
 import { useState, useRef, useEffect, useLayoutEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Camera, X, RotateCcw, ImageIcon, Loader2 } from "lucide-react"
-import { Card } from "@/components/ui/card"
 import { useUploadFileMutation } from "@/lib/api/upload"
 
 interface CameraCaptureProps {
@@ -220,122 +219,128 @@ export default function CameraCapture({ onCapture, capturedImage, onClear }: Cam
     };
   }, []);
 
+  // Uploading state — inline in the input bar
   if (isUploading) {
     return (
-      <div className="space-y-2">
-        <Card className="p-8 flex flex-col items-center justify-center border border-gray-200 rounded-lg">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-2" />
-          <p className="text-sm text-gray-500">Uploading to cloud...</p>
-        </Card>
+      <div className="flex h-8 w-full items-center rounded-md border border-input bg-background px-3 text-sm">
+        <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+        <span className="ml-2 text-muted-foreground truncate">Uploading...</span>
       </div>
     );
   }
 
+  // Captured image — single-line input with inline thumbnail
   if (capturedImage && !isCameraOpen && !pendingRetake) {
     return (
-      <div className="space-y-2">
-        <Card className="relative overflow-hidden border border-gray-200 rounded-lg">
-          <img src={capturedImage || "/placeholder.svg"} alt="Captured" className="w-full h-48 object-cover" />
-          <Button
-            type="button"
-            onClick={onClear}
-            size="icon"
-            variant="destructive"
-            className="absolute top-2 right-2 h-8 w-8 rounded-full bg-red-500 hover:bg-red-600"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </Card>
-        <Button
-          type="button"
-          onClick={handleRetake}
-          size="sm"
-          className="w-full bg-transparent border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
-        >
-          <RotateCcw className="w-4 h-4 mr-2" />
-          Retake
-        </Button>
+      <div className="space-y-1.5">
+        <div className="flex h-8 w-full items-center rounded-md border border-input bg-background text-sm">
+          <img
+            src={capturedImage || "/placeholder.svg"}
+            alt="Captured"
+            className="h-6 w-6 rounded object-cover ml-1 shrink-0"
+          />
+          <span className="flex-1 px-2 text-foreground text-sm truncate">Photo captured</span>
+          <div className="flex items-center shrink-0 border-l border-input">
+            <button
+              type="button"
+              onClick={handleRetake}
+              className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-primary transition-colors"
+              title="Retake"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={onClear}
+              className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-destructive transition-colors rounded-r-md"
+              title="Remove"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // Camera live view — opens below the input
   if (isCameraOpen || stream) {
     return (
-      <div className="space-y-2">
-        <Card className="relative overflow-hidden bg-black rounded-lg">
+      <div className="space-y-1.5">
+        <div className="relative overflow-hidden bg-black rounded-md border border-input">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="w-full h-64 object-cover bg-black"
+            className="w-full h-44 object-cover bg-black"
             style={{ display: "block" }}
           />
-          <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-3 px-4">
+          <div className="absolute bottom-2.5 left-0 right-0 flex justify-center gap-2 px-3">
             <Button
               type="button"
               onClick={closeCamera}
               size="sm"
               variant="secondary"
-              className="rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300"
+              className="h-7 rounded-full text-xs px-3"
             >
-              <X className="w-4 h-4 mr-2" />
+              <X className="w-3 h-3 mr-1" />
               Cancel
             </Button>
             <Button
               type="button"
               onClick={capturePhoto}
               size="sm"
-              className="rounded-full bg-blue-500 text-white hover:bg-blue-600"
+              className="h-7 rounded-full text-xs px-3"
             >
-              <Camera className="w-4 h-4 mr-2" />
+              <Camera className="w-3 h-3 mr-1" />
               Capture
             </Button>
           </div>
-        </Card>
+        </div>
         <canvas ref={canvasRef} className="hidden" />
       </div>
     );
   }
 
-  // Initial state - aesthetic input field with buttons
+  // Default state — single-line input matching other form fields
   return (
-    <div className="space-y-3">
+    <div className="space-y-1.5">
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+        <div className="px-3 py-1.5 bg-destructive/10 border border-destructive/20 rounded-md text-xs text-destructive">{error}</div>
       )}
 
-      <div className="flex items-center border border-gray-200 rounded-lg bg-white shadow-sm">
-        <Button
-          type="button"
-          onClick={() => {
-            console.log("[CameraCapture] Upload button clicked");
-            fileInputRef.current?.click();
-          }}
-          size="sm"
-          variant="ghost"
-          className="h-10 px-4 rounded-l-lg hover:bg-gray-100"
-        >
-          <ImageIcon className="w-5 h-5 text-gray-500" />
-        </Button>
-        <input
-          type="text"
-          placeholder="Upload an image or use camera"
-          className="flex-1 h-10 bg-transparent outline-none text-gray-600 text-sm px-3"
-          readOnly
-        />
-        <Button
-          type="button"
-          onClick={() => {
-            console.log("[CameraCapture] Camera button clicked");
-            openCamera();
-          }}
-          size="sm"
-          variant="ghost"
-          className="h-10 px-4 rounded-r-lg hover:bg-gray-100"
-        >
-          <Camera className="w-5 h-5 text-gray-500" />
-        </Button>
+      <div className="flex h-8 w-full items-center rounded-md border border-input bg-background text-sm transition-colors hover:border-muted-foreground/40">
+        <div className="flex items-center pl-3">
+          <Camera className="w-4 h-4 text-muted-foreground shrink-0" />
+        </div>
+        <span className="flex-1 px-2 text-muted-foreground truncate">
+          Capture photo or upload image
+        </span>
+        <div className="flex items-center shrink-0 border-l border-input">
+          <button
+            type="button"
+            onClick={() => {
+              console.log("[CameraCapture] Upload button clicked");
+              fileInputRef.current?.click();
+            }}
+            className="flex items-center justify-center h-full px-2 text-muted-foreground hover:text-primary transition-colors"
+            title="Upload image"
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              console.log("[CameraCapture] Camera button clicked");
+              openCamera();
+            }}
+            className="flex items-center justify-center h-full px-2.5 text-muted-foreground hover:text-primary transition-colors rounded-r-md"
+            title="Open camera"
+          >
+            <Camera className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Hidden file input for upload */}
