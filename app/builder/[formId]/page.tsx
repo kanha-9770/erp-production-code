@@ -428,7 +428,7 @@ export default function FormBuilderPage() {
 
             const activeCenter = active.rect.current.translated
               ? active.rect.current.translated.top +
-                active.rect.current.translated.height / 2
+              active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -448,7 +448,7 @@ export default function FormBuilderPage() {
 
             const activeCenter = active.rect.current.translated
               ? active.rect.current.translated.top +
-                active.rect.current.translated.height / 2
+              active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -628,7 +628,7 @@ export default function FormBuilderPage() {
 
             const activeCenter = active.rect.current.translated
               ? active.rect.current.translated.top +
-                active.rect.current.translated.height / 2
+              active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -647,7 +647,7 @@ export default function FormBuilderPage() {
 
             const activeCenter = active.rect.current.translated
               ? active.rect.current.translated.top +
-                active.rect.current.translated.height / 2
+              active.rect.current.translated.height / 2
               : 0;
             const overCenter = over.rect.top + over.rect.height / 2;
             const isAfter = activeCenter > overCenter;
@@ -877,21 +877,21 @@ export default function FormBuilderPage() {
           fields.map((f: any) =>
             f.id === fieldId
               ? {
-                  ...f,
-                  label: config.fieldLabel,
-                  formula: formulaData,
-                  properties: {
-                    ...f.properties,
-                    formulaConfig: {
-                      expression: config.expression,
-                      returnType: config.returnType,
-                      decimalPlaces: config.decimalPlaces,
-                      blankPreference: config.blankPreference,
-                      visibleInForm: config.visibleInForm ?? true,
-                      sources: config.sources,
-                    },
+                ...f,
+                label: config.fieldLabel,
+                formula: formulaData,
+                properties: {
+                  ...f.properties,
+                  formulaConfig: {
+                    expression: config.expression,
+                    returnType: config.returnType,
+                    decimalPlaces: config.decimalPlaces,
+                    blankPreference: config.blankPreference,
+                    visibleInForm: config.visibleInForm ?? true,
+                    sources: config.sources,
                   },
-                }
+                },
+              }
               : f,
           );
 
@@ -966,8 +966,8 @@ export default function FormBuilderPage() {
         order: parentSubformId
           ? 0
           : (form.subforms || []).filter(
-              (s: { parentSubformId: any }) => !s.parentSubformId,
-            ).length || 0,
+            (s: { parentSubformId: any }) => !s.parentSubformId,
+          ).length || 0,
         columns: 1,
         visible: true,
         collapsible: true,
@@ -1128,7 +1128,7 @@ export default function FormBuilderPage() {
 
       const activeCenter = active.rect.current.translated
         ? active.rect.current.translated.top +
-          active.rect.current.translated.height / 2
+        active.rect.current.translated.height / 2
         : 0;
       const overCenter = over.rect.top + over.rect.height / 2;
       const isAfter = activeCenter > overCenter;
@@ -1164,7 +1164,7 @@ export default function FormBuilderPage() {
 
           const activeCenter = active.rect.current.translated
             ? active.rect.current.translated.left +
-              active.rect.current.translated.width / 2
+            active.rect.current.translated.width / 2
             : 0;
           const overCenter = over!.rect.left + over!.rect.width / 2;
           const isAfter = activeCenter > overCenter;
@@ -1742,8 +1742,8 @@ export default function FormBuilderPage() {
             <main className="flex-1 overflow-y-auto">
               <FormCanvas
                 form={form}
-  onFormUpdate={handleFormUpdate}
-  hasOtherEmployeeForm={false}
+                onFormUpdate={handleFormUpdate}
+                hasOtherEmployeeForm={false}   // We will improve this later when you fetch all forms
                 activeOverId={activeOverId}
                 isDragging={!!(activePaletteItem || activeDragItem)}
               />

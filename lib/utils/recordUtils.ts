@@ -51,7 +51,9 @@ export const processRecordData = (
         formField = candidates.find((c) => c.formId === record.formId) || candidates[0];
       }
 
-      // fieldData from the API may be a rich object with label, sectionTitle, etc.
+      // fieldData from the API may be:
+      // 1. A rich object with {value, label, type, ...} (enriched by GET records API)
+      // 2. A direct value (slim format — shouldn't normally reach here since GET enriches it)
       const isRichEntry = fieldData && typeof fieldData === "object" && "value" in fieldData;
       const value = isRichEntry ? fieldData.value : fieldData;
 
@@ -63,7 +65,6 @@ export const processRecordData = (
       processedData.push({
         recordId: record.id,
         recordIdFromAPI: record.id,
-        // Store the raw fieldKey as fieldId — this is what the API uses.
         fieldId: fieldKey,
         fieldLabel: formField?.label || (isRichEntry && fieldData.label) || fieldKey,
         fieldType,

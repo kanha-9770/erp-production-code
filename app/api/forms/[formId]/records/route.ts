@@ -168,31 +168,64 @@ export async function GET(
     // ────────────────────────────────────────────────
     // 5. Transform records (your existing logic – unchanged)
     // ────────────────────────────────────────────────
+    // ── Detect format: slim (fieldId→value) vs legacy (fieldId→{value,label,type,...}) ──
+    const isSlimFormat = (recordData: any): boolean => {
+      if (!recordData?.sections) return false;
+      // In slim format, section fields are direct values, not objects with "value" key
+      for (const section of Object.values(recordData.sections) as any[]) {
+        if (!section.fields) continue;
+        for (const fieldEntry of Object.values(section.fields)) {
+          // If any field entry has a "fieldId" property, it's the old bloated format
+          if (fieldEntry && typeof fieldEntry === "object" && "fieldId" in fieldEntry) {
+            return false;
+          }
+          return true; // Check first field is enough
+        }
+      }
+      return true; // Empty sections = treat as slim
+    };
+
     const transformRecordData = (recordData: any): Record<string, any> => {
       if (!recordData) return {};
 
       const transformed: Record<string, any> = {};
-      const hasNewFormat = recordData.sections || recordData.subforms;
+      const hasStructuredFormat = recordData.sections || recordData.subforms;
 
-      if (!hasNewFormat) {
+      if (!hasStructuredFormat) {
         return enrichLegacyData(recordData);
       }
+
+      const slim = isSlimFormat(recordData);
 
       // sections processing
       if (recordData.sections) {
         Object.entries(recordData.sections).forEach(([sectionId, sectionData]: [string, any]) => {
-          const sectionTitle = sectionData.sectionTitle || "Default Section";
           if (sectionData.fields) {
             Object.entries(sectionData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
               if (!allowedFieldIds.has(fieldId)) return;
-              transformed[fieldId] = {
-                ...fieldEntry,
-                fieldId,
-                sectionId,
-                sectionTitle,
-                type: fieldLookup[fieldId]?.type || fieldEntry.type,
-                label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
-              };
+              const info = fieldLookup[fieldId];
+
+              if (slim) {
+                // Slim format: fieldEntry IS the value directly
+                transformed[fieldId] = {
+                  fieldId,
+                  label: info?.label || "Unknown Field",
+                  type: info?.type || "text",
+                  value: fieldEntry,
+                  sectionId,
+                  sectionTitle: info?.sectionTitle || "Default Section",
+                };
+              } else {
+                // Legacy bloated format: fieldEntry is {fieldId, label, type, value, ...}
+                transformed[fieldId] = {
+                  ...fieldEntry,
+                  fieldId,
+                  sectionId,
+                  sectionTitle: sectionData.sectionTitle || info?.sectionTitle || "Default Section",
+                  type: info?.type || fieldEntry.type,
+                  label: fieldEntry.label || info?.label || "Unknown Field",
+                };
+              }
             });
           }
         });
@@ -201,23 +234,39 @@ export async function GET(
       // subforms processing
       if (recordData.subforms) {
         Object.entries(recordData.subforms).forEach(([subformId, subformData]: [string, any]) => {
-          const subformName = subformData.subformName || subformLookup[subformId]?.name || "Subform";
           const subformInfo = subformLookup[subformId];
+          const subformName = subformData.subformName || subformInfo?.name || "Subform";
 
           if (subformData.fields) {
             Object.entries(subformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
               if (!allowedFieldIds.has(fieldId)) return;
-              transformed[fieldId] = {
-                ...fieldEntry,
-                fieldId,
-                subformId,
-                subformName,
-                subformTitle: subformName,
-                sectionId: "subform",
-                sectionTitle: subformInfo?.sectionTitle || subformName,
-                type: fieldLookup[fieldId]?.type || fieldEntry.type,
-                label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
-              };
+              const info = fieldLookup[fieldId];
+
+              if (slim) {
+                transformed[fieldId] = {
+                  fieldId,
+                  label: info?.label || "Unknown Field",
+                  type: info?.type || "text",
+                  value: fieldEntry,
+                  subformId,
+                  subformName,
+                  subformTitle: subformName,
+                  sectionId: "subform",
+                  sectionTitle: subformInfo?.sectionTitle || subformName,
+                };
+              } else {
+                transformed[fieldId] = {
+                  ...fieldEntry,
+                  fieldId,
+                  subformId,
+                  subformName,
+                  subformTitle: subformName,
+                  sectionId: "subform",
+                  sectionTitle: subformInfo?.sectionTitle || subformName,
+                  type: info?.type || fieldEntry.type,
+                  label: fieldEntry.label || info?.label || "Unknown Field",
+                };
+              }
             });
           }
 
@@ -227,7 +276,8 @@ export async function GET(
               const rowData: Record<string, any> = {};
               if (row.fields) {
                 Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                  rowData[fId] = (fEntry as any).value;
+                  // Slim: fEntry is the value; Legacy: fEntry is {value, ...}
+                  rowData[fId] = slim ? fEntry : (fEntry as any).value;
                 });
               }
               return rowData;
@@ -252,7 +302,7 @@ export async function GET(
           }
 
           if (subformData.childSubforms) {
-            processChildSubforms(subformData.childSubforms, subformName, transformed);
+            processChildSubforms(subformData.childSubforms, subformName, transformed, slim);
           }
         });
       }
@@ -263,27 +313,44 @@ export async function GET(
     const processChildSubforms = (
       childSubforms: Record<string, any>,
       parentPath: string,
-      transformed: Record<string, any>
+      transformed: Record<string, any>,
+      slim: boolean
     ) => {
       Object.entries(childSubforms).forEach(([childSubformId, childSubformData]: [string, any]) => {
-        const childSubformName = childSubformData.subformName || subformLookup[childSubformId]?.name || "Child Subform";
-        const fullPath = `${parentPath} → ${childSubformName}`;
         const childSubformInfo = subformLookup[childSubformId];
+        const childSubformName = childSubformData.subformName || childSubformInfo?.name || "Child Subform";
+        const fullPath = `${parentPath} → ${childSubformName}`;
 
         if (childSubformData.fields) {
           Object.entries(childSubformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
             if (!allowedFieldIds.has(fieldId)) return;
-            transformed[fieldId] = {
-              ...fieldEntry,
-              fieldId,
-              subformId: childSubformId,
-              subformName: childSubformName,
-              subformTitle: fullPath,
-              sectionId: "subform",
-              sectionTitle: fullPath,
-              type: fieldLookup[fieldId]?.type || fieldEntry.type,
-              label: fieldEntry.label || fieldLookup[fieldId]?.label || "Unknown Field",
-            };
+            const info = fieldLookup[fieldId];
+
+            if (slim) {
+              transformed[fieldId] = {
+                fieldId,
+                label: info?.label || "Unknown Field",
+                type: info?.type || "text",
+                value: fieldEntry,
+                subformId: childSubformId,
+                subformName: childSubformName,
+                subformTitle: fullPath,
+                sectionId: "subform",
+                sectionTitle: fullPath,
+              };
+            } else {
+              transformed[fieldId] = {
+                ...fieldEntry,
+                fieldId,
+                subformId: childSubformId,
+                subformName: childSubformName,
+                subformTitle: fullPath,
+                sectionId: "subform",
+                sectionTitle: fullPath,
+                type: info?.type || fieldEntry.type,
+                label: fieldEntry.label || info?.label || "Unknown Field",
+              };
+            }
           });
         }
 
@@ -293,7 +360,7 @@ export async function GET(
             const rowData: Record<string, any> = {};
             if (row.fields) {
               Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                rowData[fId] = (fEntry as any).value;
+                rowData[fId] = slim ? fEntry : (fEntry as any).value;
               });
             }
             return rowData;
@@ -318,7 +385,7 @@ export async function GET(
         }
 
         if (childSubformData.childSubforms) {
-          processChildSubforms(childSubformData.childSubforms, fullPath, transformed);
+          processChildSubforms(childSubformData.childSubforms, fullPath, transformed, slim);
         }
       });
     };
@@ -326,7 +393,7 @@ export async function GET(
     const enrichLegacyData = (recordData: Record<string, any>): Record<string, any> => {
       const enriched: Record<string, any> = {};
       Object.entries(recordData).forEach(([key, entry]: [string, any]) => {
-        const newEntry = { ...entry };
+        const newEntry = typeof entry === "object" && entry !== null ? { ...entry } : { value: entry };
 
         if (key.startsWith("_dynamicRows_")) {
           const subformId = key.replace("_dynamicRows_", "");

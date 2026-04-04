@@ -1,50 +1,23 @@
 // lib/utils/form-utils.ts
 // Shared structured-data transformation used by both manual submission and import
+// OPTIMIZED: stores only fieldId → value (no redundant metadata)
 
 // ──────────────────────────────────────────────
-// Type definitions (mirrors submit/route.ts)
+// Type definitions (slim format)
 // ──────────────────────────────────────────────
-
-export interface StructuredFieldData {
-  fieldId: string;
-  label: string;
-  type: string;
-  value: any;
-  sectionId: string | null;
-  sectionTitle: string;
-  subformId: string | null;
-  subformName: string | null;
-  order: number;
-  placeholder?: string | null;
-  description?: string | null;
-  validation?: Record<string, any>;
-  options?: any[];
-  lookup?: any;
-}
 
 export interface StructuredSectionData {
-  sectionId: string;
-  sectionTitle: string;
-  sectionDescription: string | null;
-  order: number;
-  fields: Record<string, StructuredFieldData>;
+  fields: Record<string, any>; // fieldId → value only
 }
 
 export interface StructuredSubformRowData {
   rowIndex: number;
   instanceId: string;
-  fields: Record<string, StructuredFieldData>;
+  fields: Record<string, any>; // fieldId → value only
 }
 
 export interface StructuredSubformData {
-  subformId: string;
-  subformName: string;
-  subformDescription: string | null;
-  parentSubformId: string | null;
-  order: number;
-  level: number;
-  path: string | null;
-  fields: Record<string, StructuredFieldData>;
+  fields: Record<string, any>; // fieldId → value only
   rows?: StructuredSubformRowData[];
   childSubforms?: Record<string, StructuredSubformData>;
 }
@@ -68,9 +41,9 @@ export interface StructuredRecordData {
 // ──────────────────────────────────────────────
 
 /**
- * Transforms flat recordData (fieldId → value) into the full nested structure
- * grouped by sections and subforms. Produces identical output regardless of
- * whether the data comes from manual form fill or CSV/Excel import.
+ * Transforms flat recordData (fieldId → value) into the slim nested structure
+ * grouped by sections and subforms. Stores only fieldId → value (no metadata).
+ * Field metadata (label, type, options, etc.) is derived from form fields at read time.
  *
  * @param form - The form object with sections (with fields) and subforms loaded
  * @param recordData - Flat map of fieldId → value
@@ -98,35 +71,14 @@ export function transformToStructuredData(
   let fieldCount = 0;
   let subformCount = 0;
 
-  // ── Sections ─────────────────────────────────
+  // ── Sections — store only fieldId → value ──
   (form.sections || []).forEach((section: any) => {
-    const sectionData: StructuredSectionData = {
-      sectionId: section.id,
-      sectionTitle: section.title,
-      sectionDescription: section.description || null,
-      order: section.order,
-      fields: {},
-    };
+    const sectionData: StructuredSectionData = { fields: {} };
 
     (section.fields || []).forEach((field: any) => {
       const value = recordData[field.id];
       if (value !== undefined) {
-        sectionData.fields[field.id] = {
-          fieldId: field.id,
-          label: field.label,
-          type: field.type,
-          value,
-          sectionId: section.id,
-          sectionTitle: section.title,
-          subformId: null,
-          subformName: null,
-          order: field.order,
-          placeholder: field.placeholder,
-          description: field.description,
-          validation: field.validation || {},
-          options: field.options || [],
-          lookup: field.lookup || null,
-        };
+        sectionData.fields[field.id] = value;
         fieldCount++;
       }
     });
@@ -134,19 +86,11 @@ export function transformToStructuredData(
     structured.sections[section.id] = sectionData;
   });
 
-  // ── Subforms (recursive) ─────────────────────
-  const processSubform = (subform: any, parentPath = ""): StructuredSubformData => {
-    const currentPath = parentPath ? `${parentPath}/${subform.id}` : subform.id;
+  // ── Subforms (recursive) — store only fieldId → value ──
+  const processSubform = (subform: any): StructuredSubformData => {
     subformCount++;
 
     const data: StructuredSubformData = {
-      subformId: subform.id,
-      subformName: subform.name,
-      subformDescription: subform.description || null,
-      parentSubformId: subform.parentSubformId || null,
-      order: subform.order,
-      level: subform.level,
-      path: subform.path || currentPath,
       fields: {},
       rows: [],
       childSubforms: {},
@@ -156,22 +100,7 @@ export function transformToStructuredData(
     (subform.fields || []).forEach((field: any) => {
       const value = recordData[field.id];
       if (value !== undefined) {
-        data.fields[field.id] = {
-          fieldId: field.id,
-          label: field.label,
-          type: field.type,
-          value,
-          sectionId: null,
-          sectionTitle: "",
-          subformId: subform.id,
-          subformName: subform.name,
-          order: field.order,
-          placeholder: field.placeholder,
-          description: field.description,
-          validation: field.validation || {},
-          options: field.options || [],
-          lookup: field.lookup || null,
-        };
+        data.fields[field.id] = value;
         fieldCount++;
       }
     });
@@ -182,27 +111,12 @@ export function transformToStructuredData(
 
     if (Array.isArray(rows) && rows.length > 0) {
       rows.forEach((row: any, idx: number) => {
-        const rowFields: Record<string, StructuredFieldData> = {};
+        const rowFields: Record<string, any> = {};
 
         (subform.fields || []).forEach((field: any) => {
           const val = row[field.id];
           if (val !== undefined) {
-            rowFields[field.id] = {
-              fieldId: field.id,
-              label: field.label,
-              type: field.type,
-              value: val,
-              sectionId: null,
-              sectionTitle: "",
-              subformId: subform.id,
-              subformName: subform.name,
-              order: field.order,
-              placeholder: field.placeholder,
-              description: field.description,
-              validation: field.validation || {},
-              options: field.options || [],
-              lookup: field.lookup || null,
-            };
+            rowFields[field.id] = val;
             fieldCount++;
           }
         });
@@ -218,7 +132,7 @@ export function transformToStructuredData(
     // Child subforms
     if (subform.childSubforms?.length) {
       subform.childSubforms.forEach((child: any) => {
-        data.childSubforms![child.id] = processSubform(child, currentPath);
+        data.childSubforms![child.id] = processSubform(child);
       });
     }
 
