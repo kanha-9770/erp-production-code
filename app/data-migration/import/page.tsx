@@ -94,7 +94,8 @@ export default function ImportPage() {
     setStep("map")
   }
 
-  const CHUNK_SIZE = 200 // Rows per chunk — balances payload size vs HTTP overhead
+  const CHUNK_SIZE = 500 // Rows per chunk — larger chunks = fewer HTTP round-trips for 5000+ row imports
+  const MAX_CONCURRENT_CHUNKS = 3 // Process up to 3 chunks in parallel
 
   const handleImport = async () => {
     if (!uploadedFile || mappings.length === 0 || !selectedFormId) return
@@ -108,6 +109,7 @@ export default function ImportPage() {
         formId: selectedFormId,
         fileName: uploadedFile.file.name,
         fileSize: uploadedFile.file.size,
+        totalRows: uploadedFile.preview.totalRows,
         duplicateHandling: "insert",
       }).unwrap()
 
@@ -122,7 +124,7 @@ export default function ImportPage() {
         mappings: mappings.map((m) => ({ sourceColumn: m.sourceColumn, targetFieldId: m.targetFieldId })),
       }).unwrap()
 
-      // Step 3: Convert all rows to objects
+      // Step 3: Convert all rows to objects (batch to avoid blocking UI)
       const { headers, allRows } = uploadedFile.preview
       const allDataRows = allRows || uploadedFile.preview.rows
       const rowObjects = allDataRows.map((row) => {
@@ -131,35 +133,57 @@ export default function ImportPage() {
         return obj
       })
 
-      // Step 4: Send rows in chunks
+      // Step 4: Send rows in chunks with controlled parallelism
       const totalRows = rowObjects.length
       const totalChunks = Math.ceil(totalRows / CHUNK_SIZE)
       let totalSuccess = 0
       let totalFailed = 0
       let totalSkipped = 0
+      let processedRows = 0
 
       setImportProgress({ current: 0, total: totalRows, percent: 0 })
 
-      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-        const start = chunkIdx * CHUNK_SIZE
-        const end = Math.min(start + CHUNK_SIZE, totalRows)
-        const chunkRows = rowObjects.slice(start, end)
+      // Build all chunk descriptors
+      const chunks = Array.from({ length: totalChunks }, (_, idx) => ({
+        chunkIdx: idx,
+        start: idx * CHUNK_SIZE,
+        end: Math.min((idx + 1) * CHUNK_SIZE, totalRows),
+      }))
 
-        const chunkResult = await processImport({
-          importJobId,
-          rows: chunkRows,
-          chunkIndex: chunkIdx,
-          totalChunks,
-        }).unwrap()
+      // Process chunks in parallel batches of MAX_CONCURRENT_CHUNKS
+      for (let batchStart = 0; batchStart < chunks.length; batchStart += MAX_CONCURRENT_CHUNKS) {
+        const batch = chunks.slice(batchStart, batchStart + MAX_CONCURRENT_CHUNKS)
 
-        totalSuccess += chunkResult.successCount || 0
-        totalFailed += chunkResult.failedCount || 0
-        totalSkipped += chunkResult.skippedCount || 0
+        const results = await Promise.allSettled(
+          batch.map((chunk) =>
+            processImport({
+              importJobId,
+              rows: rowObjects.slice(chunk.start, chunk.end),
+              chunkIndex: chunk.chunkIdx,
+              totalChunks,
+            }).unwrap()
+          )
+        )
+
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i]
+          const chunk = batch[i]
+          if (result.status === "fulfilled") {
+            totalSuccess += result.value.successCount || 0
+            totalFailed += result.value.failedCount || 0
+            totalSkipped += result.value.skippedCount || 0
+          } else {
+            // Entire chunk failed — count all rows as failed
+            totalFailed += chunk.end - chunk.start
+            console.error(`Chunk ${chunk.chunkIdx} failed:`, result.reason)
+          }
+          processedRows += chunk.end - chunk.start
+        }
 
         setImportProgress({
-          current: end,
+          current: processedRows,
           total: totalRows,
-          percent: Math.round((end / totalRows) * 100),
+          percent: Math.round((processedRows / totalRows) * 100),
         })
       }
 

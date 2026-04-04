@@ -155,7 +155,7 @@ All routes not listed above are accessible to any authenticated user, including:
 - `/settings` (root settings page)
 
 ---
-
+  
 ## Three-Layer Defense System
 
 ### Layer 1: Middleware (`middleware.ts`)

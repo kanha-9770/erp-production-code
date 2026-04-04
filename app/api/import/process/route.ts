@@ -111,7 +111,9 @@ async function batchInsertRecords(
 }
 
 // ── Batch size for DB inserts ───────────────────────────────
-const DB_BATCH_SIZE = 50;
+// Prisma createMany can efficiently handle 200+ rows in a single SQL statement.
+// Keeping batches at 200 balances memory usage with insert throughput.
+const DB_BATCH_SIZE = 200;
 
 export async function POST(request: NextRequest) {
   try {
@@ -354,6 +356,33 @@ export async function POST(request: NextRequest) {
       failedCount += result.failed;
     }
 
+    // === 11b. Dual-write to unified FormRecord table (non-blocking) ===
+    // This keeps the unified table in sync for forms that use it.
+    if (insertBatch.length > 0) {
+      try {
+        const unifiedRecords = insertBatch.map((rec) => ({
+          id: rec.id,
+          formId: rec.formId,
+          recordData: rec.recordData,
+          organizationId: rec.organizationId || null,
+          submittedBy: rec.submittedBy,
+          submittedAt: rec.submittedAt,
+          status: rec.status,
+          ipAddress: rec.ipAddress || null,
+          userAgent: rec.userAgent || null,
+          userId: rec.userId || null,
+        }));
+
+        for (let offset = 0; offset < unifiedRecords.length; offset += DB_BATCH_SIZE) {
+          const batch = unifiedRecords.slice(offset, offset + DB_BATCH_SIZE);
+          await prisma.formRecord.createMany({ data: batch, skipDuplicates: true });
+        }
+      } catch (dualWriteErr) {
+        // Non-blocking — log but don't fail the import
+        console.error("[PROCESS] Dual-write to unified table failed (non-blocking):", dualWriteErr);
+      }
+    }
+
     // === 12. Track events (non-blocking) ===
     DatabaseService.trackFormEvent(
       job.formId,
@@ -394,7 +423,6 @@ export async function POST(request: NextRequest) {
         processedRows: { increment: rows.length },
         successRows: { increment: successCount },
         failedRows: { increment: failedCount },
-        ...(isFirstChunk ? { totalRows: job.totalRows || rows.length } : {}),
       },
     });
 

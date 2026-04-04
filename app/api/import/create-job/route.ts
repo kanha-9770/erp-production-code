@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       formId,
       fileName,
       fileSize,
+      totalRows,
       duplicateHandling = "insert",
       importOptions = {},
     } = body
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
         fileName,
         fileSize: fileSize || 0,
         duplicateHandling: normalizedHandling,
+        totalRows: totalRows || 0,
         enableWorkflows: importOptions.enableWorkflows ?? false,
         enableValidation: importOptions.enableValidation ?? true,
         enableApprovals: importOptions.enableApprovals ?? false,

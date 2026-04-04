@@ -1,19 +1,21 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
-/**
- * GET /api/forms/[formId]/records
- * Fetches records for a form, optionally filtered by userId or organizationId
- */
+// ────────────────────────────────────────────────────────────────────────────
+// GET /api/forms/[formId]/records
+//
+// Auth:       Required — user must be logged in
+// Org scope:  Automatic — records are filtered to the caller's organization
+// Pagination: ?page=1&limit=50  (defaults: page=1, limit=50, max 200)
+// Filters:    ?status=submitted  (optional)
+// ────────────────────────────────────────────────────────────────────────────
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ formId: string }> },
 ) {
   const { formId } = await params;
-  const { searchParams } = new URL(request.url);
-
-  const userId = searchParams.get("userId");
-  const organizationId = searchParams.get("organizationId");
 
   if (!formId) {
     return NextResponse.json(
@@ -22,13 +24,35 @@ export async function GET(
     );
   }
 
+  // ────────────────────────────────────────────────
+  // 1. Authentication — no anonymous record access
+  // ────────────────────────────────────────────────
+  const authUser = await getAuthenticatedUser(request);
+  if (!authUser) {
+    return NextResponse.json(
+      { success: false, message: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
+  const { searchParams } = new URL(request.url);
+
+  // Parse pagination params
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
+  const skip = (page - 1) * limit;
+
+  // Optional status filter
+  const statusFilter = searchParams.get("status") || null;
+
   try {
     // ────────────────────────────────────────────────
-    // 1. Fetch form structure (unchanged)
+    // 2. Fetch form structure (once — reused for enrichment + field lookup)
     // ────────────────────────────────────────────────
     const form = await prisma.form.findUnique({
       where: { id: formId },
       include: {
+        module: { select: { organizationId: true } },
         sections: {
           include: {
             fields: { orderBy: { order: "asc" } },
@@ -66,23 +90,23 @@ export async function GET(
     }
 
     // ────────────────────────────────────────────────
-    // 2. Collect allowed fields & build lookups (unchanged)
+    // 3. Organization scoping — enforce server-side, never trust client
+    // ────────────────────────────────────────────────
+    const formOrgId = (form.module as any)?.organizationId || null;
+    const userOrgId = authUser.organizationId;
+
+    // If the form belongs to an org, the user must be in that org
+    if (formOrgId && userOrgId && formOrgId !== userOrgId) {
+      return NextResponse.json(
+        { success: false, message: "You do not have access to this form's records" },
+        { status: 403 },
+      );
+    }
+
+    // ────────────────────────────────────────────────
+    // 4. Build field & subform lookups for enrichment
     // ────────────────────────────────────────────────
     const allowedFieldIds = new Set<string>();
-    const allowedSubformFields = new Map<string, Set<string>>();
-
-    form.sections.forEach((section: any) => {
-      section.fields.forEach((f: any) => allowedFieldIds.add(f.id));
-    });
-
-    const collectFromSubform = (subform: any) => {
-      const fieldSet = new Set<string>(subform.fields.map((f: any) => f.id));
-      allowedSubformFields.set(subform.id, fieldSet);
-      subform.fields.forEach((f: any) => allowedFieldIds.add(f.id));
-      subform.childSubforms?.forEach((cs: any) => collectFromSubform(cs));
-    };
-
-    form.subforms?.forEach((sf: any) => collectFromSubform(sf));
 
     const fieldLookup: Record<
       string,
@@ -96,6 +120,7 @@ export async function GET(
     form.sections.forEach((section: any) => {
       const sectionTitle = section.title || "Default Section";
       section.fields.forEach((f: any) => {
+        allowedFieldIds.add(f.id);
         fieldLookup[f.id] = {
           label: f.label,
           sectionTitle,
@@ -113,6 +138,7 @@ export async function GET(
         fields: subform.fields,
       };
       subform.fields.forEach((f: any) => {
+        allowedFieldIds.add(f.id);
         fieldLookup[f.id] = {
           label: f.label,
           sectionTitle: fullTitle,
@@ -128,61 +154,82 @@ export async function GET(
     form.subforms?.forEach((sf: any) => buildSubformLookups(sf));
 
     // ────────────────────────────────────────────────
-    // 3. Prepare where clause for filtering
+    // 5. Build WHERE clause — org-scoped + optional filters
     // ────────────────────────────────────────────────
     const whereClause: any = { formId: form.id };
 
-    if (userId) {
-      whereClause.userId = userId;
+    // Always scope to user's organization when available
+    if (userOrgId) {
+      whereClause.organizationId = userOrgId;
     }
 
-    if (organizationId) {
-      whereClause.organizationId = organizationId;
+    if (statusFilter) {
+      whereClause.status = statusFilter;
     }
-
-    // You can add more logic here, e.g.:
-    // if (!userId && !organizationId) → show all (already default)
-    // if (userId && organizationId) → AND condition (current behavior)
 
     // ────────────────────────────────────────────────
-    // 4. Fetch filtered records
+    // 6. Fetch records with pagination + total count
     // ────────────────────────────────────────────────
     let records: any[] = [];
+    let totalCount = 0;
 
     if (form.tableMapping) {
       const match = (form.tableMapping as any).storageTable?.match(/form_records_(\d+)/);
       if (match) {
         const modelName = `formRecord${match[1]}`;
         try {
-          // @ts-ignore - dynamic model
-          records = await prisma[modelName].findMany({
-            where: whereClause,
-            orderBy: { createdAt: "desc" },
-          });
+          // @ts-ignore - dynamic model access
+          [records, totalCount] = await Promise.all([
+            (prisma as any)[modelName].findMany({
+              where: whereClause,
+              orderBy: { createdAt: "desc" },
+              skip,
+              take: limit,
+            }),
+            (prisma as any)[modelName].count({ where: whereClause }),
+          ]);
         } catch (err) {
           console.error(`Failed to query model ${modelName}:`, err);
         }
       }
     }
 
+    const totalPages = Math.ceil(totalCount / limit) || 1;
+
     // ────────────────────────────────────────────────
-    // 5. Transform records (your existing logic – unchanged)
+    // 7. Transform/enrich record data (slim → rich for frontend)
     // ────────────────────────────────────────────────
-    // ── Detect format: slim (fieldId→value) vs legacy (fieldId→{value,label,type,...}) ──
     const isSlimFormat = (recordData: any): boolean => {
       if (!recordData?.sections) return false;
-      // In slim format, section fields are direct values, not objects with "value" key
       for (const section of Object.values(recordData.sections) as any[]) {
         if (!section.fields) continue;
         for (const fieldEntry of Object.values(section.fields)) {
-          // If any field entry has a "fieldId" property, it's the old bloated format
           if (fieldEntry && typeof fieldEntry === "object" && "fieldId" in fieldEntry) {
             return false;
           }
-          return true; // Check first field is enough
+          return true;
         }
       }
-      return true; // Empty sections = treat as slim
+      return true;
+    };
+
+    const enrichField = (fieldId: string, value: any, context: {
+      sectionId?: string; subformId?: string; subformName?: string; sectionTitle?: string;
+    }) => {
+      const info = fieldLookup[fieldId];
+      return {
+        fieldId,
+        label: info?.label || "Unknown Field",
+        type: info?.type || "text",
+        value,
+        sectionId: context.sectionId || info?.sectionId || "other",
+        sectionTitle: context.sectionTitle || info?.sectionTitle || "Default Section",
+        ...(context.subformId && {
+          subformId: context.subformId,
+          subformName: context.subformName,
+          subformTitle: context.subformName,
+        }),
+      };
     };
 
     const transformRecordData = (recordData: any): Record<string, any> => {
@@ -197,41 +244,31 @@ export async function GET(
 
       const slim = isSlimFormat(recordData);
 
-      // sections processing
+      // Sections
       if (recordData.sections) {
         Object.entries(recordData.sections).forEach(([sectionId, sectionData]: [string, any]) => {
-          if (sectionData.fields) {
-            Object.entries(sectionData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-              if (!allowedFieldIds.has(fieldId)) return;
-              const info = fieldLookup[fieldId];
+          if (!sectionData.fields) return;
+          Object.entries(sectionData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
+            if (!allowedFieldIds.has(fieldId)) return;
 
-              if (slim) {
-                // Slim format: fieldEntry IS the value directly
-                transformed[fieldId] = {
-                  fieldId,
-                  label: info?.label || "Unknown Field",
-                  type: info?.type || "text",
-                  value: fieldEntry,
-                  sectionId,
-                  sectionTitle: info?.sectionTitle || "Default Section",
-                };
-              } else {
-                // Legacy bloated format: fieldEntry is {fieldId, label, type, value, ...}
-                transformed[fieldId] = {
-                  ...fieldEntry,
-                  fieldId,
-                  sectionId,
-                  sectionTitle: sectionData.sectionTitle || info?.sectionTitle || "Default Section",
-                  type: info?.type || fieldEntry.type,
-                  label: fieldEntry.label || info?.label || "Unknown Field",
-                };
-              }
-            });
-          }
+            if (slim) {
+              transformed[fieldId] = enrichField(fieldId, fieldEntry, { sectionId });
+            } else {
+              const info = fieldLookup[fieldId];
+              transformed[fieldId] = {
+                ...fieldEntry,
+                fieldId,
+                sectionId,
+                sectionTitle: sectionData.sectionTitle || info?.sectionTitle || "Default Section",
+                type: info?.type || fieldEntry.type,
+                label: fieldEntry.label || info?.label || "Unknown Field",
+              };
+            }
+          });
         });
       }
 
-      // subforms processing
+      // Subforms
       if (recordData.subforms) {
         Object.entries(recordData.subforms).forEach(([subformId, subformData]: [string, any]) => {
           const subformInfo = subformLookup[subformId];
@@ -240,21 +277,16 @@ export async function GET(
           if (subformData.fields) {
             Object.entries(subformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
               if (!allowedFieldIds.has(fieldId)) return;
-              const info = fieldLookup[fieldId];
 
               if (slim) {
-                transformed[fieldId] = {
-                  fieldId,
-                  label: info?.label || "Unknown Field",
-                  type: info?.type || "text",
-                  value: fieldEntry,
+                transformed[fieldId] = enrichField(fieldId, fieldEntry, {
+                  sectionId: "subform",
                   subformId,
                   subformName,
-                  subformTitle: subformName,
-                  sectionId: "subform",
                   sectionTitle: subformInfo?.sectionTitle || subformName,
-                };
+                });
               } else {
+                const info = fieldLookup[fieldId];
                 transformed[fieldId] = {
                   ...fieldEntry,
                   fieldId,
@@ -270,35 +302,11 @@ export async function GET(
             });
           }
 
-          if (subformData.rows && Array.isArray(subformData.rows) && subformData.rows.length > 0) {
+          if (subformData.rows?.length > 0) {
             const dynamicRowKey = `_dynamicRows_${subformId}`;
-            const rowValues = subformData.rows.map((row: any) => {
-              const rowData: Record<string, any> = {};
-              if (row.fields) {
-                Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                  // Slim: fEntry is the value; Legacy: fEntry is {value, ...}
-                  rowData[fId] = slim ? fEntry : (fEntry as any).value;
-                });
-              }
-              return rowData;
-            });
-
-            const fieldDefinitions = subformInfo?.fields?.map((f: any) => ({
-              id: f.id,
-              label: f.label,
-              type: f.type,
-            })) || [];
-
-            transformed[dynamicRowKey] = {
-              type: "dynamicRows",
-              label: subformName,
-              value: rowValues,
-              subformId,
-              subformName,
-              subformTitle: subformName,
-              sectionTitle: subformInfo?.sectionTitle || "Subforms",
-              fieldDefinitions,
-            };
+            transformed[dynamicRowKey] = buildDynamicRowEntry(
+              subformData.rows, subformId, subformName, subformInfo, slim
+            );
           }
 
           if (subformData.childSubforms) {
@@ -310,40 +318,63 @@ export async function GET(
       return transformed;
     };
 
+    const buildDynamicRowEntry = (
+      rows: any[], subformId: string, subformName: string,
+      subformInfo: any, slim: boolean
+    ) => {
+      const rowValues = rows.map((row: any) => {
+        const rowData: Record<string, any> = {};
+        if (row.fields) {
+          Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
+            rowData[fId] = slim ? fEntry : (fEntry as any).value;
+          });
+        }
+        return rowData;
+      });
+
+      return {
+        type: "dynamicRows",
+        label: subformName,
+        value: rowValues,
+        subformId,
+        subformName,
+        subformTitle: subformName,
+        sectionTitle: subformInfo?.sectionTitle || "Subforms",
+        fieldDefinitions: subformInfo?.fields?.map((f: any) => ({
+          id: f.id, label: f.label, type: f.type,
+        })) || [],
+      };
+    };
+
     const processChildSubforms = (
       childSubforms: Record<string, any>,
       parentPath: string,
       transformed: Record<string, any>,
       slim: boolean
     ) => {
-      Object.entries(childSubforms).forEach(([childSubformId, childSubformData]: [string, any]) => {
-        const childSubformInfo = subformLookup[childSubformId];
-        const childSubformName = childSubformData.subformName || childSubformInfo?.name || "Child Subform";
-        const fullPath = `${parentPath} → ${childSubformName}`;
+      Object.entries(childSubforms).forEach(([childId, childData]: [string, any]) => {
+        const childInfo = subformLookup[childId];
+        const childName = childData.subformName || childInfo?.name || "Child Subform";
+        const fullPath = `${parentPath} → ${childName}`;
 
-        if (childSubformData.fields) {
-          Object.entries(childSubformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
+        if (childData.fields) {
+          Object.entries(childData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
             if (!allowedFieldIds.has(fieldId)) return;
-            const info = fieldLookup[fieldId];
 
             if (slim) {
-              transformed[fieldId] = {
-                fieldId,
-                label: info?.label || "Unknown Field",
-                type: info?.type || "text",
-                value: fieldEntry,
-                subformId: childSubformId,
-                subformName: childSubformName,
-                subformTitle: fullPath,
+              transformed[fieldId] = enrichField(fieldId, fieldEntry, {
                 sectionId: "subform",
+                subformId: childId,
+                subformName: childName,
                 sectionTitle: fullPath,
-              };
+              });
             } else {
+              const info = fieldLookup[fieldId];
               transformed[fieldId] = {
                 ...fieldEntry,
                 fieldId,
-                subformId: childSubformId,
-                subformName: childSubformName,
+                subformId: childId,
+                subformName: childName,
                 subformTitle: fullPath,
                 sectionId: "subform",
                 sectionTitle: fullPath,
@@ -354,38 +385,18 @@ export async function GET(
           });
         }
 
-        if (childSubformData.rows && Array.isArray(childSubformData.rows) && childSubformData.rows.length > 0) {
-          const dynamicRowKey = `_dynamicRows_${childSubformId}`;
-          const rowValues = childSubformData.rows.map((row: any) => {
-            const rowData: Record<string, any> = {};
-            if (row.fields) {
-              Object.entries(row.fields).forEach(([fId, fEntry]: [string, any]) => {
-                rowData[fId] = slim ? fEntry : (fEntry as any).value;
-              });
-            }
-            return rowData;
-          });
-
-          const fieldDefinitions = childSubformInfo?.fields?.map((f: any) => ({
-            id: f.id,
-            label: f.label,
-            type: f.type,
-          })) || [];
-
-          transformed[dynamicRowKey] = {
-            type: "dynamicRows",
-            label: childSubformName,
-            value: rowValues,
-            subformId: childSubformId,
-            subformName: childSubformName,
-            subformTitle: fullPath,
-            sectionTitle: fullPath,
-            fieldDefinitions,
-          };
+        if (childData.rows?.length > 0) {
+          const dynamicRowKey = `_dynamicRows_${childId}`;
+          transformed[dynamicRowKey] = buildDynamicRowEntry(
+            childData.rows, childId, childName, childInfo, slim
+          );
+          // Override path for nested subforms
+          transformed[dynamicRowKey].subformTitle = fullPath;
+          transformed[dynamicRowKey].sectionTitle = fullPath;
         }
 
-        if (childSubformData.childSubforms) {
-          processChildSubforms(childSubformData.childSubforms, fullPath, transformed, slim);
+        if (childData.childSubforms) {
+          processChildSubforms(childData.childSubforms, fullPath, transformed, slim);
         }
       });
     };
@@ -403,9 +414,7 @@ export async function GET(
             newEntry.sectionTitle = sfInfo.sectionTitle;
             newEntry.subformTitle = sfInfo.name;
             newEntry.fieldDefinitions = sfInfo.fields.map((f: any) => ({
-              id: f.id,
-              label: f.label,
-              type: f.type,
+              id: f.id, label: f.label, type: f.type,
             }));
           }
         } else if (key.includes("__instance_")) {
@@ -438,25 +447,27 @@ export async function GET(
       return enriched;
     };
 
+    // ────────────────────────────────────────────────
+    // 8. Process records — enrich data, DO NOT embed full form structure per record
+    // ────────────────────────────────────────────────
     const processedRecords = records.map((record: any) => {
-      const recordData = record.recordData || {};
-      const transformedData = transformRecordData(recordData);
-
+      const transformedData = transformRecordData(record.recordData || {});
       return {
-        ...record,
+        id: record.id,
+        formId: record.formId,
         recordData: transformedData,
-        form: {
-          id: form.id,
-          name: form.name,
-          sections: form.sections,
-          subforms: form.subforms,
-        },
-        formName: form.name,
+        submittedBy: record.submittedBy,
+        submittedAt: record.submittedAt,
+        status: record.status,
+        userId: record.userId,
+        employee_id: record.employee_id,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
       };
     });
 
     // ────────────────────────────────────────────────
-    // 6. Build formFieldsWithSections (unchanged)
+    // 9. Build formFieldsWithSections (field metadata for table columns)
     // ────────────────────────────────────────────────
     const formFieldsWithSections: any[] = [];
 
@@ -525,20 +536,17 @@ export async function GET(
     form.subforms?.forEach((sf: any) => addSubformFields(sf));
 
     // ────────────────────────────────────────────────
-    // 7. Response
+    // 10. Response — lean payload, no form structure duplication
     // ────────────────────────────────────────────────
     return NextResponse.json({
       success: true,
-      total: processedRecords.length,
-      page: 1,
-      limit: 500,
-      totalPages: 1,
-      filters: { userId: userId || null, organizationId: organizationId || null },
+      total: totalCount,
+      page,
+      limit,
+      totalPages,
       form: {
         id: form.id,
         name: form.name,
-        sections: form.sections,
-        subforms: form.subforms,
       },
       formFieldsWithSections,
       records: processedRecords,

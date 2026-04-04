@@ -5,6 +5,12 @@ import { FormRecord } from "./types"
 
 interface RecordsResponse {
   success: boolean
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+  form: { id: string; name: string }
+  formFieldsWithSections: any[]
   records: FormRecord[]
   error?: string
 }
@@ -51,27 +57,35 @@ export const recordsApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 30,
     }),
 
-    getModuleRecords: builder.query<FormRecord[], string[]>({
+    getModuleRecords: builder.query<
+      { records: FormRecord[]; formFieldsMap: Record<string, any[]> },
+      string[]
+    >({
       queryFn: async (formIds, _queryApi, _options, baseQuery) => {
         try {
           const allRecords: FormRecord[] = []
+          const formFieldsMap: Record<string, any[]> = {}
           for (const formId of formIds) {
-            const result = await baseQuery(`/forms/${formId}/records`)
+            const result = await baseQuery(`/forms/${formId}/records?limit=200`)
             if (result.error) {
               return { error: result.error }
             }
-            const data = (result.data as RecordsResponse).records || []
-            allRecords.push(...data.map((record) => ({ ...record, formId })))
+            const data = result.data as RecordsResponse
+            const records = data.records || []
+            allRecords.push(...records.map((record) => ({ ...record, formId, formName: data.form?.name })))
+            if (data.formFieldsWithSections) {
+              formFieldsMap[formId] = data.formFieldsWithSections
+            }
           }
-          return { data: allRecords }
+          return { data: { records: allRecords, formFieldsMap } }
         } catch (error) {
           return { error: { status: "CUSTOM_ERROR", error: String(error) } as any }
         }
       },
       providesTags: (result) =>
-        result
+        result?.records
           ? [
-              ...result.map((record) => ({
+              ...result.records.map((record) => ({
                 type: "Record" as const,
                 id: record.id,
               })),

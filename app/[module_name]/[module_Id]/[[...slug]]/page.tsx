@@ -234,7 +234,9 @@ export default function ModulePage({
 
       setFormFieldsWithSections(allFieldsWithSections);
 
-      const enhancedRecords = allRecordsData.map((record) =>
+      const rawRecords = allRecordsData?.records ?? allRecordsData ?? [];
+      const recordsArray = Array.isArray(rawRecords) ? rawRecords : [];
+      const enhancedRecords = recordsArray.map((record: any) =>
         processRecordData(record, allFieldsWithSections),
       );
 

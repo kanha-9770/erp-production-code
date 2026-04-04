@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 /* ============================================================
    CONSTANTS
 ============================================================ */
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — supports large XLSX with 5000+ rows and wide columns
 const PREVIEW_ROWS_LIMIT = 50;
 
 /* ============================================================
