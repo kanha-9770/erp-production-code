@@ -57,6 +57,14 @@ export interface FormFieldWithSection {
   lookup?: any;
   returnType?: "text" | "number" | "currency" | "percent" | "date" | "boolean";
   properties?: any;
+  styling?: {
+    className?: string;
+    style?: string;
+    textColor?: string;
+    backgroundColor?: string;
+    capsule?: boolean;
+    optionColors?: Record<string, { textColor: string; backgroundColor: string }>;
+  } | null;
 }
 
 export interface EditingCell {

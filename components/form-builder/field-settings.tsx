@@ -1399,7 +1399,7 @@ export default function FieldSettings({
                       <div className="space-y-0.5">
                         <Label>Custom Styling</Label>
                         <p className="text-sm text-muted-foreground">
-                          Apply custom CSS classes or inline styles
+                          Style this field in records display
                         </p>
                       </div>
                       <Switch
@@ -1412,34 +1412,137 @@ export default function FieldSettings({
 
                     {localField.styling && (
                       <div className="pl-6 border-l-2 border-gray-200 space-y-4">
+                        {/* Text & Background Color */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Text Color</Label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={localField.styling?.textColor || "#374151"}
+                                onChange={(e) =>
+                                  handleFieldUpdate({
+                                    styling: { ...localField.styling, textColor: e.target.value },
+                                  })
+                                }
+                                className="w-8 h-8 rounded border cursor-pointer"
+                              />
+                              <Input
+                                value={localField.styling?.textColor || ""}
+                                onChange={(e) =>
+                                  handleFieldUpdate({
+                                    styling: { ...localField.styling, textColor: e.target.value },
+                                  })
+                                }
+                                placeholder="#374151"
+                                className="h-8 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Background Color</Label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={localField.styling?.backgroundColor || "#ffffff"}
+                                onChange={(e) =>
+                                  handleFieldUpdate({
+                                    styling: { ...localField.styling, backgroundColor: e.target.value },
+                                  })
+                                }
+                                className="w-8 h-8 rounded border cursor-pointer"
+                              />
+                              <Input
+                                value={localField.styling?.backgroundColor || ""}
+                                onChange={(e) =>
+                                  handleFieldUpdate({
+                                    styling: { ...localField.styling, backgroundColor: e.target.value },
+                                  })
+                                }
+                                placeholder="#ffffff"
+                                className="h-8 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Capsule / Pill mode for dropdowns */}
+                        {["dropdown", "select", "lookup", "radio"].includes(localField.type) && (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                <Label className="text-xs">Capsule / Pill Format</Label>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Show values as colored capsules in records
+                                </p>
+                              </div>
+                              <Switch
+                                checked={!!localField.styling?.capsule}
+                                onCheckedChange={(checked) =>
+                                  handleFieldUpdate({
+                                    styling: { ...localField.styling, capsule: checked },
+                                  })
+                                }
+                              />
+                            </div>
+
+                            {localField.styling?.capsule && Array.isArray(localField.options) && localField.options.length > 0 && (
+                              <div className="space-y-2">
+                                <Label className="text-xs">Option Colors</Label>
+                                <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                                  {localField.options.map((opt: any) => {
+                                    const optValue = typeof opt === "string" ? opt : (opt.value ?? opt.label ?? opt);
+                                    const optLabel = typeof opt === "string" ? opt : (opt.label ?? opt.value ?? opt);
+                                    const colors = localField.styling?.optionColors?.[optValue] || { textColor: "#374151", backgroundColor: "#f3f4f6" };
+                                    return (
+                                      <div key={optValue} className="flex items-center gap-2">
+                                        <span
+                                          className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 min-w-[60px] text-center truncate max-w-[120px]"
+                                          style={{ color: colors.textColor, backgroundColor: colors.backgroundColor }}
+                                        >
+                                          {optLabel}
+                                        </span>
+                                        <input
+                                          type="color"
+                                          value={colors.textColor}
+                                          onChange={(e) => {
+                                            const updated = { ...localField.styling?.optionColors, [optValue]: { ...colors, textColor: e.target.value } };
+                                            handleFieldUpdate({ styling: { ...localField.styling, optionColors: updated } });
+                                          }}
+                                          className="w-6 h-6 rounded border cursor-pointer shrink-0"
+                                          title="Text color"
+                                        />
+                                        <input
+                                          type="color"
+                                          value={colors.backgroundColor}
+                                          onChange={(e) => {
+                                            const updated = { ...localField.styling?.optionColors, [optValue]: { ...colors, backgroundColor: e.target.value } };
+                                            handleFieldUpdate({ styling: { ...localField.styling, optionColors: updated } });
+                                          }}
+                                          className="w-6 h-6 rounded border cursor-pointer shrink-0"
+                                          title="Background color"
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* Custom CSS (advanced) */}
                         <div className="space-y-2">
-                          <Label>Custom Class</Label>
+                          <Label className="text-xs">Custom Class (advanced)</Label>
                           <Input
                             value={localField.styling?.className || ""}
                             onChange={(e) =>
                               handleFieldUpdate({
-                                styling: {
-                                  ...localField.styling,
-                                  className: e.target.value,
-                                },
+                                styling: { ...localField.styling, className: e.target.value },
                               })
                             }
                             placeholder="e.g. bg-blue-50 border-blue-300"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Custom Style (CSS)</Label>
-                          <Input
-                            value={localField.styling?.style || ""}
-                            onChange={(e) =>
-                              handleFieldUpdate({
-                                styling: {
-                                  ...localField.styling,
-                                  style: e.target.value,
-                                },
-                              })
-                            }
-                            placeholder="e.g. color: #2563eb; font-weight: bold;"
+                            className="h-8 text-xs"
                           />
                         </div>
                       </div>

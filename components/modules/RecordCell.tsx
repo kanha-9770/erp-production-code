@@ -816,18 +816,44 @@ export const RecordCell = memo(function RecordCell({
             </a>
           ) : (
             <div className="relative group w-full h-full">
-              <div
-                className={cn(
-                  "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
-                  isWrapTextEnabled || isExpanded ? "whitespace-normal break-words" : "whitespace-nowrap overflow-hidden text-ellipsis",
-                )}
-                style={getConditionalStyle(fieldDef, actualValue, displayText)}
-                title={displayText}
-              >
-                {(displayText ?? "") === "" ? "N/A" : displayText}
-              </div>
+              {/* Capsule/Pill rendering for dropdown fields with styling */}
+              {fieldDef.styling?.capsule && ["dropdown", "select", "lookup", "radio"].includes(fieldDef.type) && displayText && displayText !== "N/A" ? (
+                <div className="flex items-center gap-1 flex-wrap py-1">
+                  {displayText.split(",").map((val: string, i: number) => {
+                    const trimmed = val.trim();
+                    const optColors = fieldDef.styling?.optionColors?.[trimmed];
+                    return (
+                      <span
+                        key={i}
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium leading-tight"
+                        style={{
+                          color: optColors?.textColor || fieldDef.styling?.textColor || "#374151",
+                          backgroundColor: optColors?.backgroundColor || fieldDef.styling?.backgroundColor || "#f3f4f6",
+                        }}
+                      >
+                        {trimmed}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
+                    isWrapTextEnabled || isExpanded ? "whitespace-normal break-words" : "whitespace-nowrap overflow-hidden text-ellipsis",
+                  )}
+                  style={{
+                    ...getConditionalStyle(fieldDef, actualValue, displayText),
+                    ...(fieldDef.styling?.textColor ? { color: fieldDef.styling.textColor } : {}),
+                    ...(fieldDef.styling?.backgroundColor ? { backgroundColor: fieldDef.styling.backgroundColor } : {}),
+                  }}
+                  title={displayText}
+                >
+                  {(displayText ?? "") === "" ? "N/A" : displayText}
+                </div>
+              )}
 
-              {!isWrapTextEnabled && displayText && displayText.length > 40 && (
+              {!isWrapTextEnabled && displayText && displayText.length > 40 && !fieldDef.styling?.capsule && (
                 <button onClick={(e) => { e.stopPropagation(); toggleCellExpansion(cellKey); }} className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs rounded shadow-sm p-0.5 z-20">
                   {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                 </button>

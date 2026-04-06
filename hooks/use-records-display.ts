@@ -573,6 +573,7 @@ export function useRecordsDisplay({
           if (!existing.lookup && src.lookup) existing.lookup = src.lookup;
           if (!existing.validation && src.validation) existing.validation = src.validation;
           if (!existing.properties && src.properties) existing.properties = src.properties;
+          if (!existing.styling && src.styling) existing.styling = src.styling;
           if (!existing.formula && src.formula) existing.formula = src.formula;
           if (!existing.placeholder && src.placeholder) existing.placeholder = src.placeholder;
           if (!existing.description && src.description) existing.description = src.description;

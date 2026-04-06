@@ -494,6 +494,8 @@ export async function GET(
           validation: field.validation,
           options: field.options,
           lookup: field.lookup,
+          styling: field.styling || null,
+          properties: field.properties || null,
         });
       });
     });
@@ -519,6 +521,8 @@ export async function GET(
           validation: field.validation,
           options: field.options,
           lookup: field.lookup,
+          styling: field.styling || null,
+          properties: field.properties || null,
         });
       });
 
