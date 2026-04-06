@@ -55,6 +55,87 @@ export function patternToRegex(pattern: string): RegExp {
 }
 
 /**
+ * Calculate the specificity score of a route pattern.
+ * Higher score = more specific pattern.
+ *
+ * Scoring rules:
+ *  - Exact path (no wildcards): 1000 + number of segments
+ *  - Single wildcard (*):       500  + number of literal segments
+ *  - Double wildcard (**):      100  + number of literal segments
+ *  - Longer literal paths are always more specific than shorter ones
+ *
+ * Example:
+ *  "/profile/update-profile" → 1002 (exact, 2 segments)
+ *  "/profile"                → 1001 (exact, 1 segment)
+ *  "/profile/*"              → 502  (single wildcard, 2 parts)
+ *  "/profile/**"             → 101  (double wildcard, 1 literal segment)
+ *  "/**"                     → 100  (double wildcard, 0 literal segments)
+ */
+export function patternSpecificity(pattern: string): number {
+  const segments = pattern.split("/").filter(Boolean);
+  const hasDoubleWild = pattern.includes("**");
+  const hasSingleWild = !hasDoubleWild && pattern.includes("*");
+  const literalSegments = segments.filter((s) => !s.includes("*")).length;
+
+  if (hasDoubleWild) return 100 + literalSegments;
+  if (hasSingleWild) return 500 + literalSegments;
+  return 1000 + segments.length; // exact match
+}
+
+/**
+ * Resolve route access using specificity-based matching.
+ *
+ * Given a pathname and two arrays of route patterns (allowed & denied),
+ * finds the MOST SPECIFIC matching pattern across both lists.
+ * The most specific match determines the outcome.
+ * If two patterns have the same specificity, deny wins (secure-by-default).
+ *
+ * Returns:
+ *  - true  → allowed (most specific match was in allowedRoutes)
+ *  - false → denied  (most specific match was in deniedRoutes)
+ *  - null  → no rule matched (caller decides default behavior)
+ *
+ * Example:
+ *  allowed: ["/profile"]              ← specificity 1001
+ *  denied:  ["/profile/update-profile"] ← specificity 1002 (wins!)
+ *  pathname: "/profile/update-profile"
+ *  → result: false (denied, because the more specific pattern says deny)
+ */
+export function resolveRouteAccess(
+  pathname: string,
+  allowedRoutes: string[],
+  deniedRoutes: string[]
+): boolean | null {
+  let bestSpecificity = -1;
+  let bestResult: boolean | null = null;
+
+  // Check all allowed patterns
+  for (const pattern of allowedRoutes) {
+    if (patternToRegex(pattern).test(pathname)) {
+      const spec = patternSpecificity(pattern);
+      if (spec > bestSpecificity) {
+        bestSpecificity = spec;
+        bestResult = true;
+      }
+    }
+  }
+
+  // Check all denied patterns
+  for (const pattern of deniedRoutes) {
+    if (patternToRegex(pattern).test(pathname)) {
+      const spec = patternSpecificity(pattern);
+      // Deny wins on tie (>= instead of >)
+      if (spec >= bestSpecificity) {
+        bestSpecificity = spec;
+        bestResult = false;
+      }
+    }
+  }
+
+  return bestResult;
+}
+
+/**
  * Match a pathname against the route permission rules.
  * Returns the first matching rule, or null if no rule matches.
  */

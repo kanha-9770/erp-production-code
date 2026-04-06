@@ -112,11 +112,20 @@ export const routePermissionsApi = baseApi.injectEndpoints({
     }),
 
     /** Re-compute auth-meta cookie after route permissions change */
-    refreshAuthMeta: builder.mutation<{ success: boolean }, void>({
+    refreshAuthMeta: builder.mutation<
+      { success: boolean; data?: { ts: number; isAdmin: boolean; deniedRoutes: string[]; allowedRoutes: string[]; allowedModuleIds: string[] } },
+      void
+    >({
       query: () => ({
         url: "/auth/refresh-meta",
         method: "POST",
       }),
+    }),
+
+    /** Get the latest permission version timestamp for change detection */
+    getPermVersion: builder.query<{ success: boolean; data: { version: number } }, void>({
+      query: () => "/auth/perm-version",
+      keepUnusedDataFor: 0, // Always fresh
     }),
   }),
 })
@@ -131,4 +140,5 @@ export const {
   useGetRouteAccessQuery,
   useUpdateRouteAccessMutation,
   useRefreshAuthMetaMutation,
+  useGetPermVersionQuery,
 } = routePermissionsApi

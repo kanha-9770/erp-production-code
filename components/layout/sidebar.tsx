@@ -55,6 +55,7 @@ import { useGetUserQuery } from "@/lib/api/auth";
 
 import { useOptimisticModules } from "@/hooks/useOptimisticModules";
 import { usePermissionContext } from "@/context/PermissionContext";
+import { useRouteAccess } from "@/hooks/use-route-access";
 
 interface FormModule {
   id: string;
@@ -131,26 +132,10 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   // Use isAdmin directly from /api/auth/me (checks role.isAdmin, org owner, role name)
   const isAdmin = userData?.user?.isAdmin ?? false;
 
-  // Check if user has route-level access to admin/modules (DB-backed route permissions)
-  const allowedRoutes: string[] = (userData?.user as any)?.allowedRoutes ?? [];
-  const canManageModules = isAdmin || allowedRoutes.some((pattern: string) => {
-    // Match patterns like "/admin/**" or "/admin/modules"
-    if (pattern === "/admin/modules") return true;
-    if (pattern === "/admin/**") return true;
-    try {
-      const regex = new RegExp(
-        "^" +
-          pattern
-            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-            .replace(/\*\*/g, ".*")
-            .replace(/\*/g, "[^/]+") +
-          "$"
-      );
-      return regex.test("/admin/modules");
-    } catch {
-      return false;
-    }
-  });
+  // Route-level access check (reads from auth-meta cookie, reactive to permission changes)
+  const { canAccess } = useRouteAccess();
+
+  const canManageModules = canAccess("/admin/modules");
 
   const organizationId = userData?.user?.organization?.id ?? null;
 
@@ -398,30 +383,14 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
   ];
 
-  // Filter nav items based on permissions — admin or route-level grants
+  // Filter nav items based on route permissions.
+  // Hides any button whose route the user is denied access to.
   const iconButtons = allIconButtons.filter((btn) => {
-    if (btn.requireAdmin && !isAdmin) {
-      // Check if user has route-level access for this specific route
-      if (btn.route) {
-        return allowedRoutes.some((pattern: string) => {
-          if (pattern === btn.route) return true;
-          try {
-            const regex = new RegExp(
-              "^" +
-                pattern
-                  .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-                  .replace(/\*\*/g, ".*")
-                  .replace(/\*/g, "[^/]+") +
-                "$"
-            );
-            return regex.test(btn.route!);
-          } catch {
-            return false;
-          }
-        });
-      }
-      return false;
+    // Buttons with a route — check if user can access that route
+    if (btn.route) {
+      return canAccess(btn.route);
     }
+    // View-only buttons (no route) — always shown
     return true;
   });
 
@@ -585,36 +554,38 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
           )}
         </div>
 
-        {/* User area – simplified (remove userData dependency) */}
-        <Link href="/profile">
-          <div
-            className="border-t px-3 py-3 relative"
-            style={{ borderColor: "#5a4d96" }}
-          >
-            <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-black hover:text-white hover:bg-black transition-colors group">
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded bg-[#5a4d96] flex items-center justify-center text-xs font-semibold text-white">
-                  {userData?.user?.first_name?.charAt(0)?.toUpperCase() || "CT"}
+        {/* User area */}
+        {canAccess("/profile") && (
+          <Link href="/profile">
+            <div
+              className="border-t px-3 py-3 relative"
+              style={{ borderColor: "#5a4d96" }}
+            >
+              <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-black hover:text-white hover:bg-black transition-colors group">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded bg-[#5a4d96] flex items-center justify-center text-xs font-semibold text-white">
+                    {userData?.user?.first_name?.charAt(0)?.toUpperCase() || "CT"}
+                  </div>
+                  <span className="text-sm font-medium text-black group-hover:text-white">
+                    {userData?.user
+                      ? userData.user.first_name || userData.user.last_name
+                        ? `${userData.user.first_name ?? ""} ${
+                            userData.user.last_name ?? ""
+                          }`.trim()
+                        : (userData.user.username ??
+                          userData.user.email ??
+                          "CRM Teamspace")
+                      : "CRM Teamspace"}
+                  </span>
                 </div>
-                <span className="text-sm font-medium text-black group-hover:text-white">
-                  {userData?.user
-                    ? userData.user.first_name || userData.user.last_name
-                      ? `${userData.user.first_name ?? ""} ${
-                          userData.user.last_name ?? ""
-                        }`.trim()
-                      : (userData.user.username ??
-                        userData.user.email ??
-                        "CRM Teamspace")
-                    : "CRM Teamspace"}
-                </span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              <div className="absolute bottom-3 left-7 w-5 h-5 rounded-full bg-[#5a4d96] flex items-center justify-center">
+                <span className="text-xs font-semibold text-white">1</span>
               </div>
-              <ChevronDown className="w-4 h-4" />
-            </button>
-            <div className="absolute bottom-3 left-7 w-5 h-5 rounded-full bg-[#5a4d96] flex items-center justify-center">
-              <span className="text-xs font-semibold text-white">1</span>
             </div>
-          </div>
-        </Link>
+          </Link>
+        )}
 
         {/* Resize handle — desktop only */}
         {!isCollapsed && (

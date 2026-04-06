@@ -36,22 +36,37 @@ async function buildAuthMeta(token: string) {
 
   // Admin gets full access — skip DB queries
   if (isAdmin) {
-    return { v: 2, isAdmin: true, roleNames, deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] };
+    return {
+      v: 2,
+      ts: Date.now(),
+      isAdmin: true,
+      roleNames,
+      deniedRoutes: [] as string[],
+      allowedRoutes: [] as string[],
+      allowedModuleIds: [] as string[],
+    };
   }
 
-  const { deniedRoutes, allowedRoutes, allowedModuleIds } = await computeRouteMeta(
-    userId,
-    user.organizationId,
-    roleIds
-  );
+  const { deniedRoutes, allowedRoutes, allowedModuleIds } =
+    await computeRouteMeta(userId, user.organizationId, roleIds);
 
-  return { v: 2, isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds };
+  return {
+    v: 2,
+    ts: Date.now(),
+    isAdmin,
+    roleNames,
+    deniedRoutes,
+    allowedRoutes,
+    allowedModuleIds,
+  };
 }
 
 /** Set the auth-meta cookie on a response */
 function setAuthMetaCookie(
   response: NextResponse,
   meta: {
+    v: number;
+    ts: number;
     isAdmin: boolean;
     roleNames: string[];
     deniedRoutes: string[];
@@ -60,7 +75,7 @@ function setAuthMetaCookie(
   }
 ) {
   response.cookies.set("auth-meta", JSON.stringify(meta), {
-    httpOnly: true,
+    httpOnly: false, // Client-side RoutePermissionGuard needs to read this
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60,
@@ -111,8 +126,9 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/auth/refresh-meta
  *
- * Called by the settings UI after route permissions are updated.
- * Re-computes auth-meta cookie from current DB state.
+ * Called by the client-side RoutePermissionGuard or settings UI after
+ * route permissions are updated. Re-computes auth-meta cookie from
+ * current DB state and returns the permission data in the response body.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -126,7 +142,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const response = NextResponse.json({ success: true });
+    // Return the full permission data so the client can check routes immediately
+    const response = NextResponse.json({
+      success: true,
+      data: {
+        ts: meta.ts,
+        isAdmin: meta.isAdmin,
+        roleNames: meta.roleNames,
+        deniedRoutes: meta.deniedRoutes,
+        allowedRoutes: meta.allowedRoutes,
+        allowedModuleIds: meta.allowedModuleIds,
+      },
+    });
     setAuthMetaCookie(response, meta);
 
     console.log(

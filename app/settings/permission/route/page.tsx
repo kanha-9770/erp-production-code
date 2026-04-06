@@ -584,7 +584,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
       {/* Footer */}
       <div className="px-5 py-2 border-t bg-muted/20">
         <p className="text-[10px] text-muted-foreground">
-          Changes apply to your session instantly. Other users must re-login.
+          Changes apply to your session instantly. Other users will be updated automatically within 15 seconds.
         </p>
       </div>
     </div>

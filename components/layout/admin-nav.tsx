@@ -3,7 +3,7 @@
 import { BarChart3, Bot, Brain, FileDown, LayoutDashboard, LogOut, Menu, Settings, User } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { logoutAction } from '@/app/actions/auth';
 import {
@@ -21,6 +21,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import { useRouteAccess } from '@/hooks/use-route-access';
 
 interface AdminNavProps {
   user: {
@@ -34,8 +35,9 @@ interface AdminNavProps {
 export function AdminNav({ user }: AdminNavProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { canAccess } = useRouteAccess();
 
-  const navItems = [
+  const allNavItems = [
     { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     { href: '/admin/intelligence', label: 'Intelligence', icon: Brain },
@@ -43,6 +45,12 @@ export function AdminNav({ user }: AdminNavProps) {
     { href: '/admin/chatbot', label: 'Chatbot', icon: Bot },
     { href: '/admin/settings', label: 'Settings', icon: Settings },
   ];
+
+  // Filter nav items — only show routes the user has permission to access
+  const navItems = useMemo(
+    () => allNavItems.filter((item) => canAccess(item.href)),
+    [canAccess]
+  );
 
   return (
     <nav className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">

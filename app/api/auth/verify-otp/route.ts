@@ -155,9 +155,9 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set(
       "auth-meta",
-      JSON.stringify({ v: 2, isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
+      JSON.stringify({ v: 2, ts: Date.now(), isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
       {
-        httpOnly: true,
+        httpOnly: false, // Client-side RoutePermissionGuard needs to read this
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60,

@@ -1,31 +1,5 @@
 import { prisma } from "@/lib/prisma";
 
-/**
- * Routes that are always accessible to any logged-in user.
- * These are never denied even if they exist in the RoutePermission table
- * with no access rules configured.
- */
-const ALWAYS_OPEN_ROUTES = new Set([
-  "/",
-  "/profile",
-  "/profile/security",
-  "/profile/update-profile",
-  "/chatbot",
-  "/settings",
-  "/settings/permission",
-  "/settings/permission/roles",
-  "/settings/permission/route",
-  "/admin",
-  "/admin/modules",
-  "/admin/dashboard",
-  "/admin/users",
-  "/admin/settings",
-  "/admin/analytics",
-  "/admin/reports",
-  "/admin/chatbot",
-  "/admin/intelligence",
-]);
-
 export interface RouteMetaResult {
   deniedRoutes: string[];
   allowedRoutes: string[];
@@ -34,6 +8,16 @@ export interface RouteMetaResult {
 
 /**
  * Compute the user's route + module access from DB.
+ *
+ * Every route in the RoutePermission table is evaluated:
+ *  - If the route has no access rules → it is NOT added to either list (open by default)
+ *  - User-level override takes highest priority
+ *  - Then role-level check
+ *  - Granted → allowedRoutes, not granted → deniedRoutes
+ *
+ * The consumer (middleware / client guard) uses specificity-based matching
+ * via resolveRouteAccess() so a specific deny (e.g. /profile/update-profile)
+ * always wins over a general allow (e.g. /profile).
  */
 export async function computeRouteMeta(
   userId: string,
@@ -72,13 +56,14 @@ export async function computeRouteMeta(
   const allowed: string[] = [];
 
   for (const rp of dbRoutePermissions) {
-    // Route exists in DB but no access rules configured yet — allow by default.
+    // Route exists in DB but no access rules configured yet — open by default.
+    // Don't add to either list so it stays unrestricted.
     if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) {
-      console.log(`[route-meta]   pattern="${rp.pattern}" → ALLOWED (no access rules configured)`);
+      console.log(`[route-meta]   pattern="${rp.pattern}" → OPEN (no access rules configured)`);
       continue;
     }
 
-    // User-level override
+    // User-level override (most specific — if found, it wins)
     const userEntry = rp.userAccess.find((ua) => ua.userId === userId);
     if (userEntry) {
       if (userEntry.granted) {
@@ -107,10 +92,6 @@ export async function computeRouteMeta(
       );
     }
   }
-
-  // Remove patterns from denied if a more specific allowed pattern covers them.
-  // e.g. if "/admin/**" is denied but "/admin/modules" is allowed, keep both —
-  // the middleware checks allowedRoutes first so the specific grant wins.
 
   // ── 2. Module-level VIEW access ────────────────────────────────────────────
   const allowedModuleIdSet = new Set<string>();

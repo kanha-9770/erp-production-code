@@ -90,6 +90,7 @@ export interface GetUserResponse {
     isAdmin: boolean
     isOrgOwner?: boolean
     allowedRoutes?: string[]
+    deniedRoutes?: string[]
     mobile?: string
     mobile_verified?: boolean
     avatar?: string
