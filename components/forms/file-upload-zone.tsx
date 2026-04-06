@@ -64,7 +64,7 @@ export function FileUploadZone({
       case "signature":
         return "image/png,image/jpeg";
       case "file":
-        return "*";
+        return "image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar,.ppt,.pptx";
       default:
         return "image/*";
     }

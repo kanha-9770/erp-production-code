@@ -5,6 +5,37 @@ import { requireAuth } from '@/lib/auth2';
 import { getDateRange } from '@/lib/utils/date-utils';
 
 // Helpers
+function isSessionAdmin(session: any): boolean {
+  const isOrgOwner = session.user.organization?.ownerId === session.user.id;
+  const hasAdminRole = session.user.unitAssignments?.some(
+    (ua: any) => ua.role?.isAdmin && ua.role?.isActive !== false
+  );
+  return isOrgOwner || !!hasAdminRole;
+}
+
+async function getUserAllowedModuleIds(userId: string, orgId: string): Promise<string[]> {
+  const perms = await prisma.rolePermission.findMany({
+    where: {
+      role: { userAssignments: { some: { userId } } },
+      moduleId: { not: null },
+      granted: true,
+    },
+    select: { moduleId: true },
+  });
+  const moduleIds = Array.from(new Set(perms.map((p) => p.moduleId!)));
+  return moduleIds;
+}
+
+async function getUserAllowedFormIds(userId: string, orgId: string, moduleIds?: string[]): Promise<string[]> {
+  const allowedModules = moduleIds ?? await getUserAllowedModuleIds(userId, orgId);
+  if (allowedModules.length === 0) return [];
+  const modules = await prisma.formModule.findMany({
+    where: { id: { in: allowedModules }, organizationId: orgId, isActive: true },
+    select: { forms: { select: { id: true } } },
+  });
+  return modules.flatMap((m) => m.forms.map((f) => f.id));
+}
+
 async function getOrgUserIds(orgId: string | null | undefined): Promise<string[]> {
   if (!orgId) return [];
   const users = await prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true } });
@@ -26,6 +57,8 @@ async function getOrgFormIds(orgId: string | null | undefined): Promise<string[]
 export async function getExecutiveKPIs(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
   const { startDate, endDate } = getDateRange(dateRange);
 
   // Calculate previous period for comparison
@@ -33,9 +66,15 @@ export async function getExecutiveKPIs(dateRange: string) {
   const prevStart = new Date(startDate.getTime() - periodMs);
   const prevEnd = new Date(startDate);
 
+  // For admin: org-wide data. For user: only own data.
   const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
-  const orgFormIds = orgId ? await getOrgFormIds(orgId) : [];
-  const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  const loginUserFilter = admin
+    ? (orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {})
+    : { userId };
+
+  const orgFormIds = admin
+    ? (orgId ? await getOrgFormIds(orgId) : [])
+    : (orgId ? await getUserAllowedFormIds(userId, orgId) : []);
 
   // Current period metrics
   const [
@@ -43,83 +82,102 @@ export async function getExecutiveKPIs(dateRange: string) {
     totalSubmissionsCurrent, auditCurrent, pendingRecords,
     totalModules, loginSuccess, loginFailed,
   ] = await Promise.all([
-    orgId ? prisma.user.count({ where: { organizationId: orgId } }) : prisma.user.count(),
+    // Total users - admin only, user gets 0
+    admin
+      ? (orgId ? prisma.user.count({ where: { organizationId: orgId } }) : prisma.user.count())
+      : Promise.resolve(0),
 
-    // Active today
-    prisma.loginHistory.findMany({
-      where: {
-        status: 'Success',
-        ...userFilter,
-        createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-      },
-      distinct: ['userId'],
-      select: { userId: true },
-    }),
+    // Active today - admin only
+    admin
+      ? prisma.loginHistory.findMany({
+          where: {
+            status: 'Success',
+            ...loginUserFilter,
+            createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          },
+          distinct: ['userId'],
+          select: { userId: true },
+        })
+      : Promise.resolve([]),
 
-    // Active last 7d
-    prisma.loginHistory.findMany({
-      where: {
-        status: 'Success',
-        ...userFilter,
-        createdAt: { gte: new Date(Date.now() - 7 * 86400000) },
-      },
-      distinct: ['userId'],
-      select: { userId: true },
-    }),
+    // Active last 7d - admin only
+    admin
+      ? prisma.loginHistory.findMany({
+          where: {
+            status: 'Success',
+            ...loginUserFilter,
+            createdAt: { gte: new Date(Date.now() - 7 * 86400000) },
+          },
+          distinct: ['userId'],
+          select: { userId: true },
+        })
+      : Promise.resolve([]),
 
-    // Active last 30d
-    prisma.loginHistory.findMany({
-      where: {
-        status: 'Success',
-        ...userFilter,
-        createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
-      },
-      distinct: ['userId'],
-      select: { userId: true },
-    }),
+    // Active last 30d - admin only
+    admin
+      ? prisma.loginHistory.findMany({
+          where: {
+            status: 'Success',
+            ...loginUserFilter,
+            createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
+          },
+          distinct: ['userId'],
+          select: { userId: true },
+        })
+      : Promise.resolve([]),
 
-    // Total submissions current period
+    // Total submissions current period (scoped by user's allowed forms for non-admin)
     (async () => {
       if (orgFormIds.length === 0) return 0;
       let total = 0;
+      const recordFilter: any = { formId: { in: orgFormIds }, submittedAt: { gte: startDate, lte: endDate } };
+      if (!admin) recordFilter.userId = userId;
       for (let t = 1; t <= 15; t++) {
         const model = `formRecord${t}` as keyof typeof prisma;
-        total += await (prisma[model] as any).count({
-          where: { formId: { in: orgFormIds }, submittedAt: { gte: startDate, lte: endDate } },
-        });
+        total += await (prisma[model] as any).count({ where: recordFilter });
       }
       return total;
     })(),
 
-    // Audit logs current
-    prisma.auditLog.count({
-      where: { ...(orgId && { organizationId: orgId }), createdAt: { gte: startDate, lte: endDate } },
-    }),
+    // Audit logs current (scoped to user for non-admin)
+    admin
+      ? prisma.auditLog.count({
+          where: { ...(orgId && { organizationId: orgId }), createdAt: { gte: startDate, lte: endDate } },
+        })
+      : prisma.auditLog.count({
+          where: { performedBy: userId, createdAt: { gte: startDate, lte: endDate } },
+        }),
 
-    // Pending records
+    // Pending records (scoped by user's forms for non-admin)
     (async () => {
       if (orgFormIds.length === 0) return 0;
       let pending = 0;
+      const recordFilter: any = { formId: { in: orgFormIds }, status: 'pending' };
+      if (!admin) recordFilter.userId = userId;
       for (let t = 1; t <= 15; t++) {
         const model = `formRecord${t}` as keyof typeof prisma;
-        pending += await (prisma[model] as any).count({
-          where: { formId: { in: orgFormIds }, status: 'pending' },
-        });
+        pending += await (prisma[model] as any).count({ where: recordFilter });
       }
       return pending;
     })(),
 
-    // Total modules
-    prisma.formModule.count({ where: { ...(orgId && { organizationId: orgId }), isActive: true } }),
+    // Total modules (user sees only allowed modules count)
+    admin
+      ? prisma.formModule.count({ where: { ...(orgId && { organizationId: orgId }), isActive: true } })
+      : (async () => {
+          if (!orgId) return 0;
+          const allowed = await getUserAllowedModuleIds(userId, orgId);
+          return allowed.length;
+        })(),
 
-    // Login success
+    // Login success (scoped to user for non-admin)
     prisma.loginHistory.count({
-      where: { ...userFilter, status: 'Success', createdAt: { gte: startDate, lte: endDate } },
+      where: { ...loginUserFilter, status: 'Success', createdAt: { gte: startDate, lte: endDate } },
     }),
 
-    // Login failed
+    // Login failed (scoped to user for non-admin)
     prisma.loginHistory.count({
-      where: { ...userFilter, status: 'Failed', createdAt: { gte: startDate, lte: endDate } },
+      where: { ...loginUserFilter, status: 'Failed', createdAt: { gte: startDate, lte: endDate } },
     }),
   ]);
 
@@ -128,19 +186,23 @@ export async function getExecutiveKPIs(dateRange: string) {
     (async () => {
       if (orgFormIds.length === 0) return 0;
       let total = 0;
+      const recordFilter: any = { formId: { in: orgFormIds }, submittedAt: { gte: prevStart, lte: prevEnd } };
+      if (!admin) recordFilter.userId = userId;
       for (let t = 1; t <= 15; t++) {
         const model = `formRecord${t}` as keyof typeof prisma;
-        total += await (prisma[model] as any).count({
-          where: { formId: { in: orgFormIds }, submittedAt: { gte: prevStart, lte: prevEnd } },
-        });
+        total += await (prisma[model] as any).count({ where: recordFilter });
       }
       return total;
     })(),
-    prisma.auditLog.count({
-      where: { ...(orgId && { organizationId: orgId }), createdAt: { gte: prevStart, lte: prevEnd } },
-    }),
+    admin
+      ? prisma.auditLog.count({
+          where: { ...(orgId && { organizationId: orgId }), createdAt: { gte: prevStart, lte: prevEnd } },
+        })
+      : prisma.auditLog.count({
+          where: { performedBy: userId, createdAt: { gte: prevStart, lte: prevEnd } },
+        }),
     prisma.loginHistory.count({
-      where: { ...userFilter, status: 'Success', createdAt: { gte: prevStart, lte: prevEnd } },
+      where: { ...loginUserFilter, status: 'Success', createdAt: { gte: prevStart, lte: prevEnd } },
     }),
   ]);
 
@@ -150,6 +212,7 @@ export async function getExecutiveKPIs(dateRange: string) {
   };
 
   return {
+    isAdmin: admin,
     totalUsers,
     activeToday: activeToday.length,
     active7d: active7d.length,
@@ -173,10 +236,18 @@ export async function getExecutiveKPIs(dateRange: string) {
 export async function getModuleUsageRanking(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
   const { startDate, endDate } = getDateRange(dateRange);
 
+  // Non-admin: only modules they have permission to
+  const allowedModuleIds = !admin && orgId ? await getUserAllowedModuleIds(userId, orgId) : [];
+  const moduleFilter: any = { ...(orgId && { organizationId: orgId }), isActive: true };
+  if (!admin && allowedModuleIds.length > 0) moduleFilter.id = { in: allowedModuleIds };
+  else if (!admin && allowedModuleIds.length === 0 && orgId) return [];
+
   const modules = await prisma.formModule.findMany({
-    where: { ...(orgId && { organizationId: orgId }), isActive: true },
+    where: moduleFilter,
     include: { forms: { select: { id: true, name: true } } },
     orderBy: { sortOrder: 'asc' },
   });
@@ -189,8 +260,10 @@ export async function getModuleUsageRanking(dateRange: string) {
       for (const form of mod.forms) {
         for (let t = 1; t <= 15; t++) {
           const model = `formRecord${t}` as keyof typeof prisma;
+          const recordFilter: any = { formId: form.id, submittedAt: { gte: startDate, lte: endDate } };
+          if (!admin) recordFilter.userId = userId;
           const records = await (prisma[model] as any).findMany({
-            where: { formId: form.id, submittedAt: { gte: startDate, lte: endDate } },
+            where: recordFilter,
             select: { userId: true },
           });
           totalRecords += records.length;
@@ -221,10 +294,20 @@ export async function getModuleUsageRanking(dateRange: string) {
 export async function getFormUsageFrequency(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
   const { startDate, endDate } = getDateRange(dateRange);
 
+  // Non-admin: only forms from allowed modules
+  let formFilter: any = { ...(orgId && { module: { organizationId: orgId } }) };
+  if (!admin && orgId) {
+    const allowedModuleIds = await getUserAllowedModuleIds(userId, orgId);
+    if (allowedModuleIds.length === 0) return [];
+    formFilter = { module: { organizationId: orgId, id: { in: allowedModuleIds } } };
+  }
+
   const forms = await prisma.form.findMany({
-    where: { ...(orgId && { module: { organizationId: orgId } }) },
+    where: formFilter,
     include: { module: { select: { name: true, color: true } } },
   });
 
@@ -235,14 +318,16 @@ export async function getFormUsageFrequency(dateRange: string) {
 
       for (let t = 1; t <= 15; t++) {
         const model = `formRecord${t}` as keyof typeof prisma;
-        const count = await (prisma[model] as any).count({
-          where: { formId: form.id, submittedAt: { gte: startDate, lte: endDate } },
-        });
+        const recordFilter: any = { formId: form.id, submittedAt: { gte: startDate, lte: endDate } };
+        if (!admin) recordFilter.userId = userId;
+        const count = await (prisma[model] as any).count({ where: recordFilter });
         totalRecords += count;
 
         if (count > 0) {
+          const latestFilter: any = { formId: form.id };
+          if (!admin) latestFilter.userId = userId;
           const latest = await (prisma[model] as any).findFirst({
-            where: { formId: form.id },
+            where: latestFilter,
             orderBy: { submittedAt: 'desc' },
             select: { submittedAt: true },
           });
@@ -273,19 +358,31 @@ export async function getFormUsageFrequency(dateRange: string) {
 export async function getUserActivityHeatmap(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
   const { startDate, endDate } = getDateRange(dateRange);
-  const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
-  const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+
+  // Admin: org-wide. User: own activity only.
+  let loginFilter: any = { status: 'Success', createdAt: { gte: startDate, lte: endDate } };
+  let auditFilter: any = { createdAt: { gte: startDate, lte: endDate } };
+  if (admin) {
+    const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+    if (orgId && orgUserIds.length > 0) loginFilter.userId = { in: orgUserIds };
+    if (orgId) auditFilter.organizationId = orgId;
+  } else {
+    loginFilter.userId = userId;
+    auditFilter.performedBy = userId;
+  }
 
   // Get login timestamps
   const logins = await prisma.loginHistory.findMany({
-    where: { ...userFilter, status: 'Success', createdAt: { gte: startDate, lte: endDate } },
+    where: loginFilter,
     select: { createdAt: true },
   });
 
   // Get audit log timestamps
   const audits = await prisma.auditLog.findMany({
-    where: { ...(orgId && { organizationId: orgId }), createdAt: { gte: startDate, lte: endDate } },
+    where: auditFilter,
     select: { createdAt: true },
   });
 
@@ -322,19 +419,28 @@ export async function getUserActivityHeatmap(dateRange: string) {
 export async function getLiveActivityTimeline(limit: number = 30) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
 
   const [audits, logins] = await Promise.all([
     prisma.auditLog.findMany({
-      where: { ...(orgId && { organizationId: orgId }) },
+      where: admin
+        ? { ...(orgId && { organizationId: orgId }) }
+        : { performedBy: userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { user: { select: { email: true, first_name: true, last_name: true, avatar: true } } },
     }),
     (async () => {
-      const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
-      const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+      let loginFilter: any = {};
+      if (admin) {
+        const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+        loginFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+      } else {
+        loginFilter = { userId };
+      }
       return prisma.loginHistory.findMany({
-        where: userFilter,
+        where: loginFilter,
         orderBy: { createdAt: 'desc' },
         take: limit,
         include: { user: { select: { email: true, first_name: true, last_name: true, avatar: true } } },
@@ -374,6 +480,11 @@ export async function getLiveActivityTimeline(limit: number = 30) {
 export async function getInactiveUsers(daysSinceLastLogin: number = 30) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+
+  // Non-admin users cannot see other users' data
+  if (!admin) return [];
+
   const cutoffDate = new Date(Date.now() - daysSinceLastLogin * 86400000);
 
   const users = await prisma.user.findMany({
@@ -413,6 +524,11 @@ export async function getInactiveUsers(daysSinceLastLogin: number = 30) {
 export async function getRoleUsageAnalysis() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+
+  // Non-admin users cannot see role analysis
+  if (!admin) return { roles: [], unassignedUsers: 0 };
+
   if (!orgId) return { roles: [], unassignedUsers: 0 };
 
   const [roles, unassigned] = await Promise.all([
@@ -452,62 +568,92 @@ export async function getRoleUsageAnalysis() {
 export async function getSmartAlerts() {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
-  const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
-  const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
 
   const alerts: Array<{ severity: 'critical' | 'warning' | 'info'; title: string; description: string }> = [];
 
-  // Failed logins last 24h
-  const recentFailedLogins = await prisma.loginHistory.count({
-    where: { ...userFilter, status: 'Failed', createdAt: { gte: new Date(Date.now() - 86400000) } },
-  });
-  if (recentFailedLogins > 10) {
-    alerts.push({ severity: 'critical', title: 'High Failed Login Rate', description: `${recentFailedLogins} failed logins in last 24 hours` });
-  } else if (recentFailedLogins > 3) {
-    alerts.push({ severity: 'warning', title: 'Failed Login Attempts', description: `${recentFailedLogins} failed logins in last 24 hours` });
-  }
+  if (admin) {
+    // Admin: org-wide alerts
+    const orgUserIds = orgId ? await getOrgUserIds(orgId) : [];
+    const userFilter = orgId && orgUserIds.length > 0 ? { userId: { in: orgUserIds } } : {};
 
-  // Inactive users
-  const cutoff30 = new Date(Date.now() - 30 * 86400000);
-  const totalUsers = orgId ? await prisma.user.count({ where: { organizationId: orgId } }) : 0;
-  const activeUsers30 = await prisma.loginHistory.findMany({
-    where: { ...userFilter, status: 'Success', createdAt: { gte: cutoff30 } },
-    distinct: ['userId'],
-    select: { userId: true },
-  });
-  const inactiveCount = totalUsers - activeUsers30.length;
-  if (inactiveCount > 0 && totalUsers > 0 && (inactiveCount / totalUsers) > 0.3) {
-    alerts.push({ severity: 'warning', title: 'Many Inactive Users', description: `${inactiveCount} users haven't logged in for 30+ days (${Math.round((inactiveCount / totalUsers) * 100)}%)` });
-  }
-
-  // Unassigned users
-  if (orgId) {
-    const unassigned = await prisma.user.count({ where: { organizationId: orgId, unitAssignments: { none: {} } } });
-    if (unassigned > 0) {
-      alerts.push({ severity: 'info', title: 'Unassigned Users', description: `${unassigned} users have no role assignment` });
+    // Failed logins last 24h
+    const recentFailedLogins = await prisma.loginHistory.count({
+      where: { ...userFilter, status: 'Failed', createdAt: { gte: new Date(Date.now() - 86400000) } },
+    });
+    if (recentFailedLogins > 10) {
+      alerts.push({ severity: 'critical', title: 'High Failed Login Rate', description: `${recentFailedLogins} failed logins in last 24 hours` });
+    } else if (recentFailedLogins > 3) {
+      alerts.push({ severity: 'warning', title: 'Failed Login Attempts', description: `${recentFailedLogins} failed logins in last 24 hours` });
     }
-  }
 
-  // Pending records
-  const orgFormIds = orgId ? await getOrgFormIds(orgId) : [];
-  if (orgFormIds.length > 0) {
-    let pending = 0;
-    for (let t = 1; t <= 15; t++) {
-      const model = `formRecord${t}` as keyof typeof prisma;
-      pending += await (prisma[model] as any).count({ where: { formId: { in: orgFormIds }, status: 'pending' } });
+    // Inactive users
+    const cutoff30 = new Date(Date.now() - 30 * 86400000);
+    const totalUsers = orgId ? await prisma.user.count({ where: { organizationId: orgId } }) : 0;
+    const activeUsers30 = await prisma.loginHistory.findMany({
+      where: { ...userFilter, status: 'Success', createdAt: { gte: cutoff30 } },
+      distinct: ['userId'],
+      select: { userId: true },
+    });
+    const inactiveCount = totalUsers - activeUsers30.length;
+    if (inactiveCount > 0 && totalUsers > 0 && (inactiveCount / totalUsers) > 0.3) {
+      alerts.push({ severity: 'warning', title: 'Many Inactive Users', description: `${inactiveCount} users haven't logged in for 30+ days (${Math.round((inactiveCount / totalUsers) * 100)}%)` });
     }
-    if (pending > 50) {
-      alerts.push({ severity: 'warning', title: 'Pending Approvals Backlog', description: `${pending} records awaiting approval` });
-    } else if (pending > 0) {
-      alerts.push({ severity: 'info', title: 'Pending Approvals', description: `${pending} records awaiting approval` });
-    }
-  }
 
-  // Unpublished forms
-  if (orgId) {
-    const unpublished = await prisma.form.count({ where: { module: { organizationId: orgId }, isPublished: false } });
-    if (unpublished > 0) {
-      alerts.push({ severity: 'info', title: 'Draft Forms', description: `${unpublished} forms not yet published` });
+    // Unassigned users
+    if (orgId) {
+      const unassigned = await prisma.user.count({ where: { organizationId: orgId, unitAssignments: { none: {} } } });
+      if (unassigned > 0) {
+        alerts.push({ severity: 'info', title: 'Unassigned Users', description: `${unassigned} users have no role assignment` });
+      }
+    }
+
+    // Pending records (org-wide)
+    const orgFormIds = orgId ? await getOrgFormIds(orgId) : [];
+    if (orgFormIds.length > 0) {
+      let pending = 0;
+      for (let t = 1; t <= 15; t++) {
+        const model = `formRecord${t}` as keyof typeof prisma;
+        pending += await (prisma[model] as any).count({ where: { formId: { in: orgFormIds }, status: 'pending' } });
+      }
+      if (pending > 50) {
+        alerts.push({ severity: 'warning', title: 'Pending Approvals Backlog', description: `${pending} records awaiting approval` });
+      } else if (pending > 0) {
+        alerts.push({ severity: 'info', title: 'Pending Approvals', description: `${pending} records awaiting approval` });
+      }
+    }
+
+    // Unpublished forms
+    if (orgId) {
+      const unpublished = await prisma.form.count({ where: { module: { organizationId: orgId }, isPublished: false } });
+      if (unpublished > 0) {
+        alerts.push({ severity: 'info', title: 'Draft Forms', description: `${unpublished} forms not yet published` });
+      }
+    }
+  } else {
+    // Non-admin: user-specific alerts only
+    // Own failed logins last 24h
+    const ownFailedLogins = await prisma.loginHistory.count({
+      where: { userId, status: 'Failed', createdAt: { gte: new Date(Date.now() - 86400000) } },
+    });
+    if (ownFailedLogins > 0) {
+      alerts.push({ severity: 'warning', title: 'Failed Login Attempts', description: `${ownFailedLogins} failed login attempt(s) on your account in last 24 hours` });
+    }
+
+    // Own pending records
+    if (orgId) {
+      const allowedFormIds = await getUserAllowedFormIds(userId, orgId);
+      if (allowedFormIds.length > 0) {
+        let pending = 0;
+        for (let t = 1; t <= 15; t++) {
+          const model = `formRecord${t}` as keyof typeof prisma;
+          pending += await (prisma[model] as any).count({ where: { formId: { in: allowedFormIds }, userId, status: 'pending' } });
+        }
+        if (pending > 0) {
+          alerts.push({ severity: 'info', title: 'Your Pending Records', description: `You have ${pending} record(s) awaiting approval` });
+        }
+      }
     }
   }
 
@@ -523,11 +669,17 @@ export async function getSmartAlerts() {
 export async function getImportExportAnalytics(dateRange: string) {
   const session = await requireAuth();
   const orgId = session.user.organizationId;
+  const admin = isSessionAdmin(session);
+  const userId = session.user.id;
   const { startDate, endDate } = getDateRange(dateRange);
 
-  // ImportJob & ExportJob don't have direct orgId, but use moduleId/formId
-  const orgFormIds = orgId ? await getOrgFormIds(orgId) : [];
-  const formFilter = orgFormIds.length > 0 ? { formId: { in: orgFormIds } } : {};
+  // Scoped form IDs
+  const scopedFormIds = admin
+    ? (orgId ? await getOrgFormIds(orgId) : [])
+    : (orgId ? await getUserAllowedFormIds(userId, orgId) : []);
+  const formFilter: any = scopedFormIds.length > 0 ? { formId: { in: scopedFormIds } } : {};
+  // Non-admin: also filter by own userId
+  if (!admin) formFilter.userId = userId;
 
   const [imports, exports] = await Promise.all([
     prisma.importJob.findMany({
