@@ -524,40 +524,64 @@ export function usePublicForm({
       | { type: "subform"; data: Subform; parentSectionId?: string }
     > = [];
 
-    // Sort sections by order
-    const sortedSections = [...(form.sections || [])].sort(
-      (a, b) => (a.order ?? 0) - (b.order ?? 0)
-    );
-
-    sortedSections.forEach((section) => {
-      if (isSectionVisible(section.id)) {
-        items.push({ type: "section", data: section });
+    // Collect child subforms keyed by parent section (rendered inside the section)
+    const childSubformsBySectionId = new Map<string, Subform[]>();
+    (form.subforms || []).forEach((sf) => {
+      if (sf.parentSectionId) {
+        const list = childSubformsBySectionId.get(sf.parentSectionId) || [];
+        list.push(sf);
+        childSubformsBySectionId.set(sf.parentSectionId, list);
       }
-
-      // Direct child subforms of this section
-      const childSubforms = (form.subforms || []).filter(
-        (sf) => sf.parentSectionId === section.id
-      ).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-      childSubforms.forEach((subform) => {
-        if (isSectionVisible(subform.id)) {
-          items.push({
-            type: "subform",
-            data: subform,
-            parentSectionId: section.id,
-          });
-        }
-      });
     });
 
-    // True top-level subforms (no parent section)
+    // Top-level subforms (no parent section) — these participate in global ordering
     const topLevelSubforms = (form.subforms || []).filter(
-      (sf) => sf.parentSectionId === null
-    ).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      (sf) => !sf.parentSectionId
+    );
 
-    topLevelSubforms.forEach((subform) => {
-      if (isSectionVisible(subform.id)) {
-        items.push({ type: "subform", data: subform });
+    // Merge sections and top-level subforms, then sort by order to match canvas
+    const merged: Array<
+      | { kind: "section"; data: Form["sections"][number]; order: number }
+      | { kind: "topSubform"; data: Subform; order: number }
+    > = [
+      ...(form.sections || []).map((s) => ({
+        kind: "section" as const,
+        data: s,
+        order: s.order ?? 0,
+      })),
+      ...topLevelSubforms.map((sf) => ({
+        kind: "topSubform" as const,
+        data: sf,
+        order: sf.order ?? 0,
+      })),
+    ];
+    merged.sort((a, b) => a.order - b.order);
+
+    merged.forEach((entry) => {
+      if (entry.kind === "section") {
+        const section = entry.data;
+        if (isSectionVisible(section.id)) {
+          items.push({ type: "section", data: section });
+        }
+
+        // Direct child subforms of this section (rendered inside the section card)
+        const childSubforms = (childSubformsBySectionId.get(section.id) || [])
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+        childSubforms.forEach((subform) => {
+          if (isSectionVisible(subform.id)) {
+            items.push({
+              type: "subform",
+              data: subform,
+              parentSectionId: section.id,
+            });
+          }
+        });
+      } else {
+        // Top-level subform — rendered at root level between sections
+        if (isSectionVisible(entry.data.id)) {
+          items.push({ type: "subform", data: entry.data });
+        }
       }
     });
 

@@ -599,6 +599,52 @@ export function FormBody(props: FormBodyProps) {
             isFieldVisible(f, section.id),
           );
 
+          // Gather subforms belonging to this section
+          const sectionSubforms = rootItems
+            .filter(
+              (it) =>
+                it.type === "subform" &&
+                (it as any).parentSectionId === section.id,
+            )
+            .map((it) => it.data as Subform);
+
+          // Merge fields and subforms into a single order-sorted list
+          const allSectionItems: Array<
+            | { kind: "field"; field: FormField; order: number }
+            | { kind: "subform"; subform: Subform; order: number }
+          > = [
+            ...visibleSectionFields.map((f: FormField) => ({
+              kind: "field" as const,
+              field: f,
+              order: f.order ?? 0,
+            })),
+            ...sectionSubforms.map((sf: Subform) => ({
+              kind: "subform" as const,
+              subform: sf,
+              order: sf.order ?? 0,
+            })),
+          ];
+          allSectionItems.sort((a, b) => a.order - b.order);
+
+          // Group consecutive fields together into grid blocks,
+          // with subforms rendered as full-width blocks between them.
+          const renderGroups: Array<
+            | { kind: "fields"; fields: FormField[] }
+            | { kind: "subform"; subform: Subform }
+          > = [];
+          for (const entry of allSectionItems) {
+            if (entry.kind === "field") {
+              const last = renderGroups[renderGroups.length - 1];
+              if (last && last.kind === "fields") {
+                last.fields.push(entry.field);
+              } else {
+                renderGroups.push({ kind: "fields", fields: [entry.field] });
+              }
+            } else {
+              renderGroups.push({ kind: "subform", subform: entry.subform });
+            }
+          }
+
           return (
             <div
               key={section.id}
@@ -621,73 +667,69 @@ export function FormBody(props: FormBodyProps) {
                 </div>
               </div>
 
-              {/* Section fields */}
-              <div className="p-5">
-                <div
-                  className="grid gap-x-5 gap-y-4 items-start"
-                  style={{
-                    gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
-                  }}
-                >
-                  {visibleSectionFields.map((field: FormField) => {
-                    // Compute read-only for this field:
-                    // 1. Start with form-level view-only state
-                    let readOnly = !!isViewOnly;
-                    // 2. Section-level can override (editable section in view-only form)
-                    if (isSectionReadOnly) {
-                      const sr = isSectionReadOnly(section.id);
-                      if (sr === true) readOnly = true;   // section is VIEW-only
-                      if (sr === false) readOnly = false;  // section is explicitly editable
-                    }
-                    // 3. Field-level is most specific — overrides everything
-                    if (isFieldReadOnly) {
-                      const fr = isFieldReadOnly(field.id);
-                      if (fr === true) readOnly = true;   // field is VIEW-only
-                      if (fr === false) readOnly = false;  // field is explicitly editable
-                    }
+              {/* Section content: fields and subforms interleaved by order */}
+              <div className="p-5 space-y-5">
+                {renderGroups.map((group, gIdx) => {
+                  if (group.kind === "fields") {
                     return (
-                      <FieldWrapper
-                        key={field.id}
-                        field={field}
-                        error={errors[field.id]}
+                      <div
+                        key={`fields-${gIdx}`}
+                        className="grid gap-x-5 gap-y-4 items-start"
+                        style={{
+                          gridTemplateColumns: `repeat(${section.columns || 1}, minmax(0, 1fr))`,
+                        }}
                       >
-                        <FormRenderer
-                          field={field}
-                          value={formData[field.id]}
-                          error={errors[field.id]}
-                          submitting={submitting}
-                          submitted={submitted}
-                          handleFieldChange={handleFieldChange}
-                          formulaValues={formulaValues}
-                          formData={formData}
-                          allFields={allFields}
-                          setErrors={setErrors}
-                          locationStatus={locationStatus}
-                          forceReadOnly={readOnly}
-                          idToLabel={idToLabel}
-                        />
-                      </FieldWrapper>
+                        {group.fields.map((field: FormField) => {
+                          let readOnly = !!isViewOnly;
+                          if (isSectionReadOnly) {
+                            const sr = isSectionReadOnly(section.id);
+                            if (sr === true) readOnly = true;
+                            if (sr === false) readOnly = false;
+                          }
+                          if (isFieldReadOnly) {
+                            const fr = isFieldReadOnly(field.id);
+                            if (fr === true) readOnly = true;
+                            if (fr === false) readOnly = false;
+                          }
+                          return (
+                            <FieldWrapper
+                              key={field.id}
+                              field={field}
+                              error={errors[field.id]}
+                            >
+                              <FormRenderer
+                                field={field}
+                                value={formData[field.id]}
+                                error={errors[field.id]}
+                                submitting={submitting}
+                                submitted={submitted}
+                                handleFieldChange={handleFieldChange}
+                                formulaValues={formulaValues}
+                                formData={formData}
+                                allFields={allFields}
+                                setErrors={setErrors}
+                                locationStatus={locationStatus}
+                                forceReadOnly={readOnly}
+                                idToLabel={idToLabel}
+                              />
+                            </FieldWrapper>
+                          );
+                        })}
+                      </div>
                     );
-                  })}
-                </div>
+                  }
 
-                {/* Subforms belonging to this section */}
-                {rootItems
-                  .filter(
-                    (it) =>
-                      it.type === "subform" &&
-                      (it as any).parentSectionId === section.id,
-                  )
-                  .map((it) => (
-                    <div key={it.data.id} className="mt-5">
-                      <SubformBlock
-                        subform={it.data as Subform}
-                        level={1}
-                        parentPath={section.title}
-                        props={props}
-                      />
-                    </div>
-                  ))}
+                  // Subform block
+                  return (
+                    <SubformBlock
+                      key={group.subform.id}
+                      subform={group.subform}
+                      level={1}
+                      parentPath={section.title}
+                      props={props}
+                    />
+                  );
+                })}
               </div>
             </div>
           );
