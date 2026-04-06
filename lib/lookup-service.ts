@@ -72,50 +72,44 @@ export class LookupService {
   }
 
   // ──────────────────────────────────────────────────────────────
-  // 2. getFormRecords — heavy logging + safety
+  // 2. getFormRecords — matches admin records API logic
   // ──────────────────────────────────────────────────────────────
   private async getFormRecords(formId: string, options: { limit?: number; offset?: number } = {}): Promise<any[]> {
     const { limit = 50, offset = 0 } = options;
 
-    // Try unified table first
-    const unifiedRecords = await prisma.formRecord.findMany({
-      where: { formId },
-      orderBy: { createdAt: "desc" as const },
-      take: limit,
-      skip: offset,
-    });
-    if (unifiedRecords.length > 0) return unifiedRecords;
-
-    // Fallback to legacy table mapping
+    // Check table mapping first (same logic as admin /api/forms/[formId]/records)
     const tableName = await this.getTableName(formId);
-    if (!tableName) return [];
 
-    const model = this.getTableModel(tableName);
-    if (!model) return [];
+    if (tableName) {
+      const model = this.getTableModel(tableName);
+      if (!model) return [];
 
-    const records = await model.findMany({
-      where: { formId },
-      orderBy: { createdAt: "desc" as const },
-      take: limit,
-      skip: offset,
-      select: {
-        id: true,
-        recordData: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+      const records = await model.findMany({
+        where: { formId },
+        orderBy: { createdAt: "desc" as const },
+        take: limit,
+        skip: offset,
+        select: {
+          id: true,
+          recordData: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
 
-    console.log(`[getFormRecords] ✅ Query done → Found ${records.length} records`);
-
-    if (records.length > 0) {
-      console.log(`[getFormRecords] Sample record IDs: ${records.slice(0, 3).map(r => r.id).join(", ")}`);
-      console.log(`[getFormRecords] Sample recordData structure:`, 
-        Object.keys(records[0].recordData || {}));
-    } else {
-      console.log(`[getFormRecords] ⚠️ Zero records returned — either no data or wrong formId`);
+      console.log(`[getFormRecords] ✅ Table ${tableName} → Found ${records.length} records`);
+      return records;
     }
 
+    // No table mapping — use unified table
+    const records = await prisma.formRecord.findMany({
+      where: { formId },
+      orderBy: { createdAt: "desc" as const },
+      take: limit,
+      skip: offset,
+    });
+
+    console.log(`[getFormRecords] ✅ Unified table → Found ${records.length} records`);
     return records;
   }
 
@@ -144,6 +138,23 @@ export class LookupService {
     if (module) {
       transformedData._moduleId = module.id
       transformedData._moduleName = module.name
+    }
+
+    // Build a field-ID → definition map from form sections + subforms
+    const fieldDefMap: Record<string, { label: string; type: string; options: any; validation: any; sectionId?: string; subformId?: string }> = {};
+    if (form.sections) {
+      for (const section of form.sections) {
+        for (const f of (section.fields || [])) {
+          fieldDefMap[f.id] = { label: f.label, type: f.type, options: f.options, validation: f.validation, sectionId: section.id };
+        }
+      }
+    }
+    if (form.subforms) {
+      for (const subform of form.subforms) {
+        for (const f of (subform.fields || [])) {
+          fieldDefMap[f.id] = { label: f.label, type: f.type, options: f.options, validation: f.validation, subformId: subform.id };
+        }
+      }
     }
 
     // Add top-level fields if they exist
@@ -176,132 +187,103 @@ export class LookupService {
         field_id: "metadata",
         field_value: recordData.metadata,
         field_label: "metadata",
-        field_type: "object", // or json
+        field_type: "object",
         field_section_id: null,
         field_options: null,
         field_validation: null,
       };
     }
 
+    // Helper: resolve a field entry which may be a plain value or an object
+    const resolveField = (fieldKey: string, fieldDataAny: any, parentId: string, parentType: "section" | "subform") => {
+      const def = fieldDefMap[fieldKey];
+      const isPlainValue = fieldDataAny === null || fieldDataAny === undefined || typeof fieldDataAny !== "object" || Array.isArray(fieldDataAny);
+
+      let fieldType: string;
+      let fieldValue: any;
+      let fieldLabel: string;
+      let parsedOptions: any = null;
+      let parsedValidation: any = null;
+      let sectionId = parentType === "section" ? parentId : null;
+      let subformId = parentType === "subform" ? parentId : null;
+
+      if (isPlainValue) {
+        // New format: fields store just the value, use form definition for metadata
+        fieldType = def?.type || "text";
+        fieldValue = fieldDataAny;
+        fieldLabel = def?.label || fieldKey;
+        parsedOptions = def?.options ?? null;
+        parsedValidation = def?.validation ?? null;
+      } else {
+        // Legacy format: fields store {value, type, label, ...}
+        const fieldData = fieldDataAny as any;
+        fieldType = fieldData?.type || def?.type || "text";
+        fieldValue = fieldData?.value;
+        fieldLabel = fieldData?.label?.trim() || def?.label || fieldKey;
+        sectionId = fieldData?.sectionId || sectionId;
+        subformId = fieldData?.subformId || subformId;
+
+        if (fieldData?.options != null) {
+          try {
+            parsedOptions = typeof fieldData.options === "string" ? JSON.parse(fieldData.options) : fieldData.options;
+          } catch { parsedOptions = []; }
+        } else {
+          parsedOptions = def?.options ?? null;
+        }
+
+        if (fieldData?.validation != null) {
+          try {
+            parsedValidation = typeof fieldData.validation === "string" ? JSON.parse(fieldData.validation) : fieldData.validation;
+          } catch { parsedValidation = {}; }
+        } else {
+          parsedValidation = def?.validation ?? null;
+        }
+      }
+
+      // Type conversion
+      if (fieldType === "number" && fieldValue != null) {
+        const num = Number(fieldValue);
+        fieldValue = isNaN(num) ? fieldValue : num;
+      } else if ((fieldType === "datetime" || fieldType === "date") && fieldValue) {
+        try {
+          const date = new Date(fieldValue);
+          fieldValue = fieldType === "date" ? date.toISOString().split("T")[0] : date.toISOString();
+        } catch { /* keep original */ }
+      } else if (fieldType === "checkbox") {
+        fieldValue = Boolean(fieldValue);
+      } else if (["tel", "email", "url"].includes(fieldType)) {
+        fieldValue = fieldValue != null ? String(fieldValue) : fieldValue;
+      }
+
+      // Use label as key so LookupField can find it by display name
+      const key = fieldLabel || fieldKey;
+
+      transformedData[key] = {
+        field_id: fieldKey,
+        field_value: fieldValue,
+        field_label: fieldLabel,
+        field_type: fieldType,
+        field_section_id: sectionId || subformId || parentId,
+        field_options: parsedOptions,
+        field_validation: parsedValidation,
+      };
+    };
+
     // Traverse sections and extract fields
     const sections = recordData.sections || {};
     for (const [sectionKey, section] of Object.entries(sections)) {
       const fields = (section as any).fields || {};
       for (const [fieldKey, fieldDataAny] of Object.entries(fields)) {
-        const fieldData = fieldDataAny as any;
-        const fieldType = fieldData?.type || "text";
-        let fieldValue = fieldData?.value;
-
-        // Type conversion
-        if (fieldType === "number" && fieldValue != null) {
-          const num = Number(fieldValue);
-          fieldValue = isNaN(num) ? fieldValue : num;
-        } else if ((fieldType === "datetime" || fieldType === "date") && fieldValue) {
-          try {
-            const date = new Date(fieldValue);
-            fieldValue = fieldType === "date" ? date.toISOString().split("T")[0] : date.toISOString();
-          } catch {
-            // Keep original value
-          }
-        } else if (fieldType === "checkbox") {
-          fieldValue = Boolean(fieldValue);
-        } else if (["tel", "email", "url"].includes(fieldType)) {
-          fieldValue = String(fieldValue);
-        }
-
-        // Parse options and validation only if they exist
-        let parsedOptions = null;
-        let parsedValidation = null;
-
-        if (fieldData?.options != null) {
-          try {
-            parsedOptions = typeof fieldData.options === "string" ? JSON.parse(fieldData.options) : fieldData.options;
-          } catch {
-            parsedOptions = [];
-          }
-        }
-
-        if (fieldData?.validation != null) {
-          try {
-            parsedValidation = typeof fieldData.validation === "string" ? JSON.parse(fieldData.validation) : fieldData.validation;
-          } catch {
-            parsedValidation = {};
-          }
-        }
-
-        // Use label as key if available, else fieldId
-        const key = fieldData?.label?.trim() || fieldKey;
-
-        transformedData[key] = {
-          field_id: fieldData?.fieldId || fieldKey,
-          field_value: fieldValue,
-          field_label: fieldData?.label || key,
-          field_type: fieldType,
-          field_section_id: fieldData?.sectionId || sectionKey,
-          field_options: parsedOptions,
-          field_validation: parsedValidation,
-        };
+        resolveField(fieldKey, fieldDataAny, sectionKey, "section");
       }
     }
 
-    // Handle subforms similarly if present
+    // Handle subforms similarly
     const subforms = recordData.subforms || {};
     for (const [subformKey, subform] of Object.entries(subforms)) {
-      // Assuming subforms have similar structure to sections, adjust if needed
       const fields = (subform as any).fields || {};
       for (const [fieldKey, fieldDataAny] of Object.entries(fields)) {
-        const fieldData = fieldDataAny as any;
-        const fieldType = fieldData?.type || "text";
-        let fieldValue = fieldData?.value;
-
-        // Type conversion (same as above)
-        if (fieldType === "number" && fieldValue != null) {
-          const num = Number(fieldValue);
-          fieldValue = isNaN(num) ? fieldValue : num;
-        } else if ((fieldType === "datetime" || fieldType === "date") && fieldValue) {
-          try {
-            const date = new Date(fieldValue);
-            fieldValue = fieldType === "date" ? date.toISOString().split("T")[0] : date.toISOString();
-          } catch {
-            // Keep original value
-          }
-        } else if (fieldType === "checkbox") {
-          fieldValue = Boolean(fieldValue);
-        } else if (["tel", "email", "url"].includes(fieldType)) {
-          fieldValue = String(fieldValue);
-        }
-
-        // Parse options and validation
-        let parsedOptions = null;
-        let parsedValidation = null;
-
-        if (fieldData?.options != null) {
-          try {
-            parsedOptions = typeof fieldData.options === "string" ? JSON.parse(fieldData.options) : fieldData.options;
-          } catch {
-            parsedOptions = [];
-          }
-        }
-
-        if (fieldData?.validation != null) {
-          try {
-            parsedValidation = typeof fieldData.validation === "string" ? JSON.parse(fieldData.validation) : fieldData.validation;
-          } catch {
-            parsedValidation = {};
-          }
-        }
-
-        const key = fieldData?.label?.trim() || fieldKey;
-
-        transformedData[key] = {
-          field_id: fieldData?.fieldId || fieldKey,
-          field_value: fieldValue,
-          field_label: fieldData?.label || key,
-          field_type: fieldType,
-          field_section_id: fieldData?.subformId || subformKey, // or subformId
-          field_options: parsedOptions,
-          field_validation: parsedValidation,
-        };
+        resolveField(fieldKey, fieldDataAny, subformKey, "subform");
       }
     }
 
@@ -328,12 +310,30 @@ export class LookupService {
       // Strip form_ / module_ prefix if present
       const cleanId = sourceId.replace(/^(form_|module_|static_)/, "");
 
+      // Shared select shape for sourceForm — includes field definitions for transformRecord
+      const sourceFormSelect = {
+        id: true,
+        name: true,
+        sections: {
+          select: {
+            id: true,
+            fields: { select: { id: true, label: true, type: true, options: true, validation: true } },
+          },
+        },
+        subforms: {
+          select: {
+            id: true,
+            fields: { select: { id: true, label: true, type: true, options: true, validation: true } },
+          },
+        },
+      };
+
       // Try with original ID first, then clean ID
       let lookupSource = await prisma.lookupSource.findUnique({
         where: { id: sourceId },
         include: {
           sourceModule: true,
-          sourceForm: { select: { id: true, name: true } },
+          sourceForm: { select: sourceFormSelect },
         },
       });
 
@@ -342,7 +342,7 @@ export class LookupService {
           where: { id: cleanId },
           include: {
             sourceModule: true,
-            sourceForm: { select: { id: true, name: true } },
+            sourceForm: { select: sourceFormSelect },
           },
         });
       }
@@ -352,7 +352,7 @@ export class LookupService {
         if (sourceId.startsWith("form_")) {
           const form = await prisma.form.findUnique({
             where: { id: cleanId },
-            select: { id: true, name: true, moduleId: true },
+            select: { ...sourceFormSelect, moduleId: true },
           });
           if (form) {
             lookupSource = {
@@ -363,7 +363,7 @@ export class LookupService {
               sourceModuleId: form.moduleId,
               sourceModule: null,
               sourceFormId: form.id,
-              sourceForm: { id: form.id, name: form.name },
+              sourceForm: form,
               apiEndpoint: null,
               staticData: null,
               active: true,
@@ -450,7 +450,7 @@ export class LookupService {
 
         const module = await prisma.formModule.findUnique({
           where: { id: lookupSource.sourceModuleId },
-          include: { forms: { select: { id: true, name: true } } },
+          include: { forms: { select: sourceFormSelect } },
         });
 
         if (!module || module.forms.length === 0) {
