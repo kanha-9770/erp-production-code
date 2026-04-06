@@ -161,6 +161,7 @@ model User {
   formRecords15    FormRecord15[]          @relation("FormRecord15User")
   conversations    ChatConversation[]      @relation("UserConversations")
   routeAccess      RouteUserAccess[]
+  lookupTemplates  LookupTemplate[]        @relation("LookupTemplateCreator")
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
 
@@ -225,6 +226,7 @@ model Organization {
   formModules        FormModule[]    @relation("UserOrganization")
   aiConfigurations   AIConfiguration[] @relation("OrganizationAIConfigs")
   routePermissions   RoutePermission[]
+  lookupTemplates    LookupTemplate[]
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
@@ -1132,6 +1134,26 @@ model LookupFieldRelation {
   @@index([formId])
   @@index([moduleId])
   @@map("lookup_field_relations")
+}
+
+model LookupTemplate {
+  id              String       @id @default(cuid())
+  name            String
+  description     String?
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById     String       @map("created_by_id")
+  createdBy       User         @relation("LookupTemplateCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  config          Json         // Full lookup config snapshot
+  selectedFields  Json         // Selected fields array snapshot
+  dependencies    Json?        // Dependency config snapshot
+  sourceInfo      Json         // { moduleId, moduleName, formId, formName, sourceType }
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@map("lookup_templates")
 }
 
 model UserPermission {

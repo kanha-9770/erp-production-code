@@ -27,6 +27,36 @@ export const lookupApi = baseApi.injectEndpoints({
     getLookupFieldsWithSection: builder.query<ApiResponse, { sourceId: string; sectionId: string }>({
       query: ({ sourceId, sectionId }) => `/lookup/fields?sourceId=${sourceId}&sectionId=${sectionId}`,
     }),
+
+    // ─── Lookup Templates ──────────────────────────────────────
+    getLookupTemplates: builder.query<ApiResponse, void>({
+      query: () => "/lookup/templates",
+      providesTags: ["LookupTemplates"],
+    }),
+
+    saveLookupTemplate: builder.mutation<ApiResponse, {
+      name: string
+      description?: string
+      config: any
+      selectedFields: any
+      dependencies?: any
+      sourceInfo: any
+    }>({
+      query: (body) => ({
+        url: "/lookup/templates",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["LookupTemplates"],
+    }),
+
+    deleteLookupTemplate: builder.mutation<ApiResponse, string>({
+      query: (id) => ({
+        url: `/lookup/templates?id=${id}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["LookupTemplates"],
+    }),
   }),
 })
 
@@ -41,4 +71,8 @@ export const {
   useLazyGetLookupSectionsQuery,
   useGetLookupFieldsWithSectionQuery,
   useLazyGetLookupFieldsWithSectionQuery,
+  useGetLookupTemplatesQuery,
+  useLazyGetLookupTemplatesQuery,
+  useSaveLookupTemplateMutation,
+  useDeleteLookupTemplateMutation,
 } = lookupApi

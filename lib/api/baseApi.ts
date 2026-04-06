@@ -49,6 +49,8 @@ export const baseApi = createApi({
     "RouteAccess",
     // Chat
     "Conversations",
+    // Lookup Templates
+    "LookupTemplates",
   ],
   endpoints: () => ({}),
 })

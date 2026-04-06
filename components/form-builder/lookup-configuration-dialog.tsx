@@ -46,8 +46,23 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import type { FormField } from "@/types/form-builder";
-import { useLazyGetLookupSourcesQuery, useLazyGetLookupSectionsQuery, useLazyGetLookupDataQuery, useLazyGetLookupFieldsWithSectionQuery } from "@/lib/api/lookup";
+import {
+  useLazyGetLookupSourcesQuery,
+  useLazyGetLookupSectionsQuery,
+  useLazyGetLookupDataQuery,
+  useLazyGetLookupFieldsWithSectionQuery,
+  useGetLookupTemplatesQuery,
+  useSaveLookupTemplateMutation,
+  useDeleteLookupTemplateMutation,
+} from "@/lib/api/lookup";
 import { useLazyGetMasterDataQuery, useLazyGetMasterDataByModuleQuery } from "@/lib/api/settings";
+import {
+  Bookmark,
+  BookmarkPlus,
+  Trash2,
+  FolderOpen,
+  X as XIcon,
+} from "lucide-react";
 
 /* ===================== TYPES ===================== */
 interface LookupSource {
@@ -169,6 +184,16 @@ export default function LookupConfigurationDialog({
   const [triggerGetMasterData] = useLazyGetMasterDataQuery();
   const [triggerGetMasterDataByModule] = useLazyGetMasterDataByModuleQuery();
   const [triggerGetLookupFieldsWithSection] = useLazyGetLookupFieldsWithSectionQuery();
+
+  // Template features
+  const { data: templatesData, refetch: refetchTemplates } = useGetLookupTemplatesQuery();
+  const [saveTemplate, { isLoading: savingTemplate }] = useSaveLookupTemplateMutation();
+  const [deleteTemplate] = useDeleteLookupTemplateMutation();
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showTemplateList, setShowTemplateList] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDesc, setTemplateDesc] = useState("");
+  const savedTemplates = (templatesData as any)?.data || [];
 
   /* ===================== COMPUTED DATA ===================== */
   const modules = useMemo(
@@ -414,11 +439,12 @@ export default function LookupConfigurationDialog({
     setEditLoading(true);
 
     const configSourceId = config.sourceId || "";
+    const cleanSourceId = configSourceId.replace(/^(form_|module_|static_)/, "");
     const isMasterType = config.sourceType === "master";
 
     console.log("[LookupReconfig] Starting edit init with config:", JSON.stringify(config, null, 2));
 
-    // Clean slate (but DON'T set step yet — keep loading overlay visible)
+    // Clean slate
     setSelectedModuleId("");
     setSelectedFormId("");
     setSelectedSectionId("all");
@@ -462,7 +488,6 @@ export default function LookupConfigurationDialog({
       };
       const masterSelectedFields = [masterField];
 
-      // Restore dependency for master type
       if (config.dependency && config.dependency.parentFieldLabel) {
         let loadedMasters: MasterDropdown[] = [];
         try {
@@ -492,22 +517,33 @@ export default function LookupConfigurationDialog({
       }
 
       setSelectedFields(masterSelectedFields);
-      setStep("selection");
+      // Jump directly to mapping step so user sees the editable config
+      setStep("mapping");
       setEditLoading(false);
       return;
     }
 
     // ─── FORM / MODULE TYPE ───
 
-    // 2) Resolve module + form from sourceId
+    // 2) Resolve module + form from sourceId (try multiple matching strategies)
     let moduleId = "";
     let formId = "";
-    const exact = loadedSources.find(s => s.id === configSourceId);
-    const match = exact || loadedSources.find((s: any) => s.key === configSourceId.replace(/^(form_|module_)/, ""));
+
+    // Strategy 1: exact match on id
+    let match = loadedSources.find(s => s.id === configSourceId);
+    // Strategy 2: match on key (clean ID without prefix)
+    if (!match) match = loadedSources.find((s: any) => s.key === cleanSourceId);
+    // Strategy 3: match prefixed version if source was stored without prefix
+    if (!match) match = loadedSources.find(s => s.id === `form_${configSourceId}`);
+    if (!match) match = loadedSources.find(s => s.id === `module_${configSourceId}`);
+    // Strategy 4: match on key with original ID
+    if (!match) match = loadedSources.find((s: any) => s.key === configSourceId);
 
     if (match) {
       if (match.type === "form") {
-        const parent = loadedSources.find(s => s.id === match.parentId && s.type === "module");
+        // Find parent module — try parentId first, then scan by key
+        const parent = loadedSources.find(s => s.id === match!.parentId && s.type === "module")
+          || loadedSources.find((s: any) => s.type === "module" && loadedSources.some(f => f.type === "form" && f.parentId === s.id && f.id === match!.id));
         moduleId = parent?.id || "";
         formId = match.id;
       } else if (match.type === "module") {
@@ -516,7 +552,7 @@ export default function LookupConfigurationDialog({
       }
     }
 
-    console.log("[LookupReconfig] Resolved:", { configSourceId, matchType: match?.type, moduleId, formId, sourcesCount: loadedSources.length });
+    console.log("[LookupReconfig] Resolved:", { configSourceId, cleanSourceId, matchType: match?.type, moduleId, formId, sourcesCount: loadedSources.length });
 
     setSelectedModuleId(moduleId);
     setSelectedFormId(formId);
@@ -565,12 +601,16 @@ export default function LookupConfigurationDialog({
     const store = config.fieldMapping?.store || "";
     const display = config.fieldMapping?.display || "name";
     const value = config.fieldMapping?.value || "id";
+
+    // Robust field matching — try multiple strategies
     const hit = fields.find(f => f.name === store)
+      || fields.find(f => f.label === store)
       || fields.find(f => f.name === display)
+      || fields.find(f => f.label === display)
       || fields.find(f => f.label === config.label)
       || fields.find(f => f.name === config.label);
 
-    const selectedField = {
+    const selectedField: SelectedField = {
       fieldName: hit?.name || store || display,
       label: config.label || hit?.label || store || display,
       displayField: display,
@@ -581,19 +621,17 @@ export default function LookupConfigurationDialog({
       isMaster: false,
     };
 
-    console.log("[LookupReconfig] Fields loaded:", fields.length, "Matched:", !!hit, "SelectedField:", selectedField, "sourceFields set:", fields.map(f => f.name));
+    console.log("[LookupReconfig] Fields loaded:", fields.length, "Matched:", !!hit, "SelectedField:", selectedField);
 
     // 7) Restore dependency if present
     const allSelectedFields: SelectedField[] = [selectedField];
 
     if (config.dependency && config.dependency.parentFieldLabel) {
       const parentLabel = config.dependency.parentFieldLabel;
-      // Find the parent field in loaded sourceFields
       const parentHit = fields.find(f => f.label === parentLabel)
         || fields.find(f => f.name === parentLabel);
 
       if (parentHit) {
-        // Add the parent field to selectedFields so dependency UI appears (needs 2+ fields)
         const parentSelectedField: SelectedField = {
           fieldName: parentHit.name,
           label: parentHit.label,
@@ -604,10 +642,8 @@ export default function LookupConfigurationDialog({
           useIdField: config.useIdField || false,
           isMaster: false,
         };
-        // Parent goes first, child second (matches typical order)
         allSelectedFields.unshift(parentSelectedField);
 
-        // Reconstruct the dependency entry
         const restoredDep: FieldDependency = {
           childFieldName: selectedField.fieldName,
           parentFieldName: parentHit.name,
@@ -615,11 +651,8 @@ export default function LookupConfigurationDialog({
         };
         setDependencies([restoredDep]);
 
-        // Load dependency values for parent and child so the mapping matrix populates
-        // Pass srcId directly since React state (selectedFormId/selectedModuleId) isn't committed yet
         loadDependencyValues([parentSelectedField, selectedField], srcId);
       } else {
-        // Parent field not found in source fields — check if it's a master dropdown
         const parentMaster = loadedMasterDropdowns.find(m => m.name === parentLabel);
         if (parentMaster) {
           const parentSelectedField: SelectedField = {
@@ -648,8 +681,11 @@ export default function LookupConfigurationDialog({
 
     setSelectedFields(allSelectedFields);
 
-    // 8) Show selection step with all previous config restored
-    setStep("selection");
+    // 8) In edit mode, jump directly to the mapping/configuration step
+    //    so the user sees the full editable config with all restored fields,
+    //    display/value mappings, dependencies, etc. They can go "Back" to
+    //    the selection step if they need to change the source.
+    setStep("mapping");
     setEditLoading(false);
   };
 
@@ -793,6 +829,88 @@ export default function LookupConfigurationDialog({
     onOpenChange(false);
   };
 
+  /* ===================== TEMPLATE HANDLERS ===================== */
+  const handleSaveTemplate = async () => {
+    if (!templateName.trim()) return;
+    try {
+      const sourceModule = sources.find((s) => s.id === selectedModuleId);
+      const sourceForm = sources.find((s) => s.id === selectedFormId);
+
+      await saveTemplate({
+        name: templateName.trim(),
+        description: templateDesc.trim() || undefined,
+        config: {
+          selectedModuleId,
+          selectedFormId,
+          selectedSectionId,
+        },
+        selectedFields,
+        dependencies: dependencies.length > 0 ? dependencies : undefined,
+        sourceInfo: {
+          moduleId: selectedModuleId,
+          moduleName: sourceModule?.name || "",
+          formId: selectedFormId,
+          formName: sourceForm?.name || "",
+          sourceType: selectedFormId && selectedFormId !== "none" ? "form" : "module",
+        },
+      }).unwrap();
+
+      toast({ title: "Template Saved", description: `"${templateName.trim()}" saved for reuse` });
+      setShowSaveDialog(false);
+      setTemplateName("");
+      setTemplateDesc("");
+    } catch {
+      toast({ title: "Error", description: "Failed to save template", variant: "destructive" });
+    }
+  };
+
+  const handleLoadTemplate = (template: any) => {
+    const fields = template.selectedFields || [];
+    const deps = template.dependencies || [];
+    const cfg = template.config || {};
+
+    setSelectedModuleId(cfg.selectedModuleId || "");
+    setSelectedFormId(cfg.selectedFormId || "");
+    setSelectedSectionId(cfg.selectedSectionId || "all");
+    setSelectedFields(fields);
+    setDependencies(deps);
+
+    // Trigger field/section fetching for the loaded source
+    userNavigatedBack.current = true;
+    editInitRef.current = false;
+
+    const srcId = cfg.selectedFormId && cfg.selectedFormId !== "none"
+      ? cfg.selectedFormId
+      : cfg.selectedModuleId;
+    if (srcId) {
+      fetchFields(srcId, cfg.selectedSectionId || "all");
+    }
+    if (cfg.selectedFormId && cfg.selectedFormId !== "none") {
+      fetchSections(cfg.selectedFormId);
+    }
+    if (cfg.selectedModuleId) {
+      fetchMasterDropdowns(cfg.selectedModuleId);
+    }
+
+    // Load dependency values if there are deps
+    if (deps.length > 0 && fields.length > 0) {
+      loadDependencyValues(fields, srcId);
+    }
+
+    setShowTemplateList(false);
+    setStep("mapping");
+    toast({ title: "Template Loaded", description: `"${template.name}" applied` });
+  };
+
+  const handleDeleteTemplate = async (id: string, name: string) => {
+    try {
+      await deleteTemplate(id).unwrap();
+      toast({ title: "Deleted", description: `"${name}" removed` });
+    } catch {
+      toast({ title: "Error", description: "Failed to delete", variant: "destructive" });
+    }
+  };
+
   /* ===================== EMPTY STATE ===================== */
   const EmptyState = ({
     icon,
@@ -832,15 +950,82 @@ export default function LookupConfigurationDialog({
                 </p>
               </div>
             </div>
-            {subformId && (
-              <Badge
+            <div className="flex items-center gap-2">
+              {subformId && (
+                <Badge
+                  variant="outline"
+                  className="bg-purple-50 text-purple-700 border-purple-200 py-1 px-3"
+                >
+                  <Layers className="h-3 w-3 mr-2" /> Subform Field
+                </Badge>
+              )}
+              <Button
                 variant="outline"
-                className="bg-purple-50 text-purple-700 border-purple-200 py-1 px-3"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={() => { setShowTemplateList(!showTemplateList); setShowSaveDialog(false); }}
               >
-                <Layers className="h-3 w-3 mr-2" /> Subform Field
-              </Badge>
-            )}
+                <FolderOpen className="h-3.5 w-3.5" />
+                {savedTemplates.length > 0 ? `Templates (${savedTemplates.length})` : "Templates"}
+              </Button>
+            </div>
           </div>
+
+          {/* Template List Panel */}
+          {showTemplateList && (
+            <div className="mt-3 border rounded-lg bg-muted/30 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/50">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Saved Templates</span>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setShowTemplateList(false)}>
+                  <XIcon className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              {savedTemplates.length === 0 ? (
+                <div className="px-4 py-6 text-center">
+                  <Bookmark className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No saved templates yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Configure a lookup and save it as a template for reuse</p>
+                </div>
+              ) : (
+                <ScrollArea className="max-h-[200px]">
+                  <div className="divide-y">
+                    {savedTemplates.map((tpl: any) => {
+                      const info = tpl.sourceInfo || {};
+                      return (
+                        <div key={tpl.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors group">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{tpl.name}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">
+                              {info.moduleName}{info.formName ? ` / ${info.formName}` : ""}
+                              {tpl.description ? ` — ${tpl.description}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="h-7 text-xs px-3"
+                              onClick={() => handleLoadTemplate(tpl)}
+                            >
+                              Use
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
+          )}
         </DialogHeader>
 
         {/* DROPDOWNS */}
@@ -1322,6 +1507,51 @@ export default function LookupConfigurationDialog({
           )}
         </div>
 
+        {/* SAVE TEMPLATE INLINE DIALOG */}
+        {showSaveDialog && (
+          <div className="px-6 py-3 border-t bg-amber-50/80 shrink-0">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs font-medium">Template Name *</Label>
+                <Input
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  placeholder="e.g. Employee Department Lookup"
+                  className="h-8 text-sm bg-background"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter" && templateName.trim()) handleSaveTemplate(); }}
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs font-medium">Description (optional)</Label>
+                <Input
+                  value={templateDesc}
+                  onChange={(e) => setTemplateDesc(e.target.value)}
+                  placeholder="Short description..."
+                  className="h-8 text-sm bg-background"
+                />
+              </div>
+              <Button
+                size="sm"
+                className="h-8 px-4 text-xs"
+                disabled={!templateName.trim() || savingTemplate}
+                onClick={handleSaveTemplate}
+              >
+                {savingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookmarkPlus className="h-3.5 w-3.5 mr-1" />}
+                Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => { setShowSaveDialog(false); setTemplateName(""); setTemplateDesc(""); }}
+              >
+                <XIcon className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* FOOTER */}
         <DialogFooter className="px-6 py-4 border-t bg-muted/10 shrink-0">
           <div className="flex items-center justify-between w-full">
@@ -1331,9 +1561,21 @@ export default function LookupConfigurationDialog({
 
             <div className="flex gap-3">
               {step === "mapping" && (
-                <Button variant="outline" onClick={() => { userNavigatedBack.current = true; setStep("selection"); }}>
-                  <ChevronLeft className="h-4 w-4 mr-2" /> Back
-                </Button>
+                <>
+                  <Button variant="outline" onClick={() => { userNavigatedBack.current = true; setStep("selection"); }}>
+                    <ChevronLeft className="h-4 w-4 mr-2" /> Back
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                    disabled={selectedFields.length === 0}
+                    onClick={() => { setShowSaveDialog(!showSaveDialog); setShowTemplateList(false); }}
+                  >
+                    <BookmarkPlus className="h-3.5 w-3.5" />
+                    Save as Template
+                  </Button>
+                </>
               )}
 
               {step === "selection" ? (

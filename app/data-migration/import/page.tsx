@@ -57,12 +57,33 @@ export default function ImportPage() {
     return mod?.forms?.filter((f) => f.isPublished) || []
   }, [modules, selectedModuleId])
 
-  // Get form fields for mapping
+  // Get form fields for mapping (sections + all subforms)
   const formFields = useMemo(() => {
-    if (!formDetail?.data?.sections) return []
-    return formDetail.data.sections.flatMap((s: any) =>
-      (s.fields || []).map((f: any) => ({ id: f.id, label: f.label, type: f.type }))
-    )
+    if (!formDetail?.data) return []
+    const fields: { id: string; label: string; type: string; group?: string }[] = []
+
+    // Section fields
+    for (const section of formDetail.data.sections || []) {
+      for (const f of section.fields || []) {
+        fields.push({ id: f.id, label: f.label, type: f.type, group: section.title || "Section" })
+      }
+    }
+
+    // Subform fields (recursive)
+    const collectSubformFields = (subforms: any[], parentName?: string) => {
+      for (const sf of subforms || []) {
+        const sfName = parentName ? `${parentName} / ${sf.name}` : sf.name || "Subform"
+        for (const f of sf.fields || []) {
+          fields.push({ id: f.id, label: f.label, type: f.type, group: sfName })
+        }
+        if (sf.childSubforms?.length) {
+          collectSubformFields(sf.childSubforms, sfName)
+        }
+      }
+    }
+    collectSubformFields(formDetail.data.subforms || [])
+
+    return fields
   }, [formDetail])
 
   // Auto-map columns to fields by label match
@@ -432,6 +453,7 @@ export default function ImportPage() {
                                 {formFields.map((f: any) => (
                                   <SelectItem key={f.id} value={f.id}>
                                     {f.label} <span className="text-muted-foreground">({f.type})</span>
+                                    {f.group && <span className="text-muted-foreground/60 ml-1 text-[10px]">[{f.group}]</span>}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -471,6 +493,7 @@ export default function ImportPage() {
                           {formFields.map((f: any) => (
                             <SelectItem key={f.id} value={f.id}>
                               {f.label} <span className="text-muted-foreground">({f.type})</span>
+                              {f.group && <span className="text-muted-foreground/60 ml-1 text-[10px]">[{f.group}]</span>}
                             </SelectItem>
                           ))}
                         </SelectContent>

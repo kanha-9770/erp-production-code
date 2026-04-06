@@ -325,7 +325,11 @@ export class LookupService {
     try {
       console.log(`[getData] === START === sourceId=${sourceId} search="${search}" limit=${limit}`);
 
-      const lookupSource = await prisma.lookupSource.findUnique({
+      // Strip form_ / module_ prefix if present
+      const cleanId = sourceId.replace(/^(form_|module_|static_)/, "");
+
+      // Try with original ID first, then clean ID
+      let lookupSource = await prisma.lookupSource.findUnique({
         where: { id: sourceId },
         include: {
           sourceModule: true,
@@ -333,10 +337,69 @@ export class LookupService {
         },
       });
 
+      if (!lookupSource && cleanId !== sourceId) {
+        lookupSource = await prisma.lookupSource.findUnique({
+          where: { id: cleanId },
+          include: {
+            sourceModule: true,
+            sourceForm: { select: { id: true, name: true } },
+          },
+        });
+      }
+
+      // Fallback: if sourceId is a prefixed form/module ID, create a virtual LookupSource
+      if (!lookupSource) {
+        if (sourceId.startsWith("form_")) {
+          const form = await prisma.form.findUnique({
+            where: { id: cleanId },
+            select: { id: true, name: true, moduleId: true },
+          });
+          if (form) {
+            lookupSource = {
+              id: sourceId,
+              name: form.name,
+              type: "form",
+              description: null,
+              sourceModuleId: form.moduleId,
+              sourceModule: null,
+              sourceFormId: form.id,
+              sourceForm: { id: form.id, name: form.name },
+              apiEndpoint: null,
+              staticData: null,
+              active: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            } as any;
+          }
+        } else if (sourceId.startsWith("module_")) {
+          const mod = await prisma.formModule.findUnique({
+            where: { id: cleanId },
+            select: { id: true, name: true },
+          });
+          if (mod) {
+            lookupSource = {
+              id: sourceId,
+              name: mod.name,
+              type: "module",
+              description: null,
+              sourceModuleId: mod.id,
+              sourceModule: mod,
+              sourceFormId: null,
+              sourceForm: null,
+              apiEndpoint: null,
+              staticData: null,
+              active: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            } as any;
+          }
+        }
+      }
+
       console.log(`[getData] lookupSource → found=${!!lookupSource} | type=${lookupSource?.type} | sourceFormId=${lookupSource?.sourceFormId} | sourceFormLoaded=${!!lookupSource?.sourceForm}`);
 
       if (!lookupSource) {
-        console.log(`[getData] ❌ lookupSource not found`);
+        console.log(`[getData] ❌ lookupSource not found for id=${sourceId} (cleanId=${cleanId})`);
         return [];
       }
 
@@ -433,6 +496,13 @@ export class LookupService {
     try {
       console.log(`[getFields] === START === sourceId=${sourceId}, sectionId=${sectionId}`);
 
+      // Strip form_ / module_ prefix if present (the sources API returns
+      // prefixed IDs like "form_cm123..." but LookupSource stores clean IDs)
+      const cleanId = sourceId.replace(/^(form_|module_|static_)/, "");
+      const isFormPrefixed = sourceId.startsWith("form_");
+      const isModulePrefixed = sourceId.startsWith("module_");
+
+      // 1) Try LookupSource table (with original ID first, then clean ID)
       const lookupSource = await prisma.lookupSource.findUnique({
         where: { id: sourceId },
         include: {
@@ -457,61 +527,139 @@ export class LookupService {
             },
           },
         },
-      });
+      }) ?? (cleanId !== sourceId ? await prisma.lookupSource.findUnique({
+        where: { id: cleanId },
+        include: {
+          sourceForm: {
+            include: {
+              sections: {
+                include: { fields: { select: { id: true, label: true, type: true } } },
+                ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+              },
+            },
+          },
+          sourceModule: {
+            include: {
+              forms: {
+                include: {
+                  sections: {
+                    include: { fields: { select: { id: true, label: true, type: true } } },
+                    ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+                  },
+                },
+              },
+            },
+          },
+        },
+      }) : null);
 
-      if (!lookupSource) {
-        console.log(`[getFields] ❌ lookupSource not found for id=${sourceId}`);
-        return [];
-      }
+      if (lookupSource) {
+        console.log(`[getFields] Found LookupSource → Type: ${lookupSource.type} | Has Form: ${!!lookupSource.sourceForm} | Has Module: ${!!lookupSource.sourceModule}`);
 
-      console.log(`[getFields] Found source → Type: ${lookupSource.type} | Has Form: ${!!lookupSource.sourceForm} | Has Module: ${!!lookupSource.sourceModule}`);
-
-      // Static source
-      if (lookupSource.type === "static") {
-        console.log(`[getFields] Static source → ${lookupSource.staticData?.length || 0} items`);
-        return {
-          fields: [lookupSource.name || "value"],
-          staticData: lookupSource.staticData || [],
-        };
-      }
-
-      const fieldLabels = new Set<string>();
-
-      // 1. Primary: From form definition
-      let fromDefinition = 0;
-
-      if (lookupSource.type === "form" && lookupSource.sourceForm) {
-        for (const section of lookupSource.sourceForm.sections) {
-          for (const field of section.fields) {
-            const label = field.label?.trim();
-            if (label) {
-              fieldLabels.add(label);
-              fromDefinition++;
-            }
-          }
+        // Static source
+        if (lookupSource.type === "static") {
+          console.log(`[getFields] Static source → ${(lookupSource.staticData as any)?.length || 0} items`);
+          return {
+            fields: [lookupSource.name || "value"],
+            staticData: (lookupSource.staticData as any) || [],
+          };
         }
-      } else if (lookupSource.type === "module" && lookupSource.sourceModule) {
-        for (const form of lookupSource.sourceModule.forms) {
-          for (const section of form.sections) {
+
+        const fieldLabels = new Set<string>();
+        let fromDefinition = 0;
+
+        if (lookupSource.type === "form" && lookupSource.sourceForm) {
+          for (const section of lookupSource.sourceForm.sections) {
             for (const field of section.fields) {
               const label = field.label?.trim();
-              if (label) {
-                fieldLabels.add(label);
-                fromDefinition++;
+              if (label) { fieldLabels.add(label); fromDefinition++; }
+            }
+          }
+        } else if (lookupSource.type === "module" && lookupSource.sourceModule) {
+          for (const form of lookupSource.sourceModule.forms) {
+            for (const section of form.sections) {
+              for (const field of section.fields) {
+                const label = field.label?.trim();
+                if (label) { fieldLabels.add(label); fromDefinition++; }
               }
             }
           }
         }
+
+        console.log(`[getFields] From LookupSource definition → ${fromDefinition} fields`);
+        const finalFields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+        console.log(`[getFields] FINAL RESULT → ${finalFields.length} fields`);
+        return finalFields;
       }
 
-      console.log(`[getFields] From form definition → ${fromDefinition} fields`);
+      // 2) Fallback: Query Form or Module table directly using the clean ID.
+      //    This handles the case where sourceId is a prefixed form/module ID
+      //    (e.g. "form_cm123...") that doesn't exist in the LookupSource table.
+      console.log(`[getFields] LookupSource not found for id=${sourceId}, trying direct fallback with cleanId=${cleanId}`);
 
-      const finalFields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+      const fieldLabels = new Set<string>();
+      const sectionFilter = sectionId !== "all" ? { where: { id: sectionId } } : {};
 
-      console.log(`[getFields] FINAL RESULT → ${finalFields.length} fields`);
-      console.log(`[getFields] Fields:`, finalFields.slice(0, 20));
+      if (isFormPrefixed || (!isModulePrefixed && !isFormPrefixed)) {
+        // Try as a Form ID
+        const form = await prisma.form.findUnique({
+          where: { id: cleanId },
+          include: {
+            sections: {
+              include: { fields: { select: { id: true, label: true, type: true } } },
+              ...sectionFilter,
+            },
+          },
+        });
 
-      return finalFields;
+        if (form) {
+          console.log(`[getFields] Fallback: Found form "${form.name}" with ${form.sections.length} sections`);
+          for (const section of form.sections) {
+            for (const field of section.fields) {
+              const label = field.label?.trim();
+              if (label) fieldLabels.add(label);
+            }
+          }
+          const fields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+          console.log(`[getFields] Fallback RESULT → ${fields.length} fields`);
+          return fields;
+        }
+      }
+
+      if (isModulePrefixed || (!isModulePrefixed && !isFormPrefixed && fieldLabels.size === 0)) {
+        // Try as a Module ID
+        const module = await prisma.formModule.findUnique({
+          where: { id: cleanId },
+          include: {
+            forms: {
+              include: {
+                sections: {
+                  include: { fields: { select: { id: true, label: true, type: true } } },
+                  ...sectionFilter,
+                },
+              },
+            },
+          },
+        });
+
+        if (module) {
+          console.log(`[getFields] Fallback: Found module "${module.name}" with ${module.forms.length} forms`);
+          for (const form of module.forms) {
+            for (const section of form.sections) {
+              for (const field of section.fields) {
+                const label = field.label?.trim();
+                if (label) fieldLabels.add(label);
+              }
+            }
+          }
+          const fields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+          console.log(`[getFields] Fallback RESULT → ${fields.length} fields`);
+          return fields;
+        }
+      }
+
+      console.log(`[getFields] ❌ No source found for id=${sourceId} (cleanId=${cleanId})`);
+      return [];
 
     } catch (error: any) {
       console.error("[getFields] CRITICAL ERROR:", error.message, error.stack);

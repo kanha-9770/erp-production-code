@@ -190,8 +190,18 @@ export async function processImportRows(
     tableMapping = await prisma.formTableMapping.create({ data: { formId, storageTable: bestTable } })
   }
 
-  // Build field map
-  const fields = (form as any).sections?.flatMap((s: any) => s.fields || []) || []
+  // Build field map (sections + all subforms)
+  const fields: any[] = []
+  for (const s of (form as any).sections || []) {
+    fields.push(...(s.fields || []))
+  }
+  const collectSubformFields = (subforms: any[]) => {
+    for (const sf of subforms || []) {
+      fields.push(...(sf.fields || []))
+      if (sf.childSubforms?.length) collectSubformFields(sf.childSubforms)
+    }
+  }
+  collectSubformFields((form as any).subforms || [])
   const fieldMap = new Map<string, any>()
   fields.forEach((f: any) => fieldMap.set(f.id, f))
 
