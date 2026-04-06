@@ -737,7 +737,8 @@ export const RecordCell = memo(function RecordCell({
       <div
         key={cellKey}
         className={cn(
-          "bg-white px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200 relative",
+          "px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200 relative",
+          !fieldDef.styling?.backgroundColor && "bg-white",
           isWrapTextEnabled || isExpanded ? "h-auto min-h-[36px] py-2 items-start" : "h-9 items-center",
           selectedCell === cellKey && "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
           isEditing && "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
@@ -745,7 +746,14 @@ export const RecordCell = memo(function RecordCell({
           editMode !== "locked" && canEdit && !isEditing && !isImageColumn && "cursor-pointer hover:bg-gray-50",
           focusedCell === cellKey && !isEditing && "ring-1 ring-blue-300 ring-inset",
         )}
-        style={{ width: `${columnWidth}px`, boxShadow: "inset -1px 0 0 0 #e5e7eb" }}
+        style={{
+          width: `${columnWidth}px`,
+          boxShadow: "inset -1px 0 0 0 #e5e7eb",
+          ...(fieldDef.styling?.backgroundColor && !isEditing && !pendingChange && selectedCell !== cellKey
+            ? { backgroundColor: fieldDef.styling.backgroundColor }
+            : {}),
+          ...(fieldDef.styling?.textColor ? { color: fieldDef.styling.textColor } : {}),
+        }}
         onClick={() => {
           if (!isEditing && editMode !== "locked" && canEdit && !isImageColumn && !locationUrl) {
             onCellClick(cellKey);
@@ -842,11 +850,7 @@ export const RecordCell = memo(function RecordCell({
                     "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
                     isWrapTextEnabled || isExpanded ? "whitespace-normal break-words" : "whitespace-nowrap overflow-hidden text-ellipsis",
                   )}
-                  style={{
-                    ...getConditionalStyle(fieldDef, actualValue, displayText),
-                    ...(fieldDef.styling?.textColor ? { color: fieldDef.styling.textColor } : {}),
-                    ...(fieldDef.styling?.backgroundColor ? { backgroundColor: fieldDef.styling.backgroundColor } : {}),
-                  }}
+                  style={getConditionalStyle(fieldDef, actualValue, displayText)}
                   title={displayText}
                 >
                   {(displayText ?? "") === "" ? "N/A" : displayText}
