@@ -1,23 +1,23 @@
-import { prisma } from "@/lib/prisma"
+import { prisma } from "@/lib/prisma";
 
 interface LookupOptions {
-  search?: string
-  limit?: number
-  offset?: number
+  search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 interface LookupSourceData {
-  id: string
-  name: string
-  description?: string | null
-  type: string
-  recordCount: number
-  icon: string
-  hasIdField?: boolean
-  idFieldName?: string
+  id: string;
+  name: string;
+  description?: string | null;
+  type: string;
+  recordCount: number;
+  icon: string;
+  hasIdField?: boolean;
+  idFieldName?: string;
 }
 
-const tableMappingCache = new Map<string, string>()
+const tableMappingCache = new Map<string, string>();
 
 export class LookupService {
   // ──────────────────────────────────────────────────────────────
@@ -37,15 +37,21 @@ export class LookupService {
       select: { storageTable: true },
     });
 
-    console.log(`[getTableName] DB query result → ${mapping ? mapping.storageTable : "NULL (no mapping)"}`);
+    console.log(
+      `[getTableName] DB query result → ${mapping ? mapping.storageTable : "NULL (no mapping)"}`,
+    );
 
     if (mapping) {
       tableMappingCache.set(formId, mapping.storageTable);
-      console.log(`[getTableName] ✅ Cached new mapping: ${mapping.storageTable}`);
+      console.log(
+        `[getTableName] ✅ Cached new mapping: ${mapping.storageTable}`,
+      );
       return mapping.storageTable;
     }
 
-    console.log(`[getTableName] ❌ NO MAPPING FOUND in formTableMapping table for this formId`);
+    console.log(
+      `[getTableName] ❌ NO MAPPING FOUND in formTableMapping table for this formId`,
+    );
     return null;
   }
 
@@ -67,14 +73,17 @@ export class LookupService {
       form_records_14: prisma.formRecord14,
       form_records_15: prisma.formRecord15,
       form_records: prisma.formRecord,
-    }
-    return tableMap[tableName]
+    };
+    return tableMap[tableName];
   }
 
   // ──────────────────────────────────────────────────────────────
   // 2. getFormRecords — matches admin records API logic
   // ──────────────────────────────────────────────────────────────
-  private async getFormRecords(formId: string, options: { limit?: number; offset?: number } = {}): Promise<any[]> {
+  private async getFormRecords(
+    formId: string,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<any[]> {
     const { limit = 50, offset = 0 } = options;
 
     // Check table mapping first (same logic as admin /api/forms/[formId]/records)
@@ -97,7 +106,9 @@ export class LookupService {
         },
       });
 
-      console.log(`[getFormRecords] ✅ Table ${tableName} → Found ${records.length} records`);
+      console.log(
+        `[getFormRecords] ✅ Table ${tableName} → Found ${records.length} records`,
+      );
       return records;
     }
 
@@ -109,22 +120,24 @@ export class LookupService {
       skip: offset,
     });
 
-    console.log(`[getFormRecords] ✅ Unified table → Found ${records.length} records`);
+    console.log(
+      `[getFormRecords] ✅ Unified table → Found ${records.length} records`,
+    );
     return records;
   }
 
   private async countFormRecords(formId: string): Promise<number> {
-    const tableName = await this.getTableName(formId)
-    if (!tableName) return 0
+    const tableName = await this.getTableName(formId);
+    if (!tableName) return 0;
 
-    const model = this.getTableModel(tableName)
-    if (!model) return 0
+    const model = this.getTableModel(tableName);
+    if (!model) return 0;
 
-    return await model.count({ where: { formId } })
+    return await model.count({ where: { formId } });
   }
 
   private transformRecord(record: any, form: any, module?: any): any {
-    const recordData = record.recordData as any
+    const recordData = record.recordData as any;
     const transformedData: any = {
       record_id: record.id,
       form_id: form.id,
@@ -133,26 +146,48 @@ export class LookupService {
       _formName: form.name,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
-    }
+    };
 
     if (module) {
-      transformedData._moduleId = module.id
-      transformedData._moduleName = module.name
+      transformedData._moduleId = module.id;
+      transformedData._moduleName = module.name;
     }
 
     // Build a field-ID → definition map from form sections + subforms
-    const fieldDefMap: Record<string, { label: string; type: string; options: any; validation: any; sectionId?: string; subformId?: string }> = {};
+    const fieldDefMap: Record<
+      string,
+      {
+        label: string;
+        type: string;
+        options: any;
+        validation: any;
+        sectionId?: string;
+        subformId?: string;
+      }
+    > = {};
     if (form.sections) {
       for (const section of form.sections) {
-        for (const f of (section.fields || [])) {
-          fieldDefMap[f.id] = { label: f.label, type: f.type, options: f.options, validation: f.validation, sectionId: section.id };
+        for (const f of section.fields || []) {
+          fieldDefMap[f.id] = {
+            label: f.label,
+            type: f.type,
+            options: f.options,
+            validation: f.validation,
+            sectionId: section.id,
+          };
         }
       }
     }
     if (form.subforms) {
       for (const subform of form.subforms) {
-        for (const f of (subform.fields || [])) {
-          fieldDefMap[f.id] = { label: f.label, type: f.type, options: f.options, validation: f.validation, subformId: subform.id };
+        for (const f of subform.fields || []) {
+          fieldDefMap[f.id] = {
+            label: f.label,
+            type: f.type,
+            options: f.options,
+            validation: f.validation,
+            subformId: subform.id,
+          };
         }
       }
     }
@@ -195,9 +230,18 @@ export class LookupService {
     }
 
     // Helper: resolve a field entry which may be a plain value or an object
-    const resolveField = (fieldKey: string, fieldDataAny: any, parentId: string, parentType: "section" | "subform") => {
+    const resolveField = (
+      fieldKey: string,
+      fieldDataAny: any,
+      parentId: string,
+      parentType: "section" | "subform",
+    ) => {
       const def = fieldDefMap[fieldKey];
-      const isPlainValue = fieldDataAny === null || fieldDataAny === undefined || typeof fieldDataAny !== "object" || Array.isArray(fieldDataAny);
+      const isPlainValue =
+        fieldDataAny === null ||
+        fieldDataAny === undefined ||
+        typeof fieldDataAny !== "object" ||
+        Array.isArray(fieldDataAny);
 
       let fieldType: string;
       let fieldValue: any;
@@ -225,16 +269,26 @@ export class LookupService {
 
         if (fieldData?.options != null) {
           try {
-            parsedOptions = typeof fieldData.options === "string" ? JSON.parse(fieldData.options) : fieldData.options;
-          } catch { parsedOptions = []; }
+            parsedOptions =
+              typeof fieldData.options === "string"
+                ? JSON.parse(fieldData.options)
+                : fieldData.options;
+          } catch {
+            parsedOptions = [];
+          }
         } else {
           parsedOptions = def?.options ?? null;
         }
 
         if (fieldData?.validation != null) {
           try {
-            parsedValidation = typeof fieldData.validation === "string" ? JSON.parse(fieldData.validation) : fieldData.validation;
-          } catch { parsedValidation = {}; }
+            parsedValidation =
+              typeof fieldData.validation === "string"
+                ? JSON.parse(fieldData.validation)
+                : fieldData.validation;
+          } catch {
+            parsedValidation = {};
+          }
         } else {
           parsedValidation = def?.validation ?? null;
         }
@@ -244,11 +298,19 @@ export class LookupService {
       if (fieldType === "number" && fieldValue != null) {
         const num = Number(fieldValue);
         fieldValue = isNaN(num) ? fieldValue : num;
-      } else if ((fieldType === "datetime" || fieldType === "date") && fieldValue) {
+      } else if (
+        (fieldType === "datetime" || fieldType === "date") &&
+        fieldValue
+      ) {
         try {
           const date = new Date(fieldValue);
-          fieldValue = fieldType === "date" ? date.toISOString().split("T")[0] : date.toISOString();
-        } catch { /* keep original */ }
+          fieldValue =
+            fieldType === "date"
+              ? date.toISOString().split("T")[0]
+              : date.toISOString();
+        } catch {
+          /* keep original */
+        }
       } else if (fieldType === "checkbox") {
         fieldValue = Boolean(fieldValue);
       } else if (["tel", "email", "url"].includes(fieldType)) {
@@ -291,11 +353,15 @@ export class LookupService {
   }
 
   private matchesSearch(transformedData: any, search: string): boolean {
-    const searchLower = search.toLowerCase()
+    const searchLower = search.toLowerCase();
     return Object.values(transformedData).some((field: any) => {
-      const value = field?.field_value
-      return value != null && typeof value === "string" && value.toLowerCase().includes(searchLower)
-    })
+      const value = field?.field_value;
+      return (
+        value != null &&
+        typeof value === "string" &&
+        value.toLowerCase().includes(searchLower)
+      );
+    });
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -305,7 +371,9 @@ export class LookupService {
     const { search = "", limit = 50, offset = 0 } = options;
 
     try {
-      console.log(`[getData] === START === sourceId=${sourceId} search="${search}" limit=${limit}`);
+      console.log(
+        `[getData] === START === sourceId=${sourceId} search="${search}" limit=${limit}`,
+      );
 
       // Strip form_ / module_ prefix if present
       const cleanId = sourceId.replace(/^(form_|module_|static_)/, "");
@@ -317,13 +385,29 @@ export class LookupService {
         sections: {
           select: {
             id: true,
-            fields: { select: { id: true, label: true, type: true, options: true, validation: true } },
+            fields: {
+              select: {
+                id: true,
+                label: true,
+                type: true,
+                options: true,
+                validation: true,
+              },
+            },
           },
         },
         subforms: {
           select: {
             id: true,
-            fields: { select: { id: true, label: true, type: true, options: true, validation: true } },
+            fields: {
+              select: {
+                id: true,
+                label: true,
+                type: true,
+                options: true,
+                validation: true,
+              },
+            },
           },
         },
       };
@@ -396,26 +480,33 @@ export class LookupService {
         }
       }
 
-      console.log(`[getData] lookupSource → found=${!!lookupSource} | type=${lookupSource?.type} | sourceFormId=${lookupSource?.sourceFormId} | sourceFormLoaded=${!!lookupSource?.sourceForm}`);
+      console.log(
+        `[getData] lookupSource → found=${!!lookupSource} | type=${lookupSource?.type} | sourceFormId=${lookupSource?.sourceFormId} | sourceFormLoaded=${!!lookupSource?.sourceForm}`,
+      );
 
       if (!lookupSource) {
-        console.log(`[getData] ❌ lookupSource not found for id=${sourceId} (cleanId=${cleanId})`);
+        console.log(
+          `[getData] ❌ lookupSource not found for id=${sourceId} (cleanId=${cleanId})`,
+        );
         return [];
       }
 
       // Static
       if (lookupSource.type === "static") {
-        console.log(`[getData] Static source → processing ${lookupSource.staticData?.length || 0} items`);
+        console.log(
+          `[getData] Static source → processing ${lookupSource.staticData?.length || 0} items`,
+        );
         let data = (lookupSource.staticData || []) as any[];
         if (search) {
-          data = data.filter(item =>
-            (item.label || "").toLowerCase().includes(search.toLowerCase()) ||
-            (item.value || "").toLowerCase().includes(search.toLowerCase())
+          data = data.filter(
+            (item) =>
+              (item.label || "").toLowerCase().includes(search.toLowerCase()) ||
+              (item.value || "").toLowerCase().includes(search.toLowerCase()),
           );
         }
         const paginated = data.slice(offset, offset + limit);
         console.log(`[getData] Static → returning ${paginated.length} items`);
-        return paginated.map(item => ({
+        return paginated.map((item) => ({
           id: item.id,
           label: item.label || item.value,
           value: item.value || item.code,
@@ -425,14 +516,21 @@ export class LookupService {
       // Form
       if (lookupSource.type === "form" && lookupSource.sourceFormId) {
         const form = lookupSource.sourceForm;
-        console.log(`[getData] Form path → form.id=${form?.id} form.name=${form?.name}`);
+        console.log(
+          `[getData] Form path → form.id=${form?.id} form.name=${form?.name}`,
+        );
 
         if (!form) {
-          console.log(`[getData] ❌ sourceForm relation is null — check DB relation`);
+          console.log(
+            `[getData] ❌ sourceForm relation is null — check DB relation`,
+          );
           return [];
         }
 
-        const records = await this.getFormRecords(form.id, { limit: limit * 2, offset });
+        const records = await this.getFormRecords(form.id, {
+          limit: limit * 2,
+          offset,
+        });
         console.log(`[getData] Raw records from DB: ${records.length}`);
 
         const transformedRecords = records
@@ -440,13 +538,17 @@ export class LookupService {
           .filter((record) => !search || this.matchesSearch(record, search))
           .slice(0, limit);
 
-        console.log(`[getData] After transform + filter → ${transformedRecords.length} records`);
+        console.log(
+          `[getData] After transform + filter → ${transformedRecords.length} records`,
+        );
         return transformedRecords;
       }
 
       // Module
       if (lookupSource.type === "module" && lookupSource.sourceModuleId) {
-        console.log(`[getData] Module path → moduleId=${lookupSource.sourceModuleId}`);
+        console.log(
+          `[getData] Module path → moduleId=${lookupSource.sourceModuleId}`,
+        );
 
         const module = await prisma.formModule.findUnique({
           where: { id: lookupSource.sourceModuleId },
@@ -461,7 +563,9 @@ export class LookupService {
         const limitPerForm = Math.ceil((limit * 2) / module.forms.length);
 
         const allRecordsPromises = module.forms.map((form) =>
-          this.getFormRecords(form.id, { limit: limitPerForm }).then((records) => ({ form, records }))
+          this.getFormRecords(form.id, { limit: limitPerForm }).then(
+            (records) => ({ form, records }),
+          ),
         );
 
         const allRecordsResults = await Promise.all(allRecordsPromises);
@@ -489,12 +593,14 @@ export class LookupService {
     }
   }
 
-   async getFields(
+  async getFields(
     sourceId: string,
-    sectionId: string = "all"
+    sectionId: string = "all",
   ): Promise<string[] | { fields: string[]; staticData: any[] }> {
     try {
-      console.log(`[getFields] === START === sourceId=${sourceId}, sectionId=${sectionId}`);
+      console.log(
+        `[getFields] === START === sourceId=${sourceId}, sectionId=${sectionId}`,
+      );
 
       // Strip form_ / module_ prefix if present (the sources API returns
       // prefixed IDs like "form_cm123..." but LookupSource stores clean IDs)
@@ -503,62 +609,90 @@ export class LookupService {
       const isModulePrefixed = sourceId.startsWith("module_");
 
       // 1) Try LookupSource table (with original ID first, then clean ID)
-      const lookupSource = await prisma.lookupSource.findUnique({
-        where: { id: sourceId },
-        include: {
-          sourceForm: {
-            include: {
-              sections: {
-                include: { fields: { select: { id: true, label: true, type: true } } },
-                ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+      const lookupSource =
+        (await prisma.lookupSource.findUnique({
+          where: { id: sourceId },
+          include: {
+            sourceForm: {
+              include: {
+                sections: {
+                  include: {
+                    fields: { select: { id: true, label: true, type: true } },
+                  },
+                  ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+                },
               },
             },
-          },
-          sourceModule: {
-            include: {
-              forms: {
-                include: {
-                  sections: {
-                    include: { fields: { select: { id: true, label: true, type: true } } },
-                    ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+            sourceModule: {
+              include: {
+                forms: {
+                  include: {
+                    sections: {
+                      include: {
+                        fields: {
+                          select: { id: true, label: true, type: true },
+                        },
+                      },
+                      ...(sectionId !== "all"
+                        ? { where: { id: sectionId } }
+                        : {}),
+                    },
                   },
                 },
               },
             },
           },
-        },
-      }) ?? (cleanId !== sourceId ? await prisma.lookupSource.findUnique({
-        where: { id: cleanId },
-        include: {
-          sourceForm: {
-            include: {
-              sections: {
-                include: { fields: { select: { id: true, label: true, type: true } } },
-                ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
-              },
-            },
-          },
-          sourceModule: {
-            include: {
-              forms: {
-                include: {
-                  sections: {
-                    include: { fields: { select: { id: true, label: true, type: true } } },
-                    ...(sectionId !== "all" ? { where: { id: sectionId } } : {}),
+        })) ??
+        (cleanId !== sourceId
+          ? await prisma.lookupSource.findUnique({
+              where: { id: cleanId },
+              include: {
+                sourceForm: {
+                  include: {
+                    sections: {
+                      include: {
+                        fields: {
+                          select: { id: true, label: true, type: true },
+                        },
+                      },
+                      ...(sectionId !== "all"
+                        ? { where: { id: sectionId } }
+                        : {}),
+                    },
+                  },
+                },
+                sourceModule: {
+                  include: {
+                    forms: {
+                      include: {
+                        sections: {
+                          include: {
+                            fields: {
+                              select: { id: true, label: true, type: true },
+                            },
+                          },
+                          ...(sectionId !== "all"
+                            ? { where: { id: sectionId } }
+                            : {}),
+                        },
+                      },
+                    },
                   },
                 },
               },
-            },
-          },
-        },
-      }) : null);
+            })
+          : null);
 
       if (lookupSource) {
-        console.log(`[getFields] Found LookupSource → Type: ${lookupSource.type} | Has Form: ${!!lookupSource.sourceForm} | Has Module: ${!!lookupSource.sourceModule}`);
+        console.log(
+          `[getFields] Found LookupSource → Type: ${lookupSource.type} | Has Form: ${!!lookupSource.sourceForm} | Has Module: ${!!lookupSource.sourceModule}`,
+        );
 
         // Static source
         if (lookupSource.type === "static") {
-          console.log(`[getFields] Static source → ${(lookupSource.staticData as any)?.length || 0} items`);
+          console.log(
+            `[getFields] Static source → ${(lookupSource.staticData as any)?.length || 0} items`,
+          );
           return {
             fields: [lookupSource.name || "value"],
             staticData: (lookupSource.staticData as any) || [],
@@ -572,22 +706,35 @@ export class LookupService {
           for (const section of lookupSource.sourceForm.sections) {
             for (const field of section.fields) {
               const label = field.label?.trim();
-              if (label) { fieldLabels.add(label); fromDefinition++; }
+              if (label) {
+                fieldLabels.add(label);
+                fromDefinition++;
+              }
             }
           }
-        } else if (lookupSource.type === "module" && lookupSource.sourceModule) {
+        } else if (
+          lookupSource.type === "module" &&
+          lookupSource.sourceModule
+        ) {
           for (const form of lookupSource.sourceModule.forms) {
             for (const section of form.sections) {
               for (const field of section.fields) {
                 const label = field.label?.trim();
-                if (label) { fieldLabels.add(label); fromDefinition++; }
+                if (label) {
+                  fieldLabels.add(label);
+                  fromDefinition++;
+                }
               }
             }
           }
         }
 
-        console.log(`[getFields] From LookupSource definition → ${fromDefinition} fields`);
-        const finalFields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+        console.log(
+          `[getFields] From LookupSource definition → ${fromDefinition} fields`,
+        );
+        const finalFields = Array.from(fieldLabels).sort((a, b) =>
+          a.localeCompare(b),
+        );
         console.log(`[getFields] FINAL RESULT → ${finalFields.length} fields`);
         return finalFields;
       }
@@ -595,10 +742,13 @@ export class LookupService {
       // 2) Fallback: Query Form or Module table directly using the clean ID.
       //    This handles the case where sourceId is a prefixed form/module ID
       //    (e.g. "form_cm123...") that doesn't exist in the LookupSource table.
-      console.log(`[getFields] LookupSource not found for id=${sourceId}, trying direct fallback with cleanId=${cleanId}`);
+      console.log(
+        `[getFields] LookupSource not found for id=${sourceId}, trying direct fallback with cleanId=${cleanId}`,
+      );
 
       const fieldLabels = new Set<string>();
-      const sectionFilter = sectionId !== "all" ? { where: { id: sectionId } } : {};
+      const sectionFilter =
+        sectionId !== "all" ? { where: { id: sectionId } } : {};
 
       if (isFormPrefixed || (!isModulePrefixed && !isFormPrefixed)) {
         // Try as a Form ID
@@ -606,27 +756,36 @@ export class LookupService {
           where: { id: cleanId },
           include: {
             sections: {
-              include: { fields: { select: { id: true, label: true, type: true } } },
+              include: {
+                fields: { select: { id: true, label: true, type: true } },
+              },
               ...sectionFilter,
             },
           },
         });
 
         if (form) {
-          console.log(`[getFields] Fallback: Found form "${form.name}" with ${form.sections.length} sections`);
+          console.log(
+            `[getFields] Fallback: Found form "${form.name}" with ${form.sections.length} sections`,
+          );
           for (const section of form.sections) {
             for (const field of section.fields) {
               const label = field.label?.trim();
               if (label) fieldLabels.add(label);
             }
           }
-          const fields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+          const fields = Array.from(fieldLabels).sort((a, b) =>
+            a.localeCompare(b),
+          );
           console.log(`[getFields] Fallback RESULT → ${fields.length} fields`);
           return fields;
         }
       }
 
-      if (isModulePrefixed || (!isModulePrefixed && !isFormPrefixed && fieldLabels.size === 0)) {
+      if (
+        isModulePrefixed ||
+        (!isModulePrefixed && !isFormPrefixed && fieldLabels.size === 0)
+      ) {
         // Try as a Module ID
         const module = await prisma.formModule.findUnique({
           where: { id: cleanId },
@@ -634,7 +793,9 @@ export class LookupService {
             forms: {
               include: {
                 sections: {
-                  include: { fields: { select: { id: true, label: true, type: true } } },
+                  include: {
+                    fields: { select: { id: true, label: true, type: true } },
+                  },
                   ...sectionFilter,
                 },
               },
@@ -643,7 +804,9 @@ export class LookupService {
         });
 
         if (module) {
-          console.log(`[getFields] Fallback: Found module "${module.name}" with ${module.forms.length} forms`);
+          console.log(
+            `[getFields] Fallback: Found module "${module.name}" with ${module.forms.length} forms`,
+          );
           for (const form of module.forms) {
             for (const section of form.sections) {
               for (const field of section.fields) {
@@ -652,22 +815,28 @@ export class LookupService {
               }
             }
           }
-          const fields = Array.from(fieldLabels).sort((a, b) => a.localeCompare(b));
+          const fields = Array.from(fieldLabels).sort((a, b) =>
+            a.localeCompare(b),
+          );
           console.log(`[getFields] Fallback RESULT → ${fields.length} fields`);
           return fields;
         }
       }
 
-      console.log(`[getFields] ❌ No source found for id=${sourceId} (cleanId=${cleanId})`);
+      console.log(
+        `[getFields] ❌ No source found for id=${sourceId} (cleanId=${cleanId})`,
+      );
       return [];
-
     } catch (error: any) {
       console.error("[getFields] CRITICAL ERROR:", error.message, error.stack);
       return [];
     }
   }
-  static async getLookupSources(userId: string, options: { quick?: boolean } = {}): Promise<LookupSourceData[]> {
-    const { quick = false } = options
+  static async getLookupSources(
+    userId: string,
+    options: { quick?: boolean } = {},
+  ): Promise<LookupSourceData[]> {
+    const { quick = false } = options;
 
     try {
       const [user, roles] = await Promise.all([
@@ -681,21 +850,21 @@ export class LookupService {
           JOIN roles r ON r.id = uua.role_id
           WHERE uua.user_id = ${userId}
         `,
-      ])
+      ]);
 
       if (!user?.organizationId) {
-        return []
+        return [];
       }
 
-      const organizationId = user.organizationId
-      const isAdmin = roles.some((r) => r.role_name === "ADMIN")
+      const organizationId = user.organizationId;
+      const isAdmin = roles.some((r) => r.role_name === "ADMIN");
 
-      let modules: any[] = []
-      let forms: any[] = []
+      let modules: any[] = [];
+      let forms: any[] = [];
 
       if (isAdmin) {
         // ADMIN gets all active modules and published forms for their organization
-        [modules, forms] = await Promise.all([
+        [modules, forms] = (await Promise.all([
           prisma.$queryRaw`
             SELECT 
               fm.id AS module_id,
@@ -724,7 +893,7 @@ export class LookupService {
             AND fm.organization_id = ${organizationId}
             ORDER BY f.name ASC
           `,
-        ]) as [any[], any[]]
+        ])) as [any[], any[]];
       } else {
         // Non-admin: role-based and user-based for modules (with hierarchy)
         const [roleBasedModules, userBasedModules] = await Promise.all([
@@ -766,14 +935,19 @@ export class LookupService {
             WHERE u.id = ${userId}
             AND fm.organization_id = ${organizationId}
           `,
-        ])
+        ]);
 
-        let finalModules: any[] = []
-        const allModules = [...(roleBasedModules as any[]), ...(userBasedModules as any[])]
-        const uniqueModulesMap = new Map(allModules.map((m) => [m.module_id, m]))
-        const uniqueModules = Array.from(uniqueModulesMap.values())
+        let finalModules: any[] = [];
+        const allModules = [
+          ...(roleBasedModules as any[]),
+          ...(userBasedModules as any[]),
+        ];
+        const uniqueModulesMap = new Map(
+          allModules.map((m) => [m.module_id, m]),
+        );
+        const uniqueModules = Array.from(uniqueModulesMap.values());
 
-        const childModuleIds = uniqueModules.map((m) => m.module_id)
+        const childModuleIds = uniqueModules.map((m) => m.module_id);
 
         if (childModuleIds.length > 0) {
           const parentModules = await prisma.$queryRaw`
@@ -818,17 +992,21 @@ export class LookupService {
               AND fm.organization_id = ${organizationId}
             )
             SELECT * FROM parent_hierarchy
-          `
+          `;
 
-          const mergedModules = [...uniqueModules, ...(parentModules as any[])]
-          const finalModulesMap = new Map(mergedModules.map((m) => [m.module_id, m]))
-          finalModules = Array.from(finalModulesMap.values())
+          const mergedModules = [...uniqueModules, ...(parentModules as any[])];
+          const finalModulesMap = new Map(
+            mergedModules.map((m) => [m.module_id, m]),
+          );
+          finalModules = Array.from(finalModulesMap.values());
         } else {
-          finalModules = uniqueModules
+          finalModules = uniqueModules;
         }
 
-        finalModules.sort((a: any, b: any) => a.level - b.level || a.sort_order - b.sort_order)
-        modules = finalModules
+        finalModules.sort(
+          (a: any, b: any) => a.level - b.level || a.sort_order - b.sort_order,
+        );
+        modules = finalModules;
 
         // Non-admin: role-based and user-based for forms (no hierarchy)
         const [roleBasedForms, userBasedForms] = await Promise.all([
@@ -858,16 +1036,19 @@ export class LookupService {
             WHERE u.id = ${userId}
             AND fm.organization_id = ${organizationId}
           `,
-        ])
+        ]);
 
-        const allForms = [...(roleBasedForms as any[]), ...(userBasedForms as any[])]
-        const uniqueFormsMap = new Map(allForms.map((f) => [f.form_id, f]))
-        forms = Array.from(uniqueFormsMap.values())
-        forms.sort((a: any, b: any) => a.form_name.localeCompare(b.form_name))
+        const allForms = [
+          ...(roleBasedForms as any[]),
+          ...(userBasedForms as any[]),
+        ];
+        const uniqueFormsMap = new Map(allForms.map((f) => [f.form_id, f]));
+        forms = Array.from(uniqueFormsMap.values());
+        forms.sort((a: any, b: any) => a.form_name.localeCompare(b.form_name));
       }
 
-      const permittedFormIds = forms.map((f: any) => f.form_id)
-      const permittedModuleIds = modules.map((m: any) => m.module_id)
+      const permittedFormIds = forms.map((f: any) => f.form_id);
+      const permittedModuleIds = modules.map((m: any) => m.module_id);
 
       // Fetch static sources based on permissions
       const staticSourcesDB = await prisma.lookupSource.findMany({
@@ -876,16 +1057,16 @@ export class LookupService {
           active: true,
           OR: [
             { sourceFormId: { in: permittedFormIds } },
-            { sourceModuleId: { in: permittedModuleIds } }
-          ]
+            { sourceModuleId: { in: permittedModuleIds } },
+          ],
         },
         select: {
           id: true,
           name: true,
           description: true,
-          staticData: true
-        }
-      })
+          staticData: true,
+        },
+      });
 
       const staticSources: LookupSourceData[] = staticSourcesDB.map((ls) => ({
         id: ls.id,
@@ -894,33 +1075,44 @@ export class LookupService {
         type: "static",
         recordCount: ls.staticData?.length || 0,
         icon: "zap",
-        hasIdField: false
-      }))
+        hasIdField: false,
+      }));
 
       // Prepare source IDs for counting
-      const moduleSourceIds = modules.map((m: any) => `module_${m.module_id}`)
-      const formSourceIds = forms.map((f: any) => `form_${f.form_id}`)
-      const staticSourceIds = staticSources.map((s) => s.id)
+      const moduleSourceIds = modules.map((m: any) => `module_${m.module_id}`);
+      const formSourceIds = forms.map((f: any) => `form_${f.form_id}`);
+      const staticSourceIds = staticSources.map((s) => s.id);
 
-      let moduleCounts: (number | undefined)[] = []
-      let formCounts: (number | undefined)[] = []
-      let staticCounts: (number | undefined)[] = []
+      let moduleCounts: (number | undefined)[] = [];
+      let formCounts: (number | undefined)[] = [];
+      let staticCounts: (number | undefined)[] = [];
 
       if (!quick) {
-        const serviceInstance = new LookupService()
+        const serviceInstance = new LookupService();
         const countPromises = [
-          ...moduleSourceIds.map((id) => serviceInstance.countFormRecordsForSource(id)),
-          ...formSourceIds.map((id) => serviceInstance.countFormRecordsForSource(id)),
-          ...staticSourceIds.map((id) => serviceInstance.countFormRecordsForSource(id)),
-        ]
-        const allCounts = await Promise.all(countPromises)
-        moduleCounts = allCounts.slice(0, moduleSourceIds.length)
-        formCounts = allCounts.slice(moduleSourceIds.length, moduleSourceIds.length + formSourceIds.length)
-        staticCounts = allCounts.slice(moduleSourceIds.length + formSourceIds.length)
+          ...moduleSourceIds.map((id) =>
+            serviceInstance.countFormRecordsForSource(id),
+          ),
+          ...formSourceIds.map((id) =>
+            serviceInstance.countFormRecordsForSource(id),
+          ),
+          ...staticSourceIds.map((id) =>
+            serviceInstance.countFormRecordsForSource(id),
+          ),
+        ];
+        const allCounts = await Promise.all(countPromises);
+        moduleCounts = allCounts.slice(0, moduleSourceIds.length);
+        formCounts = allCounts.slice(
+          moduleSourceIds.length,
+          moduleSourceIds.length + formSourceIds.length,
+        );
+        staticCounts = allCounts.slice(
+          moduleSourceIds.length + formSourceIds.length,
+        );
       } else {
-        moduleCounts = moduleSourceIds.map(() => undefined)
-        formCounts = formSourceIds.map(() => undefined)
-        staticCounts = staticSourceIds.map(() => undefined)
+        moduleCounts = moduleSourceIds.map(() => undefined);
+        formCounts = formSourceIds.map(() => undefined);
+        staticCounts = staticSourceIds.map(() => undefined);
       }
 
       // Map to LookupSource format
@@ -932,8 +1124,8 @@ export class LookupService {
         recordCount: moduleCounts[i] ?? 0,
         icon: "database",
         hasIdField: true,
-        idFieldName: "_recordId"
-      }))
+        idFieldName: "_recordId",
+      }));
 
       const formSources = forms.map((f: any, i: number) => ({
         id: `form_${f.form_id}`,
@@ -943,16 +1135,16 @@ export class LookupService {
         recordCount: formCounts[i] ?? 0,
         icon: "file-text",
         hasIdField: true,
-        idFieldName: "_recordId"
-      }))
+        idFieldName: "_recordId",
+      }));
 
       // Override recordCount for static if not quick
       const finalStaticSources = staticSources.map((s, i: number) => ({
         ...s,
-        recordCount: staticCounts[i] ?? s.recordCount
-      }))
+        recordCount: staticCounts[i] ?? s.recordCount,
+      }));
 
-      const sources = [...formSources, ...moduleSources, ...finalStaticSources]
+      const sources = [...formSources, ...moduleSources, ...finalStaticSources];
 
       // Upsert permitted sources (only for form/module)
       Promise.all(
@@ -970,8 +1162,14 @@ export class LookupService {
               id: source.id,
               name: source.name,
               type: source.type,
-              sourceModuleId: source.type === "module" ? source.id.replace("module_", "") : undefined,
-              sourceFormId: source.type === "form" ? source.id.replace("form_", "") : undefined,
+              sourceModuleId:
+                source.type === "module"
+                  ? source.id.replace("module_", "")
+                  : undefined,
+              sourceFormId:
+                source.type === "form"
+                  ? source.id.replace("form_", "")
+                  : undefined,
               description: source.description,
               active: true,
               createdAt: new Date(),
@@ -979,39 +1177,39 @@ export class LookupService {
             },
           }),
         ),
-      ).catch((error) => console.error("Background upsert error:", error))
+      ).catch((error) => console.error("Background upsert error:", error));
 
-      return sources
+      return sources;
     } catch (error) {
-      console.error("Error fetching lookup sources:", error)
-      return []
+      console.error("Error fetching lookup sources:", error);
+      return [];
     }
   }
 
   private async countFormRecordsForSource(sourceId: string): Promise<number> {
     const lookupSource = await prisma.lookupSource.findUnique({
       where: { id: sourceId },
-      select: { type: true, staticData: true }
-    })
+      select: { type: true, staticData: true },
+    });
 
     if (lookupSource?.type === "static") {
-      return lookupSource.staticData?.length || 0
+      return lookupSource.staticData?.length || 0;
     }
 
     if (sourceId.startsWith("form_")) {
-      const formId = sourceId.replace("form_", "")
-      return await this.countFormRecords(formId)
+      const formId = sourceId.replace("form_", "");
+      return await this.countFormRecords(formId);
     }
 
     if (sourceId.startsWith("module_")) {
-      const moduleId = sourceId.replace("module_", "")
+      const moduleId = sourceId.replace("module_", "");
       try {
         const module = await prisma.formModule.findUnique({
           where: { id: moduleId },
-          select: { organizationId: true }
-        })
+          select: { organizationId: true },
+        });
 
-        if (!module?.organizationId) return 0
+        if (!module?.organizationId) return 0;
 
         // Get descendant module IDs including self
         const descendantResult = await prisma.$queryRaw<{ id: string }[]>` 
@@ -1023,33 +1221,35 @@ export class LookupService {
             WHERE fm.organization_id = ${module.organizationId} AND fm."is_active" = true
           )
           SELECT id FROM module_hierarchy
-        `
+        `;
 
-        const descendantModuleIds: string[] = descendantResult.map((r) => r.id)
+        const descendantModuleIds: string[] = descendantResult.map((r) => r.id);
 
         // Get published forms in those modules
         const forms = await prisma.form.findMany({
           where: {
             moduleId: { in: descendantModuleIds },
-            isPublished: true
+            isPublished: true,
           },
-          select: { id: true }
-        })
+          select: { id: true },
+        });
 
-        const formIds = forms.map((f) => f.id)
+        const formIds = forms.map((f) => f.id);
 
-        if (formIds.length === 0) return 0
+        if (formIds.length === 0) return 0;
 
         // Get counts for each form
-        const counts = await Promise.all(formIds.map(id => this.countFormRecords(id)))
+        const counts = await Promise.all(
+          formIds.map((id) => this.countFormRecords(id)),
+        );
 
-        return counts.reduce((sum, count) => sum + count, 0)
+        return counts.reduce((sum, count) => sum + count, 0);
       } catch (error) {
-        console.error(`Error counting records for module ${moduleId}:`, error)
-        return 0
+        console.error(`Error counting records for module ${moduleId}:`, error);
+        return 0;
       }
     }
 
-    return 0
+    return 0;
   }
 }
