@@ -51,6 +51,8 @@ export const baseApi = createApi({
     "Conversations",
     // Lookup Templates
     "LookupTemplates",
+    // Saved Filters
+    "SavedFilters",
   ],
   endpoints: () => ({}),
 })

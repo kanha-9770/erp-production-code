@@ -1,7 +1,7 @@
 'use client';
 
 import React from "react"
-import { ChevronDown, Search, X, Save, Trash2, Check } from "lucide-react"
+import { ChevronDown, Search, X, Save, Trash2, Check, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,12 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import {
+  useGetSavedFiltersQuery,
+  useCreateSavedFilterMutation,
+  useDeleteSavedFilterMutation,
+} from "@/lib/api/saved-filters"
+import type { SavedFilterData } from "@/lib/api/saved-filters"
 
 export interface FieldFilter {
   fieldId: string
@@ -53,13 +59,6 @@ interface RecordData {
   }>
 }
 
-interface SavedFilter {
-  id: string
-  name: string
-  filters: FieldFilter[]
-  createdAt: string
-}
-
 interface AdvancedFilterSidebarProps {
   isOpen: boolean
   onClose: () => void
@@ -70,7 +69,7 @@ interface AdvancedFilterSidebarProps {
   preselectedFieldId?: string | null
   onColumnSearch?: (fieldId: string, searchValue: string) => void
   records?: RecordData[]
-  storageKey?: string
+  moduleId?: string
 }
 
 interface ExpandedField {
@@ -156,23 +155,6 @@ const needsSecondValue = (operator: string) => {
   return operator === "between"
 }
 
-// ── Saved Filters helpers ──────────────────────────────────────────────────
-
-const getSavedFilters = (key: string): SavedFilter[] => {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-const persistSavedFilters = (key: string, saved: SavedFilter[]) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(saved))
-  } catch { /* quota exceeded — silently fail */ }
-}
-
 // ── Value Picker Dialog ────────────────────────────────────────────────────
 
 interface ValuePickerDialogProps {
@@ -195,7 +177,6 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
   const [localSelected, setLocalSelected] = React.useState<Set<string>>(new Set(selectedValues))
   const [dialogSearch, setDialogSearch] = React.useState("")
 
-  // Sync when dialog opens
   React.useEffect(() => {
     if (open) {
       setLocalSelected(new Set(selectedValues))
@@ -218,12 +199,9 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
     })
   }
 
-  const selectAll = () => {
-    setLocalSelected(new Set(filtered))
-  }
+  const selectAll = () => setLocalSelected(new Set(filtered))
 
   const clearAll = () => {
-    // Only clear filtered items
     setLocalSelected((prev) => {
       const next = new Set(prev)
       for (const v of filtered) next.delete(v)
@@ -235,7 +213,7 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="text-sm">Select values for "{fieldLabel}"</DialogTitle>
+          <DialogTitle className="text-sm">Select values for &quot;{fieldLabel}&quot;</DialogTitle>
           <DialogDescription className="text-xs text-gray-500">
             Choose one or more values to filter by. {localSelected.size > 0 && `${localSelected.size} selected`}
           </DialogDescription>
@@ -252,24 +230,15 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
         </div>
 
         <div className="flex items-center gap-2 text-xs">
-          <button
-            type="button"
-            onClick={selectAll}
-            className="text-blue-600 hover:text-blue-800 hover:underline"
-          >
+          <button type="button" onClick={selectAll} className="text-blue-600 hover:text-blue-800 hover:underline">
             Select all{dialogSearch ? " visible" : ""}
           </button>
           <span className="text-gray-300">|</span>
-          <button
-            type="button"
-            onClick={clearAll}
-            className="text-gray-500 hover:text-gray-700 hover:underline"
-          >
+          <button type="button" onClick={clearAll} className="text-gray-500 hover:text-gray-700 hover:underline">
             Clear{dialogSearch ? " visible" : " all"}
           </button>
         </div>
 
-        {/* Selected badges */}
         {localSelected.size > 0 && (
           <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
             {Array.from(localSelected).map((val) => (
@@ -300,11 +269,7 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
                     isChecked && "bg-blue-50"
                   )}
                 >
-                  <Checkbox
-                    checked={isChecked}
-                    onCheckedChange={() => toggleValue(val)}
-                    className="h-3.5 w-3.5"
-                  />
+                  <Checkbox checked={isChecked} onCheckedChange={() => toggleValue(val)} className="h-3.5 w-3.5" />
                   <span className="text-xs text-gray-700 truncate">{val}</span>
                 </label>
               )
@@ -313,12 +278,7 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            className="text-xs"
-          >
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="text-xs">
             Cancel
           </Button>
           <Button
@@ -343,12 +303,14 @@ interface SaveFilterDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSave: (name: string) => void
+  isSaving: boolean
 }
 
 const SaveFilterDialog: React.FC<SaveFilterDialogProps> = ({
   open,
   onOpenChange,
   onSave,
+  isSaving,
 }) => {
   const [filterName, setFilterName] = React.useState("")
 
@@ -371,9 +333,8 @@ const SaveFilterDialog: React.FC<SaveFilterDialogProps> = ({
           onChange={(e) => setFilterName(e.target.value)}
           className="text-xs h-8"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && filterName.trim()) {
+            if (e.key === "Enter" && filterName.trim() && !isSaving) {
               onSave(filterName.trim())
-              onOpenChange(false)
             }
           }}
           autoFocus
@@ -384,13 +345,11 @@ const SaveFilterDialog: React.FC<SaveFilterDialogProps> = ({
           </Button>
           <Button
             size="sm"
-            disabled={!filterName.trim()}
-            onClick={() => {
-              onSave(filterName.trim())
-              onOpenChange(false)
-            }}
+            disabled={!filterName.trim() || isSaving}
+            onClick={() => onSave(filterName.trim())}
             className="text-xs"
           >
+            {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             Save Filter
           </Button>
         </DialogFooter>
@@ -412,7 +371,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   preselectedFieldId,
   onColumnSearch,
   records = [],
-  storageKey = "erp_saved_filters",
+  moduleId,
 }) => {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [columnSearchMode, setColumnSearchMode] = React.useState(false)
@@ -430,27 +389,29 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   const [valuePickerOpen, setValuePickerOpen] = React.useState(false)
   const [valuePickerFieldId, setValuePickerFieldId] = React.useState<string | null>(null)
 
-  // ── Saved Filters state ──
-  const [savedFilters, setSavedFilters] = React.useState<SavedFilter[]>([])
+  // ── Saved Filters (from database) ──
   const [saveDialogOpen, setSaveDialogOpen] = React.useState(false)
   const [savedFiltersExpanded, setSavedFiltersExpanded] = React.useState(true)
 
-  // Load saved filters on mount
-  React.useEffect(() => {
-    setSavedFilters(getSavedFilters(storageKey))
-  }, [storageKey])
+  const { data: savedFiltersResponse, isLoading: isLoadingSavedFilters } = useGetSavedFiltersQuery(
+    moduleId || "",
+    { skip: !moduleId }
+  )
+  const [createSavedFilter, { isLoading: isCreating }] = useCreateSavedFilterMutation()
+  const [deleteSavedFilter] = useDeleteSavedFilterMutation()
 
+  const savedFilters: SavedFilterData[] = savedFiltersResponse?.data || []
+
+  // ── Keyboard ──
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose()
-      }
+      if (e.key === "Escape" && isOpen) onClose()
     }
-
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [isOpen, onClose])
 
+  // ── Resize ──
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault()
     setIsResizing(true)
@@ -460,33 +421,27 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
 
   React.useEffect(() => {
     if (!isResizing) return
-
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - resizeStartX.current
       const newWidth = Math.max(200, Math.min(300, resizeStartWidth.current + deltaX))
       setSidebarWidth(newWidth)
     }
-
-    const handleMouseUp = () => {
-      setIsResizing(false)
-    }
-
+    const handleMouseUp = () => setIsResizing(false)
     document.addEventListener("mousemove", handleMouseMove)
     document.addEventListener("mouseup", handleMouseUp)
-
     return () => {
       document.removeEventListener("mousemove", handleMouseMove)
       document.removeEventListener("mouseup", handleMouseUp)
     }
   }, [isResizing])
 
+  // ── Preselected field ──
   React.useEffect(() => {
     if (preselectedFieldId && isOpen) {
       const field = fields.find((f) => f.id === preselectedFieldId)
       if (field) {
         const operators = getOperatorsForFieldType(field.type)
         const defaultOperator = operators[0].value
-
         const existingFilter = filters.find((f) => f.fieldId === preselectedFieldId)
 
         const newExpandedFields = new Map(expandedFields)
@@ -497,17 +452,13 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
           value2: existingFilter?.value2,
         })
         setExpandedFields(newExpandedFields)
-
         setFieldFiltersExpanded(true)
         setSearchQuery("")
         setColumnSearchMode(true)
 
         setTimeout(() => {
           if (preselectedFieldRef.current) {
-            preselectedFieldRef.current.scrollIntoView({
-              behavior: 'smooth',
-              block: 'center',
-            })
+            preselectedFieldRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
           }
           setTimeout(() => {
             if (valueInputRef.current && needsValueInput(existingFilter?.operator || defaultOperator)) {
@@ -523,20 +474,15 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     }
   }, [preselectedFieldId, isOpen])
 
+  // ── Field expansion / filter updates ──
+
   const toggleFieldExpansion = (fieldId: string, checked: boolean) => {
     if (checked) {
       const field = fields.find((f) => f.id === fieldId)
       if (!field) return
-
       const operators = getOperatorsForFieldType(field.type)
-      const defaultOperator = operators[0].value
-
       setExpandedFields(
-        new Map(expandedFields.set(fieldId, {
-          fieldId,
-          operator: defaultOperator,
-          value: "",
-        }))
+        new Map(expandedFields.set(fieldId, { fieldId, operator: operators[0].value, value: "" }))
       )
     } else {
       const newExpanded = new Map(expandedFields)
@@ -575,19 +521,13 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     }
   }
 
-  const isFieldExpanded = (fieldId: string) => {
-    return expandedFields.has(fieldId)
-  }
+  const isFieldExpanded = (fieldId: string) => expandedFields.has(fieldId)
+  const getFieldExpandedData = (fieldId: string) => expandedFields.get(fieldId)
 
-  const getFieldExpandedData = (fieldId: string) => {
-    return expandedFields.get(fieldId)
-  }
-
+  // ── Column search ──
   React.useEffect(() => {
     if (columnSearchMode && preselectedFieldId && searchQuery && onColumnSearch) {
-      const timeoutId = setTimeout(() => {
-        onColumnSearch(preselectedFieldId, searchQuery)
-      }, 300)
+      const timeoutId = setTimeout(() => { onColumnSearch(preselectedFieldId, searchQuery) }, 300)
       return () => clearTimeout(timeoutId)
     } else if (columnSearchMode && preselectedFieldId && !searchQuery && onColumnSearch) {
       onColumnSearch(preselectedFieldId, "")
@@ -601,19 +541,16 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
 
   const filteredFields = React.useMemo(() => {
     const nonImageFields = fields.filter(field => !isImageField(field.label))
-
     if (!searchQuery || columnSearchMode) return nonImageFields
-
     return nonImageFields.filter((field) =>
       field.label.toLowerCase().includes(searchQuery.toLowerCase())
     )
   }, [fields, searchQuery, columnSearchMode])
 
-  // Extract unique values from records for a given field
+  // ── Unique values from records ──
   const getUniqueValuesForField = React.useCallback(
     (field: FormFieldWithSection): string[] => {
       if (!records || records.length === 0) return []
-
       const valueSet = new Set<string>()
       for (const record of records) {
         const pd = record.processedData?.find(
@@ -633,29 +570,27 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     [records]
   )
 
-  // ── Saved filter handlers ──
+  // ── Saved filter handlers (database) ──
 
-  const handleSaveFilter = (name: string) => {
-    if (filters.length === 0) return
-    const newSaved: SavedFilter = {
-      id: Date.now().toString(),
-      name,
-      filters: [...filters],
-      createdAt: new Date().toISOString(),
+  const handleSaveFilter = async (name: string) => {
+    if (filters.length === 0 || !moduleId) return
+    try {
+      await createSavedFilter({ name, moduleId, filters }).unwrap()
+      setSaveDialogOpen(false)
+    } catch (err) {
+      console.error("Failed to save filter:", err)
     }
-    const updated = [...savedFilters, newSaved]
-    setSavedFilters(updated)
-    persistSavedFilters(storageKey, updated)
   }
 
-  const handleDeleteSavedFilter = (id: string) => {
-    const updated = savedFilters.filter((sf) => sf.id !== id)
-    setSavedFilters(updated)
-    persistSavedFilters(storageKey, updated)
+  const handleDeleteSavedFilter = async (id: string) => {
+    try {
+      await deleteSavedFilter(id).unwrap()
+    } catch (err) {
+      console.error("Failed to delete saved filter:", err)
+    }
   }
 
-  const handleApplySavedFilter = (saved: SavedFilter) => {
-    // Restore expanded fields state from saved filters
+  const handleApplySavedFilter = (saved: SavedFilterData) => {
     const newExpanded = new Map<string, ExpandedField>()
     for (const f of saved.filters) {
       newExpanded.set(f.fieldId, {
@@ -671,9 +606,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
 
   // ── Value picker helpers ──
 
-  const valuePickerField = valuePickerFieldId
-    ? fields.find((f) => f.id === valuePickerFieldId)
-    : null
+  const valuePickerField = valuePickerFieldId ? fields.find((f) => f.id === valuePickerFieldId) : null
 
   const valuePickerAllValues = React.useMemo(() => {
     if (!valuePickerField) return []
@@ -690,16 +623,10 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   const handleValuePickerApply = (values: string[]) => {
     if (!valuePickerFieldId) return
     const joinedValue = values.join(", ")
-    // If multiple values selected, switch to "is one of"
     if (values.length > 1) {
-      updateFieldFilter(valuePickerFieldId, {
-        operator: "is one of",
-        value: joinedValue,
-      })
+      updateFieldFilter(valuePickerFieldId, { operator: "is one of", value: joinedValue })
     } else {
-      updateFieldFilter(valuePickerFieldId, {
-        value: joinedValue,
-      })
+      updateFieldFilter(valuePickerFieldId, { value: joinedValue })
     }
   }
 
@@ -735,7 +662,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold text-gray-900">Filter Leads by</h2>
           <div className="flex items-center gap-1">
-            {filters.length > 0 && (
+            {filters.length > 0 && moduleId && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -806,8 +733,8 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── Saved Filters Section ── */}
-        {savedFilters.length > 0 && (
+        {/* ── Saved Filters Section (from database) ── */}
+        {moduleId && (
           <div className="border-b border-gray-200">
             <button
               onClick={() => setSavedFiltersExpanded(!savedFiltersExpanded)}
@@ -821,50 +748,62 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                   )}
                 />
                 <span className="text-sm font-semibold text-gray-900">Saved Filters</span>
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{savedFilters.length}</Badge>
+                {savedFilters.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{savedFilters.length}</Badge>
+                )}
               </div>
             </button>
             {savedFiltersExpanded && (
               <div className="px-4 pb-3 space-y-1">
-                {savedFilters.map((sf) => {
-                  // Check if this saved filter is currently active
-                  const isActive =
-                    sf.filters.length === filters.length &&
-                    sf.filters.every((sfFilter) =>
-                      filters.some(
-                        (af) =>
-                          af.fieldId === sfFilter.fieldId &&
-                          af.operator === sfFilter.operator &&
-                          af.value === sfFilter.value
+                {isLoadingSavedFilters ? (
+                  <div className="flex items-center justify-center py-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                    <span className="ml-2 text-xs text-gray-400">Loading saved filters...</span>
+                  </div>
+                ) : savedFilters.length === 0 ? (
+                  <div className="text-xs text-gray-400 py-2 text-center">
+                    No saved filters yet. Apply filters and click the save icon to save them.
+                  </div>
+                ) : (
+                  savedFilters.map((sf) => {
+                    const isActive =
+                      sf.filters.length === filters.length &&
+                      sf.filters.every((sfFilter) =>
+                        filters.some(
+                          (af) =>
+                            af.fieldId === sfFilter.fieldId &&
+                            af.operator === sfFilter.operator &&
+                            af.value === sfFilter.value
+                        )
                       )
-                    )
-                  return (
-                    <div
-                      key={sf.id}
-                      className={cn(
-                        "flex items-center justify-between group rounded-md px-2 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors",
-                        isActive && "bg-blue-50 border border-blue-200"
-                      )}
-                      onClick={() => handleApplySavedFilter(sf)}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {isActive && <Check className="h-3 w-3 text-blue-600 shrink-0" />}
-                        <span className="text-xs text-gray-700 truncate">{sf.name}</span>
-                        <span className="text-[10px] text-gray-400 shrink-0">({sf.filters.length})</span>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteSavedFilter(sf.id)
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity"
-                        title="Delete saved filter"
+                    return (
+                      <div
+                        key={sf.id}
+                        className={cn(
+                          "flex items-center justify-between group rounded-md px-2 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors",
+                          isActive && "bg-blue-50 border border-blue-200"
+                        )}
+                        onClick={() => handleApplySavedFilter(sf)}
                       >
-                        <Trash2 className="h-3 w-3 text-red-500" />
-                      </button>
-                    </div>
-                  )
-                })}
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isActive && <Check className="h-3 w-3 text-blue-600 shrink-0" />}
+                          <span className="text-xs text-gray-700 truncate">{sf.name}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">({sf.filters.length})</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteSavedFilter(sf.id)
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity"
+                          title="Delete saved filter"
+                        >
+                          <Trash2 className="h-3 w-3 text-red-500" />
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
               </div>
             )}
           </div>
@@ -909,9 +848,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                     )}>
                       <Checkbox
                         checked={isExpanded}
-                        onCheckedChange={(checked) => {
-                          toggleFieldExpansion(field.id, !!checked)
-                        }}
+                        onCheckedChange={(checked) => toggleFieldExpansion(field.id, !!checked)}
                         className="h-4 w-4"
                       />
                       <span className="text-sm text-gray-700 font-medium">
@@ -926,9 +863,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                       <div className="ml-6 space-y-2 animate-in slide-in-from-top-2 duration-200">
                         <Select
                           value={expandedData.operator}
-                          onValueChange={(value) => {
-                            updateFieldFilter(field.id, { operator: value })
-                          }}
+                          onValueChange={(value) => updateFieldFilter(field.id, { operator: value })}
                         >
                           <SelectTrigger className="h-8 text-xs bg-white border-gray-300 hover:border-gray-400">
                             <SelectValue />
@@ -943,7 +878,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                         </Select>
 
                         {needsValueInput(expandedData.operator) && (() => {
-                          // For select/radio/lookup/dropdown fields, show a dropdown of available options
                           const fieldOptions = ["select", "radio", "dropdown"].includes(field.type)
                             ? (field.options || [])
                             : field.type === "lookup"
@@ -993,9 +927,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                               }
                               placeholder={expandedData.operator === "is one of" ? "value1, value2, ..." : "Type here"}
                               value={expandedData.value}
-                              onChange={(e) => {
-                                updateFieldFilter(field.id, { value: e.target.value })
-                              }}
+                              onChange={(e) => updateFieldFilter(field.id, { value: e.target.value })}
                               className={cn(
                                 "h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500",
                                 isPreselected && "ring-2 ring-blue-400 border-blue-400"
@@ -1015,14 +947,12 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                             }
                             placeholder="And"
                             value={expandedData.value2 || ""}
-                            onChange={(e) => {
-                              updateFieldFilter(field.id, { value2: e.target.value })
-                            }}
+                            onChange={(e) => updateFieldFilter(field.id, { value2: e.target.value })}
                             className="h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                           />
                         )}
 
-                        {/* Selected values badges */}
+                        {/* Selected values badges for "is one of" */}
                         {expandedData.operator === "is one of" && expandedData.value && (
                           <div className="flex flex-wrap gap-1">
                             {expandedData.value.split(",").map((v) => v.trim()).filter(Boolean).map((val) => (
@@ -1084,6 +1014,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
         open={saveDialogOpen}
         onOpenChange={setSaveDialogOpen}
         onSave={handleSaveFilter}
+        isSaving={isCreating}
       />
     </div>
   )

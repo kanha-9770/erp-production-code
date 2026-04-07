@@ -162,6 +162,7 @@ model User {
   conversations    ChatConversation[]      @relation("UserConversations")
   routeAccess      RouteUserAccess[]
   lookupTemplates  LookupTemplate[]        @relation("LookupTemplateCreator")
+  savedFilters     SavedFilter[]           @relation("SavedFilterCreator")
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
 
@@ -227,6 +228,7 @@ model Organization {
   aiConfigurations   AIConfiguration[] @relation("OrganizationAIConfigs")
   routePermissions   RoutePermission[]
   lookupTemplates    LookupTemplate[]
+  savedFilters       SavedFilter[]
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
@@ -1730,4 +1732,22 @@ model RouteUserAccess {
   @@index([routePermissionId])
   @@index([userId])
   @@map("route_user_access")
+}
+
+model SavedFilter {
+  id              String       @id @default(cuid())
+  name            String
+  moduleId        String       @map("module_id")
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById     String       @map("created_by_id")
+  createdBy       User         @relation("SavedFilterCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  filters         Json         // Array of FieldFilter objects
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([moduleId])
+  @@map("saved_filters")
 }
