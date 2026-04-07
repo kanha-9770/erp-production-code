@@ -13,6 +13,7 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import { isImageUrl, isImageField, formatDynamicRowValue } from "@/lib/utils/fieldUtils";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type {
   ProcessedFieldData,
   EnhancedFormRecord,
@@ -73,6 +74,8 @@ export function useRecordsDisplay({
   onDeleteRecord,
   onViewDetails,
 }: UseRecordsDisplayOptions) {
+  const { fullName: currentUserName } = useCurrentUser();
+
   // ── State ────────────────────────────────────────────────────────────────────
 
   const tableContainerRef = React.useRef<HTMLDivElement>(null);
@@ -113,6 +116,8 @@ export function useRecordsDisplay({
   const [activeCommentCell, setActiveCommentCell] = React.useState<string | null>(null);
   const [newComment, setNewComment] = React.useState<string>("");
   const [confirmDeleteCommentId, setConfirmDeleteCommentId] = React.useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = React.useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = React.useState<string>("");
   const [conditionalRules, setConditionalRules] = React.useState<ConditionalFormatRule[]>([]);
   const [formulaDependencies, setFormulaDependencies] = React.useState<
     Map<string, Set<string>>
@@ -951,7 +956,7 @@ export function useRecordsDisplay({
     while ((match = mentionRegex.exec(newComment))) mentions.push({ name: match[1], id: match[2] });
     const cleanText = newComment.replace(mentionRegex, "@$1");
     const newC: Comment = {
-      id: Date.now().toString(), author: "Current User",
+      id: Date.now().toString(), author: currentUserName || "Unknown User",
       text: cleanText, timestamp: new Date().toISOString(), mentions,
     };
     setComments((prev) => {
@@ -964,6 +969,53 @@ export function useRecordsDisplay({
 
   const requestDeleteComment = (commentId: string) => setConfirmDeleteCommentId(commentId);
   const cancelDeleteComment = () => setConfirmDeleteCommentId(null);
+
+  const deleteComment = (commentId: string) => {
+    if (!activeCommentCell) return;
+    setComments((prev) => {
+      const m = new Map(prev);
+      const cellComments = m.get(activeCommentCell);
+      if (cellComments) {
+        const filtered = cellComments.filter((c) => c.id !== commentId);
+        if (filtered.length > 0) {
+          m.set(activeCommentCell, filtered);
+        } else {
+          m.delete(activeCommentCell);
+        }
+      }
+      return m;
+    });
+    setConfirmDeleteCommentId(null);
+  };
+
+  const startEditComment = (comment: Comment) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentText(comment.text);
+  };
+
+  const saveEditComment = () => {
+    if (!activeCommentCell || !editingCommentId || !editingCommentText.trim()) return;
+    setComments((prev) => {
+      const m = new Map(prev);
+      const cellComments = m.get(activeCommentCell);
+      if (cellComments) {
+        m.set(
+          activeCommentCell,
+          cellComments.map((c) =>
+            c.id === editingCommentId ? { ...c, text: editingCommentText.trim() } : c
+          ),
+        );
+      }
+      return m;
+    });
+    setEditingCommentId(null);
+    setEditingCommentText("");
+  };
+
+  const cancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentText("");
+  };
 
   // ── DnD ──────────────────────────────────────────────────────────────────────
 
@@ -1260,7 +1312,10 @@ export function useRecordsDisplay({
     handleResizeStart, toggleCellExpansion, toggleFieldVisibility, toggleAllFieldsVisibility, allFieldsVisible,
     handleCellPointerDown, handleOpenAdvancedFilterForColumn,
     handleOpenDeleteConfirm, handleConfirmDelete, handleViewDetails,
-    addComment, requestDeleteComment, cancelDeleteComment,
+    addComment, requestDeleteComment, cancelDeleteComment, deleteComment,
+    editingCommentId, editingCommentText, setEditingCommentText,
+    startEditComment, saveEditComment, cancelEditComment,
+    currentUserName,
     // DnD
     sensors, handleDragStart, handleDragEnd,
   };

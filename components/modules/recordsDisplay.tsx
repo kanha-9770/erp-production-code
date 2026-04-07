@@ -211,6 +211,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     addComment,
     requestDeleteComment,
     cancelDeleteComment,
+    deleteComment,
+    editingCommentId,
+    editingCommentText,
+    setEditingCommentText,
+    startEditComment,
+    saveEditComment,
+    cancelEditComment,
+    currentUserName,
     sensors,
     handleDragStart,
     handleDragEnd,
@@ -1349,26 +1357,60 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 <DialogTitle>Comments</DialogTitle>
               </DialogHeader>
               <div className="max-h-60 overflow-y-auto space-y-3">
-                {comments.get(activeCommentCell || "")?.map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-3 border border-gray-200 rounded-lg relative group/comment"
-                  >
-                    <button
-                      onClick={() => requestDeleteComment(c.id)}
-                      className="absolute top-2 right-2 opacity-0 group-hover/comment:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full p-1 text-xs"
+                {comments.get(activeCommentCell || "")?.map((c) => {
+                  const isOwner = c.author === currentUserName;
+                  const isEditing = editingCommentId === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      className="p-3 border border-gray-200 rounded-lg relative group/comment"
                     >
-                      ×
-                    </button>
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{c.author}</span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(c.timestamp).toLocaleString()}
-                      </span>
+                      {isOwner && !isEditing && (
+                        <div className="absolute top-2 right-2 opacity-0 group-hover/comment:opacity-100 transition-opacity flex gap-1">
+                          <button
+                            onClick={() => startEditComment(c)}
+                            className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1 text-xs"
+                            title="Edit comment"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => deleteComment(c.id)}
+                            className="bg-red-500 hover:bg-red-600 text-white rounded-full p-1 text-xs"
+                            title="Delete comment"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{c.author}</span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(c.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                      {isEditing ? (
+                        <div className="mt-1 space-y-2">
+                          <Input
+                            value={editingCommentText}
+                            onChange={(e) => setEditingCommentText(e.target.value)}
+                            className="w-full text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={saveEditComment}>
+                              Save
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={cancelEditComment}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm mt-1">{c.text}</p>
+                      )}
                     </div>
-                    <p className="text-sm mt-1">{c.text}</p>
-                  </div>
-                )) || <p className="text-sm text-gray-500">No comments yet.</p>}
+                  );
+                }) || <p className="text-sm text-gray-500">No comments yet.</p>}
               </div>
               <div className="mt-4">
                 <Input
