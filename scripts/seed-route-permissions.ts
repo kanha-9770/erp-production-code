@@ -55,11 +55,20 @@ const STATIC_ROUTES: { pattern: string; description: string }[] = [
   { pattern: "/settings/login-history", description: "Login history" },
   { pattern: "/settings/masters", description: "Masters configuration" },
   { pattern: "/settings/permission", description: "Permission management" },
-  { pattern: "/settings/permission/roles", description: "Role-based permissions" },
-  { pattern: "/settings/permission/route", description: "Route-based permissions" },
+  {
+    pattern: "/settings/permission/roles",
+    description: "Role-based permissions",
+  },
+  {
+    pattern: "/settings/permission/route",
+    description: "Route-based permissions",
+  },
   { pattern: "/settings/profiles", description: "Profile settings" },
   { pattern: "/settings/users", description: "Users list" },
-  { pattern: "/settings/users/user-management", description: "User management" },
+  {
+    pattern: "/settings/users/user-management",
+    description: "User management",
+  },
   // ─── Standalone ────────────────────────────────────────────────────────
   { pattern: "/StandaloneTable", description: "Standalone table view" },
 ];

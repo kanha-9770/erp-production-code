@@ -3,7 +3,12 @@ import { AdminNav } from '@/components/layout/admin-nav';
 import { validateSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import DashboardPage from './admin/dashboard/page';
+import {
+  getOrganizationKPIs, getFormModules, getSubmissionTimeSeries,
+  getOrganizationSetupMetrics, getUserDashboardData, checkIsAdmin,
+} from '@/app/actions/analytics';
+import { DashboardContent } from '@/components/dashboard/dashboard-content';
+import { UserDashboardContent } from '@/components/dashboard/user-dashboard-content';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,11 +17,7 @@ export const metadata: Metadata = {
   description: 'Advanced analytics and monitoring for your organization',
 };
 
-export default async function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function HomePage() {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
 
@@ -39,14 +40,43 @@ export default async function AdminLayout({
     organizationName: session.user.organization?.name,
   };
 
+  const isAdmin = await checkIsAdmin();
+
   return (
     <div className="flex h-screen  bg-background">
       <div className="w-full">
         <AdminNav user={user} />
         <main className="overflow-auto p-3 sm:p-4 lg:p-8">
-          <DashboardPage />
+          {isAdmin ? (
+            <AdminDashboard />
+          ) : (
+            <UserDashboard />
+          )}
         </main>
       </div>
     </div>
   );
+}
+
+async function AdminDashboard() {
+  const [kpis, modules, timeSeries, setupMetrics] = await Promise.all([
+    getOrganizationKPIs('30days'),
+    getFormModules(),
+    getSubmissionTimeSeries('30days'),
+    getOrganizationSetupMetrics(),
+  ]);
+
+  return (
+    <DashboardContent
+      kpis={kpis}
+      modules={modules}
+      timeSeries={timeSeries}
+      setupMetrics={setupMetrics}
+    />
+  );
+}
+
+async function UserDashboard() {
+  const userData = await getUserDashboardData('30days');
+  return <UserDashboardContent userData={userData} />;
 }

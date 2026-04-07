@@ -59,7 +59,7 @@ export async function loginAction(formData: FormData) {
     return { error: 'An unexpected error occurred' };
   }
 
-  redirect('/admin/dashboard');
+  redirect('/');
 }
 
 export async function signupAction(formData: FormData) {
@@ -108,7 +108,7 @@ export async function signupAction(formData: FormData) {
     return { error: 'An unexpected error occurred' };
   }
 
-  redirect('/admin/dashboard');
+  redirect('/');
 }
 
 export async function logoutAction() {

@@ -37,20 +37,6 @@ export function AdminNav({ user }: AdminNavProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { canAccess } = useRouteAccess();
 
-  const allNavItems = [
-    { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
-    { href: '/admin/intelligence', label: 'Intelligence', icon: Brain },
-    { href: '/admin/reports', label: 'Reports', icon: FileDown },
-    { href: '/admin/chatbot', label: 'Chatbot', icon: Bot },
-    { href: '/admin/settings', label: 'Settings', icon: Settings },
-  ];
-
-  // Filter nav items — only show routes the user has permission to access
-  const navItems = useMemo(
-    () => allNavItems.filter((item) => canAccess(item.href)),
-    [canAccess]
-  );
 
   return (
     <nav className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
@@ -72,26 +58,7 @@ export function AdminNav({ user }: AdminNavProps) {
                 </SheetTitle>
               </SheetHeader>
               <nav className="flex flex-col gap-1 p-3">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={[
-                        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                        isActive
-                          ? 'bg-secondary text-secondary-foreground'
-                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                      ].join(' ')}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
+
                 <div className="border-t mt-2 pt-2">
                   <button
                     onClick={() => { logoutAction(); setMobileOpen(false); }}
@@ -106,7 +73,7 @@ export function AdminNav({ user }: AdminNavProps) {
           </Sheet>
 
           {/* Logo */}
-          <Link href="/admin/dashboard" className="flex items-center gap-2 font-bold text-lg">
+          <Link href="/" className="flex items-center gap-2 font-bold text-lg">
             <div className="p-1.5 rounded-lg bg-foreground text-background">
               <BarChart3 className="h-5 w-5" />
             </div>
@@ -114,27 +81,6 @@ export function AdminNav({ user }: AdminNavProps) {
               {user.organizationName || 'Analytics'}
             </span>
           </Link>
-
-          {/* Desktop nav */}
-          <div className="hidden md:flex gap-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.href;
-              return (
-                <Button
-                  key={item.href}
-                  variant={isActive ? 'secondary' : 'ghost'}
-                  size="sm"
-                  asChild
-                >
-                  <Link href={item.href} className="gap-2">
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                </Button>
-              );
-            })}
-          </div>
         </div>
 
         {/* Right — user menu */}
@@ -145,7 +91,6 @@ export function AdminNav({ user }: AdminNavProps) {
                 <div className="h-7 w-7 rounded-full bg-foreground/10 flex items-center justify-center">
                   <User className="h-4 w-4" />
                 </div>
-                <span className="hidden sm:inline text-sm">{user.name}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -156,17 +101,7 @@ export function AdminNav({ user }: AdminNavProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <DropdownMenuItem key={item.href} asChild>
-                    <Link href={item.href} className="cursor-pointer">
-                      <Icon className="h-4 w-4 mr-2" />
-                      {item.label}
-                    </Link>
-                  </DropdownMenuItem>
-                );
-              })}
+
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => logoutAction()}

@@ -719,11 +719,10 @@ export default function ModuleDashboard() {
     <div className="flex flex-col min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b shadow-sm flex-shrink-0 sticky top-0 z-30">
-        <div className="container px-4 py-3 md:px-6 md:py-4 flex items-center justify-between">
+        <div className="container px-4 py-1 md:px-6 md:py-2 flex items-center justify-between">
           <div className="flex items-center gap-3 md:gap-4">
             <Button
               variant="ghost"
-              si
               className="md:hidden"
               onClick={() => setIsMobileSidebarOpen(true)}
             >
@@ -822,7 +821,7 @@ export default function ModuleDashboard() {
         </div>
 
         {/* Desktop Sidebar */}
-        <div className="hidden md:block md:w-72 lg:w-80 flex-shrink-0 border-r bg-white overflow-y-auto">
+        <div className="hidden md:block flex-shrink-0 overflow-y-auto">
           <ModuleSidebar
             filteredModules={filteredModules}
             searchQuery={searchQuery}
