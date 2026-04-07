@@ -1,11 +1,20 @@
 'use client';
 
 import React from "react"
-import { ChevronDown, Search, X } from "lucide-react"
+import { ChevronDown, Search, X, Save, Trash2, Check } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 export interface FieldFilter {
@@ -34,6 +43,23 @@ interface FormFieldWithSection {
   lookup?: any
 }
 
+interface RecordData {
+  processedData: Array<{
+    fieldId: string
+    fieldLabel?: string
+    value: any
+    displayValue?: string
+    sectionId?: string
+  }>
+}
+
+interface SavedFilter {
+  id: string
+  name: string
+  filters: FieldFilter[]
+  createdAt: string
+}
+
 interface AdvancedFilterSidebarProps {
   isOpen: boolean
   onClose: () => void
@@ -43,12 +69,8 @@ interface AdvancedFilterSidebarProps {
   isMergedMode: boolean
   preselectedFieldId?: string | null
   onColumnSearch?: (fieldId: string, searchValue: string) => void
-}
-
-interface SystemFilter {
-  id: string
-  label: string
-  checked: boolean
+  records?: RecordData[]
+  storageKey?: string
 }
 
 interface ExpandedField {
@@ -71,6 +93,7 @@ const getOperatorsForFieldType = (fieldType: string) => {
         { value: "doesn't contain", label: "doesn't contain" },
         { value: "starts with", label: "starts with" },
         { value: "ends with", label: "ends with" },
+        { value: "is one of", label: "is one of" },
         { value: "is empty", label: "is empty" },
         { value: "is not empty", label: "is not empty" },
       ]
@@ -81,6 +104,7 @@ const getOperatorsForFieldType = (fieldType: string) => {
         { value: "greater than", label: "greater than" },
         { value: "less than", label: "less than" },
         { value: "between", label: "between" },
+        { value: "is one of", label: "is one of" },
         { value: "is empty", label: "is empty" },
         { value: "is not empty", label: "is not empty" },
       ]
@@ -117,6 +141,7 @@ const getOperatorsForFieldType = (fieldType: string) => {
       return [
         { value: "is", label: "is" },
         { value: "contains", label: "contains" },
+        { value: "is one of", label: "is one of" },
         { value: "is empty", label: "is empty" },
         { value: "is not empty", label: "is not empty" },
       ]
@@ -131,6 +156,253 @@ const needsSecondValue = (operator: string) => {
   return operator === "between"
 }
 
+// ── Saved Filters helpers ──────────────────────────────────────────────────
+
+const getSavedFilters = (key: string): SavedFilter[] => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+const persistSavedFilters = (key: string, saved: SavedFilter[]) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(saved))
+  } catch { /* quota exceeded — silently fail */ }
+}
+
+// ── Value Picker Dialog ────────────────────────────────────────────────────
+
+interface ValuePickerDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  fieldLabel: string
+  allValues: string[]
+  selectedValues: string[]
+  onApply: (values: string[]) => void
+}
+
+const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
+  open,
+  onOpenChange,
+  fieldLabel,
+  allValues,
+  selectedValues,
+  onApply,
+}) => {
+  const [localSelected, setLocalSelected] = React.useState<Set<string>>(new Set(selectedValues))
+  const [dialogSearch, setDialogSearch] = React.useState("")
+
+  // Sync when dialog opens
+  React.useEffect(() => {
+    if (open) {
+      setLocalSelected(new Set(selectedValues))
+      setDialogSearch("")
+    }
+  }, [open, selectedValues])
+
+  const filtered = React.useMemo(() => {
+    if (!dialogSearch) return allValues
+    const q = dialogSearch.toLowerCase()
+    return allValues.filter((v) => v.toLowerCase().includes(q))
+  }, [allValues, dialogSearch])
+
+  const toggleValue = (val: string) => {
+    setLocalSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(val)) next.delete(val)
+      else next.add(val)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    setLocalSelected(new Set(filtered))
+  }
+
+  const clearAll = () => {
+    // Only clear filtered items
+    setLocalSelected((prev) => {
+      const next = new Set(prev)
+      for (const v of filtered) next.delete(v)
+      return next
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Select values for "{fieldLabel}"</DialogTitle>
+          <DialogDescription className="text-xs text-gray-500">
+            Choose one or more values to filter by. {localSelected.size > 0 && `${localSelected.size} selected`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <Input
+            placeholder="Search values..."
+            value={dialogSearch}
+            onChange={(e) => setDialogSearch(e.target.value)}
+            className="pl-9 h-8 text-xs"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={selectAll}
+            className="text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            Select all{dialogSearch ? " visible" : ""}
+          </button>
+          <span className="text-gray-300">|</span>
+          <button
+            type="button"
+            onClick={clearAll}
+            className="text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            Clear{dialogSearch ? " visible" : " all"}
+          </button>
+        </div>
+
+        {/* Selected badges */}
+        {localSelected.size > 0 && (
+          <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+            {Array.from(localSelected).map((val) => (
+              <Badge
+                key={val}
+                variant="secondary"
+                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer hover:bg-red-100 hover:text-red-700"
+                onClick={() => toggleValue(val)}
+              >
+                {val.length > 20 ? val.slice(0, 20) + "..." : val}
+                <X className="h-2.5 w-2.5 ml-1" />
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <div className="flex-1 min-h-0 max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+          {filtered.length === 0 ? (
+            <div className="p-4 text-center text-xs text-gray-400">No values found</div>
+          ) : (
+            filtered.map((val) => {
+              const isChecked = localSelected.has(val)
+              return (
+                <label
+                  key={val}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-b-0",
+                    isChecked && "bg-blue-50"
+                  )}
+                >
+                  <Checkbox
+                    checked={isChecked}
+                    onCheckedChange={() => toggleValue(val)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="text-xs text-gray-700 truncate">{val}</span>
+                </label>
+              )
+            })
+          )}
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="text-xs"
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              onApply(Array.from(localSelected))
+              onOpenChange(false)
+            }}
+            className="text-xs"
+          >
+            Apply ({localSelected.size})
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Save Filter Dialog ──────────────────────────────────────────────────────
+
+interface SaveFilterDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSave: (name: string) => void
+}
+
+const SaveFilterDialog: React.FC<SaveFilterDialogProps> = ({
+  open,
+  onOpenChange,
+  onSave,
+}) => {
+  const [filterName, setFilterName] = React.useState("")
+
+  React.useEffect(() => {
+    if (open) setFilterName("")
+  }, [open])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Save Current Filter</DialogTitle>
+          <DialogDescription className="text-xs text-gray-500">
+            Give your filter a name so you can quickly apply it later.
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          placeholder="e.g. High priority leads, Active customers..."
+          value={filterName}
+          onChange={(e) => setFilterName(e.target.value)}
+          className="text-xs h-8"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && filterName.trim()) {
+              onSave(filterName.trim())
+              onOpenChange(false)
+            }
+          }}
+          autoFocus
+        />
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="text-xs">
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={!filterName.trim()}
+            onClick={() => {
+              onSave(filterName.trim())
+              onOpenChange(false)
+            }}
+            className="text-xs"
+          >
+            Save Filter
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ══════════════════════════════════════════════════════════════════════════════
+
 const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   isOpen,
   onClose,
@@ -139,10 +411,11 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   onFiltersChange,
   preselectedFieldId,
   onColumnSearch,
+  records = [],
+  storageKey = "erp_saved_filters",
 }) => {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [columnSearchMode, setColumnSearchMode] = React.useState(false)
-  const [systemFiltersExpanded, setSystemFiltersExpanded] = React.useState(true)
   const [fieldFiltersExpanded, setFieldFiltersExpanded] = React.useState(true)
   const [expandedFields, setExpandedFields] = React.useState<Map<string, ExpandedField>>(new Map())
   const preselectedFieldRef = React.useRef<HTMLDivElement>(null)
@@ -152,6 +425,20 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   const [isResizing, setIsResizing] = React.useState(false)
   const resizeStartX = React.useRef(0)
   const resizeStartWidth = React.useRef(200)
+
+  // ── Value Picker dialog state ──
+  const [valuePickerOpen, setValuePickerOpen] = React.useState(false)
+  const [valuePickerFieldId, setValuePickerFieldId] = React.useState<string | null>(null)
+
+  // ── Saved Filters state ──
+  const [savedFilters, setSavedFilters] = React.useState<SavedFilter[]>([])
+  const [saveDialogOpen, setSaveDialogOpen] = React.useState(false)
+  const [savedFiltersExpanded, setSavedFiltersExpanded] = React.useState(true)
+
+  // Load saved filters on mount
+  React.useEffect(() => {
+    setSavedFilters(getSavedFilters(storageKey))
+  }, [storageKey])
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -192,8 +479,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
       document.removeEventListener("mouseup", handleMouseUp)
     }
   }, [isResizing])
-
-
 
   React.useEffect(() => {
     if (preselectedFieldId && isOpen) {
@@ -324,6 +609,100 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     )
   }, [fields, searchQuery, columnSearchMode])
 
+  // Extract unique values from records for a given field
+  const getUniqueValuesForField = React.useCallback(
+    (field: FormFieldWithSection): string[] => {
+      if (!records || records.length === 0) return []
+
+      const valueSet = new Set<string>()
+      for (const record of records) {
+        const pd = record.processedData?.find(
+          (p) =>
+            p.fieldId === field.id ||
+            p.fieldId === field.originalId ||
+            (p.fieldLabel === field.label && p.sectionId === field.sectionId)
+        )
+        if (!pd) continue
+        const display = pd.displayValue ?? pd.value
+        if (display === null || display === undefined || display === "") continue
+        const str = String(display).trim()
+        if (str) valueSet.add(str)
+      }
+      return Array.from(valueSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    },
+    [records]
+  )
+
+  // ── Saved filter handlers ──
+
+  const handleSaveFilter = (name: string) => {
+    if (filters.length === 0) return
+    const newSaved: SavedFilter = {
+      id: Date.now().toString(),
+      name,
+      filters: [...filters],
+      createdAt: new Date().toISOString(),
+    }
+    const updated = [...savedFilters, newSaved]
+    setSavedFilters(updated)
+    persistSavedFilters(storageKey, updated)
+  }
+
+  const handleDeleteSavedFilter = (id: string) => {
+    const updated = savedFilters.filter((sf) => sf.id !== id)
+    setSavedFilters(updated)
+    persistSavedFilters(storageKey, updated)
+  }
+
+  const handleApplySavedFilter = (saved: SavedFilter) => {
+    // Restore expanded fields state from saved filters
+    const newExpanded = new Map<string, ExpandedField>()
+    for (const f of saved.filters) {
+      newExpanded.set(f.fieldId, {
+        fieldId: f.fieldId,
+        operator: f.operator,
+        value: f.value,
+        value2: f.value2,
+      })
+    }
+    setExpandedFields(newExpanded)
+    onFiltersChange([...saved.filters])
+  }
+
+  // ── Value picker helpers ──
+
+  const valuePickerField = valuePickerFieldId
+    ? fields.find((f) => f.id === valuePickerFieldId)
+    : null
+
+  const valuePickerAllValues = React.useMemo(() => {
+    if (!valuePickerField) return []
+    return getUniqueValuesForField(valuePickerField)
+  }, [valuePickerField, getUniqueValuesForField])
+
+  const valuePickerSelected = React.useMemo(() => {
+    if (!valuePickerFieldId) return []
+    const expanded = expandedFields.get(valuePickerFieldId)
+    if (!expanded || !expanded.value) return []
+    return expanded.value.split(",").map((v) => v.trim()).filter(Boolean)
+  }, [valuePickerFieldId, expandedFields])
+
+  const handleValuePickerApply = (values: string[]) => {
+    if (!valuePickerFieldId) return
+    const joinedValue = values.join(", ")
+    // If multiple values selected, switch to "is one of"
+    if (values.length > 1) {
+      updateFieldFilter(valuePickerFieldId, {
+        operator: "is one of",
+        value: joinedValue,
+      })
+    } else {
+      updateFieldFilter(valuePickerFieldId, {
+        value: joinedValue,
+      })
+    }
+  }
+
   if (!isOpen) return null
 
   const preselectedField = preselectedFieldId ? fields.find((f) => f.id === preselectedFieldId) : null
@@ -333,6 +712,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
       className="bg-white border-r border-gray-200 flex flex-col h-full shadow-lg relative select-none"
       style={{ width: `${sidebarWidth}px`, transition: isResizing ? 'none' : 'width 0.2s ease' }}
     >
+      {/* Resize handle */}
       <div
         className={cn(
           "absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-500 transition-colors duration-200 z-50 group",
@@ -350,20 +730,32 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
         </div>
       </div>
 
+      {/* Header */}
       <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold text-gray-900">Filter Leads by</h2>
-
-          {/* NEW: Close Button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="h-8 w-8 rounded-lg hover:bg-gray-200 text-gray-600 hover:text-gray-900"
-            aria-label="Close filter sidebar"
-          >
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            {filters.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSaveDialogOpen(true)}
+                className="h-7 w-7 rounded-lg hover:bg-blue-100 text-blue-600 hover:text-blue-800"
+                title="Save current filter"
+              >
+                <Save className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="h-8 w-8 rounded-lg hover:bg-gray-200 text-gray-600 hover:text-gray-900"
+              aria-label="Close filter sidebar"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -396,10 +788,89 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
           )}
         </div>
 
+        {/* Active filter count + clear all */}
+        {filters.length > 0 && (
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-gray-500">{filters.length} active filter{filters.length > 1 ? "s" : ""}</span>
+            <button
+              onClick={() => {
+                setExpandedFields(new Map())
+                onFiltersChange([])
+              }}
+              className="text-xs text-red-500 hover:text-red-700 hover:underline"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {/* ── Saved Filters Section ── */}
+        {savedFilters.length > 0 && (
+          <div className="border-b border-gray-200">
+            <button
+              onClick={() => setSavedFiltersExpanded(!savedFiltersExpanded)}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 text-gray-600 transition-transform",
+                    !savedFiltersExpanded && "-rotate-90"
+                  )}
+                />
+                <span className="text-sm font-semibold text-gray-900">Saved Filters</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{savedFilters.length}</Badge>
+              </div>
+            </button>
+            {savedFiltersExpanded && (
+              <div className="px-4 pb-3 space-y-1">
+                {savedFilters.map((sf) => {
+                  // Check if this saved filter is currently active
+                  const isActive =
+                    sf.filters.length === filters.length &&
+                    sf.filters.every((sfFilter) =>
+                      filters.some(
+                        (af) =>
+                          af.fieldId === sfFilter.fieldId &&
+                          af.operator === sfFilter.operator &&
+                          af.value === sfFilter.value
+                      )
+                    )
+                  return (
+                    <div
+                      key={sf.id}
+                      className={cn(
+                        "flex items-center justify-between group rounded-md px-2 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors",
+                        isActive && "bg-blue-50 border border-blue-200"
+                      )}
+                      onClick={() => handleApplySavedFilter(sf)}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isActive && <Check className="h-3 w-3 text-blue-600 shrink-0" />}
+                        <span className="text-xs text-gray-700 truncate">{sf.name}</span>
+                        <span className="text-[10px] text-gray-400 shrink-0">({sf.filters.length})</span>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteSavedFilter(sf.id)
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity"
+                        title="Delete saved filter"
+                      >
+                        <Trash2 className="h-3 w-3 text-red-500" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
+        {/* ── Field Filters Section ── */}
         <div className="border-b border-gray-200">
           <button
             onClick={() => setFieldFiltersExpanded(!fieldFiltersExpanded)}
@@ -550,6 +1021,45 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                             className="h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                           />
                         )}
+
+                        {/* Selected values badges */}
+                        {expandedData.operator === "is one of" && expandedData.value && (
+                          <div className="flex flex-wrap gap-1">
+                            {expandedData.value.split(",").map((v) => v.trim()).filter(Boolean).map((val) => (
+                              <Badge
+                                key={val}
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer hover:bg-red-100 hover:text-red-700"
+                                onClick={() => {
+                                  const current = expandedData.value.split(",").map((v) => v.trim()).filter(Boolean)
+                                  const updated = current.filter((v) => v !== val)
+                                  updateFieldFilter(field.id, {
+                                    value: updated.join(", "),
+                                    operator: updated.length > 1 ? "is one of" : updated.length === 1 ? "is" : "is one of",
+                                  })
+                                }}
+                              >
+                                {val.length > 15 ? val.slice(0, 15) + "..." : val}
+                                <X className="h-2.5 w-2.5 ml-0.5" />
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* "Select values" button to open picker dialog */}
+                        {needsValueInput(expandedData.operator) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full h-7 text-[11px] text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-400"
+                            onClick={() => {
+                              setValuePickerFieldId(field.id)
+                              setValuePickerOpen(true)
+                            }}
+                          >
+                            Select values from records
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -559,6 +1069,22 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
           )}
         </div>
       </div>
+
+      {/* ── Dialogs ── */}
+      <ValuePickerDialog
+        open={valuePickerOpen}
+        onOpenChange={setValuePickerOpen}
+        fieldLabel={valuePickerField?.label || ""}
+        allValues={valuePickerAllValues}
+        selectedValues={valuePickerSelected}
+        onApply={handleValuePickerApply}
+      />
+
+      <SaveFilterDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        onSave={handleSaveFilter}
+      />
     </div>
   )
 }

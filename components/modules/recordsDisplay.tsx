@@ -856,6 +856,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             setColumnSearchFieldId(fieldId);
             setColumnSearchValue(searchValue);
           }}
+          records={formRecords}
+          storageKey={`erp_saved_filters_${allModuleForms.map((f) => f.id).join("_") || "default"}`}
         />
 
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
