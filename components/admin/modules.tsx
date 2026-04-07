@@ -723,7 +723,7 @@ export default function ModuleDashboard() {
           <div className="flex items-center gap-3 md:gap-4">
             <Button
               variant="ghost"
-              si 
+              si
               className="md:hidden"
               onClick={() => setIsMobileSidebarOpen(true)}
             >
@@ -910,11 +910,6 @@ export default function ModuleDashboard() {
                     <Trash2 className="mr-1.5 h-4 w-4" /> Delete
                   </Button>
 
-                  <Button asChild size="sm">
-                    <NextLink href={`/modules/${selectedModule.id}`}>
-                      <Settings className="mr-1.5 h-4 w-4" /> Manage
-                    </NextLink>
-                  </Button>
                 </div>
               </div>
 

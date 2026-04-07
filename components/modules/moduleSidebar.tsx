@@ -323,11 +323,13 @@ export default function ModuleSidebar({
 
       {/* Content with Root Drop Zones */}
       <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 py-4 px-2">
-        {/* Top Root Drop Zone */}
+        {/* Top Root Drop Zone - hidden until dragging */}
         <div
-          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mb-3 border-2 border-dashed ${drag.over === null && drag.position === "inside" && drag.isDragging
-            ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
-            : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
+          className={`flex items-center justify-center mx-4 rounded-lg transition-all mb-3 border-2 border-dashed ${drag.isDragging
+            ? drag.over === null && drag.position === "inside"
+              ? "h-12 border-blue-500 bg-blue-100/80 shadow-md scale-105 opacity-100"
+              : "h-12 border-gray-300 hover:border-blue-400 hover:bg-blue-50/30 opacity-100"
+            : "h-0 border-transparent overflow-hidden opacity-0 mb-0"
             }`}
           onDragOver={e => handleDragOver(e, null, "inside")}
           onDrop={e => handleDrop(e, null)}
@@ -351,11 +353,13 @@ export default function ModuleSidebar({
           </Accordion>
         )}
 
-        {/* Bottom Root Drop Zone */}
+        {/* Bottom Root Drop Zone - hidden until dragging */}
         <div
-          className={`h-12 flex items-center justify-center mx-4 rounded-lg transition-all mt-3 border-2 border-dashed ${drag.over === null && drag.position === "inside" && drag.isDragging
-            ? "border-blue-500 bg-blue-100/80 shadow-md scale-105"
-            : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/30"
+          className={`flex items-center justify-center mx-4 rounded-lg transition-all mt-3 border-2 border-dashed ${drag.isDragging
+            ? drag.over === null && drag.position === "inside"
+              ? "h-12 border-blue-500 bg-blue-100/80 shadow-md scale-105 opacity-100"
+              : "h-12 border-gray-300 hover:border-blue-400 hover:bg-blue-50/30 opacity-100"
+            : "h-0 border-transparent overflow-hidden opacity-0 mt-0"
             }`}
           onDragOver={e => handleDragOver(e, null, "inside")}
           onDrop={e => handleDrop(e, null)}
