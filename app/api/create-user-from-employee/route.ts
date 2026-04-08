@@ -47,7 +47,9 @@ export async function POST(request: NextRequest) {
       employeeName,
       email,
       password,
-      confirmPassword
+      confirmPassword,
+      roleId,
+      unitId,
     } = body;
 
     console.log('Request data:', { employeeRecordId, employee_id, employeeName, email, hasPassword: !!password });
@@ -109,16 +111,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse the form record data
-    const parsedData = parseEmployeeData(formRecord.recordData);
-
-    // Validate essential parsed data
-    if (!parsedData.employeeName || !parsedData.email) {
-      return NextResponse.json(
-        { error: 'Unable to extract essential employee information from form data' },
-        { status: 400 }
-      );
+    // Build fieldId → label map so Format B records (nested sections) can be parsed
+    const formFields = await prisma.formField.findMany({
+      where: {
+        section: {
+          form: {
+            module: { organizationId: orgId }
+          }
+        }
+      },
+      select: { id: true, label: true },
+    });
+    const fieldIdToLabel: Record<string, string> = {};
+    for (const ff of formFields) {
+      fieldIdToLabel[ff.id] = ff.label;
     }
+
+    // Parse the form record data with label resolution
+    const parsedData = parseEmployeeData(formRecord.recordData, fieldIdToLabel);
+
+    // Use request body values as fallback — the user already entered these in the UI
+    if (!parsedData.employeeName) parsedData.employeeName = employeeName;
+    if (!parsedData.email) parsedData.email = email;
 
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -258,6 +272,18 @@ export async function POST(request: NextRequest) {
       });
 
       console.log('FormRecord14 updated with employee_id and userId');
+
+      // 4. Assign role & unit if provided
+      if (roleId && unitId) {
+        await tx.userUnitAssignment.create({
+          data: {
+            userId: newUser.id,
+            unitId: unitId,
+            roleId: roleId,
+          },
+        });
+        console.log(`Assigned user ${newUser.id} to unit=${unitId} role=${roleId}`);
+      }
 
       return { user: newUser, employee };
     });

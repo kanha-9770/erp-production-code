@@ -69,6 +69,23 @@ interface EmployeeRecord {
   uiStatus?: "idle" | "pending" | "success" | "error";
   uiMessage?: string;
   bulkPassword?: string;
+  bulkRoleId?: string;
+  bulkUnitId?: string;
+}
+
+interface OrgRole {
+  id: string;
+  name: string;
+  isAdmin?: boolean;
+  level: number;
+  children: OrgRole[];
+}
+
+interface OrgUnit {
+  id: string;
+  name: string;
+  level: number;
+  children: OrgUnit[];
 }
 
 interface CreateUserData {
@@ -96,13 +113,21 @@ const UserCreationPage: React.FC = () => {
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState<CreateUserData & { confirmPassword: string }>({
+  // Role & Unit data for assignment
+  const [roles, setRoles] = useState<OrgRole[]>([]);
+  const [units, setUnits] = useState<OrgUnit[]>([]);
+  const [defaultRoleId, setDefaultRoleId] = useState("");
+  const [defaultUnitId, setDefaultUnitId] = useState("");
+
+  const [formData, setFormData] = useState<CreateUserData & { confirmPassword: string; roleId: string; unitId: string }>({
     employeeRecordId: "",
     employee_id: "",
     employeeName: "",
     email: "",
     password: "",
     confirmPassword: "",
+    roleId: "",
+    unitId: "",
   });
 
   const [createUserFromEmployee] = useCreateUserFromEmployeeMutation();
@@ -137,7 +162,13 @@ const UserCreationPage: React.FC = () => {
         throw new Error("Unexpected response: records is not an array");
       }
 
-      const mapped: EmployeeRecord[] = records.map((r: any) => ({
+      // Filter out records where a user already exists with that email
+      const available = records.filter((r: any) => {
+        if (r.processStatus === "skipped" && r.reason?.includes("User already exists")) return false;
+        return true;
+      });
+
+      const mapped: EmployeeRecord[] = available.map((r: any) => ({
         ...r,
         selected: false,
         uiStatus: "idle" as const,
@@ -158,10 +189,56 @@ const UserCreationPage: React.FC = () => {
     }
   }, []);
 
+  // Fetch roles and units for the org
+  const fetchRolesAndUnits = useCallback(async () => {
+    try {
+      const meRes = await fetch("/api/auth/me", { credentials: "include" });
+      if (!meRes.ok) return;
+      const me = await meRes.json();
+      const orgId = me?.user?.organizationId || me?.user?.organization?.id;
+      if (!orgId) return;
+
+      const [rolesRes, unitsRes] = await Promise.all([
+        fetch(`/api/organizations/${orgId}/roles`, { credentials: "include" }),
+        fetch(`/api/organizations/${orgId}/units`, { credentials: "include" }),
+      ]);
+
+      if (rolesRes.ok) {
+        const rolesData = await rolesRes.json();
+        const flat = Array.isArray(rolesData) ? rolesData : rolesData?.data || [];
+        setRoles(flat);
+      }
+      if (unitsRes.ok) {
+        const unitsData = await unitsRes.json();
+        const flat = Array.isArray(unitsData) ? unitsData : unitsData?.data || [];
+        setUnits(flat);
+      }
+    } catch (err) {
+      console.error("[UserCreationPage] Failed to fetch roles/units:", err);
+    }
+  }, []);
+
+  // Flatten hierarchical roles/units for dropdowns
+  const flattenTree = <T extends { name: string; level: number; children: T[] }>(items: T[]): T[] => {
+    const result: T[] = [];
+    const walk = (list: T[]) => {
+      for (const item of list) {
+        result.push(item);
+        if (item.children?.length) walk(item.children);
+      }
+    };
+    walk(items);
+    return result;
+  };
+
+  const flatRoles = flattenTree(roles).filter((r) => !r.isAdmin);
+  const flatUnits = flattenTree(units);
+
   // Initial load
   useEffect(() => {
     fetchEmployeeRecords();
-  }, [fetchEmployeeRecords]);
+    fetchRolesAndUnits();
+  }, [fetchEmployeeRecords, fetchRolesAndUnits]);
 
   // ── Filter logic ───────────────────────────────────────────────────
   useEffect(() => {
@@ -198,6 +275,8 @@ const UserCreationPage: React.FC = () => {
       email: record.parsedData?.email || "",
       password: "",
       confirmPassword: "",
+      roleId: "",
+      unitId: "",
     });
     setBulkMode(false);
   };
@@ -238,6 +317,8 @@ const UserCreationPage: React.FC = () => {
         ...formData,
         password: formData.password.trim(),
         confirmPassword: formData.confirmPassword.trim(),
+        ...(formData.roleId && { roleId: formData.roleId }),
+        ...(formData.unitId && { unitId: formData.unitId }),
       }).unwrap();
 
       toast({ title: "User Created", description: `Account for ${formData.employeeName} created successfully` });
@@ -290,6 +371,8 @@ const UserCreationPage: React.FC = () => {
           email: record.parsedData?.email || "",
           password: pw,
           confirmPassword: pw,
+          ...(record.bulkRoleId && { roleId: record.bulkRoleId }),
+          ...(record.bulkUnitId && { unitId: record.bulkUnitId }),
         }).unwrap();
 
         successCount++;
@@ -333,6 +416,18 @@ const UserCreationPage: React.FC = () => {
     );
   };
 
+  const setBulkRoleForRecord = (id: string, roleId: string) => {
+    setEmployeeRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, bulkRoleId: roleId } : r))
+    );
+  };
+
+  const setBulkUnitForRecord = (id: string, unitId: string) => {
+    setEmployeeRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, bulkUnitId: unitId } : r))
+    );
+  };
+
   const applyPasswordToAllSelected = () => {
     if (!bulkPassword || bulkPassword.length < 8) {
       toast({ title: "Invalid Password", description: "Password must be at least 8 characters", variant: "destructive" });
@@ -342,6 +437,23 @@ const UserCreationPage: React.FC = () => {
       prev.map((r) => (r.selected ? { ...r, bulkPassword: bulkPassword } : r))
     );
     toast({ title: "Password Applied", description: `Password set for all ${selectedCount} selected users` });
+  };
+
+  const applyRoleUnitToAllSelected = () => {
+    if (!defaultRoleId && !defaultUnitId) {
+      toast({ title: "Nothing to Apply", description: "Select a role or unit first", variant: "destructive" });
+      return;
+    }
+    setEmployeeRecords((prev) =>
+      prev.map((r) => (r.selected
+        ? { ...r, ...(defaultRoleId && { bulkRoleId: defaultRoleId }), ...(defaultUnitId && { bulkUnitId: defaultUnitId }) }
+        : r
+      ))
+    );
+    const parts = [];
+    if (defaultRoleId) parts.push("Role");
+    if (defaultUnitId) parts.push("Unit");
+    toast({ title: `${parts.join(" & ")} Applied`, description: `Assigned to all ${selectedCount} selected users` });
   };
 
   // ── Render ─────────────────────────────────────────────────────────
@@ -595,42 +707,74 @@ const UserCreationPage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* Quick-fill: apply one password to all */}
-                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                      <label className="block text-xs font-semibold text-purple-800 mb-1.5">
+                    {/* Quick-fill section */}
+                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-3">
+                      <label className="block text-xs font-semibold text-purple-800">
                         Quick fill — apply to all selected
                       </label>
+                      {/* Password quick-fill */}
                       <div className="flex gap-2">
                         <div className="relative flex-1">
                           <input
                             type={showBulkPassword ? "text" : "password"}
                             value={bulkPassword}
                             onChange={(e) => setBulkPassword(e.target.value)}
-                            placeholder="Type password, then Apply"
-                            className="w-full px-3 py-2 pr-9 border border-purple-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            placeholder="Password (min 8 chars)"
+                            className="w-full px-3 py-1.5 pr-9 border border-purple-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 bg-white"
                           />
                           <button
                             type="button"
                             onClick={() => setShowBulkPassword(!showBulkPassword)}
                             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                           >
-                            {showBulkPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                            {showBulkPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                           </button>
                         </div>
                         <button
                           onClick={applyPasswordToAllSelected}
                           disabled={!bulkPassword || bulkPassword.length < 8}
-                          className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                          className="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
                         >
                           Apply
                         </button>
                       </div>
-                      {bulkPassword && bulkPassword.length < 8 && (
-                        <p className="text-[11px] text-purple-600 mt-1">Min 8 characters</p>
-                      )}
+                      {/* Role & Unit quick-fill */}
+                      <div className="flex gap-2">
+                        <select
+                          value={defaultRoleId}
+                          onChange={(e) => setDefaultRoleId(e.target.value)}
+                          className="flex-1 px-2 py-1.5 border border-purple-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="">Role (optional)</option>
+                          {flatRoles.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {"—".repeat(r.level)} {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={defaultUnitId}
+                          onChange={(e) => setDefaultUnitId(e.target.value)}
+                          className="flex-1 px-2 py-1.5 border border-purple-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="">Unit (optional)</option>
+                          {flatUnits.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {"—".repeat(u.level)} {u.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={applyRoleUnitToAllSelected}
+                          disabled={!defaultRoleId && !defaultUnitId}
+                          className="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                        >
+                          Apply
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Per-user password list */}
+                    {/* Per-user config list */}
                     <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                       {employeeRecords
                         .filter((r) => r.selected)
@@ -639,6 +783,8 @@ const UserCreationPage: React.FC = () => {
                           const email = record.parsedData?.email || "No email";
                           const pw = record.bulkPassword || "";
                           const isValid = pw.length >= 8;
+                          const roleName = flatRoles.find((r) => r.id === record.bulkRoleId)?.name;
+                          const unitName = flatUnits.find((u) => u.id === record.bulkUnitId)?.name;
 
                           return (
                             <div
@@ -649,28 +795,52 @@ const UserCreationPage: React.FC = () => {
                                   : "border-gray-200 bg-gray-50/40"
                               }`}
                             >
-                              <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center justify-between mb-2">
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
                                   <p className="text-xs text-gray-500 truncate">{email}</p>
                                 </div>
                                 {isValid && <Check size={16} className="text-green-600 flex-shrink-0 ml-2" />}
                               </div>
+                              {/* Password */}
                               <input
                                 type="text"
                                 value={pw}
                                 onChange={(e) => setBulkPasswordForRecord(record.id, e.target.value)}
-                                placeholder="Set password (min 8 chars)"
-                                className={`w-full px-2.5 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-purple-500 ${
-                                  pw && !isValid
-                                    ? "border-red-300 bg-red-50"
-                                    : isValid
-                                      ? "border-green-300 bg-white"
-                                      : "border-gray-300 bg-white"
+                                placeholder="Password (min 8 chars)"
+                                className={`w-full px-2.5 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-purple-500 mb-1.5 ${
+                                  pw && !isValid ? "border-red-300 bg-red-50" : isValid ? "border-green-300 bg-white" : "border-gray-300 bg-white"
                                 }`}
                               />
-                              {pw && !isValid && (
-                                <p className="text-[11px] text-red-500 mt-0.5">Min 8 characters</p>
+                              {/* Role & Unit */}
+                              <div className="flex gap-1.5">
+                                <select
+                                  value={record.bulkRoleId || ""}
+                                  onChange={(e) => setBulkRoleForRecord(record.id, e.target.value)}
+                                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-indigo-500"
+                                >
+                                  <option value="">No role</option>
+                                  {flatRoles.map((r) => (
+                                    <option key={r.id} value={r.id}>{"—".repeat(r.level)} {r.name}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  value={record.bulkUnitId || ""}
+                                  onChange={(e) => setBulkUnitForRecord(record.id, e.target.value)}
+                                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-indigo-500"
+                                >
+                                  <option value="">No unit</option>
+                                  {flatUnits.map((u) => (
+                                    <option key={u.id} value={u.id}>{"—".repeat(u.level)} {u.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {(roleName || unitName) && (
+                                <p className="text-[10px] text-indigo-600 mt-1">
+                                  {roleName && <span>Role: {roleName}</span>}
+                                  {roleName && unitName && <span> · </span>}
+                                  {unitName && <span>Unit: {unitName}</span>}
+                                </p>
                               )}
                             </div>
                           );
@@ -680,7 +850,8 @@ const UserCreationPage: React.FC = () => {
                     {/* Summary + Create button */}
                     <div className="pt-2 border-t">
                       <div className="flex justify-between text-xs text-gray-500 mb-3">
-                        <span>{employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length} / {selectedCount} have valid passwords</span>
+                        <span>{employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length} / {selectedCount} ready</span>
+                        <span>{employeeRecords.filter((r) => r.selected && r.bulkRoleId).length} with roles</span>
                       </div>
                       <button
                         onClick={createBulkUsers}
@@ -831,6 +1002,44 @@ const UserCreationPage: React.FC = () => {
                             {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                           </button>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Role & Unit Assignment */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Role (optional)
+                        </label>
+                        <select
+                          value={formData.roleId}
+                          onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                        >
+                          <option value="">No role</option>
+                          {flatRoles.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {"—".repeat(r.level)} {r.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Unit (optional)
+                        </label>
+                        <select
+                          value={formData.unitId}
+                          onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                        >
+                          <option value="">No unit</option>
+                          {flatUnits.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {"—".repeat(u.level)} {u.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
 
