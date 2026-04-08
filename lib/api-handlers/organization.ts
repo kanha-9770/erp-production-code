@@ -84,11 +84,14 @@ export const OrganizationHandlers = {
     return handle(async () => {
       const role = await prisma.role.findUnique({
         where: { id: roleId },
-        select: { id: true, name: true, organizationId: true },
+        select: { id: true, name: true, organizationId: true, isAdmin: true },
       });
 
       if (!role)
         return NextResponse.json({ success: false, error: "Role not found" }, { status: 404 });
+
+      if (role.isAdmin)
+        return NextResponse.json({ success: false, error: "Admin roles are protected and cannot be deleted" }, { status: 403 });
 
       const result = await prisma.$transaction(async (tx) => {
         const allRoleIds = await collectDescendants(tx, roleId);

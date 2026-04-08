@@ -189,6 +189,7 @@ import {
   Maximize2,
   Minimize2,
   Move,
+  Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { RoleChartNode } from "./role-tree-node"
@@ -273,6 +274,34 @@ export function RoleManagementSheet() {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2.5">
+              {/* Create new root role */}
+              <Button
+                size="sm"
+                className="h-8 sm:h-9 px-3 sm:px-4 bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-sm"
+                onClick={() =>
+                  dispatch({
+                    type: "SELECT_ROLE",
+                    payload: {
+                      role: {
+                        id: "new",
+                        name: "",
+                        description: "",
+                        shareDataWithPeers: false,
+                        isAdmin: false,
+                        level: 0,
+                        children: [],
+                        parentId: undefined,
+                      },
+                    },
+                  })
+                }
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                <span className="hidden sm:inline">New Role</span>
+              </Button>
+
+              <div className="h-5 w-px bg-slate-200 mx-0.5 hidden sm:block" />
+
               {/* Zoom controls - compact on mobile */}
               <div className="flex items-center bg-slate-100/80 rounded-lg border border-slate-200 p-0.5">
                 <Button
@@ -372,43 +401,81 @@ export function RoleManagementSheet() {
               </div>
             )}
 
-            <div
-              style={{
-                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-                transformOrigin: "0 0",
-                willChange: "transform",
-                transition: isPanning ? "none" : "transform 0.14s ease-out",
-              }}
-              className={cn(
-                "absolute inset-0 origin-top-left",
-                viewMode !== "desktop" &&
-                  cn(
-                    "border-4 sm:border-8 border-slate-800/90 rounded-2xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden mx-auto mt-6 sm:mt-8",
-                    isMobile && "border-opacity-80 rounded-xl",
-                    isTablet && "border-opacity-85 rounded-2xl"
-                  )
-              )}
-            >
-              {/* Responsive inner padding based on view mode */}
-              <div
-                className={cn(
-                  "min-w-max flex justify-center items-start",
-                  isMobile ? "p-16 sm:p-20" : isTablet ? "p-24 sm:p-32" : "p-32 sm:p-40 md:p-48 lg:p-56"
-                )}
-              >
-                <div className="flex gap-20 sm:gap-28 md:gap-36 lg:gap-48">
-                  {state.roles.map((role, idx) => (
-                    <RoleChartNode
-                      key={role.id}
-                      role={role}
-                      isRoot
-                      isFirst={idx === 0}
-                      isLast={idx === state.roles.length - 1}
-                    />
-                  ))}
+            {state.roles.length === 0 ? (
+              /* Empty state — no roles yet */
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 sm:p-10 text-center max-w-sm">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-purple-100 mx-auto mb-4">
+                    <Shield className="h-7 w-7 text-purple-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">No roles yet</h3>
+                  <p className="text-sm text-slate-500 mb-6">
+                    Create your first role to start building the organizational hierarchy.
+                  </p>
+                  <Button
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-6"
+                    onClick={() =>
+                      dispatch({
+                        type: "SELECT_ROLE",
+                        payload: {
+                          role: {
+                            id: "new",
+                            name: "",
+                            description: "",
+                            shareDataWithPeers: false,
+                            isAdmin: false,
+                            level: 0,
+                            children: [],
+                            parentId: undefined,
+                          },
+                        },
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create First Role
+                  </Button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div
+                style={{
+                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                  transformOrigin: "0 0",
+                  willChange: "transform",
+                  transition: isPanning ? "none" : "transform 0.14s ease-out",
+                }}
+                className={cn(
+                  "absolute inset-0 origin-top-left",
+                  viewMode !== "desktop" &&
+                    cn(
+                      "border-4 sm:border-8 border-slate-800/90 rounded-2xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden mx-auto mt-6 sm:mt-8",
+                      isMobile && "border-opacity-80 rounded-xl",
+                      isTablet && "border-opacity-85 rounded-2xl"
+                    )
+                )}
+              >
+                {/* Responsive inner padding based on view mode */}
+                <div
+                  className={cn(
+                    "min-w-max flex justify-center items-start",
+                    isMobile ? "p-16 sm:p-20" : isTablet ? "p-24 sm:p-32" : "p-32 sm:p-40 md:p-48 lg:p-56"
+                  )}
+                >
+                  <div className="flex gap-20 sm:gap-28 md:gap-36 lg:gap-48">
+                    {state.roles.map((role, idx) => (
+                      <RoleChartNode
+                        key={role.id}
+                        role={role}
+                        isRoot
+                        isFirst={idx === 0}
+                        isLast={idx === state.roles.length - 1}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </SheetContent>

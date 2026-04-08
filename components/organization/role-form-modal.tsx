@@ -460,11 +460,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Shield } from "lucide-react"
+import { Shield, ShieldAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useCreateOrgRoleMutation, useUpdateRoleMutation } from "@/lib/api/organization"
 
-const EMPTY_FORM: RoleFormData = { name: "", description: "", shareDataWithPeers: false, parentId: "" }
+const EMPTY_FORM: RoleFormData = { name: "", description: "", shareDataWithPeers: false, isAdmin: false, parentId: "" }
 
 /** 
  * Check if we are creating. 
@@ -487,15 +487,16 @@ export function RoleFormModal() {
 
   const isOpen = state.selectedRole !== null
   const creating = isCreating(state.selectedRole)
+  const isExistingAdmin = !creating && !!(state.selectedRole as any)?.isAdmin
 
   // Synchronize form when selectedRole changes
   useEffect(() => {
     if (!state.selectedRole) return
     
     if (creating) {
-      setFormData({ 
-        ...EMPTY_FORM, 
-        parentId: state.selectedRole.parentId || "" 
+      setFormData({
+        ...EMPTY_FORM,
+        parentId: state.selectedRole.parentId || ""
       })
     } else {
       // EDIT MODE: Populate all existing values
@@ -503,6 +504,7 @@ export function RoleFormModal() {
         name: state.selectedRole.name || "",
         description: state.selectedRole.description || "",
         shareDataWithPeers: !!state.selectedRole.shareDataWithPeers,
+        isAdmin: !!(state.selectedRole as any).isAdmin,
         parentId: state.selectedRole.parentId || ""
       })
     }
@@ -533,6 +535,7 @@ export function RoleFormModal() {
         name: formData.name.trim(),
         description: formData.description || "",
         shareDataWithPeers: !!formData.shareDataWithPeers,
+        isAdmin: !!formData.isAdmin,
         parentId: cleanParentId,
       }
 
@@ -602,7 +605,7 @@ export function RoleFormModal() {
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="e.g. Sales Manager"
               required
-              disabled={loading}
+              disabled={loading || isExistingAdmin}
               className="h-11 focus:ring-2 focus:ring-purple-500"
             />
           </div>
@@ -610,7 +613,7 @@ export function RoleFormModal() {
           <div className="space-y-2">
             <Label htmlFor="role-parent" className="text-base font-medium">Reports To</Label>
             <Select
-              disabled={loading}
+              disabled={loading || isExistingAdmin}
               value={formData.parentId || "none"}
               onValueChange={(value) => setFormData({ ...formData, parentId: value === "none" ? "" : value })}
             >
@@ -636,7 +639,7 @@ export function RoleFormModal() {
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="Responsibilities of this role..."
               rows={4}
-              disabled={loading}
+              disabled={loading || isExistingAdmin}
               className="resize-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
@@ -645,7 +648,7 @@ export function RoleFormModal() {
             <Checkbox
               id="shareData"
               checked={formData.shareDataWithPeers}
-              disabled={loading}
+              disabled={loading || isExistingAdmin}
               onCheckedChange={(checked) => setFormData({ ...formData, shareDataWithPeers: !!checked })}
               className="h-5 w-5 data-[state=checked]:bg-purple-600"
             />
@@ -659,6 +662,34 @@ export function RoleFormModal() {
             </div>
           </div>
 
+          <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
+            <Checkbox
+              id="isAdmin"
+              checked={formData.isAdmin}
+              disabled={loading || isExistingAdmin}
+              onCheckedChange={(checked) => setFormData({ ...formData, isAdmin: !!checked })}
+              className="h-5 w-5 data-[state=checked]:bg-amber-600"
+            />
+            <div className="space-y-1">
+              <Label htmlFor="isAdmin" className="text-sm font-bold text-amber-900 leading-none cursor-pointer">
+                <span className="flex items-center gap-1.5">
+                  <ShieldAlert className="h-4 w-4 text-amber-600" />
+                  Admin Role
+                </span>
+              </Label>
+              <p className="text-xs text-amber-700/90">
+                Grant full administrative privileges. Admin roles cannot be edited or deleted once created.
+              </p>
+            </div>
+          </div>
+
+          {isExistingAdmin && (
+            <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-xs text-red-700 flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 flex-shrink-0" />
+              <span>This is a protected admin role. Name, admin status, and sharing settings cannot be modified.</span>
+            </div>
+          )}
+
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4">
             <Button 
               type="button" 
@@ -669,23 +700,25 @@ export function RoleFormModal() {
             >
               Cancel
             </Button>
-            <Button 
-              type="submit" 
-              disabled={loading}
-              className="h-11 px-8 bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-lg"
-            >
-              {loading ? (
-                 <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Saving...
-                 </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
-                  {creating ? "Create Role" : "Update Role"}
-                </div>
-              )}
-            </Button>
+            {!isExistingAdmin && (
+              <Button
+                type="submit"
+                disabled={loading}
+                className="h-11 px-8 bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-lg"
+              >
+                {loading ? (
+                   <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Saving...
+                   </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    {creating ? "Create Role" : "Update Role"}
+                  </div>
+                )}
+              </Button>
+            )}
           </div>
         </form>
       </DialogContent>

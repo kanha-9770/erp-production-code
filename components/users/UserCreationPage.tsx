@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   User,
   Plus,
@@ -11,8 +11,11 @@ import {
   UserPlus,
   Users,
   Loader2,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
-import { useGetEmployeeRecordsQuery, useCreateUserFromEmployeeMutation } from "@/lib/api/users";
+import { useCreateUserFromEmployeeMutation } from "@/lib/api/users";
+import { useToast } from "@/hooks/use-toast";
 
 interface EmployeeRecord {
   id: string;
@@ -28,11 +31,44 @@ interface EmployeeRecord {
     designation?: string;
     phone?: string;
     status?: string;
+    gender?: string;
+    dob?: string;
+    nativePlace?: string;
+    country?: string;
+    permanentAddress?: string;
+    currentAddress?: string;
+    alternateNo1?: string;
+    alternateNo2?: string;
+    emailAddress2?: string;
+    bankName?: string;
+    bankAccountNo?: string;
+    ifscCode?: string;
+    shiftType?: string;
+    inTime?: string;
+    outTime?: string;
+    dateOfJoining?: string;
+    dateOfLeaving?: string;
+    incrementMonth?: string;
+    yearsOfAgreement?: string;
+    bonusAfterYears?: string;
+    totalSalary?: string;
+    givenSalary?: string;
+    bonusAmount?: string;
+    nightAllowance?: string;
+    overTime?: string;
+    oneHourExtra?: string;
+    companySimIssue?: boolean;
+    aadharCardNo?: string;
+    [key: string]: string | boolean | undefined;
   };
-  // New fields for bulk UI
+  // API status fields
+  processStatus?: "valid" | "warning" | "skipped";
+  reason?: string;
+  // UI-only fields
   selected?: boolean;
-  status?: "idle" | "pending" | "success" | "error";
-  message?: string;
+  uiStatus?: "idle" | "pending" | "success" | "error";
+  uiMessage?: string;
+  bulkPassword?: string;
 }
 
 interface CreateUserData {
@@ -44,17 +80,21 @@ interface CreateUserData {
 }
 
 const UserCreationPage: React.FC = () => {
+  // ── State ──────────────────────────────────────────────────────────
+  const { toast } = useToast();
   const [employeeRecords, setEmployeeRecords] = useState<EmployeeRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<EmployeeRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedRecord, setSelectedRecord] = useState<EmployeeRecord | null>(null); // for single mode
+  const [selectedRecord, setSelectedRecord] = useState<EmployeeRecord | null>(null);
   const [bulkPassword, setBulkPassword] = useState("");
   const [showBulkPassword, setShowBulkPassword] = useState(false);
   const [showSinglePassword, setShowSinglePassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [loadingRecords, setLoadingRecords] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<CreateUserData & { confirmPassword: string }>({
     employeeRecordId: "",
@@ -65,45 +105,87 @@ const UserCreationPage: React.FC = () => {
     confirmPassword: "",
   });
 
-  const { data: employeeRecordsData, isLoading: loadingRecords, error: employeeRecordsError, refetch: refetchEmployeeRecords } = useGetEmployeeRecordsQuery();
   const [createUserFromEmployee] = useCreateUserFromEmployeeMutation();
 
-  useEffect(() => {
-    if (employeeRecordsError) {
-      setMessage({ type: "error", text: "Failed to load employee records" });
-    }
-  }, [employeeRecordsError]);
+  // ── Fetch employee records directly (reliable) ─────────────────────
+  const fetchEmployeeRecords = useCallback(async () => {
+    setLoadingRecords(true);
+    setFetchError(null);
+    try {
+      const res = await fetch("/api/employee-records", {
+        method: "GET",
+        credentials: "include",
+      });
 
-  useEffect(() => {
-    if (employeeRecordsData) {
-      const records = (employeeRecordsData as any).records || (employeeRecordsData as any).data || [];
-      setEmployeeRecords(
-        records.map((r: EmployeeRecord) => ({
-          ...r,
-          selected: false,
-          status: "idle",
-          message: "",
-        }))
-      );
-    }
-  }, [employeeRecordsData]);
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw new Error(errorBody?.error || errorBody?.message || `HTTP ${res.status}: ${res.statusText}`);
+      }
 
+      const json = await res.json();
+
+      // Use allProcessedRecords (all records) over records (filtered "usable" only).
+      // json.records is [] when all records are "skipped", but allProcessedRecords has them all.
+      const usable = Array.isArray(json.records) ? json.records : [];
+      const all = Array.isArray(json.allProcessedRecords) ? json.allProcessedRecords : [];
+      const dataArr = Array.isArray(json.data) ? json.data : [];
+      const records: any[] = all.length > 0 ? all : usable.length > 0 ? usable : dataArr;
+
+      console.log(`[UserCreationPage] records: ${usable.length}, allProcessed: ${all.length}, using ${records.length} items`);
+
+      if (!Array.isArray(records)) {
+        throw new Error("Unexpected response: records is not an array");
+      }
+
+      const mapped: EmployeeRecord[] = records.map((r: any) => ({
+        ...r,
+        selected: false,
+        uiStatus: "idle" as const,
+        uiMessage: "",
+      }));
+
+      setEmployeeRecords(mapped);
+      setFetchError(null);
+      if (mapped.length === 0) {
+        setFetchError("API returned 0 employee records. Verify records exist in FormRecord14 with status='submitted' for your organization.");
+      }
+    } catch (err: any) {
+      console.error("[UserCreationPage] Fetch error:", err);
+      setFetchError(err?.message || "Unknown error fetching employee records");
+      setEmployeeRecords([]);
+    } finally {
+      setLoadingRecords(false);
+    }
+  }, []);
+
+  // Initial load
   useEffect(() => {
+    fetchEmployeeRecords();
+  }, [fetchEmployeeRecords]);
+
+  // ── Filter logic ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!searchTerm) {
+      setFilteredRecords(employeeRecords);
+      return;
+    }
+    const q = searchTerm.toLowerCase();
     setFilteredRecords(
-      employeeRecords.filter((r) =>
-        !searchTerm ||
-        r.parsedData?.employeeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.parsedData?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.parsedData?.employeeId || r.employee_id || "").toLowerCase().includes(searchTerm.toLowerCase())
+      employeeRecords.filter(
+        (r) =>
+          r.parsedData?.employeeName?.toLowerCase().includes(q) ||
+          r.parsedData?.email?.toLowerCase().includes(q) ||
+          r.parsedData?.department?.toLowerCase().includes(q) ||
+          r.parsedData?.designation?.toLowerCase().includes(q) ||
+          (r.parsedData?.employeeId || r.employee_id || "").toLowerCase().includes(q)
       )
     );
   }, [searchTerm, employeeRecords]);
 
+  // ── Handlers ───────────────────────────────────────────────────────
   const toggleSelect = (id: string) => {
     setEmployeeRecords((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, selected: !r.selected } : r
-      )
+      prev.map((r) => (r.id === id ? { ...r, selected: !r.selected } : r))
     );
   };
 
@@ -124,27 +206,23 @@ const UserCreationPage: React.FC = () => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleBulkPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setBulkPassword(e.target.value);
-  };
-
   const validateSingle = (): boolean => {
     if (!formData.employee_id || !formData.employeeName || !formData.email || !formData.password) {
-      setMessage({ type: "error", text: "Fill all required fields" });
+      toast({ title: "Validation Error", description: "Fill all required fields", variant: "destructive" });
       return false;
     }
     const pass = formData.password.trim();
     const conf = formData.confirmPassword.trim();
     if (pass !== conf) {
-      setMessage({ type: "error", text: "Passwords do not match" });
+      toast({ title: "Validation Error", description: "Passwords do not match", variant: "destructive" });
       return false;
     }
     if (pass.length < 8) {
-      setMessage({ type: "error", text: "Password ≥ 8 characters" });
+      toast({ title: "Validation Error", description: "Password must be at least 8 characters", variant: "destructive" });
       return false;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      setMessage({ type: "error", text: "Invalid email" });
+      toast({ title: "Validation Error", description: "Invalid email format", variant: "destructive" });
       return false;
     }
     return true;
@@ -156,19 +234,18 @@ const UserCreationPage: React.FC = () => {
 
     setCreating(true);
     try {
-      const pass = formData.password.trim();
-      const conf = formData.confirmPassword.trim();
       await createUserFromEmployee({
         ...formData,
-        password: pass,
-        confirmPassword: conf,
+        password: formData.password.trim(),
+        confirmPassword: formData.confirmPassword.trim(),
       }).unwrap();
 
-      setMessage({ type: "success", text: "User created successfully" });
+      toast({ title: "User Created", description: `Account for ${formData.employeeName} created successfully` });
       setFormData({ ...formData, password: "", confirmPassword: "" });
-      refetchEmployeeRecords();
-    } catch {
-      setMessage({ type: "error", text: "Network/server error" });
+      fetchEmployeeRecords();
+    } catch (err: any) {
+      const detail = err?.data?.error || err?.data?.message || err?.message || "Server error";
+      toast({ title: "Creation Failed", description: detail, variant: "destructive" });
     } finally {
       setCreating(false);
     }
@@ -177,60 +254,56 @@ const UserCreationPage: React.FC = () => {
   const createBulkUsers = async () => {
     const selected = employeeRecords.filter((r) => r.selected);
     if (selected.length === 0) {
-      setMessage({ type: "error", text: "No records selected" });
+      toast({ title: "No Selection", description: "Select at least one employee record", variant: "destructive" });
       return;
     }
 
-    const password = bulkPassword.trim();
-    if (!password || password.length < 8) {
-      setMessage({ type: "error", text: "Bulk password must be ≥ 8 characters" });
+    // Validate every selected record has a password
+    const missing = selected.filter((r) => !r.bulkPassword || r.bulkPassword.trim().length < 8);
+    if (missing.length > 0) {
+      toast({
+        title: "Missing Passwords",
+        description: `${missing.length} selected user(s) need a password (min 8 chars)`,
+        variant: "destructive",
+      });
       return;
     }
 
-    if (!confirm(`Create ${selected.length} users with the same password?`)) {
-      return;
-    }
+    if (!confirm(`Create ${selected.length} users with individual passwords?`)) return;
 
     setCreating(true);
-    setMessage(null);
 
     let successCount = 0;
     let failCount = 0;
 
-    // Update UI statuses
     setEmployeeRecords((prev) =>
-      prev.map((r) =>
-        r.selected ? { ...r, status: "pending", message: "Processing..." } : r
-      )
+      prev.map((r) => (r.selected ? { ...r, uiStatus: "pending", uiMessage: "Processing..." } : r))
     );
 
     for (const record of selected) {
+      const pw = (record.bulkPassword || "").trim();
       try {
-        const payload = {
+        await createUserFromEmployee({
           employeeRecordId: record.id,
           employee_id: record.parsedData?.employeeId || record.employee_id || "",
           employeeName: record.parsedData?.employeeName || "",
           email: record.parsedData?.email || "",
-          password: password,
-          confirmPassword: password,
-        };
+          password: pw,
+          confirmPassword: pw,
+        }).unwrap();
 
-        await createUserFromEmployee(payload).unwrap();
         successCount++;
         setEmployeeRecords((prev) =>
           prev.map((r) =>
-            r.id === record.id
-              ? { ...r, status: "success", message: "Created", selected: false }
-              : r
+            r.id === record.id ? { ...r, uiStatus: "success", uiMessage: "Created", selected: false, bulkPassword: "" } : r
           )
         );
-      } catch {
+      } catch (err: any) {
         failCount++;
+        const detail = err?.data?.error || err?.data?.message || "Failed";
         setEmployeeRecords((prev) =>
           prev.map((r) =>
-            r.id === record.id
-              ? { ...r, status: "error", message: "Network error", selected: false }
-              : r
+            r.id === record.id ? { ...r, uiStatus: "error", uiMessage: detail, selected: false } : r
           )
         );
       }
@@ -239,28 +312,43 @@ const UserCreationPage: React.FC = () => {
     setCreating(false);
     setBulkPassword("");
 
-    setMessage({
-      type: successCount > 0 ? "success" : "error",
-      text: `Bulk creation finished: ${successCount} succeeded, ${failCount} failed`,
-    });
+    if (successCount > 0 && failCount === 0) {
+      toast({ title: "Bulk Creation Complete", description: `All ${successCount} users created successfully` });
+    } else if (successCount > 0 && failCount > 0) {
+      toast({ title: "Partially Complete", description: `${successCount} created, ${failCount} failed — check errors below`, variant: "destructive" });
+    } else {
+      toast({ title: "Bulk Creation Failed", description: `All ${failCount} users failed to create`, variant: "destructive" });
+    }
 
-    if (successCount > 0) refetchEmployeeRecords();
+    if (successCount > 0) fetchEmployeeRecords();
   };
 
-  const selectAll = () => {
-    setEmployeeRecords((prev) => prev.map((r) => ({ ...r, selected: true })));
-  };
-
-  const deselectAll = () => {
-    setEmployeeRecords((prev) => prev.map((r) => ({ ...r, selected: false })));
-  };
-
+  const selectAll = () => setEmployeeRecords((prev) => prev.map((r) => ({ ...r, selected: true })));
+  const deselectAll = () => setEmployeeRecords((prev) => prev.map((r) => ({ ...r, selected: false })));
   const selectedCount = employeeRecords.filter((r) => r.selected).length;
 
+  const setBulkPasswordForRecord = (id: string, pw: string) => {
+    setEmployeeRecords((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, bulkPassword: pw } : r))
+    );
+  };
+
+  const applyPasswordToAllSelected = () => {
+    if (!bulkPassword || bulkPassword.length < 8) {
+      toast({ title: "Invalid Password", description: "Password must be at least 8 characters", variant: "destructive" });
+      return;
+    }
+    setEmployeeRecords((prev) =>
+      prev.map((r) => (r.selected ? { ...r, bulkPassword: bulkPassword } : r))
+    );
+    toast({ title: "Password Applied", description: `Password set for all ${selectedCount} selected users` });
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header - responsive stacking */}
+        {/* Header */}
         <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center gap-3">
@@ -268,46 +356,47 @@ const UserCreationPage: React.FC = () => {
               Create Users from Employee Records
             </h1>
             <p className="text-gray-600 mt-1 text-sm sm:text-base">
-              Single or bulk account creation from Form Table 14
+              Single or bulk account creation from employee data
             </p>
           </div>
-          <button
-            onClick={() => setBulkMode(!bulkMode)}
-            className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition w-full sm:w-auto justify-center ${
-              bulkMode
-                ? "bg-purple-600 text-white hover:bg-purple-700"
-                : "bg-gray-200 hover:bg-gray-300"
-            }`}
-          >
-            <Users size={18} />
-            {bulkMode ? "Exit Bulk Mode" : "Bulk Mode"}
-          </button>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button
+              onClick={fetchEmployeeRecords}
+              disabled={loadingRecords}
+              className="px-3 py-2 rounded-lg font-medium flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+              title="Refresh records"
+            >
+              <RefreshCw size={16} className={loadingRecords ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+            <button
+              onClick={() => setBulkMode(!bulkMode)}
+              className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition flex-1 sm:flex-none justify-center ${
+                bulkMode ? "bg-purple-600 text-white hover:bg-purple-700" : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              <Users size={18} />
+              {bulkMode ? "Exit Bulk Mode" : "Bulk Mode"}
+            </button>
+          </div>
         </div>
 
-        {message && (
-          <div
-            className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
-              message.type === "success"
-                ? "bg-green-50 border-green-200 text-green-800"
-                : "bg-red-50 border-red-200 text-red-800"
-            }`}
-          >
-            {message.type === "success" ? <Check /> : <X />}
-            {message.text}
-          </div>
-        )}
-
-        {/* Main grid - 1 column on mobile, 2 on larger */}
+        {/* Main grid */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 xl:gap-8">
-          {/* Left – Selection */}
+          {/* Left – Employee Records List */}
           <div className="bg-white rounded-xl shadow-lg p-5 sm:p-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
               <h2 className="text-xl font-semibold flex items-center gap-2">
                 <User className="w-5 h-5" />
                 Employee Records
+                {!loadingRecords && employeeRecords.length > 0 && (
+                  <span className="text-sm font-normal text-gray-500">
+                    ({employeeRecords.length} total, {employeeRecords.filter(r => r.processStatus !== "skipped").length} usable)
+                  </span>
+                )}
               </h2>
 
-              {bulkMode && (
+              {bulkMode && employeeRecords.length > 0 && (
                 <div className="flex gap-4 text-sm w-full sm:w-auto">
                   <button onClick={selectAll} className="text-blue-600 hover:underline">
                     Select All
@@ -319,76 +408,174 @@ const UserCreationPage: React.FC = () => {
               )}
             </div>
 
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                placeholder="Search name, email, ID..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            {/* Search */}
+            {employeeRecords.length > 0 && (
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  placeholder="Search name, email, department, ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            )}
 
+            {/* Records list */}
             <div className="space-y-3 max-h-[60vh] sm:max-h-[70vh] overflow-y-auto">
               {loadingRecords ? (
-                <div className="flex items-center justify-center py-12 text-gray-500 gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">Loading employee records…</span>
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500 gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                  <span className="text-sm font-medium">Loading employee records...</span>
+                </div>
+              ) : fetchError && employeeRecords.length === 0 ? (
+                <div className="text-center py-12">
+                  <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+                  <p className="text-gray-700 font-medium mb-2">Could not load records</p>
+                  <p className="text-sm text-gray-500 mb-4 max-w-sm mx-auto">{fetchError}</p>
+                  <button
+                    onClick={fetchEmployeeRecords}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium inline-flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} />
+                    Retry
+                  </button>
                 </div>
               ) : filteredRecords.length === 0 ? (
                 <div className="text-center py-12 text-gray-400 text-sm">
-                  {searchTerm ? "No records match your search." : "No submitted employee records found."}
+                  {searchTerm
+                    ? `No records match "${searchTerm}".`
+                    : "No employee records found for your organization."}
                 </div>
-              ) : filteredRecords.map((record) => {
-                const isSelected = bulkMode ? record.selected : selectedRecord?.id === record.id;
+              ) : (
+                filteredRecords.map((record) => {
+                  const isSelected = bulkMode ? record.selected : selectedRecord?.id === record.id;
 
-                return (
-                  <div
-                    key={record.id}
-                    onClick={() => (bulkMode ? toggleSelect(record.id) : selectSingle(record))}
-                    className={`p-4 border rounded-lg cursor-pointer transition-all flex items-start gap-3 ${
-                      isSelected
-                        ? "border-blue-500 bg-blue-50 shadow-sm"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    {bulkMode && (
-                      <input
-                        type="checkbox"
-                        checked={record.selected}
-                        onChange={() => toggleSelect(record.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-1.5 flex-shrink-0"
-                      />
-                    )}
+                  return (
+                    <div
+                      key={record.id}
+                      onClick={() => (bulkMode ? toggleSelect(record.id) : selectSingle(record))}
+                      className={`p-4 border rounded-lg cursor-pointer transition-all flex items-start gap-3 ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-50 shadow-sm"
+                          : record.processStatus === "skipped"
+                            ? "border-red-200 bg-red-50/30 hover:border-red-300"
+                            : "border-gray-200 hover:border-gray-300 hover:bg-gray-50/50"
+                      }`}
+                    >
+                      {bulkMode && (
+                        <input
+                          type="checkbox"
+                          checked={record.selected}
+                          onChange={() => toggleSelect(record.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-1.5 flex-shrink-0 h-4 w-4"
+                        />
+                      )}
 
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium truncate">{record.parsedData?.employeeName || "—"}</h3>
-                      <p className="text-sm text-gray-600 truncate">
-                        ID: {record.parsedData?.employeeId || record.employee_id || "—"}
-                      </p>
-                      <p className="text-sm text-gray-600 truncate">
-                        {record.parsedData?.email || "No email"}
-                      </p>
-
-                      {record.status && record.status !== "idle" && (
-                        <div className="mt-2 text-xs flex items-center gap-1.5">
-                          {record.status === "pending" && <Loader2 className="animate-spin" size={14} />}
-                          {record.status === "success" && <Check size={14} className="text-green-600" />}
-                          {record.status === "error" && <X size={14} className="text-red-600" />}
-                          <span className={record.status === "error" ? "text-red-700" : ""}>
-                            {record.message}
-                          </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium truncate">
+                            {record.parsedData?.employeeName || "—"}
+                          </h3>
+                          {record.processStatus === "skipped" && (
+                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200">
+                              SKIPPED
+                            </span>
+                          )}
+                          {record.processStatus === "warning" && (
+                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
+                              WARNING
+                            </span>
+                          )}
+                          {record.processStatus === "valid" && (
+                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700 border border-green-200">
+                              READY
+                            </span>
+                          )}
                         </div>
+                        {record.reason && (
+                          <p className="text-xs text-amber-600 mt-0.5">{record.reason}</p>
+                        )}
+                        <p className="text-sm text-gray-600 truncate">
+                          ID: {record.parsedData?.employeeId || record.employee_id || "—"}
+                        </p>
+                        <p className="text-sm text-gray-600 truncate">
+                          {record.parsedData?.email || "No email"}
+                        </p>
+
+                        {/* Additional parsed fields */}
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                          {record.parsedData?.department && (
+                            <span>Dept: <span className="text-gray-700 font-medium">{record.parsedData.department}</span></span>
+                          )}
+                          {record.parsedData?.designation && (
+                            <span>Role: <span className="text-gray-700 font-medium">{record.parsedData.designation}</span></span>
+                          )}
+                          {record.parsedData?.gender && (
+                            <span>Gender: <span className="text-gray-700 font-medium">{record.parsedData.gender}</span></span>
+                          )}
+                          {record.parsedData?.phone && (
+                            <span>Phone: <span className="text-gray-700 font-medium">{record.parsedData.phone}</span></span>
+                          )}
+                          {record.parsedData?.totalSalary && record.parsedData.totalSalary !== "0.00" && (
+                            <span>Salary: <span className="text-gray-700 font-medium">₹{record.parsedData.totalSalary}</span></span>
+                          )}
+                          {record.parsedData?.givenSalary && record.parsedData.givenSalary !== "0.00" && (
+                            <span>Net: <span className="text-gray-700 font-medium">₹{record.parsedData.givenSalary}</span></span>
+                          )}
+                          {record.parsedData?.dateOfJoining && (
+                            <span>Joined: <span className="text-gray-700 font-medium">{record.parsedData.dateOfJoining}</span></span>
+                          )}
+                          {record.parsedData?.shiftType && (
+                            <span>Shift: <span className="text-gray-700 font-medium">{record.parsedData.shiftType}</span></span>
+                          )}
+                          {record.parsedData?.inTime && record.parsedData.inTime !== "false" && (
+                            <span>In: <span className="text-gray-700 font-medium">{record.parsedData.inTime}</span></span>
+                          )}
+                          {record.parsedData?.outTime && record.parsedData.outTime !== "false" && (
+                            <span>Out: <span className="text-gray-700 font-medium">{record.parsedData.outTime}</span></span>
+                          )}
+                          {record.parsedData?.companyName && (
+                            <span>Company: <span className="text-gray-700 font-medium">{record.parsedData.companyName}</span></span>
+                          )}
+                          {record.parsedData?.bankName && (
+                            <span>Bank: <span className="text-gray-700 font-medium">{record.parsedData.bankName}</span></span>
+                          )}
+                          {record.parsedData?.nativePlace && (
+                            <span>Native: <span className="text-gray-700 font-medium">{record.parsedData.nativePlace}</span></span>
+                          )}
+                          {record.parsedData?.country && (
+                            <span>Country: <span className="text-gray-700 font-medium">{record.parsedData.country}</span></span>
+                          )}
+                          {record.parsedData?.overTime && record.parsedData.overTime !== "0.00" && (
+                            <span>OT: <span className="text-gray-700 font-medium">₹{record.parsedData.overTime}</span></span>
+                          )}
+                          {record.parsedData?.status && (
+                            <span>Status: <span className="text-gray-700 font-medium">{record.parsedData.status}</span></span>
+                          )}
+                        </div>
+
+                        {/* Bulk creation status indicator */}
+                        {record.uiStatus && record.uiStatus !== "idle" && (
+                          <div className="mt-2 text-xs flex items-center gap-1.5">
+                            {record.uiStatus === "pending" && <Loader2 className="animate-spin" size={14} />}
+                            {record.uiStatus === "success" && <Check size={14} className="text-green-600" />}
+                            {record.uiStatus === "error" && <X size={14} className="text-red-600" />}
+                            <span className={record.uiStatus === "error" ? "text-red-700" : "text-gray-600"}>
+                              {record.uiMessage}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {isSelected && !bulkMode && (
+                        <Check className="text-blue-600 mt-1 flex-shrink-0" size={20} />
                       )}
                     </div>
-
-                    {isSelected && !bulkMode && (
-                      <Check className="text-blue-600 mt-1 flex-shrink-0" size={20} />
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -396,64 +583,130 @@ const UserCreationPage: React.FC = () => {
           <div className="bg-white rounded-xl shadow-lg p-5 sm:p-6">
             {bulkMode ? (
               <>
-                <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                   <Users className="w-5 h-5" />
                   Bulk Create Users ({selectedCount} selected)
                 </h2>
 
                 {selectedCount === 0 ? (
                   <div className="text-center py-12 text-gray-500">
-                    Select employees on the left to create accounts in bulk
+                    <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p>Select employees on the left to create accounts in bulk</p>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Password (same for all selected users)
+                  <div className="space-y-4">
+                    {/* Quick-fill: apply one password to all */}
+                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                      <label className="block text-xs font-semibold text-purple-800 mb-1.5">
+                        Quick fill — apply to all selected
                       </label>
-                      <div className="relative">
-                        <input
-                          type={showBulkPassword ? "text" : "password"}
-                          value={bulkPassword}
-                          onChange={handleBulkPasswordChange}
-                          placeholder="Minimum 8 characters"
-                          className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                        />
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={showBulkPassword ? "text" : "password"}
+                            value={bulkPassword}
+                            onChange={(e) => setBulkPassword(e.target.value)}
+                            placeholder="Type password, then Apply"
+                            className="w-full px-3 py-2 pr-9 border border-purple-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowBulkPassword(!showBulkPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          >
+                            {showBulkPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                          </button>
+                        </div>
                         <button
-                          type="button"
-                          onClick={() => setShowBulkPassword(!showBulkPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                          onClick={applyPasswordToAllSelected}
+                          disabled={!bulkPassword || bulkPassword.length < 8}
+                          className="px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
                         >
-                          {showBulkPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                          Apply
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        All selected users will get this password (can change later)
-                      </p>
+                      {bulkPassword && bulkPassword.length < 8 && (
+                        <p className="text-[11px] text-purple-600 mt-1">Min 8 characters</p>
+                      )}
                     </div>
 
-                    <button
-                      onClick={createBulkUsers}
-                      disabled={creating || !bulkPassword || bulkPassword.length < 8}
-                      className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {creating ? (
-                        <>
-                          <Loader2 className="animate-spin" size={18} />
-                          Creating {selectedCount} users...
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus size={18} />
-                          Create {selectedCount} Users
-                        </>
-                      )}
-                    </button>
+                    {/* Per-user password list */}
+                    <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+                      {employeeRecords
+                        .filter((r) => r.selected)
+                        .map((record) => {
+                          const name = record.parsedData?.employeeName || "—";
+                          const email = record.parsedData?.email || "No email";
+                          const pw = record.bulkPassword || "";
+                          const isValid = pw.length >= 8;
+
+                          return (
+                            <div
+                              key={record.id}
+                              className={`p-3 rounded-lg border ${
+                                isValid
+                                  ? "border-green-200 bg-green-50/40"
+                                  : "border-gray-200 bg-gray-50/40"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
+                                  <p className="text-xs text-gray-500 truncate">{email}</p>
+                                </div>
+                                {isValid && <Check size={16} className="text-green-600 flex-shrink-0 ml-2" />}
+                              </div>
+                              <input
+                                type="text"
+                                value={pw}
+                                onChange={(e) => setBulkPasswordForRecord(record.id, e.target.value)}
+                                placeholder="Set password (min 8 chars)"
+                                className={`w-full px-2.5 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-purple-500 ${
+                                  pw && !isValid
+                                    ? "border-red-300 bg-red-50"
+                                    : isValid
+                                      ? "border-green-300 bg-white"
+                                      : "border-gray-300 bg-white"
+                                }`}
+                              />
+                              {pw && !isValid && (
+                                <p className="text-[11px] text-red-500 mt-0.5">Min 8 characters</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    {/* Summary + Create button */}
+                    <div className="pt-2 border-t">
+                      <div className="flex justify-between text-xs text-gray-500 mb-3">
+                        <span>{employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length} / {selectedCount} have valid passwords</span>
+                      </div>
+                      <button
+                        onClick={createBulkUsers}
+                        disabled={
+                          creating ||
+                          employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length === 0
+                        }
+                        className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {creating ? (
+                          <>
+                            <Loader2 className="animate-spin" size={18} />
+                            Creating users...
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus size={18} />
+                            Create {selectedCount} Users
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 )}
               </>
             ) : (
-              // ── Single user form (almost unchanged) ──
               <>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                   <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -480,7 +733,6 @@ const UserCreationPage: React.FC = () => {
                   </div>
                 ) : (
                   <form onSubmit={createSingleUser} className="space-y-5">
-                    {/* Your existing form fields – kept almost identical */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -490,7 +742,7 @@ const UserCreationPage: React.FC = () => {
                           name="employee_id"
                           value={formData.employee_id}
                           onChange={handleSingleChange}
-                          className="w-full px-3 py-2 border rounded-lg"
+                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                           required
                         />
                       </div>
@@ -514,7 +766,7 @@ const UserCreationPage: React.FC = () => {
                         name="employeeName"
                         value={formData.employeeName}
                         onChange={handleSingleChange}
-                        className="w-full px-3 py-2 border rounded-lg"
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                         required
                       />
                     </div>
@@ -528,7 +780,7 @@ const UserCreationPage: React.FC = () => {
                         name="email"
                         value={formData.email}
                         onChange={handleSingleChange}
-                        className="w-full px-3 py-2 border rounded-lg"
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                         required
                       />
                     </div>
@@ -544,7 +796,7 @@ const UserCreationPage: React.FC = () => {
                             name="password"
                             value={formData.password}
                             onChange={handleSingleChange}
-                            className="w-full px-3 py-2 pr-10 border rounded-lg"
+                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
                             required
                             minLength={8}
                           />
@@ -553,7 +805,7 @@ const UserCreationPage: React.FC = () => {
                             onClick={() => setShowSinglePassword(!showSinglePassword)}
                             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
                           >
-                            {showSinglePassword ? <EyeOff /> : <Eye />}
+                            {showSinglePassword ? <EyeOff size={18} /> : <Eye size={18} />}
                           </button>
                         </div>
                       </div>
@@ -568,7 +820,7 @@ const UserCreationPage: React.FC = () => {
                             name="confirmPassword"
                             value={formData.confirmPassword}
                             onChange={handleSingleChange}
-                            className="w-full px-3 py-2 pr-10 border rounded-lg"
+                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
                             required
                           />
                           <button
@@ -576,7 +828,7 @@ const UserCreationPage: React.FC = () => {
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
                           >
-                            {showConfirmPassword ? <EyeOff /> : <Eye />}
+                            {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                           </button>
                         </div>
                       </div>
@@ -589,7 +841,7 @@ const UserCreationPage: React.FC = () => {
                     >
                       {creating ? (
                         <>
-                          <Loader2 className="animate-spin" />
+                          <Loader2 className="animate-spin" size={18} />
                           Creating...
                         </>
                       ) : (

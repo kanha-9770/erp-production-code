@@ -46,6 +46,7 @@ export async function getRolesByOrganization(
         name: role.name,
         description: role.description || "",
         shareDataWithPeers: role.shareDataWithPeers,
+        isAdmin: role.isAdmin,
         level: role.level,
         parentId: role.parentId || undefined,
         children: [],
@@ -110,6 +111,7 @@ export async function createRole(
         name: data.name,
         description: data.description,
         shareDataWithPeers: data.shareDataWithPeers,
+        isAdmin: data.isAdmin ?? false,
         level,
         parentId: data.parentId,
         organizationId: data.organizationId,
@@ -121,6 +123,7 @@ export async function createRole(
       name: role.name,
       description: role.description || "",
       shareDataWithPeers: role.shareDataWithPeers,
+      isAdmin: role.isAdmin,
       level: role.level,
       parentId: role.parentId || undefined,
       children: [],
@@ -163,6 +166,7 @@ export async function updateRole(
         name: data.name,
         description: data.description,
         shareDataWithPeers: data.shareDataWithPeers,
+        ...(data.isAdmin !== undefined && { isAdmin: data.isAdmin }),
       },
     });
 
@@ -171,6 +175,7 @@ export async function updateRole(
       name: role.name,
       description: role.description || "",
       shareDataWithPeers: role.shareDataWithPeers,
+      isAdmin: role.isAdmin,
       level: role.level,
       parentId: role.parentId || undefined,
       children: [],
@@ -189,11 +194,15 @@ export async function deleteRole(roleId: string, currentOrganizationId?: string)
     // Fetch role to validate organization
     const role = await prisma.role.findUnique({
       where: { id: roleId },
-      select: { organizationId: true },
+      select: { organizationId: true, isAdmin: true },
     });
 
     if (!role) {
       throw new Error("Role not found");
+    }
+
+    if (role.isAdmin) {
+      throw new Error("Admin roles cannot be deleted");
     }
 
     if (currentOrganizationId && role.organizationId !== currentOrganizationId) {

@@ -4,6 +4,7 @@ export interface Role {
   description: string;
   parentId?: string;
   shareDataWithPeers: boolean;
+  isAdmin: boolean;
   level: number;
   children: Role[];
   isExpanded?: boolean;
@@ -14,6 +15,7 @@ export interface RoleFormData {
   description: string;
   parentId?: string;
   shareDataWithPeers: boolean;
+  isAdmin: boolean;
 }
 
 export interface User {

@@ -175,7 +175,27 @@ export async function GET(request: NextRequest) {
     console.log(`Fetching records for organization: ${orgId}`);
 
     // ──────────────────────────────────────────────────────────────
-    // 2. Fetch ONLY records belonging to this organization
+    // 2. Build fieldId → label lookup from FormField table
+    //    This resolves Format B records (sections with plain values)
+    // ──────────────────────────────────────────────────────────────
+    const formFields = await prisma.formField.findMany({
+      where: {
+        section: {
+          form: {
+            module: { organizationId: orgId }
+          }
+        }
+      },
+      select: { id: true, label: true },
+    });
+    const fieldIdToLabel: Record<string, string> = {};
+    for (const ff of formFields) {
+      fieldIdToLabel[ff.id] = ff.label;
+    }
+    console.log(`Built fieldId→label map with ${formFields.length} entries`);
+
+    // ──────────────────────────────────────────────────────────────
+    // 3. Fetch ONLY records belonging to this organization
     // ──────────────────────────────────────────────────────────────
     const records = await prisma.formRecord14.findMany({
       select: {
@@ -205,11 +225,11 @@ export async function GET(request: NextRequest) {
     const skipReasons = [];
 
     for (const record of records) {
-      const parsedData = parseEmployeeData(record.recordData);
+      const parsedData = parseEmployeeData(record.recordData, fieldIdToLabel);
 
       // Debug: Analyze structure for the first record
       if (processedRecords.length === 0) {
-        const analysis = analyzeRecordDataStructure(record.recordData);
+        const analysis = analyzeRecordDataStructure(record.recordData, fieldIdToLabel);
         console.log('Record structure analysis:', JSON.stringify(analysis, null, 2));
       }
 

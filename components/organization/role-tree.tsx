@@ -33,6 +33,7 @@ export function RoleTree() {
           name: "",
           description: "",
           shareDataWithPeers: false,
+          isAdmin: false,
           level: 0,
           children: [],
           parentId: undefined, // No parent means root role

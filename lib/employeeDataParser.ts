@@ -215,54 +215,97 @@ const FIELD_PATTERNS: Record<string, RegExp[]> = {
 };
 
 /**
- * Recursively extract all field objects from the recordData structure
- * Handles both flat and nested (sections/subforms) structures
- * @param data - The current data object to traverse
- * @returns Array of field objects {label, value, type?, ...}
+ * Recursively extract all field objects from the recordData structure.
+ * Handles three formats:
+ *   Format A (flat):  { fieldId: { label, value, type } }
+ *   Format B (nested): { sections: { secId: { fields: { fieldId: "plainValue" } } } }
+ *   Format C (mixed):  { sections: { secId: { fields: { fieldId: { label, value } } } } }
+ *
+ * @param data            - The current data object to traverse
+ * @param fieldIdToLabel  - Optional map of fieldId → label (resolves Format B)
+ * @returns Array of { label, value } objects
  */
-function extractFieldsRecursively(data: any): any[] {
+function extractFieldsRecursively(
+  data: any,
+  fieldIdToLabel: Record<string, string> = {}
+): any[] {
   const fields: any[] = [];
 
   if (!data || typeof data !== 'object') {
     return fields;
   }
 
-  // Flat structure: keys are fieldIds, values are field objects
-  if (Object.keys(data).every(key => data[key] && data[key].label && data[key].value !== undefined)) {
+  // ── Format A: flat { fieldId: { label, value } } ───────────────────
+  const dataKeys = Object.keys(data);
+  if (
+    dataKeys.length > 0 &&
+    dataKeys.every(key => {
+      const v = data[key];
+      return v && typeof v === 'object' && v.label && v.value !== undefined;
+    })
+  ) {
     return Object.values(data);
   }
 
-  // Nested structure: look for 'sections' and 'subforms'
+  // ── Format B / C: nested sections ──────────────────────────────────
   if (data.sections) {
     Object.values(data.sections).forEach((section: any) => {
-      if (section.fields) {
-        fields.push(...Object.values(section.fields));
-      }
+      if (!section || !section.fields) return;
+
+      Object.entries(section.fields).forEach(([fieldId, fieldVal]: [string, any]) => {
+        if (fieldVal && typeof fieldVal === 'object' && fieldVal.label) {
+          // Format C: already has { label, value }
+          fields.push(fieldVal);
+        } else if (fieldVal !== null && fieldVal !== undefined) {
+          // Format B: fieldId → plain value (string, number, boolean)
+          // Resolve label from the lookup map
+          const label = fieldIdToLabel[fieldId];
+          if (label) {
+            fields.push({ label, value: fieldVal, fieldId });
+          } else {
+            // No label found — still include with fieldId as fallback label
+            fields.push({ label: fieldId, value: fieldVal, fieldId, _unresolved: true });
+          }
+        }
+      });
     });
   }
 
+  // ── Subforms ───────────────────────────────────────────────────────
   if (data.subforms) {
     Object.values(data.subforms).forEach((subform: any) => {
       if (subform.fields) {
-        fields.push(...Object.values(subform.fields));
-      }
-      // If there are rows (repeatable), process each row recursively
-      if (Array.isArray(subform.rows)) {
-        subform.rows.forEach((row: any) => {
-          fields.push(...extractFieldsRecursively(row));
+        Object.entries(subform.fields).forEach(([fieldId, fieldVal]: [string, any]) => {
+          if (fieldVal && typeof fieldVal === 'object' && fieldVal.label) {
+            fields.push(fieldVal);
+          } else if (fieldVal !== null && fieldVal !== undefined) {
+            const label = fieldIdToLabel[fieldId];
+            if (label) {
+              fields.push({ label, value: fieldVal, fieldId });
+            }
+          }
         });
       }
-      // Recurse into child subforms if present
+      if (Array.isArray(subform.rows)) {
+        subform.rows.forEach((row: any) => {
+          fields.push(...extractFieldsRecursively(row, fieldIdToLabel));
+        });
+      }
       if (subform.childSubforms) {
-        fields.push(...extractFieldsRecursively({ subforms: subform.childSubforms }));
+        fields.push(
+          ...extractFieldsRecursively({ subforms: subform.childSubforms }, fieldIdToLabel)
+        );
       }
     });
   }
 
-  // General object traversal for any other nested fields
-  Object.values(data).forEach((value: any) => {
+  // ── General fallback: traverse any nested objects ──────────────────
+  // Skip known structural keys to avoid double-processing
+  const skipKeys = new Set(['sections', 'subforms', 'metadata', 'formId', 'formName']);
+  Object.entries(data).forEach(([key, value]: [string, any]) => {
+    if (skipKeys.has(key)) return;
     if (typeof value === 'object' && value !== null) {
-      fields.push(...extractFieldsRecursively(value));
+      fields.push(...extractFieldsRecursively(value, fieldIdToLabel));
     }
   });
 
@@ -271,10 +314,14 @@ function extractFieldsRecursively(data: any): any[] {
 
 /**
  * Dynamically parse employee data from variable JSON structure
- * @param recordData - The dynamic JSON structure from form submission
+ * @param recordData      - The dynamic JSON structure from form submission
+ * @param fieldIdToLabel  - Optional map { fieldId → "LABEL" } to resolve Format B records
  * @returns Parsed employee data with standardized field names
  */
-export function parseEmployeeData(recordData: any): ParsedEmployeeData {
+export function parseEmployeeData(
+  recordData: any,
+  fieldIdToLabel: Record<string, string> = {}
+): ParsedEmployeeData {
   const parsed: ParsedEmployeeData = {};
 
   // Handle null, undefined, or non-object data
@@ -284,7 +331,7 @@ export function parseEmployeeData(recordData: any): ParsedEmployeeData {
   }
 
   try {
-    const fields = extractFieldsRecursively(recordData);
+    const fields = extractFieldsRecursively(recordData, fieldIdToLabel);
 
     fields.forEach((field: any) => {
       // Skip invalid field structures
@@ -435,13 +482,14 @@ function isValidDate(dateString: string): boolean {
  * Debug helper – returns which standard fields each label matched
  */
 export function getFieldMappingSuggestions(
-  recordData: any
+  recordData: any,
+  fieldIdToLabel: Record<string, string> = {}
 ): Record<string, string[]> {
   const suggestions: Record<string, string[]> = {};
 
   if (!recordData || typeof recordData !== "object") return suggestions;
 
-  const fields = extractFieldsRecursively(recordData);
+  const fields = extractFieldsRecursively(recordData, fieldIdToLabel);
 
   fields.forEach((field: any) => {
     if (!field?.label) return;
@@ -466,7 +514,10 @@ export function getFieldMappingSuggestions(
 /**
  * Debug helper – analyzes how many fields were mapped
  */
-export function analyzeRecordDataStructure(recordData: any) {
+export function analyzeRecordDataStructure(
+  recordData: any,
+  fieldIdToLabel: Record<string, string> = {}
+) {
   const analysis = {
     totalFields: 0,
     mappedFields: 0,
@@ -476,7 +527,7 @@ export function analyzeRecordDataStructure(recordData: any) {
 
   if (!recordData || typeof recordData !== "object") return analysis;
 
-  const fields = extractFieldsRecursively(recordData);
+  const fields = extractFieldsRecursively(recordData, fieldIdToLabel);
 
   fields.forEach((field: any) => {
     if (!field?.label) return;
