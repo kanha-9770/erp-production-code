@@ -76,7 +76,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { id: "level4", label: "Level 4", defaultWidth: 140, minWidth: 100, dataKey: "level4_name" },
   { id: "form", label: "Form", defaultWidth: 180, minWidth: 120, dataKey: "form_name" },
   { id: "dropdown", label: "Dropdown Name", defaultWidth: 180, minWidth: 130, dataKey: "master_data_type_name" },
-  { id: "values", label: "Values", defaultWidth: 280, minWidth: 200, dataKey: "values", flex: true },
+  { id: "values", label: "Values", defaultWidth: 280, minWidth: 280, dataKey: "values", flex: true },
 ]
 
 // ==================== SORTABLE VALUE ITEM ====================
@@ -1081,7 +1081,7 @@ export function DynamicMasters() {
                           className={cn(
                             "group/row flex transition-all duration-150 border-b border-gray-100/80 last:border-b-0",
                             isSelected && "bg-blue-50/50 border-blue-100/50",
-                            isEditing && "bg-amber-50/20 border-amber-100/50",
+                            isEditing && "bg-amber-50 border-amber-100",
                             !isSelected && !isEditing && "hover:bg-gray-50/50"
                           )}
                         >
