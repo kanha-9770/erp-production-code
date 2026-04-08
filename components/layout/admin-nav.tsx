@@ -1,6 +1,6 @@
 'use client';
 
-import { BarChart3, Bot, Brain, FileDown, LayoutDashboard, LogOut, Menu, Settings, User } from 'lucide-react';
+import { BarChart3, Bot, Brain, FileDown, LayoutDashboard, LogOut, Mail, Menu, Settings, Shield, User, UserCog } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo, useState } from 'react';
@@ -22,6 +22,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { useRouteAccess } from '@/hooks/use-route-access';
+import { useGetUserQuery } from '@/lib/api/auth';
 
 interface AdminNavProps {
   user: {
@@ -29,6 +30,7 @@ interface AdminNavProps {
     name: string;
     avatar?: string | null;
     organizationName?: string | null;
+    role?: string | null;
   };
 }
 
@@ -36,6 +38,14 @@ export function AdminNav({ user }: AdminNavProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { canAccess } = useRouteAccess();
+  const { data: userData } = useGetUserQuery();
+
+  // Derive display name from API (same source as sidebar)
+  const displayName = userData?.user
+    ? (userData.user.first_name || userData.user.last_name)
+      ? `${userData.user.first_name ?? ''} ${userData.user.last_name ?? ''}`.trim()
+      : userData.user.username || user.name
+    : user.name;
 
 
   return (
@@ -96,12 +106,38 @@ export function AdminNav({ user }: AdminNavProps) {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
-                  <span className="font-medium">{user.name}</span>
+                  <span className="font-medium">{displayName}</span>
                   <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
+                  {user.role && (
+                    <span className="text-xs text-primary font-medium mt-0.5">{user.role}</span>
+                  )}
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/admin/profile">
+                  <User className="h-4 w-4 mr-2" />
+                  Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/admin/profile/update">
+                  <UserCog className="h-4 w-4 mr-2" />
+                  Update Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/admin/profile/security">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Security Settings
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/admin/profile/email-preferences">
+                  <Mail className="h-4 w-4 mr-2" />
+                  Email Preferences
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => logoutAction()}

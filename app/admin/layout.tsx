@@ -55,6 +55,7 @@ export default async function AdminLayout({
       : session.user.username || session.user.email,
     avatar: session.user.avatar,
     organizationName: session.user.organization?.name,
+    role: isAdmin ? 'Admin' : 'User',
   };
 
   return (

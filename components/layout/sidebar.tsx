@@ -369,19 +369,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     label: string;
     requireAdmin?: boolean;
   }[] = [
-    { icon: Folder, view: "modules", label: "Modules" },
-    { icon: BarChart3, view: "reports", label: "Reports" },
-    { icon: Clock, view: "activities", label: "Activities" },
-    { icon: FileCheck, view: "tasks", label: "Tasks" },
-    { icon: Briefcase, view: "deals", label: "Deals" },
-    { icon: Target, view: "projects", label: "Projects" },
-    { icon: Zap, view: "analytics", label: "Analytics" },
-    { icon: FileText, view: "documents", label: "Documents" },
-    { icon: Calendar, view: "calendar", label: "Calendar" },
-    { icon: Bell, view: "notifications", label: "Notifications" },
-    { icon: Settings, route: "/settings", label: "Settings" },
-    { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
-  ];
+      { icon: Folder, view: "modules", label: "Modules" },
+      { icon: BarChart3, view: "reports", label: "Reports" },
+      { icon: Settings, route: "/settings", label: "Settings" },
+      { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
+    ];
 
   // Filter nav items based on route permissions.
   // Hides any button whose route the user is denied access to.
@@ -416,12 +408,9 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
         <button
           className="flex h-8 w-8 items-center justify-center rounded-lg"
-          style={{ backgroundColor: "#5a4d96" }}
         >
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="black">
-              <path d="M18 3a3 3 0 013 3v12a3 3 0 01-3 3H6a3 3 0 01-3-3V6a3 3 0 013-3h12z" />
-            </svg>
+          <div className="flex h-8 w-8 items-center justify-center rounded-md">
+            <Search className="h-5 w-5 text-white" />
           </div>
         </button>
 
@@ -569,8 +558,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                   <span className="text-sm font-medium text-black group-hover:text-white">
                     {userData?.user
                       ? userData.user.first_name || userData.user.last_name
-                        ? `${userData.user.first_name ?? ""} ${
-                            userData.user.last_name ?? ""
+                        ? `${userData.user.first_name ?? ""} ${userData.user.last_name ?? ""
                           }`.trim()
                         : (userData.user.username ??
                           userData.user.email ??
@@ -603,7 +591,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       {/* Collapse toggle — desktop only */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute top-1/2 -translate-y-1/2  flex h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
+        className="absolute top-1/2 -translate-y-1/2 hidden md:flex  h-6 w-6 items-center justify-center rounded-full bg-[#5a4d96] text-white hover:bg-[#6b5da8]"
         style={{ left: isCollapsed ? "48px" : `${48 + sidebarWidth - 10}px` }}
       >
         {isCollapsed ? (
@@ -653,7 +641,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                 className={cn(
                   "h-9 sm:h-10 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all",
                   !moduleData.name.trim() &&
-                    "border-red-400 focus:border-red-500 focus:ring-red-500",
+                  "border-red-400 focus:border-red-500 focus:ring-red-500",
                 )}
                 autoFocus
               />

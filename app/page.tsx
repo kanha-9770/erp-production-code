@@ -31,6 +31,8 @@ export default async function HomePage() {
     redirect('/login');
   }
 
+  const isAdmin = await checkIsAdmin();
+
   const user = {
     email: session.user.email,
     name: (session.user.first_name && session.user.last_name)
@@ -38,9 +40,8 @@ export default async function HomePage() {
       : session.user.username || session.user.email,
     avatar: session.user.avatar,
     organizationName: session.user.organization?.name,
+    role: isAdmin ? 'Admin' : 'User',
   };
-
-  const isAdmin = await checkIsAdmin();
 
   return (
     <div className="flex h-screen  bg-background">

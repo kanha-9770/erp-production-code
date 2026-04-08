@@ -450,7 +450,7 @@ export function DynamicMasters() {
         row.form_id = value
         row.form_name = form?.name || ""
       } else {
-        ;(row as any)[field] = value
+        ; (row as any)[field] = value
       }
       return newRows
     })
@@ -876,7 +876,7 @@ export function DynamicMasters() {
                   />
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 items-center">
+              <div className="flex gap-2 items-center">
                 <Select value={selectedModuleFilter} onValueChange={(v) => { setSelectedModuleFilter(v); setCurrentPage(1) }}>
                   <SelectTrigger className="h-9 text-xs rounded-lg border-gray-200 min-w-[170px] bg-white">
                     <Filter className="h-3.5 w-3.5 mr-1.5 text-gray-400 flex-shrink-0" />
