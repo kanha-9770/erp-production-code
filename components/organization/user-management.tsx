@@ -235,10 +235,7 @@ export function UserManagement() {
             Assign users to organizational units and manage their roles
           </p>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700">
-          <UserPlus className="h-4 w-4 mr-2" />
-          Add New User
-        </Button>
+        {/* User creation is done via Settings > Users page */}
       </div>
 
       {/* Statistics Cards */}

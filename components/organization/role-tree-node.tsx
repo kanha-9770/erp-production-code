@@ -29,8 +29,20 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
     dispatch({ type: "TOGGLE_EXPAND", payload: { roleId: role.id } })
   }
 
+  const isAdminRole = !!role.isAdmin
+
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation()
+
+    if (isAdminRole) {
+      toast({
+        variant: "destructive",
+        title: "Cannot delete admin role",
+        description: "Admin roles are protected and cannot be deleted.",
+      })
+      return
+    }
+
     const roleName = role.name?.trim() || "this role"
     if (!confirm(`Delete "${roleName}" and all its sub-roles?\nThis cannot be undone.`)) return
 
@@ -55,11 +67,22 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
     <div className="flex flex-col items-center relative flex-1">
       <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
 
-      <div className="relative group bg-white border-2 border-slate-900 rounded-lg p-3 w-52 text-center z-20 shadow-[3px_3px_0px_0px_rgba(15,23,42,1)] mx-4 hover:-translate-y-1 transition-all">
+      <div className={cn(
+        "relative group rounded-lg p-3 w-52 text-center z-20 mx-4 hover:-translate-y-1 transition-all",
+        isAdminRole
+          ? "bg-amber-50 border-2 border-amber-500 shadow-[3px_3px_0px_0px_rgba(217,119,6,1)]"
+          : "bg-white border-2 border-slate-900 shadow-[3px_3px_0px_0px_rgba(15,23,42,1)]"
+      )}>
         <h4 className="text-sm font-black text-slate-900 truncate">
           {role.name || "Untitled Role"}
         </h4>
         <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">Level {role.level ?? "?"}</p>
+
+        {isAdminRole && (
+          <div className="mt-2 text-[9px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded border border-amber-300 inline-block">
+            ADMIN
+          </div>
+        )}
 
         {role.shareDataWithPeers && (
           <div className="mt-2 text-[9px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200 inline-block">
@@ -78,9 +101,11 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
                     parentId: role.id,
                     name: "",
                     description: "",
+                    isAdmin: false,
+                    shareDataWithPeers: false,
                     level: (role.level ?? 0) + 1,
                     children: [],
-                  } as any,
+                  },
                 },
               })
             }
@@ -91,18 +116,25 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
           </button>
           <button
             onClick={() => dispatch({ type: "SELECT_ROLE", payload: { role: { ...role } } })}
-            className="bg-white border border-slate-900 text-slate-900 p-1 rounded-full shadow-lg hover:bg-slate-100"
-            title="Edit"
+            className={cn(
+              "p-1 rounded-full shadow-lg",
+              isAdminRole
+                ? "bg-amber-50 border border-amber-400 text-amber-700 hover:bg-amber-100"
+                : "bg-white border border-slate-900 text-slate-900 hover:bg-slate-100"
+            )}
+            title={isAdminRole ? "View (protected)" : "Edit"}
           >
             <Settings2 className="h-3.5 w-3.5" />
           </button>
-          <button
-            onClick={handleDelete}
-            className="bg-red-600 hover:bg-red-700 text-white p-1 rounded-full shadow-lg transition-colors"
-            title="Delete role"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {!isAdminRole && (
+            <button
+              onClick={handleDelete}
+              className="bg-red-600 hover:bg-red-700 text-white p-1 rounded-full shadow-lg transition-colors"
+              title="Delete role"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

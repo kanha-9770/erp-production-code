@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConditionalLayout } from "@/components/layout/ConditionalLayout";
 import { ReduxProvider } from "@/lib/providers/StoreProvider";
+import { Toaster } from "@/components/ui/toaster";
 const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "ERP System",
@@ -20,6 +21,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ReduxProvider>
           <ConditionalLayout>{children}</ConditionalLayout>
+          <Toaster />
         </ReduxProvider>
       </body>
     </html>

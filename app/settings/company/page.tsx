@@ -79,15 +79,6 @@ function OrganizationHeader() {
             <span>Roles</span>
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 border-slate-300 hover:border-indigo-200 hover:bg-indigo-50/60 text-slate-700 h-9 px-3 sm:px-4"
-            onClick={() => dispatch({ type: "OPEN_USER_MANAGEMENT_SHEET" })}
-          >
-            <Users className="h-4 w-4 text-indigo-600" />
-            <span>Users</span>
-          </Button>
 
           <Button
             size="sm"
@@ -213,7 +204,9 @@ function OrganizationManagementContent() {
       <RoleManagementSheet />
       <RoleFormModal />
       <OrganizationUnitFormModal />
-      <StatisticsPopup />
+      <StatisticsPopup isOpen={false} onClose={function (): void {
+        throw new Error("Function not implemented.");
+      } } type={"roles"} data={undefined} expandedCount={0} />
       <UserManagementSheet
         open={state.showUserManagementSheet}
         onOpenChange={(open) =>
