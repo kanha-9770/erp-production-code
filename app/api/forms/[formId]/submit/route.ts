@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import crypto from "crypto";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { DatabaseTransforms } from "@/lib/database/DatabaseTransforms";
+import { DatabaseService } from "@/lib/database/database-service";
 
 // ──────────────────────────────────────────────
 // Type definitions
@@ -189,7 +190,30 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       headersList.get("x-real-ip") ||
       "::1";
 
-    // ─── 7. Create record with conditional fields ───────────────
+    // ─── 7. Create or update record ───────────────────────────────
+    const editingRecordId = body.editingRecordId as string | undefined;
+
+    if (editingRecordId) {
+      // UPDATE existing record — reuse the same structured data transformation
+      const updatedRecord = await DatabaseService.updateFormRecord(editingRecordId, {
+        recordData: structuredRecordData,
+        status: "submitted",
+        submittedBy: submittedByDisplay,
+        updatedAt: new Date(),
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: "Record updated successfully!",
+        data: {
+          id: updatedRecord.id,
+          recordData: structuredRecordData,
+          submittedAt: updatedRecord.submittedAt,
+          form: { id: form.id, name: form.name },
+        },
+      });
+    }
+
     const record = await createFormRecord(
       formId,
       tableName,

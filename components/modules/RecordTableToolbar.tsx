@@ -97,92 +97,17 @@ export function RecordTableToolbar({
           value={recordsPerPage.toString()}
           onValueChange={(v) => setRecordsPerPage(Number(v))}
         >
-          <SelectTrigger className="h-9 w-30 rounded-lg border-gray-300 hover:border-gray-400 transition-all duration-200">
+          <SelectTrigger className="h-9 w-[140px] rounded-lg border-gray-300 hover:border-gray-400 transition-all duration-200">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {[100, 200, 400, 500].map((n) => (
+            {[20, 100, 300, 500].map((n) => (
               <SelectItem key={n} value={n.toString()}>
                 {n} per page
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-
-        {/* Conditional formatting */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-9 gap-2 bg-transparent flex-shrink-0">
-              <SlidersHorizontal className="h-4 w-4" /> Conditional Formatting
-              {conditionalRules.length > 0 && (
-                <span className="bg-blue-100 text-blue-800 text-xs font-bold rounded-full px-2 py-0.5">
-                  {conditionalRules.length}
-                </span>
-              )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-96">
-            <DropdownMenuLabel>Conditional Formatting Rules</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {conditionalRules.length === 0 ? (
-              <div className="text-center py-4 text-sm text-gray-500">
-                No rules defined yet
-              </div>
-            ) : (
-              conditionalRules.map((rule, idx) => {
-                const fieldLabel =
-                  formFieldsWithSections.find((f) => f.id === rule.fieldId)?.label ||
-                  (rule.fieldId === "all" ? "All columns" : "Unknown");
-                return (
-                  <div
-                    key={rule.id}
-                    className="p-2 border-b flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <span className="font-medium">{fieldLabel}</span>{" "}
-                      <span className="text-gray-600">{rule.condition}</span>{" "}
-                      {rule.value && (
-                        <span className="font-medium">
-                          {'"'}
-                          {rule.value}
-                          {'"'}
-                        </span>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 w-6 p-0"
-                      onClick={() =>
-                        setConditionalRules((rules) => rules.filter((_, i) => i !== idx))
-                      }
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                );
-              })
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() =>
-                setConditionalRules((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now().toString(),
-                    fieldId: "all",
-                    condition: "today",
-                    backgroundColor: "#fffbeb",
-                    textColor: "#f59e0b",
-                    bold: true,
-                  },
-                ])
-              }
-            >
-              + Due Today - Amber Highlight
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
         {/* Column options */}
         <DropdownMenu>

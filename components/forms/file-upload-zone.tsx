@@ -70,17 +70,19 @@ export function FileUploadZone({
     }
   };
 
-  const getFileTypeFromUrl = (url?: string) => {
+  const getFileTypeFromUrl = (url?: any) => {
     if (!url) return "file";
-    const path = url.split("?")[0].toLowerCase();
+    const str = typeof url === "string" ? url : url?.url || url?.name || String(url);
+    const path = str.split("?")[0].toLowerCase();
     if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/)) return "image";
     if (path.match(/\.(mp4|webm|ogg|mov|mkv)$/)) return "video";
     if (path.match(/\.(pdf)$/)) return "pdf";
     return "file";
   };
 
-  const getFileName = (url: string) => {
-    const name = url.split("/").pop()?.split("?")[0] || "file";
+  const getFileName = (url: any) => {
+    const str = typeof url === "string" ? url : url?.url || url?.name || String(url);
+    const name = str.split("/").pop()?.split("?")[0] || "file";
     return name.length > 25 ? name.substring(0, 22) + "..." : name;
   };
 

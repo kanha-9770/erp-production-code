@@ -25,6 +25,12 @@ interface PublicFormDialogProps {
   isOpen: boolean;
   onClose: () => void;
   allowAdminPreview?: boolean;
+  /** Pre-fill form with existing record data (field-id → value map) */
+  initialRecordData?: Record<string, any> | null;
+  /** Force view-only mode */
+  forceViewOnly?: boolean;
+  /** When set, submit will UPDATE this record instead of creating a new one */
+  editingRecordId?: string | null;
 }
 
 export function PublicFormDialog({
@@ -32,12 +38,18 @@ export function PublicFormDialog({
   isOpen,
   onClose,
   allowAdminPreview = false,
+  initialRecordData = null,
+  forceViewOnly = false,
+  editingRecordId = null,
 }: PublicFormDialogProps) {
   const hook = usePublicForm({
     formId,
     isOpen,
     onClose,
     allowAdminPreview,
+    initialRecordData,
+    forceViewOnly,
+    editingRecordId,
   });
 
   const {

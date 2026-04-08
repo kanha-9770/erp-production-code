@@ -37,7 +37,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import AdvancedFilterSidebar from "./AdvancedFilterSidebar";
-import { DynamicDataPreviewModal2 } from "../DynamicDataPreviewModal";
+import { PublicFormDialog } from "@/components/public-form-dialog";
 import { SubformPreviewModal } from "./SubformPreviewModal";
 import { SortableColumnItem } from "./SortableColumnItem";
 import { RecordTableToolbar } from "./RecordTableToolbar";
@@ -252,8 +252,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     },
     [setSelectedCell, setFocusedCell],
   );
-  // Add this line
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [editRecordOpen, setEditRecordOpen] = React.useState(false);
+  const [editingRecord, setEditingRecord] = React.useState<EnhancedFormRecord | null>(null);
 
   const handleCellContextMenu = useCallback(
     (cellKey: string) => {
@@ -991,7 +992,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             "text-gray-400 opacity-50",
                                           )}
                                           onClick={() => {
-                                            if (canEditThisRecord) onEditRecord(record);
+                                            if (canEditThisRecord) {
+                                              setEditingRecord(record);
+                                              setEditRecordOpen(true);
+                                            }
                                           }}
                                           disabled={!canEditThisRecord}
                                         >
@@ -1428,15 +1432,39 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             </DialogContent>
           </Dialog>
 
-          {/* View Details Modal */}
-          {viewDetailsOpen && selectedRecord && (
-            <DynamicDataPreviewModal2
-              isOpen={viewDetailsOpen}
-              onClose={() => setViewDetailsOpen(false)}
-              rows={[selectedRecord]}
-              title={selectedRecord.title || "Record Details"}
-            />
-          )}
+          {/* View Details — opens the public form dialog in view-only mode */}
+          {viewDetailsOpen && selectedRecord && (() => {
+            const plainData: Record<string, any> = {};
+            for (const [key, entry] of Object.entries(selectedRecord.recordData || {})) {
+              plainData[key] = entry && typeof entry === "object" && "value" in entry ? entry.value : entry;
+            }
+            return (
+              <PublicFormDialog
+                formId={selectedRecord.formId}
+                isOpen={viewDetailsOpen}
+                onClose={() => setViewDetailsOpen(false)}
+                initialRecordData={plainData}
+                forceViewOnly
+              />
+            );
+          })()}
+
+          {/* Edit Record — opens the public form dialog in editable mode */}
+          {editRecordOpen && editingRecord && (() => {
+            const plainData: Record<string, any> = {};
+            for (const [key, entry] of Object.entries(editingRecord.recordData || {})) {
+              plainData[key] = entry && typeof entry === "object" && "value" in entry ? entry.value : entry;
+            }
+            return (
+              <PublicFormDialog
+                formId={editingRecord.formId}
+                isOpen={editRecordOpen}
+                onClose={() => setEditRecordOpen(false)}
+                initialRecordData={plainData}
+                editingRecordId={editingRecord.id}
+              />
+            );
+          })()}
         </div>
       </div>
     </TooltipProvider>

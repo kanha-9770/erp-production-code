@@ -104,6 +104,12 @@ interface PublicFormProps {
   isOpen: boolean;
   onClose: () => void;
   allowAdminPreview?: boolean;
+  /** Pre-fill form with existing record data (field-id → value map) */
+  initialRecordData?: Record<string, any> | null;
+  /** Force view-only mode (used when viewing, not editing, an existing record) */
+  forceViewOnly?: boolean;
+  /** When set, submit will UPDATE this record instead of creating a new one */
+  editingRecordId?: string | null;
 }
 
 export function usePublicForm({
@@ -111,6 +117,9 @@ export function usePublicForm({
   isOpen,
   onClose,
   allowAdminPreview = false,
+  initialRecordData = null,
+  forceViewOnly = false,
+  editingRecordId = null,
 }: PublicFormProps) {
   const { toast } = useToast();
   const [form, setForm] = useState<Form | null>(null);
@@ -1018,7 +1027,8 @@ export function usePublicForm({
       if (result.data.subforms?.length) {
         processSubforms(result.data.subforms);
       }
-      setFormData(initialData);
+      // If viewing an existing record, overlay its data on top of defaults
+      setFormData(initialRecordData ? { ...initialData, ...initialRecordData } : initialData);
       setCollapsedSubforms(initialCollapsed);
       if (userRoleId) {
         await fetchSectionPermissions(result.data);
@@ -1548,7 +1558,8 @@ export function usePublicForm({
   }, [sectionPermissions]);
 
   // Effective view-only: form says VIEW but section permissions can override
-  const effectiveViewOnly = isFormViewOnly && !hasAnySectionEditPermission;
+  // Force view-only when explicitly requested (e.g. viewing an existing record)
+  const effectiveViewOnly = forceViewOnly || (isFormViewOnly && !hasAnySectionEditPermission);
 
   // Debug log
   console.log("[usePublicForm] PERMISSION STATE:", {
@@ -1644,11 +1655,19 @@ export function usePublicForm({
             }
           },
         );
-        const submitPayload = {
-          recordData: { ...dataToSubmit, ...dynamicRowsData },
-          submittedBy: userId || currentUser?.id || "anonymous",
+        const mergedRecordData = { ...dataToSubmit, ...dynamicRowsData };
+        const submittedBy = userId || currentUser?.id || "anonymous";
+
+        // Both create and update go through the submit API so that
+        // transformToStructuredData is applied consistently.
+        const submitPayload: Record<string, any> = {
+          recordData: mergedRecordData,
+          submittedBy,
           userAgent: navigator.userAgent,
         };
+        if (editingRecordId) {
+          submitPayload.editingRecordId = editingRecordId;
+        }
         const res = await fetch(`/api/forms/${formId}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
