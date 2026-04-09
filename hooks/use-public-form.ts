@@ -360,6 +360,29 @@ export function usePublicForm({
     [formData],
   );
 
+  // Evaluate a section's own conditional visibility rule (mirrors the
+  // field & subform conditional logic). Returns true when the section
+  // should remain visible.
+  const evaluateSectionConditional = useCallback(
+    (section: Form["sections"][number]): boolean => {
+      if (!section.conditional) return true;
+      const { type = "show", parentFieldId, value: targetValue } =
+        section.conditional as {
+          type?: "show" | "hide";
+          parentFieldId?: string;
+          value?: any;
+        };
+      if (!parentFieldId || targetValue === undefined) return true;
+      const parentVal = formData[parentFieldId];
+      const parentStr = Array.isArray(parentVal)
+        ? parentVal
+        : [String(parentVal ?? "")];
+      const matches = parentStr.some((v) => String(v) === String(targetValue));
+      return type === "show" ? matches : !matches;
+    },
+    [formData],
+  );
+
   const isSectionVisible = useCallback(
     (id: string): boolean => {
       const perms = sectionPermissions[id];
@@ -370,6 +393,19 @@ export function usePublicForm({
       }
 
       if (form) {
+        // 1) If this id belongs to a section, evaluate the section's
+        //    own conditional rule.
+        const section = form.sections?.find((s) => s.id === id);
+        if (section) {
+          if (!evaluateSectionConditional(section)) {
+            console.log("[isSectionVisible]", id, "→ HIDDEN (section conditional)");
+            return false;
+          }
+          return true;
+        }
+
+        // 2) Otherwise, this id may belong to a subform — evaluate
+        //    its conditional (existing behavior, unchanged).
         const checkSubforms = (subforms: Subform[]): boolean | null => {
           for (const sf of subforms) {
             if (sf.id === id) {
@@ -388,7 +424,7 @@ export function usePublicForm({
 
       return true;
     },
-    [sectionPermissions, form, evaluateSubformConditional],
+    [sectionPermissions, form, evaluateSubformConditional, evaluateSectionConditional],
   );
 
   /**

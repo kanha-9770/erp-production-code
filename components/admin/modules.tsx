@@ -109,6 +109,7 @@ export default function ModuleDashboard() {
     isLoading: modulesLoading,
     moveFormOptimistic,
     moveModuleOptimistic,
+    reorderModuleOptimistic,
     publishFormOptimistic,
     deleteFormOptimistic,
     createFormOptimistic,
@@ -147,7 +148,9 @@ export default function ModuleDashboard() {
 
   const [viewMode, setViewMode] = useState<"table" | "grid" | "list">("table");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  // "manual" preserves drag-to-reorder order from the server (sortOrder field).
+  // "asc"/"desc" overrides with alphabetical client-side sort.
+  const [sortOrder, setSortOrder] = useState<"manual" | "asc" | "desc">("manual");
   const [availableParents, setAvailableParents] = useState<
     ParentModuleOption[]
   >([]);
@@ -249,19 +252,29 @@ export default function ModuleDashboard() {
       result = filterRecursive(modules);
     }
 
-    const sortRecursive = (items: FormModule[]): FormModule[] =>
-      [...items]
-        .sort((a, b) =>
-          sortOrder === "asc"
-            ? a.name.localeCompare(b.name)
-            : b.name.localeCompare(a.name),
-        )
-        .map((m) => ({
+    // In "manual" mode keep the server's order (sortOrder field). Only
+    // override with an alphabetical sort when the user explicitly chose it.
+    if (sortOrder === "manual") {
+      const stripRecursive = (items: FormModule[]): FormModule[] =>
+        items.map((m) => ({
           ...m,
-          children: m.children ? sortRecursive(m.children) : [],
+          children: m.children ? stripRecursive(m.children) : [],
         }));
-
-    setFilteredModules(sortRecursive(result));
+      setFilteredModules(stripRecursive(result));
+    } else {
+      const sortRecursive = (items: FormModule[]): FormModule[] =>
+        [...items]
+          .sort((a, b) =>
+            sortOrder === "asc"
+              ? a.name.localeCompare(b.name)
+              : b.name.localeCompare(a.name),
+          )
+          .map((m) => ({
+            ...m,
+            children: m.children ? sortRecursive(m.children) : [],
+          }));
+      setFilteredModules(sortRecursive(result));
+    }
   }, [modules, searchQuery, sortOrder]);
 
   // ── Helpers ─────────────────────────────────────────────────────
@@ -815,6 +828,9 @@ export default function ModuleDashboard() {
                     await moveModuleOptimistic(moduleId, newParentId);
                   }
                 }}
+                onReorderModule={async (moduleId, newParentId, newIndex) => {
+                  await reorderModuleOptimistic(moduleId, newParentId, newIndex);
+                }}
               />
             </div>
           </div>
@@ -842,6 +858,9 @@ export default function ModuleDashboard() {
               if (newParentId !== moduleId) {
                 await moveModuleOptimistic(moduleId, newParentId);
               }
+            }}
+            onReorderModule={async (moduleId, newParentId, newIndex) => {
+              await reorderModuleOptimistic(moduleId, newParentId, newIndex);
             }}
           />
         </div>

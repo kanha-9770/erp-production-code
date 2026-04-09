@@ -163,24 +163,29 @@ async function buildHierarchy(permittedIds: number[], organizationId: string) {
       },
     },
   });
-  // Build module map for quick lookup
-  const moduleMap = new Map(allPermittedModules.map((mod: any) => [mod.id, { ...mod, children: [] }]));
-  // Link children to parents
+  // Build module map for quick lookup. Each entry gets its own children: []
+  // so the tree can be linked by reference below.
+  const moduleMap = new Map(
+    allPermittedModules.map((mod: any) => [mod.id, { ...mod, children: [] }])
+  );
+  // Link children to parents — push the *mapped* node (not the raw Prisma row)
+  // so deeper descendants stay reachable through parent.children.
   allPermittedModules.forEach((mod: any) => {
-    if (mod.parentId) {
-      const parent = moduleMap.get(mod.parentId);
-      if (parent) {
-        parent.children.push(mod);
-      }
+    if (!mod.parentId) return;
+    const parent = moduleMap.get(mod.parentId);
+    const child = moduleMap.get(mod.id);
+    if (parent && child) {
+      parent.children.push(child);
     }
   });
   // Sort children for each parent
   moduleMap.forEach((mod: any) => {
     mod.children.sort((a: any, b: any) => a.sortOrder - b.sortOrder);
   });
-  // Get root modules
+  // Get root modules — anything without a parent OR whose parent is not in
+  // the permitted set (so its subtree still surfaces instead of being lost).
   const rootModules = allPermittedModules
-    .filter((mod: any) => !mod.parentId)
+    .filter((mod: any) => !mod.parentId || !moduleMap.has(mod.parentId))
     .sort((a: any, b: any) => a.sortOrder - b.sortOrder)
     .map((mod: any) => moduleMap.get(mod.id));
   const dropdowns: any[] = []

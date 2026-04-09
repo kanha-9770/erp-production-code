@@ -5,6 +5,7 @@ import {
   useGetOrgModulesQuery,
   useMoveFormMutation,
   useMoveModuleMutation,
+  useReorderModuleMutation,
   usePublishFormMutation,
   useDeleteFormMutation,
   useCreateModuleFormMutation,
@@ -42,6 +43,7 @@ export function useOptimisticModules(organizationId: string | null) {
 
   const [moveFormApi] = useMoveFormMutation()
   const [moveModuleApi] = useMoveModuleMutation()
+  const [reorderModuleApi] = useReorderModuleMutation()
   const [publishFormApi] = usePublishFormMutation()
   const [deleteFormApi] = useDeleteFormMutation()
   const [createFormApi] = useCreateModuleFormMutation()
@@ -182,6 +184,94 @@ export function useOptimisticModules(organizationId: string | null) {
       }
     },
     [patchModules, moveModuleApi, refetch]
+  )
+
+  // ── Reorder module ─────────────────────────────────────────────────────────
+  // Atomic: re-parent (if changed) AND insert at a specific index in the new
+  // parent's children list. The full child list (including the moved id) is
+  // sent to the server so it can reindex sortOrder atomically in one txn.
+
+  const reorderModuleOptimistic = useCallback(
+    async (
+      moduleId: string,
+      newParentId: string | null,
+      newIndex: number
+    ) => {
+      if (newParentId === moduleId) return
+
+      // Build the optimistic patch and capture the new sibling order
+      let orderedSiblingIds: string[] = []
+
+      const patch = patchModules((mods) => {
+        let moved: Module | undefined
+
+        // Remove the moved module from anywhere in the tree
+        const removeFromTree = (items: Module[]): Module[] => {
+          return items.filter((item) => {
+            if (item.id === moduleId) {
+              moved = { ...item, parentId: newParentId }
+              return false
+            }
+            if (item.children) {
+              item.children = removeFromTree(item.children)
+            }
+            return true
+          })
+        }
+
+        const remaining = removeFromTree(mods)
+        mods.length = 0
+        mods.push(...remaining)
+
+        if (!moved) return
+
+        // Insert into the new parent (or root) at the requested index
+        if (newParentId === null) {
+          const safeIndex = Math.max(0, Math.min(newIndex, mods.length))
+          mods.splice(safeIndex, 0, moved)
+          orderedSiblingIds = mods.map((m) => m.id)
+        } else {
+          const insertIntoTree = (items: Module[]): boolean => {
+            for (const item of items) {
+              if (item.id === newParentId) {
+                if (!item.children) item.children = []
+                const safeIndex = Math.max(
+                  0,
+                  Math.min(newIndex, item.children.length)
+                )
+                item.children.splice(safeIndex, 0, moved!)
+                orderedSiblingIds = item.children.map((c) => c.id)
+                return true
+              }
+              if (item.children && insertIntoTree(item.children)) return true
+            }
+            return false
+          }
+          insertIntoTree(mods)
+        }
+      })
+
+      if (orderedSiblingIds.length === 0) {
+        // Nothing was moved (id not found) — bail out cleanly
+        return
+      }
+
+      try {
+        await reorderModuleApi({
+          moduleId,
+          newParentId,
+          orderedSiblingIds,
+        }).unwrap()
+        // Don't refetch immediately — the optimistic state already matches
+        // what the server now holds. A background refetch will reconcile.
+        refetch()
+      } catch (err) {
+        patch.undo()
+        refetch()
+        throw err
+      }
+    },
+    [patchModules, reorderModuleApi, refetch]
   )
 
   // ── Publish form ───────────────────────────────────────────────────────────
@@ -392,6 +482,7 @@ export function useOptimisticModules(organizationId: string | null) {
     mutate: refetch,
     moveFormOptimistic,
     moveModuleOptimistic,
+    reorderModuleOptimistic,
     publishFormOptimistic,
     deleteFormOptimistic,
     createFormOptimistic,

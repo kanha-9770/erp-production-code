@@ -725,6 +725,7 @@ export default function SectionComponent({
           open={showSettings}
           onOpenChange={setShowSettings}
           onUpdate={onUpdateSection}
+          formId={formId}
         />
       )}
 

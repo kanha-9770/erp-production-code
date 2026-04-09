@@ -188,6 +188,24 @@ export const modulesApi = baseApi.injectEndpoints({
       invalidatesTags: [{ type: "Module" }, "OrgModules"],
     }),
 
+    // Reorder module: atomically re-parents (if needed) AND reindexes siblings
+    reorderModule: builder.mutation<
+      ApiResponse,
+      {
+        moduleId: string;
+        newParentId: string | null;
+        orderedSiblingIds: string[];
+      }
+    >({
+      query: ({ moduleId, newParentId, orderedSiblingIds }) => ({
+        url: `/modules/${moduleId}/reorder`,
+        method: "PATCH",
+        body: { newParentId, orderedSiblingIds },
+      }),
+      // Don't invalidate — the optimistic patch in the hook owns the cache
+      // until the request settles. Refetch is triggered manually on success.
+    }),
+
     // Delete module
     deleteModule: builder.mutation<ApiResponse, string>({
       query: (moduleId) => ({
@@ -279,6 +297,7 @@ export const {
   useCreateModuleMutation,
   useUpdateModuleMutation,
   useMoveModuleMutation,
+  useReorderModuleMutation,
   useDeleteModuleMutation,
   useCreateModuleFormMutation,
   useMoveFormMutation,
