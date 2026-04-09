@@ -936,7 +936,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen bg-gray-50 overflow-x-hidden overflow-y-hidden">
+      <div className="flex h-screen max-h-[35.8rem] bg-gray-50 overflow-x-hidden overflow-y-hidden">
         {/* Advanced Filter Sidebar */}
         <AdvancedFilterSidebar
           isOpen={isFilterSidebarOpen}
@@ -1043,7 +1043,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                   className="flex hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 min-w-max border-b border-gray-200 last:border-b-0"
                                 >
                                   {/* Checkbox */}
-                                  <div className="w-10 h-9 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-10 h-8 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
                                     <Checkbox
                                       checked={selectedRecords.has(record.id)}
                                       onCheckedChange={(c) => {
@@ -1058,12 +1058,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                   </div>
 
                                   {/* Row number */}
-                                  <div className="w-12 h-9 border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
+                                  <div className="w-12 h-8 border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
                                     {startIdx + rowIndex + 1}
                                   </div>
 
                                   {/* Row actions */}
-                                  <div className="w-20 sm:w-24 h-9 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-20 sm:w-24 h-8 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
                                     <DropdownMenu>
                                       <DropdownMenuTrigger asChild>
                                         <Button
@@ -1228,7 +1228,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                               (_, i) => (
                                 <div
                                   key={`dummy-${i}`}
-                                  className="flex h-9 border-b border-gray-200 bg-white min-w-max last:border-b-0"
+                                  className="flex h-8 border-b border-gray-200 bg-white min-w-max last:border-b-0"
                                 >
                                   <div className="w-10 border-r border-gray-200 flex-shrink-0" />
                                   <div className="w-12 border-r border-gray-200 flex-shrink-0" />

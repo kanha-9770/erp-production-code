@@ -414,7 +414,7 @@ export function RecordTableToolbar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {[20, 100, 300, 500].map((n) => (
+            {[20, 100, 500, 1000].map((n) => (
               <SelectItem key={n} value={n.toString()} className="text-xs">
                 {n} per page
               </SelectItem>
