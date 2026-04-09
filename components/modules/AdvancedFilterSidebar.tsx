@@ -1,7 +1,7 @@
 'use client';
 
 import React from "react"
-import { ChevronDown, Search, X, Trash2, Check, Loader2 } from "lucide-react"
+import { ChevronDown, Search, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
@@ -16,11 +16,6 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import {
-  useGetSavedFiltersQuery,
-  useDeleteSavedFilterMutation,
-} from "@/lib/api/saved-filters"
-import type { SavedFilterData } from "@/lib/api/saved-filters"
 
 export interface FieldFilter {
   fieldId: string
@@ -68,7 +63,6 @@ interface AdvancedFilterSidebarProps {
   preselectedFieldId?: string | null
   onColumnSearch?: (fieldId: string, searchValue: string) => void
   records?: RecordData[]
-  moduleId?: string
 }
 
 interface ExpandedField {
@@ -310,7 +304,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   preselectedFieldId,
   onColumnSearch,
   records = [],
-  moduleId,
 }) => {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [columnSearchMode, setColumnSearchMode] = React.useState(false)
@@ -327,17 +320,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
   // ── Value Picker dialog state ──
   const [valuePickerOpen, setValuePickerOpen] = React.useState(false)
   const [valuePickerFieldId, setValuePickerFieldId] = React.useState<string | null>(null)
-
-  // ── Saved Filters (from database) ──
-  const [savedFiltersExpanded, setSavedFiltersExpanded] = React.useState(true)
-
-  const { data: savedFiltersResponse, isLoading: isLoadingSavedFilters } = useGetSavedFiltersQuery(
-    moduleId || "",
-    { skip: !moduleId }
-  )
-  const [deleteSavedFilter] = useDeleteSavedFilterMutation()
-
-  const savedFilters: SavedFilterData[] = savedFiltersResponse?.data || []
 
   // ── Keyboard ──
   React.useEffect(() => {
@@ -507,30 +489,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     [records]
   )
 
-  // ── Saved filter handlers (database) ──
-
-  const handleDeleteSavedFilter = async (id: string) => {
-    try {
-      await deleteSavedFilter(id).unwrap()
-    } catch (err) {
-      console.error("Failed to delete saved filter:", err)
-    }
-  }
-
-  const handleApplySavedFilter = (saved: SavedFilterData) => {
-    const newExpanded = new Map<string, ExpandedField>()
-    for (const f of saved.filters) {
-      newExpanded.set(f.fieldId, {
-        fieldId: f.fieldId,
-        operator: f.operator,
-        value: f.value,
-        value2: f.value2,
-      })
-    }
-    setExpandedFields(newExpanded)
-    onFiltersChange([...saved.filters])
-  }
-
   // ── Value picker helpers ──
 
   const valuePickerField = valuePickerFieldId ? fields.find((f) => f.id === valuePickerFieldId) : null
@@ -649,82 +607,6 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── Saved Filters Section (from database) ── */}
-        {moduleId && (
-          <div className="border-b border-gray-200">
-            <button
-              onClick={() => setSavedFiltersExpanded(!savedFiltersExpanded)}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <ChevronDown
-                  className={cn(
-                    "h-4 w-4 text-gray-600 transition-transform",
-                    !savedFiltersExpanded && "-rotate-90"
-                  )}
-                />
-                <span className="text-sm font-semibold text-gray-900">Saved Filters</span>
-                {savedFilters.length > 0 && (
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{savedFilters.length}</Badge>
-                )}
-              </div>
-            </button>
-            {savedFiltersExpanded && (
-              <div className="px-4 pb-3 space-y-1">
-                {isLoadingSavedFilters ? (
-                  <div className="flex items-center justify-center py-3">
-                    <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-                    <span className="ml-2 text-xs text-gray-400">Loading saved filters...</span>
-                  </div>
-                ) : savedFilters.length === 0 ? (
-                  <div className="text-xs text-gray-400 py-2 text-center">
-                    No saved filters yet. Apply filters and use the Save button in the toolbar.
-                  </div>
-                ) : (
-                  savedFilters.map((sf) => {
-                    const isActive =
-                      sf.filters.length === filters.length &&
-                      sf.filters.every((sfFilter) =>
-                        filters.some(
-                          (af) =>
-                            af.fieldId === sfFilter.fieldId &&
-                            af.operator === sfFilter.operator &&
-                            af.value === sfFilter.value
-                        )
-                      )
-                    return (
-                      <div
-                        key={sf.id}
-                        className={cn(
-                          "flex items-center justify-between group rounded-md px-2 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors",
-                          isActive && "bg-blue-50 border border-blue-200"
-                        )}
-                        onClick={() => handleApplySavedFilter(sf)}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {isActive && <Check className="h-3 w-3 text-blue-600 shrink-0" />}
-                          <span className="text-xs text-gray-700 truncate">{sf.name}</span>
-                          <span className="text-[10px] text-gray-400 shrink-0">({sf.filters.length})</span>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteSavedFilter(sf.id)
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-red-100 rounded transition-opacity"
-                          title="Delete saved filter"
-                        >
-                          <Trash2 className="h-3 w-3 text-red-500" />
-                        </button>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ── Field Filters Section ── */}
         <div className="border-b border-gray-200">
           <button

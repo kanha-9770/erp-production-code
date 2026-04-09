@@ -956,7 +956,6 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
             setColumnSearchValue(searchValue);
           }}
           records={formRecords}
-          moduleId={allModuleForms[0]?.moduleId || allModuleForms[0]?.id}
         />
 
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -983,6 +982,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 setRecordSortOrder={setRecordSortOrder}
                 onSaveFilter={handleToolbarSaveFilter}
                 canSaveFilter={activeFieldFilters.length > 0 && !!moduleId}
+                moduleId={moduleId || undefined}
+                onApplySavedFilter={(filters) => {
+                  setActiveFieldFilters(filters);
+                  setCurrentPage(1);
+                }}
               />
 
               <div className="border border-gray-200 bg-white rounded-xl overflow-hidden shadow-lg flex-1 flex flex-col">
