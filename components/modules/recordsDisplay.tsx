@@ -108,6 +108,56 @@ interface RecordsDisplayProps {
   users?: User[];
 }
 
+/**
+ * Flatten structured or legacy recordData into a plain { fieldId: value } map.
+ * Handles three formats:
+ *   1. New structured: { sections: { sId: { fields: { fId: value } } }, subforms: { ... }, ... }
+ *   2. Legacy object:  { fieldId: { value, type, ... }, ... }
+ *   3. Flat:           { fieldId: value, ... }
+ */
+function flattenRecordData(recordData: Record<string, any> | null | undefined): Record<string, any> {
+  if (!recordData) return {};
+  const plain: Record<string, any> = {};
+
+  // Extract from structured sections
+  if (recordData.sections && typeof recordData.sections === "object") {
+    for (const section of Object.values(recordData.sections) as any[]) {
+      const fields = section?.fields;
+      if (fields && typeof fields === "object") {
+        for (const [fieldId, val] of Object.entries(fields)) {
+          plain[fieldId] = val && typeof val === "object" && "value" in val ? val.value : val;
+        }
+      }
+    }
+  }
+
+  // Extract from structured subforms (static fields + dynamic rows)
+  if (recordData.subforms && typeof recordData.subforms === "object") {
+    for (const subform of Object.values(recordData.subforms) as any[]) {
+      const fields = subform?.fields;
+      if (fields && typeof fields === "object") {
+        for (const [fieldId, val] of Object.entries(fields)) {
+          plain[fieldId] = val && typeof val === "object" && "value" in val ? val.value : val;
+        }
+      }
+      // Preserve dynamic rows data
+      if (Array.isArray(subform?.rows) && subform.rows.length > 0) {
+        // Dynamic rows are handled via _dynamicRows_ keys in usePublicForm
+      }
+    }
+  }
+
+  // Fallback: iterate top-level keys for legacy/flat records
+  const structuredKeys = new Set(["formId", "formName", "sections", "subforms", "metadata"]);
+  for (const [key, entry] of Object.entries(recordData)) {
+    if (structuredKeys.has(key)) continue;
+    if (plain[key] !== undefined) continue; // already extracted from sections
+    plain[key] = entry && typeof entry === "object" && "value" in entry ? entry.value : entry;
+  }
+
+  return plain;
+}
+
 // ============== MAIN COMPONENT ==============
 
 const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
@@ -1434,10 +1484,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           {/* View Details — opens the public form dialog in view-only mode */}
           {viewDetailsOpen && selectedRecord && (() => {
-            const plainData: Record<string, any> = {};
-            for (const [key, entry] of Object.entries(selectedRecord.recordData || {})) {
-              plainData[key] = entry && typeof entry === "object" && "value" in entry ? entry.value : entry;
-            }
+            const plainData = flattenRecordData(selectedRecord.recordData);
             return (
               <PublicFormDialog
                 formId={selectedRecord.formId}
@@ -1451,10 +1498,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
           {/* Edit Record — opens the public form dialog in editable mode */}
           {editRecordOpen && editingRecord && (() => {
-            const plainData: Record<string, any> = {};
-            for (const [key, entry] of Object.entries(editingRecord.recordData || {})) {
-              plainData[key] = entry && typeof entry === "object" && "value" in entry ? entry.value : entry;
-            }
+            const plainData = flattenRecordData(editingRecord.recordData);
             return (
               <PublicFormDialog
                 formId={editingRecord.formId}

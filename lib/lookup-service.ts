@@ -349,6 +349,24 @@ export class LookupService {
       }
     }
 
+    // Fallback: handle flat-format records (legacy records where fields were
+    // stored directly as recordData[fieldId] = value, without sections wrapper)
+    const structuredKeys = new Set(["formId", "formName", "sections", "subforms", "metadata"]);
+    for (const [fieldKey, fieldDataAny] of Object.entries(recordData)) {
+      if (structuredKeys.has(fieldKey)) continue;
+      const def = fieldDefMap[fieldKey];
+      if (!def) continue;
+      // Skip if already resolved from sections/subforms
+      const label = def.label || fieldKey;
+      if (transformedData[label]) continue;
+      resolveField(
+        fieldKey,
+        fieldDataAny,
+        def.sectionId || def.subformId || "",
+        def.sectionId ? "section" : "subform",
+      );
+    }
+
     return transformedData;
   }
 
