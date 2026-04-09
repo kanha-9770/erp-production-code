@@ -162,9 +162,16 @@ export default function LookupConfigurationDialog({
 
   // Dynamic sources
   const [sources, setSources] = useState<LookupSource[]>([]);
-  const [selectedModuleId, setSelectedModuleId] = useState<string>("");
+  // Top-level module (modules whose parentId is null)
+  const [selectedTopModuleId, setSelectedTopModuleId] = useState<string>("");
+  // Optional submodule (a child module of the selected top-level module)
+  const [selectedSubmoduleId, setSelectedSubmoduleId] = useState<string>("");
   const [selectedFormId, setSelectedFormId] = useState<string>("");
   const [selectedSectionId, setSelectedSectionId] = useState<string>("all");
+
+  // Effective module used by every downstream filter / fetch:
+  // submodule wins when picked, otherwise the top-level module.
+  const selectedModuleId = selectedSubmoduleId || selectedTopModuleId;
 
   // Master dropdowns
   const [masterDropdowns, setMasterDropdowns] = useState<MasterDropdown[]>([]);
@@ -202,10 +209,22 @@ export default function LookupConfigurationDialog({
   const savedTemplates = (templatesData as any)?.data || [];
 
   /* ===================== COMPUTED DATA ===================== */
-  const modules = useMemo(
-    () => sources.filter((s) => s.type === "module"),
+  // Top-level modules only (modules with no parent module).
+  const topLevelModules = useMemo(
+    () => sources.filter((s) => s.type === "module" && !s.parentId),
     [sources]
   );
+
+  // Submodules (direct children) of the selected top-level module.
+  // NOTE: a module's `id` is prefixed (`module_xxx`) but its `parentId`
+  // is the raw db id (no prefix), so we strip the prefix to compare.
+  const submodules = useMemo(() => {
+    if (!selectedTopModuleId) return [];
+    const topKey = selectedTopModuleId.replace(/^module_/, "");
+    return sources.filter(
+      (s) => s.type === "module" && s.parentId === topKey
+    );
+  }, [sources, selectedTopModuleId]);
 
   const forms = useMemo(() => {
     if (!selectedModuleId) return [];
@@ -437,13 +456,43 @@ export default function LookupConfigurationDialog({
   /* ===================== ACTIONS ===================== */
   const resetSelection = () => {
     setStep("selection");
-    setSelectedModuleId("");
+    setSelectedTopModuleId("");
+    setSelectedSubmoduleId("");
     setSelectedFormId("");
     setSelectedSectionId("all");
     setSelectedFields([]);
     setFieldSearch("");
     setDependencies([]);
     setMasterDataValues({});
+  };
+
+  /**
+   * Given a (possibly nested) moduleId and the full sources list, walks up the
+   * parent chain to find the root (top-level) module. Returns both the
+   * top-level id and the submodule id (empty if the input is itself top-level).
+   */
+  const resolveModuleHierarchy = (
+    moduleId: string,
+    allSources: LookupSource[]
+  ): { topId: string; subId: string } => {
+    const mod = allSources.find(
+      (s) => s.type === "module" && s.id === moduleId
+    );
+    if (!mod) return { topId: "", subId: "" };
+    if (!mod.parentId) return { topId: mod.id, subId: "" };
+
+    // Walk up to the root. parentId is the raw db id (no prefix).
+    let topPrefixed = `module_${mod.parentId}`;
+    let parent = allSources.find(
+      (s) => s.type === "module" && s.id === topPrefixed
+    );
+    while (parent && parent.parentId) {
+      topPrefixed = `module_${parent.parentId}`;
+      parent = allSources.find(
+        (s) => s.type === "module" && s.id === topPrefixed
+      );
+    }
+    return { topId: topPrefixed, subId: mod.id };
   };
 
   /* ===================== EDIT-MODE INIT ===================== */
@@ -459,7 +508,8 @@ export default function LookupConfigurationDialog({
     console.log("[LookupReconfig] Starting edit init with config:", JSON.stringify(config, null, 2));
 
     // Clean slate
-    setSelectedModuleId("");
+    setSelectedTopModuleId("");
+    setSelectedSubmoduleId("");
     setSelectedFormId("");
     setSelectedSectionId("all");
     setSelectedFields([]);
@@ -485,7 +535,14 @@ export default function LookupConfigurationDialog({
 
     // ─── MASTER TYPE ───
     if (isMasterType) {
-      if (loadedModules.length > 0) setSelectedModuleId(loadedModules[0].id);
+      if (loadedModules.length > 0) {
+        const { topId, subId } = resolveModuleHierarchy(
+          loadedModules[0].id,
+          loadedSources
+        );
+        setSelectedTopModuleId(topId);
+        setSelectedSubmoduleId(subId);
+      }
       try {
         const mr = await triggerGetMasterData().unwrap();
         if (mr.dropdowns) setMasterDropdowns(mr.dropdowns.map((d: any) => ({ id: d.id, name: d.master_data_type_name })));
@@ -568,7 +625,9 @@ export default function LookupConfigurationDialog({
 
     console.log("[LookupReconfig] Resolved:", { configSourceId, cleanSourceId, matchType: match?.type, moduleId, formId, sourcesCount: loadedSources.length });
 
-    setSelectedModuleId(moduleId);
+    const { topId, subId } = resolveModuleHierarchy(moduleId, loadedSources);
+    setSelectedTopModuleId(topId);
+    setSelectedSubmoduleId(subId);
     setSelectedFormId(formId);
     setSelectedSectionId("all");
 
@@ -854,7 +913,9 @@ export default function LookupConfigurationDialog({
         name: templateName.trim(),
         description: templateDesc.trim() || undefined,
         config: {
-          selectedModuleId,
+          selectedTopModuleId,
+          selectedSubmoduleId,
+          selectedModuleId, // legacy: kept so older templates still work
           selectedFormId,
           selectedSectionId,
         },
@@ -883,7 +944,19 @@ export default function LookupConfigurationDialog({
     const deps = template.dependencies || [];
     const cfg = template.config || {};
 
-    setSelectedModuleId(cfg.selectedModuleId || "");
+    // Restore module hierarchy. Newer templates store top/sub explicitly;
+    // older ones only have selectedModuleId, so derive the hierarchy from it.
+    if (cfg.selectedTopModuleId !== undefined || cfg.selectedSubmoduleId !== undefined) {
+      setSelectedTopModuleId(cfg.selectedTopModuleId || "");
+      setSelectedSubmoduleId(cfg.selectedSubmoduleId || "");
+    } else if (cfg.selectedModuleId) {
+      const { topId, subId } = resolveModuleHierarchy(cfg.selectedModuleId, sources);
+      setSelectedTopModuleId(topId || cfg.selectedModuleId);
+      setSelectedSubmoduleId(subId);
+    } else {
+      setSelectedTopModuleId("");
+      setSelectedSubmoduleId("");
+    }
     setSelectedFormId(cfg.selectedFormId || "");
     setSelectedSectionId(cfg.selectedSectionId || "all");
     setSelectedFields(fields);
@@ -1044,16 +1117,17 @@ export default function LookupConfigurationDialog({
 
         {/* DROPDOWNS */}
         <div className={cn("px-6 py-5 bg-muted/20 border-b shrink-0 transition-opacity duration-200", editLoading && "opacity-40 pointer-events-none")}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Module */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Module (top-level only) */}
             <div className="space-y-2">
               <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 <Database className="h-3 w-3" /> Step 1: Module
               </Label>
               <Select
-                value={selectedModuleId}
+                value={selectedTopModuleId}
                 onValueChange={(v) => {
-                  setSelectedModuleId(v);
+                  setSelectedTopModuleId(v);
+                  setSelectedSubmoduleId("");
                   setSelectedFormId("");
                   setSelectedSectionId("all");
                   setSelectedFields([]);
@@ -1063,9 +1137,48 @@ export default function LookupConfigurationDialog({
                   <SelectValue placeholder="Select Module..." />
                 </SelectTrigger>
                 <SelectContent position="popper" className="z-[100]">
-                  {modules.map((m) => (
+                  {topLevelModules.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Submodule (children of selected top-level module) */}
+            <div className="space-y-2">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Layers className="h-3 w-3" /> Step 2: Submodule
+              </Label>
+              <Select
+                disabled={!selectedTopModuleId || submodules.length === 0}
+                value={selectedSubmoduleId || "none"}
+                onValueChange={(v) => {
+                  setSelectedSubmoduleId(v === "none" ? "" : v);
+                  setSelectedFormId("");
+                  setSelectedSectionId("all");
+                  setSelectedFields([]);
+                }}
+              >
+                <SelectTrigger className="bg-background h-11">
+                  <SelectValue
+                    placeholder={
+                      !selectedTopModuleId
+                        ? "Select module first"
+                        : submodules.length === 0
+                          ? "No submodules"
+                          : "Select Submodule..."
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent position="popper" className="z-[100]">
+                  <SelectItem value="none">
+                    -- No submodule --
+                  </SelectItem>
+                  {submodules.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1075,7 +1188,7 @@ export default function LookupConfigurationDialog({
             {/* Form */}
             <div className="space-y-2">
               <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <FileText className="h-3 w-3" /> Step 2: Form
+                <FileText className="h-3 w-3" /> Step 3: Form
               </Label>
               <Select
                 disabled={!selectedModuleId}
@@ -1117,7 +1230,7 @@ export default function LookupConfigurationDialog({
             {/* Section */}
             <div className="space-y-2">
               <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <Layout className="h-3 w-3" /> Step 3: Section
+                <Layout className="h-3 w-3" /> Step 4: Section
               </Label>
               <Select
                 disabled={!selectedFormId}

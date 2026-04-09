@@ -730,6 +730,16 @@ export class LookupService {
               }
             }
           }
+          // Include subform fields. Every subform (root or nested) carries
+          // the root formId, so a single query captures all nesting levels.
+          const subformFields = await this.getSubformFieldsForForm(
+            lookupSource.sourceForm.id,
+            sectionId,
+          );
+          for (const label of subformFields) {
+            fieldLabels.add(label);
+            fromDefinition++;
+          }
         } else if (
           lookupSource.type === "module" &&
           lookupSource.sourceModule
@@ -743,6 +753,14 @@ export class LookupService {
                   fromDefinition++;
                 }
               }
+            }
+            const subformFields = await this.getSubformFieldsForForm(
+              form.id,
+              sectionId,
+            );
+            for (const label of subformFields) {
+              fieldLabels.add(label);
+              fromDefinition++;
             }
           }
         }
@@ -792,6 +810,11 @@ export class LookupService {
               if (label) fieldLabels.add(label);
             }
           }
+          const subformFields = await this.getSubformFieldsForForm(
+            form.id,
+            sectionId,
+          );
+          for (const label of subformFields) fieldLabels.add(label);
           const fields = Array.from(fieldLabels).sort((a, b) =>
             a.localeCompare(b),
           );
@@ -832,6 +855,11 @@ export class LookupService {
                 if (label) fieldLabels.add(label);
               }
             }
+            const subformFields = await this.getSubformFieldsForForm(
+              form.id,
+              sectionId,
+            );
+            for (const label of subformFields) fieldLabels.add(label);
           }
           const fields = Array.from(fieldLabels).sort((a, b) =>
             a.localeCompare(b),
@@ -850,6 +878,47 @@ export class LookupService {
       return [];
     }
   }
+
+  /**
+   * Returns trimmed field labels from every subform attached to a form.
+   * Every subform (root or nested) carries the root formId, so a single
+   * `formId` query captures all nesting levels in one shot.
+   *
+   * When `sectionId` is "all" → all subforms for the form are included.
+   * When `sectionId` is a specific id → only subforms whose parentSectionId
+   * matches that section are included (so the lookup respects section scope).
+   */
+  private async getSubformFieldsForForm(
+    formId: string,
+    sectionId: string = "all",
+  ): Promise<string[]> {
+    try {
+      const where: any = { formId };
+      if (sectionId && sectionId !== "all") {
+        where.parentSectionId = sectionId;
+      }
+
+      const subforms = await prisma.subform.findMany({
+        where,
+        include: {
+          fields: { select: { label: true } },
+        },
+      });
+
+      const labels: string[] = [];
+      for (const sf of subforms) {
+        for (const f of sf.fields) {
+          const label = f.label?.trim();
+          if (label) labels.push(label);
+        }
+      }
+      return labels;
+    } catch (e) {
+      console.error("[getSubformFieldsForForm] error:", e);
+      return [];
+    }
+  }
+
   static async getLookupSources(
     userId: string,
     options: { quick?: boolean } = {},
