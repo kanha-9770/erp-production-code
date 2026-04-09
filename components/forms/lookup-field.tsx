@@ -95,7 +95,7 @@ export function LookupField({
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const isMultiple = field.lookup?.multiple || false;
   const isSearchable = field.lookup?.searchable !== false;
-  const allowCustomValues = field.lookup?.allowCustomValues !== false;
+  const allowCustomValues = field.lookup?.allowCustomValues === true;
   const useIdField = field.lookup?.useIdField || false;
   const idFieldName = field.lookup?.idFieldName;
   const sourceId = field.lookup?.sourceId;

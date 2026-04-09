@@ -45,6 +45,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
 import type { FormField } from "@/types/form-builder";
 import {
   useLazyGetLookupSourcesQuery,
@@ -219,6 +225,14 @@ export default function LookupConfigurationDialog({
         f.label.toLowerCase().includes(fieldSearch.toLowerCase())
       ),
     [sourceFields, fieldSearch]
+  );
+
+  const filteredMasterDropdowns = useMemo(
+    () =>
+      masterDropdowns.filter((m) =>
+        m.name.toLowerCase().includes(fieldSearch.toLowerCase())
+      ),
+    [masterDropdowns, fieldSearch]
   );
 
   const isReadyToShowFields = !!(
@@ -1179,105 +1193,125 @@ export default function LookupConfigurationDialog({
                       <p className="font-medium">Loading fields...</p>
                     </div>
                   ) : (
-                    <div className="space-y-8">
-                      {filteredFields.length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-4">
-                            Form Fields
-                          </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {filteredFields.map((field) => {
-                              const isChecked = selectedFields.some(
-                                (f) => f.fieldName === field.name && !f.isMaster
-                              );
-                              return (
-                                <div
-                                  key={field.name}
-                                  onClick={() => handleFieldToggle(field)}
-                                  className={cn(
-                                    "group relative p-4 border rounded-xl cursor-pointer transition-all flex flex-col gap-1 min-h-[84px]",
-                                    isChecked
-                                      ? "bg-primary/5 border-primary shadow-sm ring-1 ring-primary"
-                                      : "bg-background hover:border-primary/50 hover:bg-muted/30"
-                                  )}
-                                >
-                                  <div className="flex justify-between items-start">
-                                    <span className="text-sm font-semibold truncate pr-6">
-                                      {field.label}
-                                    </span>
-                                    <div
-                                      className={cn(
-                                        "h-5 w-5 rounded-full border flex items-center justify-center transition-colors shrink-0",
-                                        isChecked
-                                          ? "bg-primary border-primary"
-                                          : "border-muted-foreground/30 group-hover:border-primary/50"
-                                      )}
-                                    >
-                                      {isChecked && (
-                                        <Check className="h-3 w-3 text-white" />
-                                      )}
-                                    </div>
-                                  </div>
-                                  <span className="text-[10px] text-muted-foreground uppercase font-mono mt-1">
-                                    {field.type || "text"}
-                                  </span>
+                    <div className="space-y-2">
+                      {(filteredFields.length > 0 || filteredMasterDropdowns.length > 0) && (
+                        <Accordion type="multiple" className="w-full space-y-4">
+                          {filteredFields.length > 0 && (
+                            <AccordionItem value="form-fields" className="border rounded-lg px-4">
+                              <AccordionTrigger className="py-3 text-sm font-medium text-muted-foreground hover:no-underline">
+                                <span className="flex items-center gap-2">
+                                  <FileText className="h-4 w-4" />
+                                  Form Fields
+                                  <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+                                    {filteredFields.length}
+                                  </Badge>
+                                </span>
+                              </AccordionTrigger>
+                              <AccordionContent>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                  {filteredFields.map((field) => {
+                                    const isChecked = selectedFields.some(
+                                      (f) => f.fieldName === field.name && !f.isMaster
+                                    );
+                                    return (
+                                      <div
+                                        key={field.name}
+                                        onClick={() => handleFieldToggle(field)}
+                                        className={cn(
+                                          "group relative p-4 border rounded-xl cursor-pointer transition-all flex flex-col gap-1 min-h-[84px]",
+                                          isChecked
+                                            ? "bg-primary/5 border-primary shadow-sm ring-1 ring-primary"
+                                            : "bg-background hover:border-primary/50 hover:bg-muted/30"
+                                        )}
+                                      >
+                                        <div className="flex justify-between items-start">
+                                          <span className="text-sm font-semibold truncate pr-6">
+                                            {field.label}
+                                          </span>
+                                          <div
+                                            className={cn(
+                                              "h-5 w-5 rounded-full border flex items-center justify-center transition-colors shrink-0",
+                                              isChecked
+                                                ? "bg-primary border-primary"
+                                                : "border-muted-foreground/30 group-hover:border-primary/50"
+                                            )}
+                                          >
+                                            {isChecked && (
+                                              <Check className="h-3 w-3 text-white" />
+                                            )}
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] text-muted-foreground uppercase font-mono mt-1">
+                                          {field.type || "text"}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                              </AccordionContent>
+                            </AccordionItem>
+                          )}
 
-                      {masterDropdowns.length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-4">
-                            Static Master Dropdowns
-                          </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {masterDropdowns.map((master) => {
-                              const isChecked = selectedFields.some(
-                                (f) => f.fieldName === master.id && f.isMaster
-                              );
-                              return (
-                                <div
-                                  key={master.id}
-                                  onClick={() => handleMasterToggle(master)}
-                                  className={cn(
-                                    "group relative p-4 border rounded-xl cursor-pointer transition-all flex flex-col gap-1 min-h-[84px]",
-                                    isChecked
-                                      ? "bg-primary/5 border-primary shadow-sm ring-1 ring-primary"
-                                      : "bg-background hover:border-primary/50 hover:bg-muted/30"
-                                  )}
-                                >
-                                  <div className="flex justify-between items-start">
-                                    <span className="text-sm font-semibold truncate pr-6">
-                                      {master.name}
-                                    </span>
-                                    <div
-                                      className={cn(
-                                        "h-5 w-5 rounded-full border flex items-center justify-center transition-colors shrink-0",
-                                        isChecked
-                                          ? "bg-primary border-primary"
-                                          : "border-muted-foreground/30 group-hover:border-primary/50"
-                                      )}
-                                    >
-                                      {isChecked && (
-                                        <Check className="h-3 w-3 text-white" />
-                                      )}
-                                    </div>
-                                  </div>
-                                  <span className="text-[10px] text-muted-foreground uppercase font-mono mt-1">
-                                    master
-                                  </span>
+                          {filteredMasterDropdowns.length > 0 && (
+                            <AccordionItem value="master-dropdowns" className="border rounded-lg px-4">
+                              <AccordionTrigger className="py-3 text-sm font-medium text-muted-foreground hover:no-underline">
+                                <span className="flex items-center gap-2">
+                                  <Database className="h-4 w-4" />
+                                  Static Master Dropdowns
+                                  <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+                                    {filteredMasterDropdowns.length}
+                                  </Badge>
+                                </span>
+                              </AccordionTrigger>
+                              <AccordionContent>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                  {filteredMasterDropdowns.map((master) => {
+                                    const isChecked = selectedFields.some(
+                                      (f) => f.fieldName === master.id && f.isMaster
+                                    );
+                                    return (
+                                      <div
+                                        key={master.id}
+                                        onClick={() => handleMasterToggle(master)}
+                                        className={cn(
+                                          "group relative p-4 border rounded-xl cursor-pointer transition-all flex flex-col gap-1 min-h-[84px]",
+                                          isChecked
+                                            ? "bg-primary/5 border-primary shadow-sm ring-1 ring-primary"
+                                            : "bg-background hover:border-primary/50 hover:bg-muted/30"
+                                        )}
+                                      >
+                                        <div className="flex justify-between items-start">
+                                          <span className="text-sm font-semibold truncate pr-6">
+                                            {master.name}
+                                          </span>
+                                          <div
+                                            className={cn(
+                                              "h-5 w-5 rounded-full border flex items-center justify-center transition-colors shrink-0",
+                                              isChecked
+                                                ? "bg-primary border-primary"
+                                                : "border-muted-foreground/30 group-hover:border-primary/50"
+                                            )}
+                                          >
+                                            {isChecked && (
+                                              <Check className="h-3 w-3 text-white" />
+                                            )}
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] text-muted-foreground uppercase font-mono mt-1">
+                                          master
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          )}
+                        </Accordion>
                       )}
 
                       {filteredFields.length === 0 &&
-                        masterDropdowns.length === 0 && (
+                        filteredMasterDropdowns.length === 0 && (
                           <EmptyState
                             icon={<Database className="h-10 w-10 opacity-40" />}
                             title="No Items Found"

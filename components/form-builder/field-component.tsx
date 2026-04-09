@@ -167,30 +167,42 @@ export default function FieldComponent({
     }
   }, [isEditingLabel]);
 
-  // Geolocation handling
+  // Keep a stable ref for onUpdate so the geolocation effect doesn't
+  // re-trigger every render (onUpdate is not memoised in the parent).
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+
+  // Geolocation handling — run once per real (non-temp) field id
+  const geoFetchedRef = useRef(false);
   useEffect(() => {
-    if (field.type === "location" && !previewValue) {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const { latitude, longitude } = position.coords;
-            const locationString = `${latitude}, ${longitude}`;
-            setPreviewValue(locationString);
-            onUpdate(field.id, { defaultValue: locationString }).catch(
-              (error) => {
-                console.error("[Field] Error updating location:", error);
-              },
-            );
-          },
-          (error) => {
-            console.error("[Field] Geolocation error:", error);
-            setPreviewValue("Location unavailable");
-          },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-        );
-      }
+    if (
+      field.type !== "location" ||
+      geoFetchedRef.current ||
+      field.id.startsWith("temp_")
+    )
+      return;
+
+    if (navigator.geolocation) {
+      geoFetchedRef.current = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          const locationString = `${latitude}, ${longitude}`;
+          setPreviewValue(locationString);
+          onUpdateRef.current(field.id, { defaultValue: locationString }).catch(
+            (error) => {
+              console.error("[Field] Error updating location:", error);
+            },
+          );
+        },
+        (error) => {
+          console.error("[Field] Geolocation error:", error);
+          setPreviewValue("Location unavailable");
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      );
     }
-  }, [field.type, field.id, previewValue, onUpdate]);
+  }, [field.type, field.id]);
 
   // --- FETCH PERMISSIONS ---
   useEffect(() => {
