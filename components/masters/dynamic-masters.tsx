@@ -293,7 +293,6 @@ export function DynamicMasters() {
   // Auto-detect which columns have data
   const columnsWithData = useMemo(() => {
     const hasData = new Set<string>()
-    const hasEditing = rows.some(r => r.isEditing)
     for (const row of rows) {
       if (row.module_name) hasData.add("module")
       if (row.level2_name || row.level2_id) hasData.add("level2")
@@ -308,17 +307,20 @@ export function DynamicMasters() {
     hasData.add("form")
     hasData.add("dropdown")
     hasData.add("values")
-    // If any row is editing, show all columns (user might need to fill them)
-    if (hasEditing) {
-      ALL_COLUMNS.forEach(c => hasData.add(c.id))
-    }
     return hasData
   }, [rows])
 
+  // Track if any row is in editing state — show all columns for editing rows only
+  const hasEditingRow = useMemo(() => rows.some(r => r.isEditing), [rows])
+
   // Visible columns = columns that have data AND are not manually hidden
+  // When editing, show all columns so user can fill level fields
   const visibleColumns = useMemo(() => {
+    if (hasEditingRow) {
+      return ALL_COLUMNS.filter(col => !hiddenColumns.has(col.id))
+    }
     return ALL_COLUMNS.filter(col => columnsWithData.has(col.id) && !hiddenColumns.has(col.id))
-  }, [columnsWithData, hiddenColumns])
+  }, [columnsWithData, hiddenColumns, hasEditingRow])
 
   // Close column menu on outside click
   useEffect(() => {
@@ -411,7 +413,15 @@ export function DynamicMasters() {
       isEditing: true,
     }
     setRows(prev => [...prev, newRow])
-    setCurrentPage(Math.ceil((rows.length + 1) / recordsPerPage))
+    // Navigate to the page where the new row will appear
+    const newPage = Math.ceil((rows.length + 1) / recordsPerPage)
+    setCurrentPage(newPage)
+    // Scroll table to bottom after React renders the new row
+    setTimeout(() => {
+      if (tableContainerRef.current) {
+        tableContainerRef.current.scrollTop = tableContainerRef.current.scrollHeight
+      }
+    }, 50)
   }, [recordsPerPage, rows.length])
 
   const updateRow = useCallback((rowId: string, field: keyof DropdownRow, value: string) => {
@@ -548,8 +558,9 @@ export function DynamicMasters() {
         }).unwrap()
       }
       toast({ title: "Success", description: `Dropdown ${row.isNew ? "created" : "updated"}!` })
+      originalRowSnapshots.current.delete(rowId)
       await fetchData()
-      setCurrentPage(1)
+      if (row.isNew) setCurrentPage(1)
     } catch (err: any) {
       toast({ title: "Error", description: err?.data?.error || "Save failed", variant: "destructive" })
     } finally {
@@ -588,17 +599,41 @@ export function DynamicMasters() {
 
   const hasSelection = selectedRecords.size > 0
 
+  // Store original row data before editing so we can restore on cancel
+  const originalRowSnapshots = useRef<Map<string, DropdownRow>>(new Map())
+
   const startEdit = useCallback((rowId: string) => {
+    // Preserve scroll position during edit mode transition
+    const scrollTop = tableContainerRef.current?.scrollTop ?? 0
+    // Snapshot the row before editing
+    const row = rowsRef.current.find(r => r.id === rowId)
+    if (row) {
+      originalRowSnapshots.current.set(rowId, JSON.parse(JSON.stringify(row)))
+    }
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, isEditing: true } : r))
+    // Restore scroll position after React re-render (column visibility might change)
+    requestAnimationFrame(() => {
+      if (tableContainerRef.current) {
+        tableContainerRef.current.scrollTop = scrollTop
+      }
+    })
   }, [])
 
   const cancelRow = useCallback((rowId: string) => {
     const row = rowsRef.current.find(r => r.id === rowId)
     if (row?.isNew) {
+      // New unsaved row — just remove it
       setRows(prev => prev.filter(r => r.id !== rowId))
     } else {
-      fetchData()
-      setCurrentPage(1)
+      // Existing row — restore the original snapshot without refetching
+      const snapshot = originalRowSnapshots.current.get(rowId)
+      if (snapshot) {
+        setRows(prev => prev.map(r => r.id === rowId ? { ...snapshot, isEditing: false } : r))
+        originalRowSnapshots.current.delete(rowId)
+      } else {
+        // Fallback: just turn off editing
+        setRows(prev => prev.map(r => r.id === rowId ? { ...r, isEditing: false } : r))
+      }
     }
     setDeleteDialogOpen(false)
   }, [])
@@ -687,24 +722,39 @@ export function DynamicMasters() {
     })
   }, [])
 
+  // Calculate filler rows only on mount and window resize — NOT on data changes
+  // This prevents scroll jumps when rows expand/collapse or enter edit mode
+  const stableRecordCount = useRef(paginatedRecords.length)
+  stableRecordCount.current = paginatedRecords.length
+
   useEffect(() => {
     const calculateFillers = () => {
       if (!tableContainerRef.current) return
       const containerHeight = tableContainerRef.current.clientHeight
-      const headerHeight = 40
-      const rowHeight = 44
+      const headerHeight = 44
+      const rowHeight = 46
       const maxRows = Math.floor((containerHeight - headerHeight) / rowHeight)
-      const numDummy = Math.max(0, maxRows - paginatedRecords.length)
+      const numDummy = Math.max(0, maxRows - stableRecordCount.current)
       setNumDummyRows(numDummy)
     }
-    const timer = setTimeout(calculateFillers, 100)
-    const resizeHandler = () => calculateFillers()
-    window.addEventListener("resize", resizeHandler)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener("resize", resizeHandler)
+    calculateFillers()
+    const resizeObserver = new ResizeObserver(() => calculateFillers())
+    if (tableContainerRef.current) {
+      resizeObserver.observe(tableContainerRef.current)
     }
-  }, [paginatedRecords.length])
+    return () => resizeObserver.disconnect()
+  }, []) // Only on mount
+
+  // Update dummy rows when page/per-page changes (not on edit mode toggle)
+  useEffect(() => {
+    if (!tableContainerRef.current) return
+    const containerHeight = tableContainerRef.current.clientHeight
+    const headerHeight = 44
+    const rowHeight = 46
+    const maxRows = Math.floor((containerHeight - headerHeight) / rowHeight)
+    const numDummy = Math.max(0, maxRows - paginatedRecords.length)
+    setNumDummyRows(numDummy)
+  }, [currentPage, recordsPerPage, paginatedRecords.length])
 
   const handleValueKeyDown = useCallback((rowId: string, e: React.KeyboardEvent, vi: number) => {
     const row = rowsRef.current.find(r => r.id === rowId)
@@ -827,7 +877,7 @@ export function DynamicMasters() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="min-h-screen bg-gray-50/50 px-4 py-5 sm:px-6 lg:px-8">
+      <div className="min-h-0 bg-gray-50/50 px-4 py-5 sm:px-6 lg:px-8">
         <div className="mx-auto w-full max-w-screen-2xl">
           {/* ==================== HEADER ==================== */}
           <div className="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -988,11 +1038,11 @@ export function DynamicMasters() {
           </div>
 
           {/* ==================== TABLE ==================== */}
-          <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden">
-            <div className="overflow-auto h-[68vh] sm:h-[72vh] max-h-[72vh]" ref={tableContainerRef}>
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-sm overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 200px)" }}>
+            <div className="overflow-auto flex-1" ref={tableContainerRef}>
               <div className="min-w-full" style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
                 {/* ===== TABLE HEADER ===== */}
-                <div className="flex bg-gradient-to-b from-gray-50 to-gray-100/80 border-b border-gray-200 sticky top-0 z-20 backdrop-blur-sm">
+                <div className="flex bg-gray-50 border-b border-gray-200 sticky top-0 z-20">
                   {/* Checkbox col */}
                   <div className="h-11 w-11 border-r border-gray-200/60 flex items-center justify-center flex-shrink-0">
                     <Checkbox
@@ -1079,14 +1129,17 @@ export function DynamicMasters() {
                         <div
                           key={rowId}
                           className={cn(
-                            "group/row flex transition-all duration-150 border-b border-gray-100/80 last:border-b-0",
-                            isSelected && "bg-blue-50/50 border-blue-100/50",
-                            isEditing && "bg-amber-50 border-amber-100",
+                            "group/row flex border-b border-gray-100/80 last:border-b-0 relative",
+                            isSelected && !isEditing && "bg-blue-50/50 border-blue-100/50",
+                            isEditing && "bg-white shadow-[inset_3px_0_0_0_#3b82f6]",
                             !isSelected && !isEditing && "hover:bg-gray-50/50"
                           )}
                         >
                           {/* Checkbox */}
-                          <div className="w-11 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center flex-shrink-0">
+                          <div className={cn(
+                            "w-11 min-h-[46px] border-r border-gray-100/60 flex justify-center flex-shrink-0",
+                            isEditing ? "items-start pt-[14px]" : "items-center"
+                          )}>
                             <Checkbox
                               checked={isSelected}
                               onCheckedChange={(checked) => {
@@ -1100,26 +1153,29 @@ export function DynamicMasters() {
                           </div>
 
                           {/* Row number */}
-                          <div className="w-11 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center text-xs font-semibold text-gray-300 flex-shrink-0 tabular-nums">
+                          <div className={cn(
+                            "w-11 min-h-[46px] border-r border-gray-100/60 flex justify-center text-xs font-semibold text-gray-300 flex-shrink-0 tabular-nums",
+                            isEditing ? "items-start pt-3" : "items-center"
+                          )}>
                             {num}
                           </div>
 
-                          {/* Dynamic cells */}
+                          {/* Dynamic cells — every column stays in its correct position */}
                           {visibleColumns.map(col => {
+                            // ── VALUES column ──
                             if (col.id === "values") {
-                              // Special rendering for values column
                               return (
                                 <div
                                   key={col.id}
                                   className={cn(
-                                    "border-r border-gray-100/60 px-3.5 text-sm text-gray-700 overflow-hidden",
+                                    "border-r border-gray-100/60 px-3 text-sm text-gray-700 overflow-hidden",
                                     getCellClass(col),
-                                    isEditing ? "py-3 min-h-[46px]" : "min-h-[46px] flex items-center"
+                                    isEditing ? "py-2.5 min-h-[46px]" : "min-h-[46px] flex items-center"
                                   )}
                                   style={getCellStyle(col)}
                                 >
                                   {isEditing ? (
-                                    <div className="w-full space-y-2.5">
+                                    <div className="w-full space-y-2">
                                       {/* Import button */}
                                       <Button
                                         variant="outline"
@@ -1240,13 +1296,14 @@ export function DynamicMasters() {
                               )
                             }
 
-                            // Regular columns
+                            // ── Regular columns ──
                             return (
                               <div
                                 key={col.id}
                                 className={cn(
-                                  "border-r border-gray-100/60 px-3.5 text-sm text-gray-700 min-h-[46px] flex items-center overflow-hidden",
-                                  getCellClass(col)
+                                  "border-r border-gray-100/60 px-3.5 text-sm text-gray-700 min-h-[46px] overflow-hidden",
+                                  getCellClass(col),
+                                  isEditing ? "flex items-start pt-[7px]" : "flex items-center"
                                 )}
                                 style={getCellStyle(col)}
                               >
@@ -1258,82 +1315,83 @@ export function DynamicMasters() {
                           })}
 
                           {/* Actions */}
-                          <div className="w-28 min-h-[46px] border-r border-gray-100/60 flex items-center justify-center flex-shrink-0 px-2">
-                            <div className="flex gap-1.5 w-full justify-center">
-                              {isEditing ? (
-                                <>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        size="sm"
-                                        onClick={() => saveRow(rowId)}
-                                        disabled={isProcessing}
-                                        className="h-7.5 px-3 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm rounded-lg font-medium"
-                                      >
-                                        {isProcessing ? (
-                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        ) : (
-                                          <>
-                                            <Save className="w-3 h-3 mr-1" />
-                                            Save
-                                          </>
-                                        )}
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top"><p className="text-xs">Save changes</p></TooltipContent>
-                                  </Tooltip>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => cancelRow(rowId)}
-                                        disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
-                                      >
-                                        <X className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top"><p className="text-xs">Cancel</p></TooltipContent>
-                                  </Tooltip>
-                                </>
-                              ) : (
-                                <div className="flex gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150">
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => startEdit(rowId)}
-                                        disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                                      >
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top"><p className="text-xs">Edit</p></TooltipContent>
-                                  </Tooltip>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => deleteRow(rowId)}
-                                        disabled={isProcessing}
-                                        className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                      >
-                                        {isProcessing ? (
-                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        ) : (
-                                          <Trash2 className="h-3.5 w-3.5" />
-                                        )}
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
-                                  </Tooltip>
-                                </div>
-                              )}
-                            </div>
+                          <div className={cn(
+                            "w-28 min-h-[46px] border-r border-gray-100/60 flex justify-center flex-shrink-0 px-2",
+                            isEditing ? "items-start pt-[7px]" : "items-center"
+                          )}>
+                            {isEditing ? (
+                              <div className="flex gap-1.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => saveRow(rowId)}
+                                      disabled={isProcessing}
+                                      className="h-8 px-3 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm rounded-lg font-medium"
+                                    >
+                                      {isProcessing ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <>
+                                          <Save className="w-3 h-3 mr-1" />
+                                          Save
+                                        </>
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p className="text-xs">Save changes</p></TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => cancelRow(rowId)}
+                                      disabled={isProcessing}
+                                      className="h-8 w-8 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p className="text-xs">Cancel</p></TooltipContent>
+                                </Tooltip>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => startEdit(rowId)}
+                                      disabled={isProcessing}
+                                      className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p className="text-xs">Edit</p></TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => deleteRow(rowId)}
+                                      disabled={isProcessing}
+                                      className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                    >
+                                      {isProcessing ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )

@@ -2,12 +2,7 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { ArrowUp, ArrowDown, ChevronDown } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -28,6 +23,7 @@ interface SortableColumnHeaderProps {
   recordSortOrder: "asc" | "desc";
   activeFieldFilters: FieldFilter[];
   handleOpenAdvancedFilterForColumn: (fieldId: string) => void;
+  onSort?: (fieldId: string) => void;
 }
 
 export function SortableColumnHeader({
@@ -40,6 +36,7 @@ export function SortableColumnHeader({
   recordSortOrder,
   activeFieldFilters,
   handleOpenAdvancedFilterForColumn,
+  onSort,
 }: SortableColumnHeaderProps) {
   const {
     attributes,
@@ -71,6 +68,7 @@ export function SortableColumnHeader({
   const tooltipText = tooltipParts.filter(Boolean).join(" → ");
 
   const hasFilter = activeFieldFilters.some((f) => f.fieldId === field.id);
+  const isSorted = recordSortField === field.id;
 
   return (
     <div
@@ -101,7 +99,14 @@ export function SortableColumnHeader({
       )}
 
       <div className="relative w-full h-full flex items-center justify-between z-0">
-        <div className="flex flex-col items-start gap-0.5 min-w-0 flex-1">
+        <div
+          className="flex flex-col items-start gap-0.5 min-w-0 flex-1 cursor-pointer select-none"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onSort) onSort(field.id);
+          }}
+          title={`Sort by ${field.label}`}
+        >
           {isMergedMode && field.formName && (
             <div className="text-[10px] text-blue-600/90 font-semibold uppercase tracking-wide truncate w-full">
               {field.formName}
@@ -114,12 +119,15 @@ export function SortableColumnHeader({
             <span className="truncate text-xs font-bold text-gray-900">
               {field.label}
             </span>
-            {recordSortField === field.id &&
-              (recordSortOrder === "asc" ? (
-                <ArrowUp className="h-3.5 w-3.5 flex-shrink-0" />
-              ) : (
-                <ArrowDown className="h-3.5 w-3.5 flex-shrink-0" />
-              ))}
+            {isSorted && (
+              <span className="flex items-center flex-shrink-0">
+                {recordSortOrder === "asc" ? (
+                  <ArrowUp className="h-3.5 w-3.5 text-violet-600" />
+                ) : (
+                  <ArrowDown className="h-3.5 w-3.5 text-violet-600" />
+                )}
+              </span>
+            )}
           </div>
         </div>
 

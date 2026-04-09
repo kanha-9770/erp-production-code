@@ -463,6 +463,7 @@ interface RecordTableHeaderProps {
   handleOpenAdvancedFilterForColumn: (fieldId: string) => void;
   onDeleteSelected: () => void;
   canBulkDelete?: boolean;
+  onSort?: (fieldId: string) => void;
 }
 
 export function RecordTableHeader({
@@ -480,6 +481,7 @@ export function RecordTableHeader({
   handleOpenAdvancedFilterForColumn,
   onDeleteSelected,
   canBulkDelete = true,
+  onSort,
 }: RecordTableHeaderProps) {
   const getGroupWidth = (fields: FormFieldWithSection[]) =>
     fields.reduce((sum, f) => sum + (columnWidths.get(f.id) || 192), 0);
@@ -636,6 +638,7 @@ export function RecordTableHeader({
                   recordSortOrder={recordSortOrder}
                   activeFieldFilters={activeFieldFilters}
                   handleOpenAdvancedFilterForColumn={handleOpenAdvancedFilterForColumn}
+                  onSort={onSort}
                 />
               )),
             ),

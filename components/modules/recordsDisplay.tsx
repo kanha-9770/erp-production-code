@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import { Eye, Pencil, Trash2, MoreHorizontal, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DndContext, closestCenter, DragOverlay } from "@dnd-kit/core";
@@ -46,6 +46,9 @@ import { RecordCell } from "./RecordCell";
 import { isImageUrl, isImageField } from "@/lib/utils/fieldUtils";
 import { useRecordsDisplay } from "@/hooks/use-records-display";
 import { LookupField } from "@/components/forms/lookup-field";
+import {
+  useCreateSavedFilterMutation,
+} from "@/lib/api/saved-filters";
 
 import type {
   ProcessedFieldData,
@@ -178,6 +181,8 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   setRecordsPerPage,
   setCurrentPage,
   setSelectedRecords,
+  setRecordSortField,
+  setRecordSortOrder,
   getFieldIcon,
   saveAllPendingChanges,
   setEditingCell,
@@ -294,6 +299,32 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     onViewDetails,
   });
 
+  // ── Save filter from toolbar ──────────────────────────────────────────────────
+  const moduleId = allModuleForms[0]?.moduleId || allModuleForms[0]?.id || "";
+  const [createSavedFilter, { isLoading: isSavingFilter }] = useCreateSavedFilterMutation();
+  const [saveFilterDialogOpen, setSaveFilterDialogOpen] = React.useState(false);
+  const [saveFilterName, setSaveFilterName] = React.useState("");
+
+  const handleToolbarSaveFilter = useCallback(() => {
+    setSaveFilterName("");
+    setSaveFilterDialogOpen(true);
+  }, []);
+
+  const handleConfirmSaveFilter = useCallback(async () => {
+    if (!saveFilterName.trim() || !moduleId || activeFieldFilters.length === 0) return;
+    try {
+      await createSavedFilter({
+        name: saveFilterName.trim(),
+        moduleId,
+        filters: activeFieldFilters,
+      }).unwrap();
+      setSaveFilterDialogOpen(false);
+      setSaveFilterName("");
+    } catch (err) {
+      console.error("Failed to save filter:", err);
+    }
+  }, [saveFilterName, moduleId, activeFieldFilters, createSavedFilter]);
+
   // ── Cell event callbacks ──────────────────────────────────────────────────────
   const handleCellClick = useCallback(
     (cellKey: string) => {
@@ -323,6 +354,23 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
       setPreviewData({ isOpen: true, rows, title, fieldDefinitions });
     },
     [setPreviewData],
+  );
+
+  const handleColumnSort = useCallback(
+    (fieldId: string) => {
+      if (recordSortField === fieldId) {
+        // Toggle order, or clear if already desc
+        if (recordSortOrder === "asc") {
+          setRecordSortOrder("desc");
+        } else {
+          setRecordSortField("");
+        }
+      } else {
+        setRecordSortField(fieldId);
+        setRecordSortOrder("asc");
+      }
+    },
+    [recordSortField, recordSortOrder, setRecordSortField, setRecordSortOrder],
   );
 
   const handleCommentClick = useCallback(
@@ -929,6 +977,12 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 isWrapTextEnabled={isWrapTextEnabled}
                 setIsWrapTextEnabled={setIsWrapTextEnabled}
                 setIsManageColumnsOpen={setIsManageColumnsOpen}
+                recordSortField={recordSortField}
+                recordSortOrder={recordSortOrder}
+                setRecordSortField={setRecordSortField}
+                setRecordSortOrder={setRecordSortOrder}
+                onSaveFilter={handleToolbarSaveFilter}
+                canSaveFilter={activeFieldFilters.length > 0 && !!moduleId}
               />
 
               <div className="border border-gray-200 bg-white rounded-xl overflow-hidden shadow-lg flex-1 flex flex-col">
@@ -961,6 +1015,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                             handleOpenAdvancedFilterForColumn
                           }
                           canBulkDelete={canDeleteAny}
+                          onSort={handleColumnSort}
                           // ✅ Proper bulk delete that opens popup
                           onDeleteSelected={() => {
                             if (selectedRecords.size > 0) {
@@ -1511,6 +1566,56 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           })()}
         </div>
       </div>
+
+      {/* Save Filter Dialog */}
+      <Dialog open={saveFilterDialogOpen} onOpenChange={(open) => {
+        if (!isSavingFilter) setSaveFilterDialogOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Save Current Filter</DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Give this filter a name to quickly apply it later.
+              {activeFieldFilters.length > 0 && (
+                <span className="block mt-1 text-indigo-600 font-medium">
+                  {activeFieldFilters.length} active filter{activeFieldFilters.length > 1 ? "s" : ""} will be saved.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            placeholder="e.g. High priority leads, Active customers..."
+            value={saveFilterName}
+            onChange={(e) => setSaveFilterName(e.target.value)}
+            className="h-9 text-sm"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && saveFilterName.trim() && !isSavingFilter) {
+                handleConfirmSaveFilter();
+              }
+            }}
+            disabled={isSavingFilter}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSaveFilterDialogOpen(false)}
+              disabled={isSavingFilter}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleConfirmSaveFilter}
+              disabled={!saveFilterName.trim() || isSavingFilter}
+            >
+              {isSavingFilter && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+              {isSavingFilter ? "Saving..." : "Save Filter"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 };
