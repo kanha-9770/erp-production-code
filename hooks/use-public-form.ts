@@ -612,6 +612,22 @@ export function usePublicForm({
     return fields;
   }, [form]);
 
+  // Map of fieldId → subformId for fields that live inside a subform.
+  // Used to compute formula values per dynamic-row instance.
+  const fieldToSubformId = useMemo(() => {
+    const map: Record<string, string> = {};
+    const collect = (subforms: Subform[] = []) => {
+      subforms.forEach((sf) => {
+        sf.fields.forEach((f) => {
+          map[f.id] = sf.id;
+        });
+        if (sf.childSubforms?.length) collect(sf.childSubforms);
+      });
+    };
+    if (form) collect(form.subforms || []);
+    return map;
+  }, [form]);
+
   const formulaFields = useMemo(() => {
     if (!form) return [];
     return allFields.filter(
@@ -645,28 +661,81 @@ export function usePublicForm({
     const evaluator = getFormulaEvaluator();
     const newFormulaValues: Record<string, any> = {};
     const runningValues: Record<string, any> = {};
-    formulaFields.forEach((field) => {
+
+    // Helper: format result based on return type / decimals
+    const formatResult = (rawValue: any, config: FormulaConfig) => {
+      let finalValue = rawValue;
+      if (
+        config.returnType === "Number" ||
+        config.returnType === "Currency" ||
+        config.returnType === "Percent"
+      ) {
+        const numValue = Number(finalValue);
+        if (!isNaN(numValue)) {
+          finalValue = numValue.toFixed(config.decimalPlaces || 2);
+          if (config.returnType === "Currency") finalValue = `$${finalValue}`;
+          if (config.returnType === "Percent") finalValue = `${finalValue}%`;
+        }
+      }
+      return finalValue;
+    };
+
+    // Helper: resolve a single referenced fieldId, optionally within a subform
+    // row instance scope (instanceSuffix like "__abc-123" or "" for root scope).
+    const resolveRef = (
+      refId: string,
+      instanceSuffix: string,
+    ): any => {
+      // 1. Try the instance-scoped key first (subform row context)
+      if (instanceSuffix) {
+        const scopedKey = `${refId}${instanceSuffix}`;
+        if (
+          formData[scopedKey] !== undefined &&
+          formData[scopedKey] !== null &&
+          formData[scopedKey] !== ""
+        ) {
+          return formData[scopedKey];
+        }
+        // running formula value computed earlier in this same row
+        if (runningValues[scopedKey] !== undefined) {
+          return runningValues[scopedKey];
+        }
+        if (formulaValuesRef.current[scopedKey] !== undefined) {
+          return formulaValuesRef.current[scopedKey];
+        }
+      }
+      // 2. Fall back to root scope (fields outside the subform, or original row)
+      if (
+        formData[refId] !== undefined &&
+        formData[refId] !== null &&
+        formData[refId] !== ""
+      ) {
+        return formData[refId];
+      }
+      if (runningValues[refId] !== undefined) {
+        return runningValues[refId];
+      }
+      if (formulaValuesRef.current[refId] !== undefined) {
+        return formulaValuesRef.current[refId];
+      }
+      return formData[refId];
+    };
+
+    // Evaluate one formula field for a given instance suffix ("" = root)
+    const evalForInstance = (
+      field: FormField,
+      instanceSuffix: string,
+    ) => {
       const config = field.properties?.formulaConfig as
         | FormulaConfig
         | undefined;
       if (!config || !config.expression) return;
+      const targetKey = `${field.id}${instanceSuffix}`;
       try {
         const referencedFields = extractFieldReferences(config.expression);
         const variables: Record<string, any> = {};
         referencedFields.forEach((refId) => {
-          if (
-            formData[refId] !== undefined &&
-            formData[refId] !== null &&
-            formData[refId] !== ""
-          ) {
-            variables[refId] = formData[refId];
-          } else if (runningValues[refId] !== undefined) {
-            variables[refId] = runningValues[refId];
-          } else if (formulaValuesRef.current[refId] !== undefined) {
-            variables[refId] = formulaValuesRef.current[refId];
-          } else {
-            variables[refId] = formData[refId];
-          }
+          variables[refId] = resolveRef(refId, instanceSuffix);
         });
         const result = evaluator.evaluate(
           config.expression,
@@ -677,36 +746,48 @@ export function usePublicForm({
           config.decimalPlaces ?? 2,
         );
         if (result.success) {
-          let finalValue = result.value;
-          if (
-            config.returnType === "Number" ||
-            config.returnType === "Currency" ||
-            config.returnType === "Percent"
-          ) {
-            const numValue = Number(finalValue);
-            if (!isNaN(numValue)) {
-              finalValue = numValue.toFixed(config.decimalPlaces || 2);
-              if (config.returnType === "Currency")
-                finalValue = `$${finalValue}`;
-              if (config.returnType === "Percent")
-                finalValue = `${finalValue}%`;
-            }
-          }
-          newFormulaValues[field.id] = finalValue;
-          runningValues[field.id] = result.value;
+          const finalValue = formatResult(result.value, config);
+          newFormulaValues[targetKey] = finalValue;
+          runningValues[targetKey] = result.value;
         } else {
-          newFormulaValues[field.id] =
+          newFormulaValues[targetKey] =
             config.blankPreference === "Zero" ? 0 : "";
-          runningValues[field.id] = config.blankPreference === "Zero" ? 0 : "";
+          runningValues[targetKey] =
+            config.blankPreference === "Zero" ? 0 : "";
         }
       } catch {
-        newFormulaValues[field.id] = "";
-        runningValues[field.id] = "";
+        newFormulaValues[targetKey] = "";
+        runningValues[targetKey] = "";
+      }
+    };
+
+    formulaFields.forEach((field) => {
+      // Always evaluate the root scope (used by section fields and the
+      // original/first subform row which uses bare field IDs).
+      evalForInstance(field, "");
+
+      // If this formula field lives inside a subform, also evaluate it once
+      // per dynamic row instance so that each row has its own result.
+      const subformId = fieldToSubformId[field.id];
+      if (subformId) {
+        const instances = dynamicSubformInstances[subformId] || [];
+        instances.forEach((instanceId) => {
+          if (instanceId === "original") return; // root scope already covers original
+          evalForInstance(field, `__${instanceId}`);
+        });
       }
     });
+
     formulaValuesRef.current = newFormulaValues;
     setFormulaValues(newFormulaValues);
-  }, [form, formulaFields, formData, evaluatorFields]);
+  }, [
+    form,
+    formulaFields,
+    formData,
+    evaluatorFields,
+    fieldToSubformId,
+    dynamicSubformInstances,
+  ]);
 
   const triggerLocationFetch = useCallback(async () => {
     if (!form) return;

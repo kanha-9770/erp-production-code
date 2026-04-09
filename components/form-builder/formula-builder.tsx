@@ -319,9 +319,13 @@ export function FormulaBuilder({
                     ) {
                       fieldType = field.properties.formulaConfig.returnType.toLowerCase();
                     }
+                    // Annotate subform fields so users can distinguish them
+                    const displayLabel = field._isSubformField && field._subformName
+                      ? `${field.label} (${field._subformName})`
+                      : field.label;
                     return {
                       id: field.id,
-                      label: field.label,
+                      label: displayLabel,
                       type: fieldType,
                       databaseName: field.label,
                     };

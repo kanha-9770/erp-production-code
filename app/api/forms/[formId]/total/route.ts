@@ -1,5 +1,80 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
+
+// Recursively collect ALL fields from a form — sections, subforms, and any
+// nested child subforms. Each field is annotated with its origin (subform name
+// or section title) so the formula builder UI can group/label them.
+function collectAllFields(form: any): any[] {
+  const out: any[] = []
+
+  const pushFromSubform = (subform: any, parentLabel?: string) => {
+    if (!subform) return
+    const subformLabel = parentLabel
+      ? `${parentLabel} › ${subform.name || subform.title || "Subform"}`
+      : subform.name || subform.title || "Subform"
+    if (Array.isArray(subform.fields)) {
+      for (const field of subform.fields) {
+        out.push({
+          ...field,
+          _subformId: subform.id,
+          _subformName: subformLabel,
+          _isSubformField: true,
+        })
+      }
+    }
+    // Subforms can have nested sections of their own
+    if (Array.isArray(subform.sections)) {
+      for (const sec of subform.sections) {
+        if (Array.isArray(sec.fields)) {
+          for (const field of sec.fields) {
+            out.push({
+              ...field,
+              _subformId: subform.id,
+              _subformName: subformLabel,
+              _sectionTitle: sec.title,
+              _isSubformField: true,
+            })
+          }
+        }
+      }
+    }
+    // Recurse into child subforms
+    if (Array.isArray(subform.childSubforms)) {
+      for (const child of subform.childSubforms) {
+        pushFromSubform(child, subformLabel)
+      }
+    }
+    if (Array.isArray(subform.subforms)) {
+      for (const child of subform.subforms) {
+        pushFromSubform(child, subformLabel)
+      }
+    }
+  }
+
+  // Section fields + section-level subforms
+  if (Array.isArray(form?.sections)) {
+    for (const section of form.sections) {
+      if (Array.isArray(section.fields)) {
+        out.push(...section.fields)
+      }
+      if (Array.isArray(section.subforms)) {
+        for (const sf of section.subforms) {
+          pushFromSubform(sf)
+        }
+      }
+    }
+  }
+
+  // Form-level subforms
+  if (Array.isArray(form?.subforms)) {
+    for (const sf of form.subforms) {
+      pushFromSubform(sf)
+    }
+  }
+
+  return out
+}
+
 export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
   try {
     const form = await DatabaseService.getForm(params.formId)
@@ -31,33 +106,21 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
       for (const moduleFormSummary of currentForms) {
         // Skip the main form we already have (to avoid duplication)
         if (moduleFormSummary.id === form.id) {
-          // Use the already loaded form's fields
-          let mainFormFields: any[] = []
-          if (form.sections) {
-            for (const section of form.sections) {
-              if (section.fields) mainFormFields.push(...section.fields)
-            }
-          }
+          // Use the already loaded form's fields (sections + subforms)
           currentModuleFields.push({
             formId: form.id,
             formName: form.name,
-            fields: mainFormFields,
+            fields: collectAllFields(form),
           })
           continue
         }
         // Load full form for others (e.g., CHECK-OUT)
         const fullForm = await DatabaseService.getForm(moduleFormSummary.id)
         if (fullForm) {
-          let allFields: any[] = []
-          if (fullForm.sections) {
-            for (const section of fullForm.sections) {
-              if (section.fields) allFields.push(...section.fields)
-            }
-          }
           currentModuleFields.push({
             formId: fullForm.id,
             formName: fullForm.name,
-            fields: allFields,
+            fields: collectAllFields(fullForm),
           })
         }
       }
@@ -70,16 +133,10 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
           for (const parentFormSummary of parentFormSummaries) {
             const fullParentForm = await DatabaseService.getForm(parentFormSummary.id)
             if (fullParentForm) {
-              let allFields: any[] = []
-              if (fullParentForm.sections) {
-                for (const section of fullParentForm.sections) {
-                  if (section.fields) allFields.push(...section.fields)
-                }
-              }
               parentModuleFields.push({
                 formId: fullParentForm.id,
                 formName: fullParentForm.name,
-                fields: allFields,
+                fields: collectAllFields(fullParentForm),
               })
             }
           }
