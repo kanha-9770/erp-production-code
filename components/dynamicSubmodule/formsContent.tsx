@@ -166,7 +166,7 @@ const FormsContent: React.FC<FormsContentProps> = ({
           w-full justify-start text-left text-blue-600 hover:text-blue-800
           border-blue-600 hover:border-blue-800
           disabled:opacity-50 disabled:cursor-not-allowed
-          bg-transparent font-medium transition-all h-11 px-3
+          bg-transparent font-medium transition-all h-8 px-3
           overflow-hidden
         "
         onClick={(e) => {

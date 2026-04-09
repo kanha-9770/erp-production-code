@@ -1522,8 +1522,13 @@ export function useRecordsDisplay({
   React.useEffect(() => {
     const calc = () => {
       if (!tableContainerRef.current) return;
+      // Header is ~72px in merged mode (section header + field header rows).
+      // Use Math.floor so dummy rows never trigger a false vertical scrollbar
+      // when data already fits — real overflow still scrolls via overflow-y-auto.
+      const HEADER_PX = 72;
+      const ROW_PX = 36;
       const maxRows = Math.floor(
-        (tableContainerRef.current.clientHeight - 40) / 36,
+        (tableContainerRef.current.clientHeight - HEADER_PX) / ROW_PX,
       );
       const paginatedLen = applyFieldFilters(sortRecords(baseRecords)).slice(
         (currentPage - 1) * recordsPerPage,

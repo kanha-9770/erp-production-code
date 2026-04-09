@@ -166,7 +166,7 @@ export function RecordTableHeader({
               return (
                 <div
                   key={sf.id}
-                  className="h-10 bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-800 border-r border-gray-300"
+                  className="h-8 bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-800 border-r border-gray-300"
                   style={{ width: `${sfWidth}px` }}
                 >
                   {sf.name}

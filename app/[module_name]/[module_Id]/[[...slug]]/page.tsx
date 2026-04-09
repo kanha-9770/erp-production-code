@@ -749,19 +749,22 @@ export default function ModulePage({
   }
 
   return (
-    <div className="container mx-auto p-2 space-y-2 max-w-full overflow-x-hidden">
-      <FormsContent
-        forms={allModuleForms}
-        selectedForm={selectedForm}
-        setSelectedForm={setSelectedForm}
-        openFormDialog={openFormDialog}
-        canCreateForForm={(formId) =>
-          hasPermissionForForm(formId, "VIEW")
-          || hasPermissionForForm(formId, "CREATE")
-          || hasPermissionForForm(formId, "EDIT")
-          || hasPermissionForForm(formId, "DELETE")
-        }
-      />
+    <div className="flex flex-col h-full p-2 gap-2 max-w-full overflow-hidden">
+      <div className="shrink-0">
+        <FormsContent
+          forms={allModuleForms}
+          selectedForm={selectedForm}
+          setSelectedForm={setSelectedForm}
+          openFormDialog={openFormDialog}
+          canCreateForForm={(formId) =>
+            hasPermissionForForm(formId, "VIEW")
+            || hasPermissionForForm(formId, "CREATE")
+            || hasPermissionForForm(formId, "EDIT")
+            || hasPermissionForForm(formId, "DELETE")
+          }
+        />
+      </div>
+      <div className="flex-1 min-h-0">
       <RecordsDisplay
         allModuleForms={allModuleForms}
         formRecords={formRecords}
@@ -799,6 +802,7 @@ export default function ModulePage({
         permissions={permissions}
         isAdmin={isAdmin}
       />
+      </div>
       <PublicFormDialog
         formId={selectedFormForFilling}
         isOpen={isFormDialogOpen}

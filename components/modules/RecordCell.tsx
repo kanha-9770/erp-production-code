@@ -3,6 +3,11 @@ import React, { memo, useState, useEffect, useMemo } from "react";
 import { ChevronDown, ChevronUp, MessageSquare, Layers, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isImageUrl, isImageField } from "@/lib/utils/fieldUtils";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import type {
   EnhancedFormRecord,
   FormFieldWithSection,
@@ -414,9 +419,49 @@ export const RecordCell = memo(function RecordCell({
 
         {hasComments && (
           <div className="absolute top-0 right-0 group z-10">
-            <button className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs" onClick={(e) => { e.stopPropagation(); onCommentClick(cellKey); }}>
-              <MessageSquare className="h-3 w-3" />
-            </button>
+            <Tooltip delayDuration={150}>
+              <TooltipTrigger asChild>
+                <button
+                  className="bg-yellow-400 text-white p-0.5 rounded-bl text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCommentClick(cellKey);
+                  }}
+                >
+                  <MessageSquare className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                align="top"
+                className="max-w-xs p-0 bg-white text-gray-800 border border-gray-200 shadow-lg"
+              >
+                <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 rounded-t-md">
+                  <p className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                    <MessageSquare className="h-3 w-3 text-yellow-500" />
+                    {(comments.get(cellKey) || []).length} Comment
+                    {(comments.get(cellKey) || []).length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {(comments.get(cellKey) || []).map((c) => (
+                    <div key={c.id} className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <span className="text-xs font-semibold text-gray-900 truncate">
+                          {c.author}
+                        </span>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0">
+                          {c.timestamp}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-700 whitespace-pre-wrap break-words">
+                        {c.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
           </div>
         )}
       </div>

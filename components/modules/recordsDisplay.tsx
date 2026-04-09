@@ -936,7 +936,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen max-h-[35.8rem] bg-gray-50 overflow-x-hidden overflow-y-hidden">
+      <div className="flex h-full min-h-0 bg-gray-50 overflow-x-hidden overflow-y-hidden">
         {/* Advanced Filter Sidebar */}
         <AdvancedFilterSidebar
           isOpen={isFilterSidebarOpen}
@@ -1262,11 +1262,11 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 </div>
 
                 {/* Tab bar */}
-                <div className="border-t border-gray-300 bg-gray-50 px-4 py-2 flex items-center gap-1 overflow-x-auto">
+                <div className="border-t border-gray-300 bg-gray-50 px-4 pt-2 flex items-center gap-1 overflow-x-auto">
                   <button
                     onClick={() => setActiveTab("merged")}
                     className={cn(
-                      "px-5 py-2.5 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
+                      "px-5 py-1 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
                       activeTab === "merged"
                         ? "bg-white text-blue-700 border-t-2 border-l border-r border-blue-500 shadow-sm -mt-px"
                         : "text-gray-600 hover:text-gray-900 hover:bg-gray-200",
@@ -1279,7 +1279,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       key={form.id}
                       onClick={() => setActiveTab(form.id)}
                       className={cn(
-                        "px-5 py-2.5 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
+                        "px-5 py-1 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
                         activeTab === form.id
                           ? "bg-white text-blue-700 border-t-2 border-l border-r border-blue-500 shadow-sm -mt-px"
                           : "text-gray-600 hover:text-gray-900 hover:bg-gray-200",
