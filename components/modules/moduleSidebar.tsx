@@ -3,6 +3,7 @@
 import React, {
   useState,
   useEffect,
+  useLayoutEffect,
   useRef,
   useMemo,
   useCallback,
@@ -46,6 +47,8 @@ import {
   LayoutDashboard,
   ChevronRight,
   ChevronDown,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -65,6 +68,27 @@ interface Module {
 }
 
 type SortOrder = "manual" | "asc" | "desc";
+
+/**
+ * One entry in the sidebar's reorder history. Each successful drag-drop
+ * captures both where the module came from and where it ended up, so we
+ * can replay the move forward (redo) or in reverse (undo) by calling the
+ * existing onReorderModule API.
+ *
+ * `fromIndex` is the module's index in its original parent's children
+ * array (with itself still present). `toIndex` is the index passed to
+ * onReorderModule when the action was performed (i.e. index in the
+ * post-removal sibling array). Both forms are valid inputs to the
+ * optimistic reorder hook because that hook always removes the module
+ * first, then inserts at the requested index.
+ */
+interface ReorderHistoryEntry {
+  moduleId: string;
+  fromParentId: string | null;
+  fromIndex: number;
+  toParentId: string | null;
+  toIndex: number;
+}
 
 interface ModuleSidebarProps {
   filteredModules: Module[];
@@ -221,27 +245,42 @@ function SortableRow({
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="relative">
-      {/* ABOVE drop indicator — thick glowing bar with a leading dot.
-          The dot anchors the line so the user instantly knows "this is a
-          drop target", not a divider. */}
-      {dropPosition === "above" && (
-        <div className="absolute left-2 right-2 -top-[3px] h-[4px] z-30 pointer-events-none">
-          <div className="absolute inset-0 bg-blue-500 rounded-full shadow-[0_0_12px_rgba(59,130,246,0.85)]" />
-          <div className="absolute -left-[2px] top-1/2 -translate-y-1/2 h-[10px] w-[10px] rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.85)] ring-2 ring-white" />
-        </div>
-      )}
-      {/* BELOW drop indicator */}
-      {dropPosition === "below" && (
-        <div className="absolute left-2 right-2 -bottom-[3px] h-[4px] z-30 pointer-events-none">
-          <div className="absolute inset-0 bg-blue-500 rounded-full shadow-[0_0_12px_rgba(59,130,246,0.85)]" />
-          <div className="absolute -left-[2px] top-1/2 -translate-y-1/2 h-[10px] w-[10px] rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.85)] ring-2 ring-white" />
-        </div>
-      )}
+    // Outer container — owns the indentation and stacks the row card + the
+    // (optional) forms list vertically. It does NOT carry setNodeRef any
+    // more, otherwise dnd-kit would measure both the row AND the forms
+    // list as one giant droppable rect — which broke "inside / above /
+    // below" detection on every parent module that had forms expanded.
+    <div style={style}>
+      {/* Row-card wrapper. Holds the drop indicators positioned relative
+          to the card so they always sit at the card's exact top/bottom
+          edges, regardless of whether forms are rendered below. */}
+      <div className="relative my-0.5">
+        {/* ABOVE drop indicator — thick glowing bar with a leading dot.
+            The dot anchors the line so the user instantly knows "this is
+            a drop target", not a divider. */}
+        {dropPosition === "above" && (
+          <div className="absolute left-2 right-2 -top-[3px] h-[4px] z-30 pointer-events-none">
+            <div className="absolute inset-0 bg-blue-500 rounded-full shadow-[0_0_12px_rgba(59,130,246,0.85)]" />
+            <div className="absolute -left-[2px] top-1/2 -translate-y-1/2 h-[10px] w-[10px] rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.85)] ring-2 ring-white" />
+          </div>
+        )}
+        {/* BELOW drop indicator */}
+        {dropPosition === "below" && (
+          <div className="absolute left-2 right-2 -bottom-[3px] h-[4px] z-30 pointer-events-none">
+            <div className="absolute inset-0 bg-blue-500 rounded-full shadow-[0_0_12px_rgba(59,130,246,0.85)]" />
+            <div className="absolute -left-[2px] top-1/2 -translate-y-1/2 h-[10px] w-[10px] rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.85)] ring-2 ring-white" />
+          </div>
+        )}
 
-      <div
-        className={`
-          group mx-2 my-0.5 rounded-md transition-all duration-150
+        {/* THIS is the dnd-kit droppable. Its rect is exactly the row
+            card (≈40px tall) — never inflated by the forms list — so the
+            cursor-Y / rect-height math in handleDragMove always lines up
+            with what the user sees. This single change is what fixes
+            nested-module drag-and-drop. */}
+        <div
+          ref={setNodeRef}
+          className={`
+          group mx-2 rounded-md transition-all duration-150
           ${isDragging ? "opacity-30 saturate-50" : ""}
           ${
             isSelected && dropPosition !== "inside"
@@ -254,7 +293,7 @@ function SortableRow({
               : ""
           }
         `}
-      >
+        >
         <div className="flex items-center min-h-[40px] gap-1">
           {/* Drag handle */}
           <button
@@ -383,31 +422,35 @@ function SortableRow({
             </Button>
           </div>
         </div>
-
-        {/* Forms list — read-only here, full editing in main pane */}
-        {isExpanded && node.module.forms && node.module.forms.length > 0 && (
-          <div className="ml-8 pl-2 pb-2 border-l border-gray-100 space-y-0.5">
-            {node.module.forms.map((form) => (
-              <div
-                key={form.id}
-                className="flex items-center gap-2 px-2 py-1 text-[11px] rounded hover:bg-white"
-              >
-                <FileText
-                  className={`h-3 w-3 flex-shrink-0 ${
-                    form.isPublished ? "text-green-500" : "text-amber-500"
-                  }`}
-                />
-                <span className="truncate font-semibold text-gray-600 tracking-wide">
-                  {form.name.toUpperCase()}
-                </span>
-                {form.isPublished && (
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-green-500" />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* end of row card */}
+        </div>
       </div>
+      {/* Forms list — read-only here, full editing in main pane.
+          Lives OUTSIDE the dnd-kit setNodeRef element so it never
+          inflates the row's hit-test rect. Slight ml bump (10 vs 8)
+          compensates for the missing card mx-2. */}
+      {isExpanded && node.module.forms && node.module.forms.length > 0 && (
+        <div className="ml-10 pl-2 pb-2 border-l border-gray-100 space-y-0.5">
+          {node.module.forms.map((form) => (
+            <div
+              key={form.id}
+              className="flex items-center gap-2 px-2 py-1 text-[11px] rounded hover:bg-white"
+            >
+              <FileText
+                className={`h-3 w-3 flex-shrink-0 ${
+                  form.isPublished ? "text-green-500" : "text-amber-500"
+                }`}
+              />
+              <span className="truncate font-semibold text-gray-600 tracking-wide">
+                {form.name.toUpperCase()}
+              </span>
+              {form.isPublished && (
+                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-green-500" />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -454,6 +497,136 @@ export default function ModuleSidebar({
     });
   }, []);
 
+  // ── Undo / Redo history ────────────────────────────────────────────────────
+  //
+  // Single source of truth for the reorder history. `index` points at the
+  // last applied entry — so undo replays history[index] in reverse and then
+  // decrements; redo increments and replays history[index] forward. New
+  // user actions truncate any "future" entries past `index` (the standard
+  // editor undo model).
+  const [historyState, setHistoryState] = useState<{
+    stack: ReorderHistoryEntry[];
+    index: number;
+  }>({ stack: [], index: -1 });
+
+  // We need the LATEST historyState inside async undo/redo (which call
+  // onReorderModule and may be invoked rapidly via keyboard). A ref keeps
+  // the read in sync without making the callbacks change identity on every
+  // history mutation, which would otherwise cause the keyboard listener
+  // effect to re-bind constantly.
+  const historyStateRef = useRef(historyState);
+  historyStateRef.current = historyState;
+
+  const canUndo = historyState.index >= 0;
+  const canRedo = historyState.index < historyState.stack.length - 1;
+
+  const pushHistory = useCallback((entry: ReorderHistoryEntry) => {
+    setHistoryState((prev) => ({
+      stack: [...prev.stack.slice(0, prev.index + 1), entry],
+      index: prev.index + 1,
+    }));
+  }, []);
+
+  const undo = useCallback(async () => {
+    const cur = historyStateRef.current;
+    if (cur.index < 0) return;
+    const entry = cur.stack[cur.index];
+    // Optimistically move the pointer back so rapid Ctrl+Z presses chain
+    // through history without waiting on the in-flight network request.
+    setHistoryState((prev) => ({ ...prev, index: prev.index - 1 }));
+    try {
+      await onReorderModule(
+        entry.moduleId,
+        entry.fromParentId,
+        entry.fromIndex
+      );
+    } catch (err) {
+      console.error("[Sidebar] undo failed", err);
+      // Roll the pointer back forward — the action did not succeed.
+      setHistoryState((prev) => ({ ...prev, index: prev.index + 1 }));
+    }
+  }, [onReorderModule]);
+
+  const redo = useCallback(async () => {
+    const cur = historyStateRef.current;
+    if (cur.index >= cur.stack.length - 1) return;
+    const entry = cur.stack[cur.index + 1];
+    setHistoryState((prev) => ({ ...prev, index: prev.index + 1 }));
+    try {
+      await onReorderModule(entry.moduleId, entry.toParentId, entry.toIndex);
+    } catch (err) {
+      console.error("[Sidebar] redo failed", err);
+      setHistoryState((prev) => ({ ...prev, index: prev.index - 1 }));
+    }
+  }, [onReorderModule]);
+
+  // ── Manual FLIP animation for smooth reorder ───────────────────────────────
+  //
+  // We can't rely on framer-motion's `layout` prop here because the rows are
+  // also dnd-kit sortable nodes — `useSortable` + `pointerWithin` measuring
+  // strategy interfere with motion's layout snapshots, and the animation
+  // either doesn't fire or fires from wrong starting positions.
+  //
+  // Instead, we implement the standard FLIP technique by hand:
+  //   1. (F)irst — store every row's bounding rect after the previous render.
+  //   2. (L)ast — measure rects again on the next render. The DOM has just
+  //      committed the new order, so each row is at its new position.
+  //   3. (I)nvert — for any row whose top moved, instantly translate it back
+  //      to its old top. The user sees rows still at their old positions.
+  //   4. (P)lay — on the next animation frame, remove the inverse transform
+  //      with a CSS transition so each row glides to its real position.
+  //
+  // Doing it manually means it always works regardless of which other libs
+  // are mounting/unmounting the rows, and we get full control over easing.
+
+  const rowElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const prevRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const flipRafRef = useRef<number | null>(null);
+
+  const registerRowEl = useCallback(
+    (id: string, el: HTMLDivElement | null) => {
+      if (el) rowElsRef.current.set(id, el);
+      else rowElsRef.current.delete(id);
+    },
+    []
+  );
+
+  // The FLIP useLayoutEffect that consumes `flatIds` lives further down,
+  // right after `flatIds` itself is declared (you can't reference a
+  // memoized value before its declaration in React render order).
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z = undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z
+  // = redo. We deliberately ignore the shortcut while focus is in a text
+  // field so we don't hijack the browser's native text-editing undo.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        void undo();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        void redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo]);
+
   // Auto-expand parents of selected module so it stays in view
   useEffect(() => {
     if (!selectedModule) return;
@@ -478,6 +651,81 @@ export default function ModuleSidebar({
     [filteredModules, expanded, parentSortOverrides]
   );
   const flatIds = useMemo(() => flatNodes.map((n) => n.id), [flatNodes]);
+
+  // ── FLIP layout effect ─────────────────────────────────────────────────────
+  // Run after every render that changes the visible row order. Because
+  // `flatIds` is a memoized array (stable identity per real data change),
+  // this effect only fires when the tree actually mutates — drag-drop,
+  // undo, redo, expand/collapse, search, sort. It does NOT fire on every
+  // mouse-move during a drag.
+  useLayoutEffect(() => {
+    // Cancel any in-flight FLIP from a previous render so two reorders in
+    // quick succession don't fight each other.
+    if (flipRafRef.current !== null) {
+      cancelAnimationFrame(flipRafRef.current);
+      flipRafRef.current = null;
+    }
+
+    const els = rowElsRef.current;
+    const prevRects = prevRectsRef.current;
+    const newRects = new Map<string, DOMRect>();
+
+    // Phase L + I: measure new positions, apply inverse translateY for any
+    // row that moved. We only animate vertical movement — horizontal shifts
+    // come from depth/indentation changes and look better snapping than
+    // sliding sideways.
+    const moved: HTMLDivElement[] = [];
+    els.forEach((el, id) => {
+      const newRect = el.getBoundingClientRect();
+      newRects.set(id, newRect);
+
+      const prevRect = prevRects.get(id);
+      if (!prevRect) return; // newly added row — no previous position to FLIP from
+
+      const dy = prevRect.top - newRect.top;
+      // Sub-pixel jitter shouldn't trigger an animation.
+      if (Math.abs(dy) < 1) return;
+
+      // Kill any leftover transition from a previous animation, snap back
+      // to the old position, and remember to play it forward next frame.
+      el.style.transition = "none";
+      el.style.transform = `translate3d(0, ${dy}px, 0)`;
+      // Force the browser to flush the inverse transform before we set the
+      // transition in the next frame. Reading offsetHeight is a no-op that
+      // triggers a synchronous reflow.
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      el.offsetHeight;
+      moved.push(el);
+    });
+
+    // Phase P: schedule the play step. Using requestAnimationFrame ensures
+    // the inverse transform is painted at least once before we start the
+    // outbound transition — without this the browser may collapse both
+    // style writes into one frame and the user sees no animation at all.
+    if (moved.length > 0) {
+      flipRafRef.current = requestAnimationFrame(() => {
+        flipRafRef.current = null;
+        for (const el of moved) {
+          el.style.transition =
+            "transform 320ms cubic-bezier(0.22, 0.85, 0.28, 1)";
+          el.style.transform = "";
+        }
+      });
+    }
+
+    prevRectsRef.current = newRects;
+  }, [flatIds]);
+
+  // Belt-and-braces cleanup: cancel any pending animation frame on unmount
+  // so we never call into a stale ref.
+  useEffect(() => {
+    return () => {
+      if (flipRafRef.current !== null) {
+        cancelAnimationFrame(flipRafRef.current);
+        flipRafRef.current = null;
+      }
+    };
+  }, []);
 
   // dnd-kit state
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -588,17 +836,34 @@ export default function ModuleSidebar({
       }
 
       // Compute position from the LIVE cursor Y (tracked via pointermove),
-      // not the start position. The "inside" zone is the middle 60% so it's
-      // very easy to hit; above/below get 20% each at the very edges.
+      // not the start position. We use a 33/34/33 split — 13/14/13 px on a
+      // 40 px row — so above/below are big enough to actually hit reliably
+      // (the old 20/60/20 split gave only 8 px above/below, which is what
+      // made nested submodule reordering feel impossible).
       const rect = over.rect;
       const cursorY = cursorYRef.current;
       const offset = cursorY - rect.top;
       const ratio = Math.max(0, Math.min(1, offset / rect.height));
 
       let position: "above" | "inside" | "below";
-      if (ratio < 0.2) position = "above";
-      else if (ratio > 0.8) position = "below";
+      if (ratio < 0.33) position = "above";
+      else if (ratio > 0.67) position = "below";
       else position = "inside";
+
+      // Smart "below" → "inside" remap. When the user hovers the bottom
+      // of an EXPANDED parent that already has visible children, "below"
+      // visually points at the parent's first child. The user expects the
+      // dragged item to slot in as a new first child, NOT to skip over
+      // every visible child and land as a sibling after the parent. So we
+      // promote that drop to "inside" — the indicator turns into the green
+      // "DROP INSIDE" badge and the child gets prepended on drop.
+      if (position === "below") {
+        const overModule = findModule(filteredModules, overIdStr);
+        const isExpanded = expanded.has(overIdStr);
+        if (overModule?.children?.length && isExpanded) {
+          position = "inside";
+        }
+      }
 
       // Update visual state only when something actually changed (avoids
       // re-renders on every pixel).
@@ -697,6 +962,13 @@ export default function ModuleSidebar({
         }
       }
 
+      // Capture the BEFORE state for history. We need this *now*, before
+      // the optimistic update mutates the tree, so undo can put the module
+      // back exactly where it came from.
+      const beforeParentId = draggedNode.parentId;
+      const beforeSiblings = getSiblings(filteredModules, beforeParentId);
+      const beforeIndex = beforeSiblings.findIndex((s) => s.id === draggedId);
+
       // No-op: dropping a module right back where it already is
       if (
         draggedNode.parentId === targetParentId &&
@@ -730,6 +1002,17 @@ export default function ModuleSidebar({
 
       try {
         await onReorderModule(draggedId, targetParentId, targetIndex);
+        // Only record on success — failed reorders shouldn't pollute the
+        // undo history with phantom entries the user can't actually undo.
+        if (beforeIndex !== -1) {
+          pushHistory({
+            moduleId: draggedId,
+            fromParentId: beforeParentId,
+            fromIndex: beforeIndex,
+            toParentId: targetParentId,
+            toIndex: targetIndex,
+          });
+        }
       } catch (err) {
         console.error("[Sidebar] reorder failed", err);
       }
@@ -740,6 +1023,7 @@ export default function ModuleSidebar({
       filteredModules,
       onReorderModule,
       parentSortOverrides,
+      pushHistory,
     ]
   );
 
@@ -819,15 +1103,47 @@ export default function ModuleSidebar({
           <h2 className="text-[11px] font-black text-gray-500 uppercase tracking-[0.18em]">
             System Modules
           </h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-gray-500 hover:text-blue-600"
-            onClick={cycleSort}
-            title={sortLabel}
-          >
-            {sortIcon}
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-gray-500 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-gray-500"
+              onClick={() => void undo()}
+              disabled={!canUndo}
+              title={
+                canUndo
+                  ? `Undo last reorder (Ctrl+Z) — ${historyState.index + 1} step(s) available`
+                  : "Nothing to undo"
+              }
+              aria-label="Undo reorder"
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-gray-500 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-gray-500"
+              onClick={() => void redo()}
+              disabled={!canRedo}
+              title={
+                canRedo
+                  ? `Redo reorder (Ctrl+Y) — ${historyState.stack.length - historyState.index - 1} step(s) available`
+                  : "Nothing to redo"
+              }
+              aria-label="Redo reorder"
+            >
+              <Redo2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-gray-500 hover:text-blue-600"
+              onClick={cycleSort}
+              title={sortLabel}
+            >
+              {sortIcon}
+            </Button>
+          </div>
         </div>
 
         <div className="relative">
@@ -914,23 +1230,35 @@ export default function ModuleSidebar({
                       : null;
 
                   return (
-                    <SortableRow
+                    // FLIP wrapper. The ref registers this DOM element with
+                    // `rowElsRef` so the layout effect can measure it on
+                    // every reorder and animate it from its old position
+                    // to its new one. The wrapper itself has no styling so
+                    // it's invisible to the layout — it only exists as a
+                    // measurement target that won't conflict with dnd-kit's
+                    // own ref on the inner SortableRow.
+                    <div
                       key={node.id}
-                      node={node}
-                      isExpanded={isExpanded}
-                      isSelected={isSelected}
-                      hasChildren={hasChildren}
-                      onToggle={() => toggleExpand(node.id)}
-                      onSelect={() => {
-                        setSelectedModule(node.module);
-                        setSelectedForm(null);
-                      }}
-                      onAddSub={() => openSubmoduleDialog(node.module)}
-                      onEdit={() => openEditDialog(node.module)}
-                      sortMode={parentSortOverrides.get(node.id) ?? null}
-                      onCycleSort={() => cycleParentSort(node.id)}
-                      dropPosition={dropPosition}
-                    />
+                      ref={(el) => registerRowEl(node.id, el)}
+                      style={{ willChange: "transform" }}
+                    >
+                      <SortableRow
+                        node={node}
+                        isExpanded={isExpanded}
+                        isSelected={isSelected}
+                        hasChildren={hasChildren}
+                        onToggle={() => toggleExpand(node.id)}
+                        onSelect={() => {
+                          setSelectedModule(node.module);
+                          setSelectedForm(null);
+                        }}
+                        onAddSub={() => openSubmoduleDialog(node.module)}
+                        onEdit={() => openEditDialog(node.module)}
+                        sortMode={parentSortOverrides.get(node.id) ?? null}
+                        onCycleSort={() => cycleParentSort(node.id)}
+                        dropPosition={dropPosition}
+                      />
+                    </div>
                   );
                 })}
               </div>
