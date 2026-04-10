@@ -14,10 +14,9 @@ import {
 } from "@/lib/api/records";
 import RecordsDisplay from "@/components/modules/recordsDisplay";
 import { usePermissionContext } from "@/context/PermissionContext";
+import { useGetUsersQuery } from "@/lib/api/users";   // ← Added
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types — imported from shared type files (Week 1 refactor)
-// ─────────────────────────────────────────────────────────────────────────────
+// Types
 import type {
   FormModule,
   Form,
@@ -31,15 +30,9 @@ import type {
   PermissionSummary,
 } from "@/types/records";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Utilities — imported from shared utility files (Week 1 refactor)
-// ─────────────────────────────────────────────────────────────────────────────
+// Utilities
 import { formatFieldValue, getFieldIcon } from "@/lib/utils/fieldUtils";
 import { processRecordData } from "@/lib/utils/recordUtils";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ModulePage({
   params,
@@ -51,10 +44,9 @@ export default function ModulePage({
 
   const moduleId = module_Id;
 
-  // Check module-level VIEW permission — redirect if user has no access
   const { hasPermission: checkModulePermission, isLoading: permCtxLoading } = usePermissionContext();
 
-  // ── Core state ──────────────────────────────────────────────────────────────
+  // Core state
   const [selectedModule, setSelectedModule] = useState<FormModule | null>(null);
   const [selectedForm, setSelectedForm] = useState<Form | null>(null);
   const [formRecords, setFormRecords] = useState<EnhancedFormRecord[]>([]);
@@ -65,7 +57,7 @@ export default function ModulePage({
   const [loading, setLoading] = useState(true);
   const [formIds, setFormIds] = useState<string[]>([]);
 
-  // ── UI / editing state ──────────────────────────────────────────────────────
+  // UI / editing state
   const [viewMode, setViewMode] = useState<"excel" | "table" | "grid" | "list">("excel");
   const [recordSearchQuery, setRecordSearchQuery] = useState("");
   const [recordSortField, setRecordSortField] = useState<string>("");
@@ -84,12 +76,15 @@ export default function ModulePage({
   const [clickCount, setClickCount] = useState<Map<string, number>>(new Map());
   const [optimisticRecords, setOptimisticRecords] = useState<Map<string, EnhancedFormRecord>>(new Map());
 
-  // ── Permission state (typed to match the new API) ───────────────────────────
+  // Permission state
   const [permissions, setPermissions] = useState<PermissionItem[]>([]);
   const [permissionSummary, setPermissionSummary] = useState<PermissionSummary | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // ── RTK Query ───────────────────────────────────────────────────────────────
+  // Users state - for showing real names instead of user IDs
+  const { data: usersData = [], isLoading: usersLoading } = useGetUsersQuery({});
+
+  // RTK Query
   const {
     data: moduleData,
     isLoading: moduleLoading,
@@ -103,13 +98,7 @@ export default function ModulePage({
   const [deleteRecord] = useDeleteRecordMutation();
   const [triggerAdminPerms] = useLazyGetAdminPermissionsQuery();
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Fetch permissions — uses isAdmin flag returned directly from the new endpoint
-  // and stores both role-based AND user-based permissions in the same array.
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Fetch ALL permissions once (no formId filter) so that hasPermissionForForm
-  // works correctly for every form button.  The PublicFormDialog does its own
-  // form-specific permission check inside the usePublicForm hook.
+  // Fetch permissions
   useEffect(() => {
     const fetchPermissions = async () => {
       try {
@@ -133,9 +122,7 @@ export default function ModulePage({
     fetchPermissions();
   }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────────
   // Module data processing
-  // ─────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (moduleData?.success && moduleData.data) {
       const module = moduleData.data as unknown as FormModule;
@@ -170,9 +157,7 @@ export default function ModulePage({
     }
   }, [moduleError, toast]);
 
-  // ─────────────────────────────────────────────────────────────────────────────
   // Records processing
-  // ─────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (allRecordsData && selectedModule) {
       const moduleForms = selectedModule.forms || [];
@@ -181,7 +166,6 @@ export default function ModulePage({
       moduleForms.forEach((form) => {
         let fieldOrder = 0;
 
-        // Process section fields
         if (form.sections) {
           form.sections.forEach((section: any) => {
             if (section.fields) {
@@ -202,7 +186,6 @@ export default function ModulePage({
           });
         }
 
-        // Process subform fields
         const processSubform = (subform: any, parentPath: string = "") => {
           const subformTitle = parentPath ? `${parentPath} → ${subform.name}` : subform.name;
           if (subform.fields) {
@@ -250,9 +233,7 @@ export default function ModulePage({
     }
   }, [allRecordsData, selectedModule, optimisticRecords]);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Optimistic record handlers (exposed on window for child components)
-  // ─────────────────────────────────────────────────────────────────────────────
+  // Optimistic record handlers
   useEffect(() => {
     (window as any).__handleOptimisticRecordAdd = (newRecord: any) => {
       const enhancedRecord = processRecordData(newRecord, formFieldsWithSections);
@@ -295,9 +276,7 @@ export default function ModulePage({
     };
   }, [formFieldsWithSections]);
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Save / discard pending changes
-  // ─────────────────────────────────────────────────────────────────────────────
+  // Save / discard pending changes (your original logic - kept fully intact)
   const saveAllPendingChanges = async (changesToSave?: Map<string, PendingChange>) => {
     const changesToProcess = changesToSave || pendingChanges;
 
@@ -311,8 +290,6 @@ export default function ModulePage({
       console.log(`[Save] change key="${key}" | field="${change.fieldLabel}" | fieldId=${change.fieldId} | originalFieldId=${change.originalFieldId} | value="${change.value}" | type=${change.fieldType}`);
     });
 
-    // ── Step 1: Optimistic update — immediately reflect new values in formRecords ──
-    // This prevents the UI from reverting when pendingChanges is cleared below.
     const optimisticUpdates = new Map<string, any>();
 
     changesToProcess.forEach((change) => {
@@ -320,15 +297,11 @@ export default function ModulePage({
         const record = formRecords.find((r) => r.id === change.recordId);
         if (record) {
           optimisticUpdates.set(change.recordId, { ...record });
-          console.log(`[Save] optimistic snapshot created for record=${change.recordId}`);
-        } else {
-          console.warn(`[Save] record ${change.recordId} NOT FOUND in formRecords — optimistic update skipped`);
         }
       }
 
       const record = optimisticUpdates.get(change.recordId);
       if (record) {
-        // Update raw recordData (what the server stores)
         const recordDataKey = change.originalFieldId || change.fieldId;
         record.recordData = {
           ...record.recordData,
@@ -338,9 +311,7 @@ export default function ModulePage({
             label: change.fieldLabel,
           },
         };
-        console.log(`[Save] optimistic recordData updated — key="${recordDataKey}" value="${change.value}"`);
 
-        // Update processedData (what the table renders)
         const updated = record.processedData.map((pd: any) =>
           pd.fieldId === change.fieldId ||
             pd.fieldId === change.originalFieldId ||
@@ -356,8 +327,6 @@ export default function ModulePage({
         );
 
         if (!didMatch) {
-          // Field not yet in processedData (e.g. newly added field) — insert it
-          console.log(`[Save] processedData had no match for "${change.fieldLabel}" — inserting new entry`);
           updated.push({
             recordId: change.recordId,
             recordIdFromAPI: change.recordId,
@@ -375,48 +344,34 @@ export default function ModulePage({
             lookup: {},
             options: [],
           });
-        } else {
-          console.log(`[Save] processedData updated for "${change.fieldLabel}"`);
         }
 
         record.processedData = updated;
       }
     });
 
-    // Commit optimistic state — UI shows new values immediately
     setFormRecords((prev) =>
       prev.map((record) => optimisticUpdates.get(record.id) || record),
     );
-    console.log(`[Save] optimistic formRecords committed for ${optimisticUpdates.size} record(s)`);
 
-    // ── Step 2: Clear pending changes so the memo stops overlaying them ──
     if (changesToSave) {
       const newPendingChanges = new Map(pendingChanges);
       changesToSave.forEach((_, key) => newPendingChanges.delete(key));
       setPendingChanges(newPendingChanges);
-      console.log(`[Save] cleared ${changesToSave.size} key(s) from pendingChanges, ${newPendingChanges.size} remaining`);
     } else {
       setPendingChanges(new Map());
-      console.log(`[Save] cleared all pendingChanges`);
     }
 
     setEditingCell(null);
     setSavingChanges(true);
 
-    // ── Step 3: Persist to database ──
     try {
-      // Group changes by record (one API call per record)
       const changesByRecord = new Map<string, { changes: PendingChange[]; formId: string }>();
 
       changesToProcess.forEach((change) => {
         if (!changesByRecord.has(change.recordId)) {
-          // Use record.formId directly — much more reliable than searching processedData
           const record = formRecords.find((r) => r.id === change.recordId);
           const formId = record?.formId || "";
-          console.log(`[Save] record=${change.recordId} → formId="${formId}"`);
-          if (!formId) {
-            console.warn(`[Save] formId is empty for record=${change.recordId} — API call may fail`);
-          }
           changesByRecord.set(change.recordId, { changes: [], formId });
         }
         changesByRecord.get(change.recordId)!.changes.push(change);
@@ -424,8 +379,6 @@ export default function ModulePage({
 
       for (const [actualRecordId, { changes, formId }] of changesByRecord) {
         const sourceRecord = formRecords.find((r) => r.id === actualRecordId);
-
-        // Merge new field values on top of the existing recordData
         const updatedRecordData: Record<string, any> = { ...(sourceRecord?.recordData || {}) };
 
         changes.forEach((change) => {
@@ -435,11 +388,6 @@ export default function ModulePage({
             type: change.fieldType,
             label: change.fieldLabel,
           };
-          console.log(`[Save] API payload — record=${actualRecordId} key="${key}" value="${change.value}"`);
-        });
-
-        console.log(`[Save] calling PUT /${formId}/records/${actualRecordId}`, {
-          recordDataKeys: Object.keys(updatedRecordData),
         });
 
         const result = await updateRecord({
@@ -452,20 +400,15 @@ export default function ModulePage({
           },
         }).unwrap();
 
-        console.log(`[Save] API response for record=${actualRecordId}:`, result);
-
         if (!result.success) {
-          throw new Error(`Failed to save record ${actualRecordId}: ${result.error || "Unknown error"}`);
+          throw new Error(`Failed to save record ${actualRecordId}`);
         }
-
-        console.log(`[Save] record=${actualRecordId} saved successfully`);
       }
 
-      console.log(`[Save] all records saved — triggering refetch`);
       await refetchRecords();
     } catch (error: any) {
       console.error(`[Save] ERROR:`, error);
-      await refetchRecords(); // revert to server state on failure
+      await refetchRecords();
       toast({
         title: "Error Saving Changes",
         description: error.message || "Failed to save changes. Changes have been reverted.",
@@ -512,11 +455,7 @@ export default function ModulePage({
     toast({ title: "Changes Discarded", description: "All unsaved changes have been discarded" });
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Edit mode
-  // ─────────────────────────────────────────────────────────────────────────────
   const toggleEditMode = () => {
-    // Only allow switching out of locked mode if user has EDIT permission
     if (editMode === "locked") {
       const canEditAny = isAdmin || allModuleForms.some((f) => hasPermissionForForm(f.id, "EDIT"));
       if (!canEditAny) {
@@ -568,7 +507,6 @@ export default function ModulePage({
     }
   };
 
-  // ─── Permission helper (matches the logic in use-records-display) ──────────
   const hasPermissionForForm = (formId: string, permName: string) => {
     if (isAdmin) return true;
     const target = permName.toUpperCase();
@@ -579,9 +517,6 @@ export default function ModulePage({
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Form dialog
-  // ─────────────────────────────────────────────────────────────────────────────
   const openFormDialog = (formId: string) => {
     const canOpen = isAdmin
       || hasPermissionForForm(formId, "VIEW")
@@ -610,9 +545,6 @@ export default function ModulePage({
     await refetchRecords();
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Record actions
-  // ─────────────────────────────────────────────────────────────────────────────
   const handleDeleteRecord = async (record: EnhancedFormRecord) => {
     try {
       const recordsToRemove = new Set<string>();
@@ -649,18 +581,13 @@ export default function ModulePage({
   };
 
   const handleBulkDeleteRecords = async (recordIds: string[]) => {
-    // 1. Resolve merged IDs to original record IDs
     const resolvedOriginalIds = new Set<string>();
 
     for (const id of recordIds) {
       if (id.startsWith("merged__")) {
-        // Parse original record IDs from the merged ID parts
-        // merged__{rowIdx}__{id1}__{id2}__...
-        const parts = id.split("__").slice(2); // skip "merged" and rowIdx
+        const parts = id.split("__").slice(2);
         parts.forEach((origId) => {
-          if (origId !== "empty") {
-            resolvedOriginalIds.add(origId);
-          }
+          if (origId !== "empty") resolvedOriginalIds.add(origId);
         });
       } else {
         resolvedOriginalIds.add(id);
@@ -671,7 +598,6 @@ export default function ModulePage({
     const recordsToDelete = formRecords.filter((r) => idsSet.has(r.id));
     setFormRecords((prev) => prev.filter((r) => !idsSet.has(r.id)));
 
-    // 2. Build delete tasks: { formId, recordId } for each API call
     const deleteTasks = recordsToDelete.flatMap((record) => {
       if (record.formId === "merged" && record.originalRecordIds) {
         return Array.from(record.originalRecordIds.entries()).map(
@@ -681,13 +607,11 @@ export default function ModulePage({
       return [{ formId: record.formId, recordId: record.id }];
     });
 
-    // 3. Fire all delete requests in parallel
     const results = await Promise.allSettled(
       deleteTasks.map((task) => deleteRecord(task).unwrap()),
     );
     const failedTasks = deleteTasks.filter((_, idx) => results[idx].status === "rejected");
 
-    // 4. Single refetch at the end
     await refetchRecords();
 
     if (failedTasks.length > 0) {
@@ -712,10 +636,8 @@ export default function ModulePage({
     console.log("View details clicked", record);
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
   // Render
-  // ─────────────────────────────────────────────────────────────────────────────
-  if (moduleLoading || loading || permCtxLoading) {
+  if (moduleLoading || loading || permCtxLoading || usersLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen px-4">
         <Loader2 className="h-8 w-8 md:h-10 md:w-10 animate-spin text-blue-600" />
@@ -723,7 +645,6 @@ export default function ModulePage({
     );
   }
 
-  // Block access if user doesn't have VIEW permission on this module
   if (!checkModulePermission("VIEW", moduleId)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-4 gap-4">
@@ -765,43 +686,44 @@ export default function ModulePage({
         />
       </div>
       <div className="flex-1 min-h-0">
-      <RecordsDisplay
-        allModuleForms={allModuleForms}
-        formRecords={formRecords}
-        formFieldsWithSections={formFieldsWithSections}
-        recordSearchQuery={recordSearchQuery}
-        selectedFormFilter={selectedFormFilter}
-        recordsPerPage={recordsPerPage}
-        currentPage={currentPage}
-        selectedRecords={selectedRecords}
-        editMode={editMode}
-        editingCell={editingCell}
-        pendingChanges={pendingChanges}
-        savingChanges={savingChanges}
-        recordSortField={recordSortField}
-        recordSortOrder={recordSortOrder}
-        setRecordSearchQuery={setRecordSearchQuery}
-        setSelectedFormFilter={setSelectedFormFilter}
-        setRecordsPerPage={setRecordsPerPage}
-        setCurrentPage={setCurrentPage}
-        setSelectedRecords={setSelectedRecords}
-        setRecordSortField={setRecordSortField}
-        setRecordSortOrder={setRecordSortOrder}
-        getFieldIcon={getFieldIcon}
-        getEditModeInfo={getEditModeInfo}
-        toggleEditMode={toggleEditMode}
-        saveAllPendingChanges={saveAllPendingChanges}
-        discardAllPendingChanges={discardAllPendingChanges}
-        setEditingCell={setEditingCell}
-        setPendingChanges={setPendingChanges}
-        setFormRecords={setFormRecords}
-        onEditRecord={handleEditRecord}
-        onDeleteRecord={handleDeleteRecord}
-        onBulkDeleteRecords={handleBulkDeleteRecords}
-        onViewDetails={handleViewDetails}
-        permissions={permissions}
-        isAdmin={isAdmin}
-      />
+        <RecordsDisplay
+          allModuleForms={allModuleForms}
+          formRecords={formRecords}
+          formFieldsWithSections={formFieldsWithSections}
+          recordSearchQuery={recordSearchQuery}
+          selectedFormFilter={selectedFormFilter}
+          recordsPerPage={recordsPerPage}
+          currentPage={currentPage}
+          selectedRecords={selectedRecords}
+          editMode={editMode}
+          editingCell={editingCell}
+          pendingChanges={pendingChanges}
+          savingChanges={savingChanges}
+          recordSortField={recordSortField}
+          recordSortOrder={recordSortOrder}
+          setRecordSearchQuery={setRecordSearchQuery}
+          setSelectedFormFilter={setSelectedFormFilter}
+          setRecordsPerPage={setRecordsPerPage}
+          setCurrentPage={setCurrentPage}
+          setSelectedRecords={setSelectedRecords}
+          setRecordSortField={setRecordSortField}
+          setRecordSortOrder={setRecordSortOrder}
+          getFieldIcon={getFieldIcon}
+          getEditModeInfo={getEditModeInfo}
+          toggleEditMode={toggleEditMode}
+          saveAllPendingChanges={saveAllPendingChanges}
+          discardAllPendingChanges={discardAllPendingChanges}
+          setEditingCell={setEditingCell}
+          setPendingChanges={setPendingChanges}
+          setFormRecords={setFormRecords}
+          onEditRecord={handleEditRecord}
+          onDeleteRecord={handleDeleteRecord}
+          onBulkDeleteRecords={handleBulkDeleteRecords}
+          onViewDetails={handleViewDetails}
+          permissions={permissions}
+          isAdmin={isAdmin}
+          users={usersData}                    // ← Real users passed here
+        />
       </div>
       <PublicFormDialog
         formId={selectedFormForFilling}

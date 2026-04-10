@@ -227,3 +227,180 @@ export async function deleteRole(roleId: string, currentOrganizationId?: string)
     throw new Error("Failed to delete role");
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hierarchical record-inheritance helpers
+//
+// These power the "a parent role automatically sees records submitted by
+// users beneath them in the org hierarchy" feature. They are deliberately
+// kept here rather than in a new file so all role-tree traversal lives in
+// one place. The records-list endpoint at
+// `app/api/forms/[formId]/records/route.ts` is the primary caller.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Caller's role context: the set of role ids and unit ids the user holds,
+ * plus a fast-path admin flag. A single user can have multiple
+ * UserUnitAssignment rows (multi-unit / multi-role) so all return values
+ * are arrays.
+ */
+export interface CallerRoleContext {
+  roleIds: string[];
+  unitIds: string[];
+  isAdmin: boolean;
+}
+
+// Tiny in-memory TTL cache. We don't pull in `lru-cache` because we have
+// exactly two consumers and the working set is bounded by active users
+// per server instance. Entries expire after CACHE_TTL_MS so re-parenting
+// or unit changes propagate within the window.
+//
+// Trade-off: up to ~60 s of staleness on role re-parenting. This is
+// documented in the docstring of every helper that reads from the cache.
+const CACHE_TTL_MS = 60_000;
+type CacheEntry<T> = { value: T; expiresAt: number };
+const callerCtxCache = new Map<string, CacheEntry<CallerRoleContext>>();
+const inheritedUserIdsCache = new Map<string, CacheEntry<string[] | null>>();
+
+function readCache<T>(map: Map<string, CacheEntry<T>>, key: string): T | undefined {
+  const entry = map.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt < Date.now()) {
+    map.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function writeCache<T>(map: Map<string, CacheEntry<T>>, key: string, value: T) {
+  map.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+/**
+ * Resolve the caller's role context (all role assignments + units) for an
+ * organization. Cached for ~60 s per `${userId}:${orgId}` pair so a single
+ * page-load that fetches records for many forms only pays the DB cost once.
+ */
+export async function getCallerRoleContext(
+  userId: string,
+  organizationId: string
+): Promise<CallerRoleContext> {
+  const key = `${userId}:${organizationId}`;
+  const cached = readCache(callerCtxCache, key);
+  if (cached) return cached;
+
+  const assignments = await prisma.userUnitAssignment.findMany({
+    where: {
+      userId,
+      role: { organizationId },
+    },
+    select: {
+      unitId: true,
+      roleId: true,
+      role: { select: { isAdmin: true } },
+    },
+  });
+
+  const ctx: CallerRoleContext = {
+    roleIds: Array.from(new Set(assignments.map((a) => a.roleId))),
+    unitIds: Array.from(new Set(assignments.map((a) => a.unitId))),
+    isAdmin: assignments.some((a) => a.role.isAdmin),
+  };
+
+  writeCache(callerCtxCache, key, ctx);
+  return ctx;
+}
+
+/**
+ * Walk the role tree downward from `rootRoleIds` and return every active
+ * descendant role id (NOT including the roots themselves). Implemented as
+ * a single PostgreSQL `WITH RECURSIVE` query so deep trees are one round
+ * trip instead of N. Defensive depth cap of 20 prevents accidental cycles
+ * from causing infinite recursion.
+ */
+export async function getDescendantRoleIds(
+  organizationId: string,
+  rootRoleIds: string[]
+): Promise<string[]> {
+  if (rootRoleIds.length === 0) return [];
+
+  // We hand-build the query rather than use prisma.role.findMany because
+  // Prisma has no native support for recursive CTEs. Cast inputs to text[]
+  // / text so the parameters bind cleanly under all driver versions.
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE descendants AS (
+      SELECT id, parent_id, 0 AS depth
+      FROM roles
+      WHERE parent_id = ANY(${rootRoleIds}::text[])
+        AND organization_id = ${organizationId}
+        AND is_active = true
+      UNION ALL
+      SELECT r.id, r.parent_id, d.depth + 1
+      FROM roles r
+      JOIN descendants d ON r.parent_id = d.id
+      WHERE r.organization_id = ${organizationId}
+        AND r.is_active = true
+        AND d.depth < 20
+    )
+    SELECT id FROM descendants
+  `;
+
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Returns the set of user ids whose records the caller should inherit.
+ *
+ * - Admin callers get `null` (sentinel meaning "no filter — see everything").
+ * - Non-admin callers get the union of users assigned to any descendant
+ *   role of their own roles, **filtered to users who share at least one
+ *   organization unit with the caller**. The unit overlap is the critical
+ *   guard against cross-team leaks: a Sales Head should not inherit from
+ *   a Dev team member just because both ladders happen to roll up to the
+ *   same Admin.
+ *
+ * Cached for ~60 s per `${userId}:${orgId}` pair, same as
+ * `getCallerRoleContext`.
+ */
+export async function getInheritedUserIds(
+  organizationId: string,
+  callerCtx: CallerRoleContext
+): Promise<string[] | null> {
+  if (callerCtx.isAdmin) return null;
+  // Caller has no role assignments → nothing to inherit.
+  if (callerCtx.roleIds.length === 0) return [];
+
+  const cacheKey = `${organizationId}:${callerCtx.roleIds.slice().sort().join(",")}:${callerCtx.unitIds.slice().sort().join(",")}`;
+  const cached = readCache(inheritedUserIdsCache, cacheKey);
+  if (cached !== undefined) return cached;
+
+  const descendantRoleIds = await getDescendantRoleIds(
+    organizationId,
+    callerCtx.roleIds
+  );
+  if (descendantRoleIds.length === 0) {
+    writeCache(inheritedUserIdsCache, cacheKey, []);
+    return [];
+  }
+
+  // Unit-scoped: only inherit from users who share at least one unit with
+  // the caller. If the caller has no units (shouldn't normally happen),
+  // we return an empty list rather than leak across the whole org.
+  if (callerCtx.unitIds.length === 0) {
+    writeCache(inheritedUserIdsCache, cacheKey, []);
+    return [];
+  }
+
+  const assignments = await prisma.userUnitAssignment.findMany({
+    where: {
+      roleId: { in: descendantRoleIds },
+      unitId: { in: callerCtx.unitIds },
+    },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+
+  const userIds = assignments.map((a) => a.userId);
+  writeCache(inheritedUserIdsCache, cacheKey, userIds);
+  return userIds;
+}

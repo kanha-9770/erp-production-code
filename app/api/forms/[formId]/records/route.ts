@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import {
+  getCallerRoleContext,
+  getInheritedUserIds,
+} from "@/lib/database/roles";
 
 // ────────────────────────────────────────────────────────────────────────────
 // GET /api/forms/[formId]/records
@@ -104,6 +108,40 @@ export async function GET(
     }
 
     // ────────────────────────────────────────────────
+    // 3b. Hierarchical record-inheritance filter
+    //
+    // Default behavior: a user sees their own records PLUS the records of
+    // every user beneath them in the role tree (limited to users they
+    // share an organization unit with). The form owner can disable this
+    // by setting `Form.settings.inheritsToAncestors = false`, in which
+    // case non-admin users see only their own submissions.
+    //
+    // Admins (`Role.isAdmin = true`) bypass the filter entirely and see
+    // every record in the form, regardless of the toggle.
+    //
+    // The helpers below are cached for ~60s per user, so a dashboard
+    // page that fetches records for many forms only pays this cost once.
+    // ────────────────────────────────────────────────
+    let inheritanceUserIdFilter: string[] | null = null; // null = no filter (admin)
+    if (userOrgId) {
+      const callerCtx = await getCallerRoleContext(authUser.id, userOrgId);
+      if (!callerCtx.isAdmin) {
+        const formSettings = (form.settings as any) || {};
+        const formInherits = formSettings.inheritsToAncestors !== false; // default true
+        if (formInherits) {
+          const inheritedUserIds = await getInheritedUserIds(userOrgId, callerCtx);
+          // Caller always sees their own records.
+          inheritanceUserIdFilter = Array.from(
+            new Set([authUser.id, ...(inheritedUserIds ?? [])])
+          );
+        } else {
+          // Sharing disabled — non-admin viewers only see their own.
+          inheritanceUserIdFilter = [authUser.id];
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────
     // 4. Build field & subform lookups for enrichment
     // ────────────────────────────────────────────────
     const allowedFieldIds = new Set<string>();
@@ -117,6 +155,11 @@ export async function GET(
       { name: string; sectionTitle: string; fields: any[] }
     > = {};
 
+    // Field ids that must be stripped from records the caller is viewing
+    // through inheritance (i.e. they are not the original creator). The
+    // creator always sees the full row regardless of these flags.
+    const inheritanceExcludedFieldIds = new Set<string>();
+
     form.sections.forEach((section: any) => {
       const sectionTitle = section.title || "Default Section";
       section.fields.forEach((f: any) => {
@@ -127,6 +170,9 @@ export async function GET(
           type: f.type,
           sectionId: section.id,
         };
+        if (section.excludeFromInheritance) {
+          inheritanceExcludedFieldIds.add(f.id);
+        }
       });
     });
 
@@ -171,6 +217,13 @@ export async function GET(
 
     if (statusFilter) {
       whereClause.status = statusFilter;
+    }
+
+    // Apply hierarchical-inheritance filter as a single IN clause. This
+    // hits the new `[formId, userId]` composite index on every FormRecord
+    // shard. `null` (admin path) means no filter — they see everything.
+    if (inheritanceUserIdFilter !== null) {
+      whereClause.userId = { in: inheritanceUserIdFilter };
     }
 
     // ────────────────────────────────────────────────
@@ -455,9 +508,34 @@ export async function GET(
 
     // ────────────────────────────────────────────────
     // 8. Process records — enrich data, DO NOT embed full form structure per record
+    //
+    // Inheritance redaction: if the caller is viewing a record they did
+    // NOT create (and they're not an admin), strip any field that lives
+    // in a section flagged `excludeFromInheritance`. The marker fields
+    // `_inherited` / `_inheritedFromUserId` let the UI render an
+    // "Inherited from {creator}" badge.
     // ────────────────────────────────────────────────
+    const callerIsAdminBypass = inheritanceUserIdFilter === null;
+    const hasExcludedFields = inheritanceExcludedFieldIds.size > 0;
     const processedRecords = records.map((record: any) => {
-      const transformedData = transformRecordData(record.recordData || {});
+      const isInherited =
+        !callerIsAdminBypass && record.userId && record.userId !== authUser.id;
+
+      let transformedData = transformRecordData(record.recordData || {});
+
+      if (isInherited && hasExcludedFields) {
+        const filtered: Record<string, any> = {};
+        for (const [key, value] of Object.entries(transformedData)) {
+          // Strip top-level excluded field ids. Dynamic-row keys
+          // (`_dynamicRows_<subformId>`) are subform-scoped and not
+          // covered by FormSection.excludeFromInheritance, so they pass
+          // through untouched.
+          if (inheritanceExcludedFieldIds.has(key)) continue;
+          filtered[key] = value;
+        }
+        transformedData = filtered;
+      }
+
       return {
         id: record.id,
         formId: record.formId,
@@ -469,6 +547,9 @@ export async function GET(
         employee_id: record.employee_id,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
+        // Inheritance markers — used by the UI to render a badge.
+        _inherited: isInherited,
+        _inheritedFromUserId: isInherited ? record.userId : null,
       };
     });
 

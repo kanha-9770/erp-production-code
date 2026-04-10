@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { prisma } from "@/lib/prisma";
 
 function makePublishedView(form: any) {
   if (!form) return form;
@@ -207,6 +208,32 @@ export async function PATCH(
       if (allowedFields.includes(key)) {
         updates[key] = body[key];
       }
+    }
+
+    // Hierarchical inheritance toggle. We don't expose Form.settings as a
+    // free-form blob through PATCH (too many ways to clobber it) — instead
+    // we read the existing settings, spread them, set the single key, and
+    // write them back. Missing key in the request means "no change", not
+    // "reset to default".
+    if (typeof body.inheritsToAncestors === "boolean") {
+      const existing = await prisma.form.findUnique({
+        where: { id: params.formId },
+        select: { settings: true },
+      });
+      if (!existing) {
+        return NextResponse.json(
+          { success: false, error: "Form not found" },
+          { status: 404 }
+        );
+      }
+      const existingSettings =
+        existing.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
+          ? (existing.settings as Record<string, any>)
+          : {};
+      updates.settings = {
+        ...existingSettings,
+        inheritsToAncestors: body.inheritsToAncestors,
+      };
     }
 
     if (Object.keys(updates).length === 0) {

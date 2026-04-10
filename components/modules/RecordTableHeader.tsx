@@ -17,7 +17,7 @@ import type {
 interface RecordTableHeaderProps {
   isMergedMode: boolean;
   hierarchyGroups: FormGroup[];
-  displayedFields: FormFieldWithSection[];
+  displayedFields: FormFieldWithSection[];   // This now includes audit fields from parent
   columnWidths: Map<string, number>;
   selectedRecords: Set<string>;
   paginatedRecords: { id: string }[];
@@ -34,6 +34,8 @@ interface RecordTableHeaderProps {
   onDeleteSelected: () => void;
   canBulkDelete?: boolean;
   onSort?: (fieldId: string) => void;
+  showAuditFields?: boolean;
+  auditFields?: FormFieldWithSection[];
 }
 
 export function RecordTableHeader({
@@ -52,11 +54,19 @@ export function RecordTableHeader({
   onDeleteSelected,
   canBulkDelete = true,
   onSort,
+  showAuditFields = false,
+  auditFields = [],
 }: RecordTableHeaderProps) {
   const getGroupWidth = (fields: FormFieldWithSection[]) =>
     fields.reduce((sum, f) => sum + (columnWidths.get(f.id) || 192), 0);
 
   const hasSelection = selectedRecords.size > 0;
+
+  // Combine regular fields + audit fields for header rendering
+  const allHeaderFields = React.useMemo(() => {
+    if (!showAuditFields || auditFields.length === 0) return displayedFields;
+    return [...displayedFields, ...auditFields];
+  }, [displayedFields, showAuditFields, auditFields]);
 
   return (
     <>
@@ -98,7 +108,7 @@ export function RecordTableHeader({
           isMergedMode && hierarchyGroups.length > 1 ? "top-8" : "top-0",
         )}
       >
-        {/* Select All + Delete Icon in SAME CELL - Dynamic Width */}
+        {/* Select All + Delete Icon */}
         <div
           className={cn(
             "h-8 border-r border-gray-300 bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-200",
@@ -121,7 +131,6 @@ export function RecordTableHeader({
               className="h-4 w-4"
             />
 
-            {/* Delete Icon - appears only when something is selected and user has delete permission */}
             {hasSelection && canBulkDelete && (
               <Button
                 variant="ghost"
@@ -146,7 +155,7 @@ export function RecordTableHeader({
           Actions
         </div>
 
-        {/* Rest of the group headers */}
+        {/* Group Headers (Section & Subform names) */}
         {hierarchyGroups.map((formGroup) => (
           <React.Fragment key={formGroup.id}>
             {formGroup.directSections.map((sec) => (
@@ -175,9 +184,19 @@ export function RecordTableHeader({
             })}
           </React.Fragment>
         ))}
+
+        {/* Audit Fields Group Header - Only show when audit fields are enabled */}
+        {showAuditFields && auditFields.length > 0 && (
+          <div
+            className="h-8 bg-amber-100 flex items-center justify-center text-sm font-bold text-amber-800 border-r border-gray-300"
+            style={{ width: `${auditFields.reduce((sum, f) => sum + (columnWidths.get(f.id) || 180), 0)}px` }}
+          >
+            Audit Information
+          </div>
+        )}
       </div>
 
-      {/* Row 3: Field Headers (unchanged) */}
+      {/* Row 3: Individual Field Headers (This is where audit field headings were missing) */}
       <div
         className={cn(
           "flex bg-slate-100 border-b border-gray-300 shadow-sm sticky z-10",
@@ -191,9 +210,10 @@ export function RecordTableHeader({
         <div className="w-20 sm:w-24 flex-shrink-0" />
 
         <SortableContext
-          items={displayedFields.map((f) => f.id)}
+          items={allHeaderFields.map((f) => f.id)}
           strategy={horizontalListSortingStrategy}
         >
+          {/* Regular Fields Headers */}
           {hierarchyGroups.flatMap((formGroup) => [
             ...formGroup.directSections.flatMap((sec) =>
               sec.fields.map((field) => (
@@ -231,6 +251,24 @@ export function RecordTableHeader({
               ),
             ),
           ])}
+
+          {/* Audit Fields Headers - FIXED */}
+          {showAuditFields &&
+            auditFields.map((auditField) => (
+              <SortableColumnHeader
+                key={auditField.id}
+                field={auditField}
+                columnWidths={columnWidths}
+                handleResizeStart={handleResizeStart}
+                isMergedMode={isMergedMode}
+                getFieldIcon={getFieldIcon}
+                recordSortField={recordSortField}
+                recordSortOrder={recordSortOrder}
+                activeFieldFilters={activeFieldFilters}
+                handleOpenAdvancedFilterForColumn={handleOpenAdvancedFilterForColumn}
+                onSort={onSort}
+              />
+            ))}
         </SortableContext>
       </div>
     </>

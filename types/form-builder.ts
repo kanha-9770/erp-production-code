@@ -585,6 +585,12 @@ export interface FormSection {
   visible: boolean;
   collapsible: boolean;
   collapsed: boolean;
+  /**
+   * When true, fields in this section are stripped from records that a
+   * viewer is seeing through hierarchical inheritance (i.e. the viewer
+   * is not the original creator). The creator always sees the full row.
+   */
+  excludeFromInheritance?: boolean;
   conditional?: Record<string, any> | null;
   styling?: Record<string, any> | null;
   fields: FormField[];

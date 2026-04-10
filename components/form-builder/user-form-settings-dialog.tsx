@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import { Users, Database, AlertTriangle, UserCheck } from "lucide-react"
+import { Users, Database, AlertTriangle, UserCheck, Share2 } from "lucide-react"
 import type { Form } from "@/types/form-builder"
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -26,6 +26,10 @@ export default function UserFormSettingsDialog({
   const { toast } = useToast()
   const [isUserForm, setIsUserForm] = useState(false)
   const [isEmployeeForm, setIsEmployeeForm] = useState(false)
+  // Hierarchical record inheritance toggle. Default true (sharing on)
+  // matches the server-side default, so a missing settings key shows
+  // the switch as enabled out-of-the-box.
+  const [inheritsToAncestors, setInheritsToAncestors] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
 
   // Sync local state when form changes or dialog opens
@@ -33,6 +37,8 @@ export default function UserFormSettingsDialog({
     if (form && open) {
       setIsUserForm(form.isUserForm || false)
       setIsEmployeeForm(form.isEmployeeForm || false)
+      const settingsInherits = (form.settings as any)?.inheritsToAncestors
+      setInheritsToAncestors(settingsInherits !== false)
     }
   }, [form, open])
 
@@ -56,6 +62,7 @@ export default function UserFormSettingsDialog({
         formId: form.id,
         isUserForm,
         isEmployeeForm,
+        inheritsToAncestors,
       }).unwrap()
 
       if (result.success) {
@@ -77,6 +84,7 @@ export default function UserFormSettingsDialog({
       // Reset toggles back to server state
       setIsUserForm(form.isUserForm || false)
       setIsEmployeeForm(form.isEmployeeForm || false)
+      setInheritsToAncestors(((form.settings as any)?.inheritsToAncestors) !== false)
       toast({
         title: "Error",
         description: error?.data?.error || error?.message || "Failed to update form settings",
@@ -91,6 +99,7 @@ export default function UserFormSettingsDialog({
     if (!newOpen && form) {
       setIsUserForm(form.isUserForm || false)
       setIsEmployeeForm(form.isEmployeeForm || false)
+      setInheritsToAncestors(((form.settings as any)?.inheritsToAncestors) !== false)
     }
     onOpenChange(newOpen)
   }
@@ -108,7 +117,11 @@ export default function UserFormSettingsDialog({
   if (!form) return null
 
   const hasRecords = form.recordCount && form.recordCount > 0
-  const hasChanges = form.isUserForm !== isUserForm || form.isEmployeeForm !== isEmployeeForm
+  const serverInherits = ((form.settings as any)?.inheritsToAncestors) !== false
+  const hasChanges =
+    form.isUserForm !== isUserForm ||
+    form.isEmployeeForm !== isEmployeeForm ||
+    serverInherits !== inheritsToAncestors
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -184,6 +197,31 @@ export default function UserFormSettingsDialog({
                   disabled={employeeFormTaken || isUpdating || isCheckingEmployee}
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Hierarchical record inheritance */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium flex items-center gap-1.5">
+              <Share2 className="h-3.5 w-3.5" />
+              Sharing & Inheritance
+            </Label>
+            <div className="flex items-center justify-between p-2 border rounded-lg">
+              <div className="space-y-1 pr-4">
+                <div className="font-medium text-sm">Share submissions with parent roles</div>
+                <div className="text-xs text-muted-foreground">
+                  When enabled, every role above the submitter in the
+                  organization hierarchy can view their records (limited to
+                  users in the same organization unit). Disable this to keep
+                  records private to each submitter.
+                </div>
+              </div>
+              <Switch
+                id="inherits-to-ancestors-toggle"
+                checked={inheritsToAncestors}
+                onCheckedChange={setInheritsToAncestors}
+                disabled={isUpdating}
+              />
             </div>
           </div>
 

@@ -130,6 +130,9 @@ export class DatabaseTransforms {
       visible: section.visible,
       collapsible: section.collapsible,
       collapsed: section.collapsed,
+      // Hierarchical inheritance opt-out flag — surfaced so the section
+      // settings dialog can read its current value.
+      excludeFromInheritance: section.excludeFromInheritance ?? false,
       conditional: section.conditional as Record<string, any> | null,
       styling: section.styling as Record<string, any> | null,
       createdAt: section.createdAt,
@@ -140,7 +143,7 @@ export class DatabaseTransforms {
       subforms: section.subforms
         ? section.subforms.map((subform: any) => this.transformSubform(subform))
         : [],
-    };
+    } as FormSection;
   }
 
   // Enhanced transform subform with complete hierarchy support

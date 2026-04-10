@@ -851,6 +851,11 @@ export class DatabaseModules {
           visible: data.visible,
           collapsible: data.collapsible,
           collapsed: data.collapsed,
+          // Per-section opt-out for hierarchical record inheritance.
+          // When true, fields in this section are stripped from rows the
+          // viewer is seeing through inheritance (handled in the records
+          // list endpoint). The original creator always sees the full row.
+          excludeFromInheritance: (data as any).excludeFromInheritance,
           conditional: data.conditional || undefined,
           styling: data.styling || undefined,
         },

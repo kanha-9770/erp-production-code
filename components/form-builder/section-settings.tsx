@@ -38,6 +38,10 @@ export default function SectionSettings({ section, open, onOpenChange, onUpdate,
     visible: section.visible,
     collapsible: section.collapsible,
     collapsed: section.collapsed,
+    // Hierarchical record inheritance: when true, this section's fields
+    // are stripped from rows that a parent role is viewing through
+    // inheritance. The original creator always sees the full row.
+    excludeFromInheritance: section.excludeFromInheritance ?? false,
     styling: section.styling || {},
   })
 
@@ -70,6 +74,7 @@ export default function SectionSettings({ section, open, onOpenChange, onUpdate,
       visible: section.visible,
       collapsible: section.collapsible,
       collapsed: section.collapsed,
+      excludeFromInheritance: section.excludeFromInheritance ?? false,
       styling: section.styling || {},
     })
     setLocalConditional((section.conditional as ConditionalRule | null) ?? null)
@@ -167,6 +172,7 @@ export default function SectionSettings({ section, open, onOpenChange, onUpdate,
       visible: formData.visible,
       collapsible: formData.collapsible,
       collapsed: formData.collapsed,
+      excludeFromInheritance: formData.excludeFromInheritance,
       styling: formData.styling,
       // Persist conditional alongside the rest. Sending `null` clears it.
       conditional: localConditional ?? null,
@@ -182,6 +188,7 @@ export default function SectionSettings({ section, open, onOpenChange, onUpdate,
       visible: section.visible,
       collapsible: section.collapsible,
       collapsed: section.collapsed,
+      excludeFromInheritance: section.excludeFromInheritance ?? false,
       styling: section.styling || {},
     })
     setLocalConditional((section.conditional as ConditionalRule | null) ?? null)
@@ -337,6 +344,23 @@ export default function SectionSettings({ section, open, onOpenChange, onUpdate,
                     />
                   </div>
                 )}
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5 pr-4">
+                    <Label>Hide from inherited views</Label>
+                    <p className="text-sm text-gray-500">
+                      When a parent role views a record they did not
+                      create, this section&apos;s fields will be hidden.
+                      The original creator always sees the full row.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.excludeFromInheritance}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, excludeFromInheritance: checked })
+                    }
+                  />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

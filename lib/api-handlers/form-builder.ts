@@ -257,7 +257,9 @@ export const FormBuilderHandlers = {
         title: body.title, description: body.description, columns: body.columns,
         order: body.order, visible: body.visible, collapsible: body.collapsible,
         collapsed: body.collapsed, conditional: body.conditional, styling: body.styling,
-      });
+        // Per-section opt-out for hierarchical record inheritance.
+        excludeFromInheritance: body.excludeFromInheritance,
+      } as any);
       return NextResponse.json({ success: true, data: section });
     }, "updateSection");
   },

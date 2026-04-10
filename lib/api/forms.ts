@@ -243,7 +243,15 @@ export const formsApi = baseApi.injectEndpoints({
 
     patchFormSettings: builder.mutation<
       ApiResponse,
-      { formId: string; isUserForm: boolean; isEmployeeForm: boolean }
+      {
+        formId: string;
+        isUserForm?: boolean;
+        isEmployeeForm?: boolean;
+        // Hierarchical inheritance: when true (or unset), records are
+        // visible to ancestor roles within the same unit. When false,
+        // non-admin viewers only see records they personally created.
+        inheritsToAncestors?: boolean;
+      }
     >({
       query: ({ formId, ...body }) => ({
         url: `/forms/${formId}`,
@@ -253,6 +261,9 @@ export const formsApi = baseApi.injectEndpoints({
       invalidatesTags: (result, error, { formId }) => [
         { type: "FormDetail", id: formId },
         "EmployeeFormCheck",
+        // Inheritance toggle changes which records other users can see;
+        // bust the records cache so other consumers refetch.
+        "Records",
       ],
     }),
 
