@@ -51,7 +51,7 @@ export async function checkRoutePermission(
 
   // 2. Admin bypasses everything
   const isAdmin = user.unitAssignments.some(
-    (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+    (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin")
   );
 
   if (isAdmin) {

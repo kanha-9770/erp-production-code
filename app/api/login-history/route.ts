@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       (p: any) => p.isSystemAdmin && p.isActive && p.granted
     )
     const isRoleAdmin = currentUser.unitAssignments?.some(
-      (a: any) => a.role?.isAdmin || a.role?.name?.toUpperCase() === "ADMIN"
+      (a: any) => a.role?.isAdmin || (a.role?.name ?? "").toLowerCase().includes("admin")
     )
     const isAdmin = isOrgOwner || isSystemAdmin || isRoleAdmin
 

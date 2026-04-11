@@ -29,7 +29,7 @@ async function buildAuthMeta(token: string) {
 
   const isAdmin =
     user.unitAssignments?.some(
-      (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+      (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin")
     ) ?? false;
   const roleNames = user.unitAssignments?.map((ua) => ua.role.name) ?? [];
   const roleIds = user.unitAssignments?.map((ua) => ua.role.id) ?? [];

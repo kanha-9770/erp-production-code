@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { isUserAdmin } from "@/lib/api-helpers";
 
 interface LookupOptions {
   search?: string;
@@ -926,25 +927,17 @@ export class LookupService {
     const { quick = false } = options;
 
     try {
-      const [user, roles] = await Promise.all([
-        prisma.user.findUnique({
-          where: { id: userId },
-          select: { organizationId: true },
-        }),
-        prisma.$queryRaw<{ role_name: string }[]>`
-          SELECT r.name AS role_name
-          FROM user_unit_assignments uua
-          JOIN roles r ON r.id = uua.role_id
-          WHERE uua.user_id = ${userId}
-        `,
-      ]);
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { organizationId: true },
+      });
 
       if (!user?.organizationId) {
         return [];
       }
 
       const organizationId = user.organizationId;
-      const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+      const isAdmin = await isUserAdmin(userId, organizationId);
 
       let modules: any[] = [];
       let forms: any[] = [];

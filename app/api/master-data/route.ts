@@ -1,7 +1,7 @@
 // app/api/master-data/route.ts
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server"
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma"
 const extractValues = (staticData: any) => {
   if (!Array.isArray(staticData)) return []
@@ -254,14 +254,7 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       );
     }
-    // Fetch roles
-    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-    const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+    const isAdmin = await isUserAdmin(userId, organizationId);
     const permittedModules = await getPermittedModulesFlat(userId, organizationId, isAdmin);
     const permittedIds = permittedModules.map((m: any) => m.module_id);
     const { dropdowns, rootModules } = await buildHierarchy(permittedIds, organizationId);
@@ -295,14 +288,7 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    // Fetch roles
-    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-    const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+    const isAdmin = await isUserAdmin(userId, organizationId);
     const body = await req.json()
     const { form_id, master_data_type_name, values } = body
     if (!form_id || !master_data_type_name || !Array.isArray(values) || values.length === 0) {
@@ -376,14 +362,7 @@ export async function PUT(req: NextRequest) {
         { status: 403 }
       );
     }
-    // Fetch roles
-    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-    const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+    const isAdmin = await isUserAdmin(userId, organizationId);
     const body = await req.json()
     const { id, master_data_type_name, values } = body
     if (!id || !master_data_type_name || !Array.isArray(values)) {
@@ -464,14 +443,7 @@ export async function DELETE(req: NextRequest) {
         { status: 403 }
       );
     }
-    // Fetch roles
-    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-    const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+    const isAdmin = await isUserAdmin(userId, organizationId);
     const { searchParams } = new URL(req.url)
     const id = searchParams.get("id")
     if (!id) {

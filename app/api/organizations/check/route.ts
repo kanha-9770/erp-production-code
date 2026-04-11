@@ -37,7 +37,11 @@ export async function GET(request: NextRequest) {
     }
 
     const hasOrganization = !!user.organizationId
-    const isAdmin = user.unitAssignments.some((assignment) => assignment.role.name === "ADMIN")
+    const isAdmin = user.unitAssignments.some(
+      (assignment) =>
+        assignment.role.isAdmin ||
+        (assignment.role.name ?? "").toLowerCase().includes("admin"),
+    )
 
     return NextResponse.json({
       hasOrganization,

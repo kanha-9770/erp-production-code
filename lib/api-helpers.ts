@@ -62,6 +62,48 @@ export async function getAuthenticatedUser(
   return user ?? null;
 }
 
+/**
+ * Returns `true` if the user should be treated as an administrator.
+ * This is the single source of truth for admin-detection on the server
+ * and matches the logic used by /api/auth/me and the client-side hooks:
+ *   1. User owns the organization, OR
+ *   2. Any of the user's assigned roles has `is_admin = true`, OR
+ *   3. Any of the user's assigned role names contains "admin" (case-insensitive)
+ *
+ * Do NOT rely on a strict `role.name === "ADMIN"` comparison anywhere — it
+ * silently misses org owners, roles flagged via `isAdmin`, and roles whose
+ * names differ in case/spelling (e.g. "Administrator", "Super Admin").
+ */
+export async function isUserAdmin(
+  userId: string,
+  organizationId?: string | null
+): Promise<boolean> {
+  if (!userId) return false;
+
+  const [organization, roles] = await Promise.all([
+    organizationId
+      ? prisma.organization.findUnique({
+          where: { id: organizationId },
+          select: { ownerId: true },
+        })
+      : Promise.resolve(null),
+    prisma.$queryRaw<{ role_name: string; is_admin: boolean }[]>`
+      SELECT r.name AS role_name, r.is_admin AS is_admin
+      FROM user_unit_assignments uua
+      JOIN roles r ON r.id = uua.role_id
+      WHERE uua.user_id = ${userId}
+    `,
+  ]);
+
+  if (organization?.ownerId === userId) return true;
+
+  return roles.some(
+    (r) =>
+      r.is_admin === true ||
+      (r.role_name ?? "").toLowerCase().includes("admin")
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Request meta
 // ─────────────────────────────────────────────────────────────────────────────

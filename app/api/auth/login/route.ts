@@ -311,7 +311,7 @@ export async function POST(request: NextRequest) {
     })
 
     const isAdmin = userWithRoles?.unitAssignments?.some(
-      (ua) => ua.role.isAdmin || ua.role.name.toUpperCase() === "ADMIN"
+      (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin")
     ) ?? false
     const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
     const roleIds = userWithRoles?.unitAssignments?.map((ua) => ua.role.id) ?? []

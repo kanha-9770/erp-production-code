@@ -4,6 +4,7 @@ import { DatabaseModules } from "./DatabaseModules";
 import { DatabaseRoles } from "./DatabaseRoles";
 import { UserPermission, RolePermission } from "@/lib/auth-middleware";
 import { prisma } from "@/lib/prisma";
+import { isUserAdmin } from "@/lib/api-helpers";
 
 export class DatabaseService {
   // ────────────────────────────────────────────────────────────────
@@ -143,15 +144,7 @@ export class DatabaseService {
 
       const organizationId = user.organizationId;
 
-      // Get role names
-      const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-
-      const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+      const isAdmin = await isUserAdmin(userId, organizationId);
 
       let directIds: string[] = [];
 
@@ -223,14 +216,7 @@ export class DatabaseService {
       const organizationId = user.organizationId;
 
       // ── Role check ─────────────────────────────────────────────────────
-      const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-
-      const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+      const isAdmin = await isUserAdmin(userId, organizationId);
 
       let allVisibleIds: string[] = [];
 
@@ -464,7 +450,7 @@ export class DatabaseService {
 
       const roleIds = user.unitAssignments.map((ua) => ua.roleId);
       const isAdmin = user.unitAssignments.some(
-        (ua) => ua.role.isAdmin || ua.role.name === "ADMIN",
+        (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin"),
       );
 
       // Admins bypass all pruning
@@ -872,7 +858,9 @@ export class DatabaseService {
       if (!user) return false;
 
       const roleIds = user.unitAssignments.map((ua) => ua.roleId);
-      const isAdmin = user.unitAssignments.some((ua) => ua.role.isAdmin || ua.role.name === "ADMIN");
+      const isAdmin = user.unitAssignments.some(
+        (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin"),
+      );
 
       if (isAdmin) return true;
 
@@ -910,7 +898,9 @@ export class DatabaseService {
       if (!user) return false;
 
       const roleIds = user.unitAssignments.map((ua) => ua.roleId);
-      const isAdmin = user.unitAssignments.some((ua) => ua.role.isAdmin || ua.role.name === "ADMIN");
+      const isAdmin = user.unitAssignments.some(
+        (ua) => ua.role.isAdmin || (ua.role.name ?? "").toLowerCase().includes("admin"),
+      );
 
       if (isAdmin) return true;
 

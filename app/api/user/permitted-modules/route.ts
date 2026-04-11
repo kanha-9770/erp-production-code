@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma"; // ✅ using global instance (no new PrismaClient per request)
 
 /**
@@ -16,15 +16,7 @@ export async function GET(request: NextRequest) {
     const userId = authUser.id;
     const organizationId = authUser.organizationId;
 
-    // 🔹 Fetch roles
-    const roles = await prisma.$queryRaw<{ role_name: string }[]>`
-      SELECT r.name AS role_name
-      FROM user_unit_assignments uua
-      JOIN roles r ON r.id = uua.role_id
-      WHERE uua.user_id = ${userId}
-    `;
-
-    const isAdmin = roles.some((r) => r.role_name === "ADMIN");
+    const isAdmin = await isUserAdmin(userId, organizationId);
 
     let finalModules: any[] = [];
 
