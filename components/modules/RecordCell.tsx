@@ -24,6 +24,7 @@ export interface RecordCellProps {
   pendingChange: PendingChange | undefined;
   editingCell: EditingCell | null;
   expandedCells: Set<string>;
+  expandedSubforms?: Set<string>;
   columnWidth: number;
   isWrapTextEnabled: boolean;
   editMode: "locked" | "single-click" | "double-click";
@@ -56,7 +57,10 @@ export interface RecordCellProps {
   ) => void;
   onCommentClick: (cellKey: string) => void;
   toggleCellExpansion: (cellKey: string) => void;
+  toggleSubformExpansion?: (recordId: string, subformId: string) => void;
 }
+
+const SUBFORM_COLLAPSED_LIMIT = 3;
 
 export const RecordCell = memo(function RecordCell({
   record,
@@ -65,6 +69,7 @@ export const RecordCell = memo(function RecordCell({
   pendingChange,
   editingCell,
   expandedCells,
+  expandedSubforms,
   columnWidth,
   isWrapTextEnabled,
   editMode,
@@ -80,6 +85,7 @@ export const RecordCell = memo(function RecordCell({
   onPreviewClick,
   onCommentClick,
   toggleCellExpansion,
+  toggleSubformExpansion,
 }: RecordCellProps) {
   const actualValue = pendingChange ? pendingChange.value : fieldData?.value ?? null;
 
@@ -241,6 +247,90 @@ export const RecordCell = memo(function RecordCell({
   const isDynamicRows =
     fieldDef.id.startsWith("_dynamicRows_") && Array.isArray(actualValue);
 
+  // For subform fields, pull the per-row values out of the record's
+  // _dynamicRows_<subformId> entry so each row in the subform can be
+  // displayed stacked inside this cell instead of needing a separate column.
+  //
+  // The form renderer stores the FIRST subform row ("original") at the
+  // top level (recordData[fieldId]) and only the additional rows go into
+  // _dynamicRows_<subformId>. So when both exist, the static value is the
+  // first visible row and must be prepended to the stacked list.
+  const subformRowValues = useMemo<string[] | null>(() => {
+    if (!fieldDef.subformId) return null;
+    if (fieldDef.id.startsWith("_dynamicRows_")) return null;
+    const dynEntry = record.processedData.find(
+      (pd) => pd.fieldId === `_dynamicRows_${fieldDef.subformId}`,
+    );
+    const rows = dynEntry?.value;
+    const hasDynamicRows = Array.isArray(rows) && rows.length > 0;
+    if (!hasDynamicRows) return null;
+
+    const fieldKey = fieldDef.originalId || fieldDef.id;
+    const formatCell = (raw: any): string => {
+      if (raw === null || raw === undefined) return "";
+      if (Array.isArray(raw)) {
+        return raw
+          .map((v) =>
+            typeof v === "object" && v !== null
+              ? v?.label || v?.url || JSON.stringify(v)
+              : String(v),
+          )
+          .join(", ");
+      }
+      if (typeof raw === "object") {
+        return raw.label || raw.url || JSON.stringify(raw);
+      }
+      return String(raw);
+    };
+
+    const dynamicValues = rows.map((row: any) => {
+      if (!row || typeof row !== "object") return "";
+      let raw = row[fieldKey];
+      if (raw && typeof raw === "object" && "value" in raw) raw = raw.value;
+      return formatCell(raw);
+    });
+
+    // The "original" first row lives in the field's static value. Prepend
+    // it whenever it has content so the user sees every row, not just the
+    // ones added via "+ Add Row".
+    const staticFormatted = formatCell(actualValue);
+    const allValues =
+      staticFormatted !== ""
+        ? [staticFormatted, ...dynamicValues]
+        : dynamicValues;
+
+    if (allValues.every((v) => v === "")) return null;
+    return allValues;
+  }, [
+    fieldDef.subformId,
+    fieldDef.id,
+    fieldDef.originalId,
+    record.processedData,
+    actualValue,
+  ]);
+
+  const subformExpansionKey = fieldDef.subformId
+    ? `${record.id}::${fieldDef.subformId}`
+    : null;
+  const isSubformExpanded =
+    !!subformExpansionKey && !!expandedSubforms?.has(subformExpansionKey);
+
+  const visibleSubformRowValues = useMemo(() => {
+    if (!subformRowValues) return null;
+    if (isSubformExpanded || subformRowValues.length <= SUBFORM_COLLAPSED_LIMIT) {
+      return subformRowValues;
+    }
+    return subformRowValues.slice(0, SUBFORM_COLLAPSED_LIMIT);
+  }, [subformRowValues, isSubformExpanded]);
+
+  const hiddenSubformRowCount =
+    subformRowValues && !isSubformExpanded
+      ? Math.max(0, subformRowValues.length - SUBFORM_COLLAPSED_LIMIT)
+      : 0;
+
+  const hasStackedSubformRows =
+    !!visibleSubformRowValues && visibleSubformRowValues.length > 1;
+
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -290,7 +380,12 @@ export const RecordCell = memo(function RecordCell({
         className={cn(
           "px-3 text-sm font-medium text-gray-700 flex-shrink-0 transition-all duration-200 relative",
           !fieldDef.styling?.backgroundColor && "bg-white",
-          isWrapTextEnabled || isExpanded ? "h-auto min-h-[36px] py-2 items-start" : "h-8 items-center",
+          // No fixed `h-8` — let flex-stretch grow this cell to the row's
+          // tallest sibling so single-value cells in rows that contain
+          // stacked subform values fill the row instead of floating at the
+          // top with empty space below.
+          "min-h-[32px]",
+          (isWrapTextEnabled || isExpanded || hasStackedSubformRows) && "py-1.5",
           selectedCell === cellKey && "bg-blue-50/70 border-2 border-blue-500 shadow-sm z-10",
           isEditing && "ring-2 ring-inset ring-blue-600 bg-blue-50 shadow-inner z-20",
           pendingChange && !isEditing && "bg-gradient-to-r from-yellow-50 to-amber-50 font-semibold",
@@ -318,9 +413,73 @@ export const RecordCell = memo(function RecordCell({
           }
         }}
       >
-        <div className={cn("w-full h-full flex items-center", isWrapTextEnabled || isExpanded ? "items-start py-2" : "")}>
+        <div
+          className={cn(
+            "w-full h-full flex",
+            hasStackedSubformRows
+              ? "flex-col items-stretch"
+              : "items-center",
+          )}
+        >
           {isEditing ? (
             renderFieldEditor(record, fieldDef, actualValue, displayText)
+          ) : visibleSubformRowValues ? (
+            <div className="flex flex-col w-full h-full">
+              <div className="flex flex-col w-full flex-1 divide-y divide-gray-200">
+                {visibleSubformRowValues.map((rowVal, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "flex-1 flex items-center w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
+                      isWrapTextEnabled || isExpanded
+                        ? "whitespace-normal break-words"
+                        : "whitespace-nowrap overflow-hidden",
+                    )}
+                    title={rowVal}
+                  >
+                    <span
+                      className={cn(
+                        "block w-full",
+                        isWrapTextEnabled || isExpanded
+                          ? "whitespace-normal break-words"
+                          : "truncate",
+                      )}
+                    >
+                      {rowVal === "" ? (
+                        <span className="text-gray-300">N/A</span>
+                      ) : (
+                        rowVal
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {subformRowValues &&
+                subformRowValues.length > SUBFORM_COLLAPSED_LIMIT &&
+                subformExpansionKey &&
+                toggleSubformExpansion && (
+                  <button
+                    type="button"
+                    className="mt-1 self-start text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-0.5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSubformExpansion(record.id, fieldDef.subformId!);
+                    }}
+                  >
+                    {isSubformExpanded ? (
+                      <>
+                        <ChevronUp className="h-3 w-3" />
+                        Read less
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-3 w-3" />
+                        Read more (+{hiddenSubformRowCount})
+                      </>
+                    )}
+                  </button>
+                )}
+            </div>
           ) : isImageColumn ? (
             <div className="flex items-center gap-2 flex-wrap py-1">
               {Array.isArray(actualValue) ? (
@@ -374,10 +533,10 @@ export const RecordCell = memo(function RecordCell({
               {displayText}
             </a>
           ) : (
-            <div className="relative group w-full h-full">
+            <div className="relative group w-full h-full flex items-center">
               {/* Capsule/Pill rendering for dropdown fields with styling */}
               {fieldDef.styling?.capsule && ["dropdown", "select", "lookup", "radio"].includes(fieldDef.type) && displayText && displayText !== "N/A" ? (
-                <div className="flex items-center gap-1 flex-wrap py-1">
+                <div className="flex items-center gap-1 flex-wrap py-1 w-full">
                   {displayText.split(",").map((val: string, i: number) => {
                     const trimmed = val.trim();
                     const optColors = fieldDef.styling?.optionColors?.[trimmed];
@@ -398,7 +557,7 @@ export const RecordCell = memo(function RecordCell({
               ) : (
                 <div
                   className={cn(
-                    "w-full text-sm text-gray-700 leading-tight py-2 uppercase-data",
+                    "w-full text-sm text-gray-700 leading-tight uppercase-data",
                     isWrapTextEnabled || isExpanded ? "whitespace-normal break-words" : "whitespace-nowrap overflow-hidden text-ellipsis",
                   )}
                   style={getConditionalStyle(fieldDef, actualValue, displayText)}

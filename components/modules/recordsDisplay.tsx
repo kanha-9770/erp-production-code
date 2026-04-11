@@ -1879,6 +1879,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     selectedRecord,
     columnWidths,
     expandedCells,
+    expandedSubforms,
     numDummyRows,
     isFilterSidebarOpen,
     setIsFilterSidebarOpen,
@@ -1929,6 +1930,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     recalculateFormulasForRecord,
     handleResizeStart,
     toggleCellExpansion,
+    toggleSubformExpansion,
     toggleFieldVisibility,
     toggleAllFieldsVisibility,
     allFieldsVisible,
@@ -2678,9 +2680,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                               return (
                                 <div
                                   key={record.id}
-                                  className="flex hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 min-w-max border-b border-gray-200 last:border-b-0"
+                                  className="flex items-stretch hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 min-w-max border-b border-gray-200 last:border-b-0"
                                 >
-                                  <div className="w-10 h-8 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-10 min-h-[32px] border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
                                     <Checkbox
                                       checked={selectedRecords.has(record.id)}
                                       onCheckedChange={(c) => {
@@ -2691,10 +2693,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                       className="h-4 w-4"
                                     />
                                   </div>
-                                  <div className="w-12 h-8 border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
+                                  <div className="w-12 min-h-[32px] border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
                                     {startIdx + rowIndex + 1}
                                   </div>
-                                  <div className="w-20 sm:w-24 h-8 border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-20 sm:w-24 min-h-[32px] border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
                                     <DropdownMenu>
                                       <DropdownMenuTrigger asChild>
                                         <Button variant="ghost" className="h-6 w-6 p-0 hover:bg-gray-200 rounded">
@@ -2742,6 +2744,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           pendingChange={pendingChanges.get(`${record.id}-${fieldDef.id}`)}
                                           editingCell={editingCell}
                                           expandedCells={expandedCells}
+                                          expandedSubforms={expandedSubforms}
                                           columnWidth={columnWidths.get(fieldDef.id) || 192}
                                           isWrapTextEnabled={isWrapTextEnabled}
                                           editMode={editMode}
@@ -2757,6 +2760,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           onPreviewClick={handlePreviewClick}
                                           onCommentClick={handleCommentClick}
                                           toggleCellExpansion={toggleCellExpansion}
+                                          toggleSubformExpansion={toggleSubformExpansion}
                                         />
                                       ))
                                     ),
@@ -2771,6 +2775,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             pendingChange={pendingChanges.get(`${record.id}-${fieldDef.id}`)}
                                             editingCell={editingCell}
                                             expandedCells={expandedCells}
+                                            expandedSubforms={expandedSubforms}
                                             columnWidth={columnWidths.get(fieldDef.id) || 192}
                                             isWrapTextEnabled={isWrapTextEnabled}
                                             editMode={editMode}
@@ -2786,6 +2791,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             onPreviewClick={handlePreviewClick}
                                             onCommentClick={handleCommentClick}
                                             toggleCellExpansion={toggleCellExpansion}
+                                            toggleSubformExpansion={toggleSubformExpansion}
                                           />
                                         ))
                                       )
@@ -2816,6 +2822,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         pendingChange={null}
                                         editingCell={null}
                                         expandedCells={expandedCells}
+                                        expandedSubforms={expandedSubforms}
                                         columnWidth={columnWidths.get(auditField.id) || 192}
                                         isWrapTextEnabled={isWrapTextEnabled}
                                         editMode={editMode}
@@ -2831,6 +2838,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         onPreviewClick={handlePreviewClick}
                                         onCommentClick={handleCommentClick}
                                         toggleCellExpansion={toggleCellExpansion}
+                                        toggleSubformExpansion={toggleSubformExpansion}
                                       />
                                     );
                                   })}

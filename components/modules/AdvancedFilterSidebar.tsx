@@ -34,6 +34,8 @@ interface FormFieldWithSection {
   order: number
   sectionTitle: string
   sectionId: string
+  subformId?: string
+  subformTitle?: string
   formId: string
   formName: string
   placeholder?: string
@@ -471,6 +473,12 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
     (field: FormFieldWithSection): string[] => {
       if (!records || records.length === 0) return []
       const valueSet = new Set<string>()
+      const addValue = (raw: any) => {
+        if (raw === null || raw === undefined) return
+        const str = String(raw).trim()
+        if (str) valueSet.add(str)
+      }
+
       for (const record of records) {
         const pd = record.processedData?.find(
           (p) =>
@@ -478,11 +486,30 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
             p.fieldId === field.originalId ||
             (p.fieldLabel === field.label && p.sectionId === field.sectionId)
         )
-        if (!pd) continue
-        const display = pd.displayValue ?? pd.value
-        if (display === null || display === undefined || display === "") continue
-        const str = String(display).trim()
-        if (str) valueSet.add(str)
+        if (pd) {
+          addValue(pd.displayValue ?? pd.value)
+        }
+
+        // For subform fields, the per-row values live inside the record's
+        // _dynamicRows_<subformId> entry. Pull them so the filter picker
+        // shows every row's value, not just the first one.
+        if (field.subformId) {
+          const dynEntry = record.processedData?.find(
+            (p) => p.fieldId === `_dynamicRows_${field.subformId}`
+          )
+          const rows = dynEntry?.value
+          if (Array.isArray(rows)) {
+            const fieldKey = field.originalId || field.id
+            for (const row of rows) {
+              if (!row || typeof row !== "object") continue
+              let raw = (row as any)[fieldKey]
+              if (raw && typeof raw === "object" && "value" in raw) {
+                raw = (raw as any).value
+              }
+              addValue(raw)
+            }
+          }
+        }
       }
       return Array.from(valueSet).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     },

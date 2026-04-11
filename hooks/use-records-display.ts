@@ -28,7 +28,7 @@ import type {
   Permission,
   Comment,
   ConditionalFormatRule,
-  FormGroup,
+  FormGroup,  
 } from "@/types/records";
 
 // ─── Options ─────────────────────────────────────────────────────────────────
@@ -93,6 +93,13 @@ export function useRecordsDisplay({
     new Map(),
   );
   const [expandedCells, setExpandedCells] = React.useState<Set<string>>(
+    new Set(),
+  );
+  // Tracks which (record, subform) pairs have had their stacked subform
+  // rows expanded past the default collapsed limit. Key shape:
+  // `${recordId}::${subformId}`. Shared across all cells of the same
+  // subform within a record so toggling expands every column at once.
+  const [expandedSubforms, setExpandedSubforms] = React.useState<Set<string>>(
     new Set(),
   );
   const [resizingColumn, setResizingColumn] = React.useState<string | null>(
@@ -840,17 +847,44 @@ export function useRecordsDisplay({
               record.processedData.find((pd) => pd.fieldId === filter.fieldId))
             : undefined;
 
-          // No data found for this field in the record
-          if (!fd) {
-            return (
-              filter.operator === "is empty" || filter.operator === "isEmpty"
-            );
+          // Build the list of value candidates for this field on this record.
+          // For subform fields we include every row from _dynamicRows_<sub> so
+          // the filter is satisfied if ANY row matches. For non-subform fields
+          // there's only ever the single static value.
+          type FieldValue = { raw: any; display: string };
+          const candidates: FieldValue[] = [];
+          if (fd) {
+            const rawStaticDisplay = (fd.displayValue ?? fd.value ?? "")
+              .toString();
+            if (
+              fd.value !== null &&
+              fd.value !== undefined &&
+              !(Array.isArray(fd.value) && fd.value.length === 0) &&
+              rawStaticDisplay !== ""
+            ) {
+              candidates.push({ raw: fd.value, display: rawStaticDisplay });
+            }
           }
 
-          const rawValue = fd.value;
-          // Use displayValue for string comparisons so user-visible text is matched
-          const displayStr = (fd.displayValue ?? rawValue ?? "").toString();
-          const rawStr = String(rawValue ?? "");
+          if (fieldDef.subformId) {
+            const dynEntry = record.processedData.find(
+              (pd) => pd.fieldId === `_dynamicRows_${fieldDef.subformId}`,
+            );
+            const rows = dynEntry?.value;
+            if (Array.isArray(rows)) {
+              const fieldKey = fieldDef.originalId || fieldDef.id;
+              for (const row of rows) {
+                if (!row || typeof row !== "object") continue;
+                let raw = (row as any)[fieldKey];
+                if (raw && typeof raw === "object" && "value" in raw) {
+                  raw = (raw as any).value;
+                }
+                if (raw === null || raw === undefined || raw === "") continue;
+                candidates.push({ raw, display: String(raw) });
+              }
+            }
+          }
+
           const fv = filter.value;
 
           // Skip filters where user hasn't entered a value yet (except value-less operators)
@@ -871,87 +905,111 @@ export function useRecordsDisplay({
             return true; // no filter value entered — pass through
           }
 
+          // No values at all — only "is empty" passes; nothing else matches.
+          if (candidates.length === 0) {
+            return (
+              filter.operator === "is empty" ||
+              filter.operator === "isEmpty"
+            );
+          }
+
           const fvLower = String(fv).toLowerCase();
+          const anyCandidate = (
+            predicate: (v: FieldValue) => boolean,
+          ): boolean => candidates.some(predicate);
+          const everyCandidate = (
+            predicate: (v: FieldValue) => boolean,
+          ): boolean => candidates.every(predicate);
 
           switch (filter.operator) {
             case "is empty":
             case "isEmpty":
-              return (
-                rawValue === null ||
-                rawValue === undefined ||
-                rawValue === "" ||
-                (Array.isArray(rawValue) && rawValue.length === 0)
-              );
+              // Already handled above (candidates.length === 0). If we got
+              // here, at least one row has a value, so the field is not empty.
+              return false;
             case "is not empty":
             case "isNotEmpty":
-              return (
-                rawValue !== null &&
-                rawValue !== undefined &&
-                rawValue !== "" &&
-                !(Array.isArray(rawValue) && rawValue.length === 0)
-              );
+              return true; // candidates.length > 0 reached this branch
             case "is true":
             case "isTrue":
-              return rawValue === true || rawValue === "true";
+              return anyCandidate(
+                (v) => v.raw === true || v.raw === "true",
+              );
             case "is false":
             case "isFalse":
-              return rawValue === false || rawValue === "false" || !rawValue;
+              return anyCandidate(
+                (v) => v.raw === false || v.raw === "false" || !v.raw,
+              );
             case "is":
             case "equals":
-              return (
-                rawStr.toLowerCase() === fvLower ||
-                displayStr.toLowerCase() === fvLower
-              );
+              return anyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return rawL === fvLower || dispL === fvLower;
+              });
             case "isn't":
-              return (
-                rawStr.toLowerCase() !== fvLower &&
-                displayStr.toLowerCase() !== fvLower
-              );
+              return everyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return rawL !== fvLower && dispL !== fvLower;
+              });
             case "contains":
-              return (
-                displayStr.toLowerCase().includes(fvLower) ||
-                rawStr.toLowerCase().includes(fvLower)
-              );
+              return anyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return dispL.includes(fvLower) || rawL.includes(fvLower);
+              });
             case "doesn't contain":
-              return (
-                !displayStr.toLowerCase().includes(fvLower) &&
-                !rawStr.toLowerCase().includes(fvLower)
-              );
+              return everyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return (
+                  !dispL.includes(fvLower) && !rawL.includes(fvLower)
+                );
+              });
             case "starts with":
             case "startsWith":
-              return (
-                displayStr.toLowerCase().startsWith(fvLower) ||
-                rawStr.toLowerCase().startsWith(fvLower)
-              );
+              return anyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return dispL.startsWith(fvLower) || rawL.startsWith(fvLower);
+              });
             case "ends with":
             case "endsWith":
-              return (
-                displayStr.toLowerCase().endsWith(fvLower) ||
-                rawStr.toLowerCase().endsWith(fvLower)
-              );
+              return anyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return dispL.endsWith(fvLower) || rawL.endsWith(fvLower);
+              });
             case "greater than":
             case "greaterThan":
               return (
-                filter.fieldType === "number" && Number(rawValue) > Number(fv)
+                filter.fieldType === "number" &&
+                anyCandidate((v) => Number(v.raw) > Number(fv))
               );
             case "less than":
             case "lessThan":
               return (
-                filter.fieldType === "number" && Number(rawValue) < Number(fv)
+                filter.fieldType === "number" &&
+                anyCandidate((v) => Number(v.raw) < Number(fv))
               );
             case "between": {
               if (filter.fieldType === "number") {
-                const nv = Number(rawValue);
-                return nv >= Number(fv) && nv <= Number(filter.value2);
+                return anyCandidate((v) => {
+                  const nv = Number(v.raw);
+                  return nv >= Number(fv) && nv <= Number(filter.value2);
+                });
               }
               if (
                 filter.fieldType === "date" ||
                 filter.fieldType === "datetime"
               ) {
-                const dv = new Date(rawValue);
-                return (
-                  dv >= new Date(fv) && dv <= new Date(filter.value2 || fv)
-                );
+                return anyCandidate((v) => {
+                  const dv = new Date(v.raw);
+                  return (
+                    dv >= new Date(fv) && dv <= new Date(filter.value2 || fv)
+                  );
+                });
               }
               return false;
             }
@@ -959,28 +1017,30 @@ export function useRecordsDisplay({
               return (
                 (filter.fieldType === "date" ||
                   filter.fieldType === "datetime") &&
-                new Date(rawValue) > new Date(fv)
+                anyCandidate((v) => new Date(v.raw) > new Date(fv))
               );
             case "before":
               return (
                 (filter.fieldType === "date" ||
                   filter.fieldType === "datetime") &&
-                new Date(rawValue) < new Date(fv)
+                anyCandidate((v) => new Date(v.raw) < new Date(fv))
               );
             case "is one of":
             case "isOneOf": {
               // Support both array and comma-separated string
-              const candidates = Array.isArray(fv)
+              const wanted = Array.isArray(fv)
                 ? fv.map((v: any) => String(v).toLowerCase())
                 : String(fv)
                     .split(",")
                     .map((s: string) => s.trim().toLowerCase())
                     .filter(Boolean);
-              const valLower = rawStr.toLowerCase();
-              const dispLower = displayStr.toLowerCase();
-              return candidates.some(
-                (c: string) => valLower === c || dispLower === c,
-              );
+              return anyCandidate((v) => {
+                const rawL = String(v.raw ?? "").toLowerCase();
+                const dispL = v.display.toLowerCase();
+                return wanted.some(
+                  (c: string) => rawL === c || dispL === c,
+                );
+              });
             }
             default:
               return true;
@@ -1205,6 +1265,18 @@ export function useRecordsDisplay({
       return s;
     });
   };
+
+  const toggleSubformExpansion = React.useCallback(
+    (recordId: string, subformId: string) => {
+      const key = `${recordId}::${subformId}`;
+      setExpandedSubforms((prev) => {
+        const s = new Set(prev);
+        s.has(key) ? s.delete(key) : s.add(key);
+        return s;
+      });
+    },
+    [],
+  );
 
   // ── Field visibility ─────────────────────────────────────────────────────────
 
@@ -1561,7 +1633,16 @@ export function useRecordsDisplay({
   };
 
   const displayedFields = useMemo(() => {
-    const selected = orderedFields.filter((f) => visibleFields.has(f.id));
+    // Subform row data is rendered inline, stacked inside each subform field
+    // column, so the synthetic "_dynamicRows_<subformId>" preview column is
+    // redundant and only adds a noisy count + raw-JSON cell.
+    const isDynamicRowsColumn = (f: FormFieldWithSection) =>
+      (f.originalId || f.id).startsWith("_dynamicRows_") ||
+      f.type === "dynamicRows";
+
+    const selected = orderedFields.filter(
+      (f) => visibleFields.has(f.id) && !isDynamicRowsColumn(f),
+    );
 
     // If user selected something → show that
     if (selected.length > 0) {
@@ -1569,9 +1650,14 @@ export function useRecordsDisplay({
     }
 
     // Otherwise → show default 4 fields + always include formula fields for real-time updates
-    const defaultFields = getDefaultFields(orderedFields);
+    const defaultFields = getDefaultFields(orderedFields).filter(
+      (f) => !isDynamicRowsColumn(f),
+    );
     const formulaFields = orderedFields.filter(
-      (f) => f.type === "formula" && f.properties?.formulaConfig,
+      (f) =>
+        f.type === "formula" &&
+        f.properties?.formulaConfig &&
+        !isDynamicRowsColumn(f),
     );
     const combined = [
       ...defaultFields,
@@ -1699,6 +1785,7 @@ export function useRecordsDisplay({
     selectedRecord,
     columnWidths,
     expandedCells,
+    expandedSubforms,
     numDummyRows,
     isFilterSidebarOpen,
     setIsFilterSidebarOpen,
@@ -1764,6 +1851,7 @@ export function useRecordsDisplay({
     // Handlers
     handleResizeStart,
     toggleCellExpansion,
+    toggleSubformExpansion,
     toggleFieldVisibility,
     toggleAllFieldsVisibility,
     allFieldsVisible,
