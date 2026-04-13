@@ -13,8 +13,25 @@ import {
   Loader2,
   RefreshCw,
   AlertTriangle,
+  List,
+  Mail,
+  Shield,
+  Phone,
+  Building2,
+  MapPin,
+  CalendarDays,
+  AtSign,
+  Pencil,
+  Trash2,
+  Save,
 } from "lucide-react";
-import { useCreateUserFromEmployeeMutation } from "@/lib/api/users";
+import {
+  useCreateUserFromEmployeeMutation,
+  useGetAdminUsersQuery,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
+  type AdminUser,
+} from "@/lib/api/users";
 import { useToast } from "@/hooks/use-toast";
 
 interface EmployeeRecord {
@@ -113,6 +130,148 @@ const UserCreationPage: React.FC = () => {
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  const [showUserListDrawer, setShowUserListDrawer] = useState(false);
+  const [userListSearch, setUserListSearch] = useState("");
+  const [editingExistingUser, setEditingExistingUser] = useState<AdminUser | null>(null);
+  const [editUserForm, setEditUserForm] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+    department: "",
+    location: "",
+    status: "active",
+    password: "",
+    confirmPassword: "",
+  });
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [showEditConfirmPassword, setShowEditConfirmPassword] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [updateUser, { isLoading: savingUser }] = useUpdateUserMutation();
+  const [deleteUser] = useDeleteUserMutation();
+
+  const {
+    data: adminUsersResp,
+    isFetching: loadingUsers,
+    refetch: refetchUsers,
+  } = useGetAdminUsersQuery(undefined, { skip: !showUserListDrawer });
+
+  const startEditUser = (u: AdminUser) => {
+    setEditingExistingUser(u);
+    setEditUserForm({
+      first_name: u.first_name || "",
+      last_name: u.last_name || "",
+      email: u.email || "",
+      phone: u.phone || u.mobile || "",
+      department: u.department || "",
+      location: u.location || "",
+      status: u.status || "active",
+      password: "",
+      confirmPassword: "",
+    });
+    // Close drawer & exit conflicting modes so the right panel is visible
+    setShowUserListDrawer(false);
+    setBulkMode(false);
+    setSelectedRecord(null);
+  };
+
+  const cancelEditUser = () => {
+    setEditingExistingUser(null);
+    setEditUserForm({
+      first_name: "",
+      last_name: "",
+      email: "",
+      phone: "",
+      department: "",
+      location: "",
+      status: "active",
+      password: "",
+      confirmPassword: "",
+    });
+    setShowEditPassword(false);
+    setShowEditConfirmPassword(false);
+  };
+
+  const saveEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExistingUser) return;
+
+    if (!editUserForm.first_name.trim() || !editUserForm.email.trim()) {
+      toast({ title: "Validation Error", description: "First name and email are required", variant: "destructive" });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editUserForm.email)) {
+      toast({ title: "Validation Error", description: "Invalid email format", variant: "destructive" });
+      return;
+    }
+    const pw = editUserForm.password.trim();
+    if (pw) {
+      if (pw.length < 8) {
+        toast({ title: "Validation Error", description: "Password must be at least 8 characters", variant: "destructive" });
+        return;
+      }
+      if (pw !== editUserForm.confirmPassword.trim()) {
+        toast({ title: "Validation Error", description: "Passwords do not match", variant: "destructive" });
+        return;
+      }
+    }
+
+    const body: Record<string, any> = {
+      first_name: editUserForm.first_name.trim(),
+      last_name: editUserForm.last_name.trim(),
+      email: editUserForm.email.trim(),
+      phone: editUserForm.phone.trim(),
+      department: editUserForm.department.trim(),
+      location: editUserForm.location.trim(),
+      status: editUserForm.status,
+    };
+    if (pw) body.password = pw;
+
+    try {
+      await updateUser({ userId: editingExistingUser.id, body }).unwrap();
+      toast({ title: "User Updated", description: "Changes saved successfully" });
+      cancelEditUser();
+    } catch (err: any) {
+      const detail = err?.data?.error || err?.data?.message || err?.message || "Update failed";
+      toast({ title: "Update Failed", description: detail, variant: "destructive" });
+    }
+  };
+
+  const handleDeleteUser = async (u: AdminUser) => {
+    const name = u.fullName || u.username || u.email;
+    if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+    setDeletingUserId(u.id);
+    try {
+      await deleteUser(u.id).unwrap();
+      toast({ title: "User Deleted", description: `${name} has been removed` });
+      if (showUserListDrawer) refetchUsers();
+    } catch (err: any) {
+      const detail = err?.data?.error || err?.data?.message || err?.message || "Delete failed";
+      toast({ title: "Delete Failed", description: detail, variant: "destructive" });
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
+  const editPasswordsMatch =
+    editUserForm.password.trim() === editUserForm.confirmPassword.trim() &&
+    editUserForm.confirmPassword.trim() !== "";
+  const adminUsers = adminUsersResp?.data || [];
+  const filteredUsers = userListSearch
+    ? adminUsers.filter((u) => {
+        const q = userListSearch.toLowerCase();
+        return (
+          u.fullName?.toLowerCase().includes(q) ||
+          u.email?.toLowerCase().includes(q) ||
+          u.username?.toLowerCase().includes(q) ||
+          u.department?.toLowerCase().includes(q) ||
+          u.phone?.toLowerCase().includes(q) ||
+          u.mobile?.toLowerCase().includes(q) ||
+          u.unitsAndRoles?.some((ur) => ur.role?.name?.toLowerCase().includes(q))
+        );
+      })
+    : adminUsers;
+
   // Role & Unit data for assignment
   const [roles, setRoles] = useState<OrgRole[]>([]);
   const [units, setUnits] = useState<OrgUnit[]>([]);
@@ -149,8 +308,6 @@ const UserCreationPage: React.FC = () => {
 
       const json = await res.json();
 
-      // Use allProcessedRecords (all records) over records (filtered "usable" only).
-      // json.records is [] when all records are "skipped", but allProcessedRecords has them all.
       const usable = Array.isArray(json.records) ? json.records : [];
       const all = Array.isArray(json.allProcessedRecords) ? json.allProcessedRecords : [];
       const dataArr = Array.isArray(json.data) ? json.data : [];
@@ -281,7 +438,7 @@ const UserCreationPage: React.FC = () => {
     setBulkMode(false);
   };
 
-  const handleSingleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSingleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
@@ -292,6 +449,10 @@ const UserCreationPage: React.FC = () => {
     }
     const pass = formData.password.trim();
     const conf = formData.confirmPassword.trim();
+    if (!conf) {
+      toast({ title: "Validation Error", description: "Please enter confirm password", variant: "destructive" });
+      return false;
+    }
     if (pass !== conf) {
       toast({ title: "Validation Error", description: "Passwords do not match", variant: "destructive" });
       return false;
@@ -316,14 +477,14 @@ const UserCreationPage: React.FC = () => {
       await createUserFromEmployee({
         ...formData,
         password: formData.password.trim(),
-        confirmPassword: formData.confirmPassword.trim(),
         ...(formData.roleId && { roleId: formData.roleId }),
         ...(formData.unitId && { unitId: formData.unitId }),
       }).unwrap();
 
       toast({ title: "User Created", description: `Account for ${formData.employeeName} created successfully` });
-      setFormData({ ...formData, password: "", confirmPassword: "" });
+      setFormData((prev) => ({ ...prev, password: "", confirmPassword: "" }));
       fetchEmployeeRecords();
+      setSelectedRecord(null);
     } catch (err: any) {
       const detail = err?.data?.error || err?.data?.message || err?.message || "Server error";
       toast({ title: "Creation Failed", description: detail, variant: "destructive" });
@@ -456,6 +617,9 @@ const UserCreationPage: React.FC = () => {
     toast({ title: `${parts.join(" & ")} Applied`, description: `Assigned to all ${selectedCount} selected users` });
   };
 
+  // Password match helper for real-time UI feedback
+  const passwordsMatch = formData.password.trim() === formData.confirmPassword.trim() && formData.confirmPassword.trim() !== "";
+
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 sm:p-6">
@@ -480,6 +644,14 @@ const UserCreationPage: React.FC = () => {
             >
               <RefreshCw size={16} className={loadingRecords ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Refresh</span>
+            </button>
+            <button
+              onClick={() => setShowUserListDrawer(true)}
+              className="px-4 py-2 rounded-lg font-medium flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 transition"
+              title="View existing users"
+            >
+              <List size={18} />
+              <span className="hidden sm:inline">User List</span>
             </button>
             <button
               onClick={() => setBulkMode(!bulkMode)}
@@ -693,7 +865,203 @@ const UserCreationPage: React.FC = () => {
 
           {/* Right – Form area */}
           <div className="bg-white rounded-xl shadow-lg p-5 sm:p-6">
-            {bulkMode ? (
+            {editingExistingUser ? (
+              <>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <Pencil className="w-5 h-5" />
+                    Edit User
+                  </h2>
+                  <button
+                    onClick={cancelEditUser}
+                    className="text-gray-500 hover:text-red-600 self-end sm:self-auto"
+                    title="Cancel edit"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs text-blue-700">
+                    Editing: <span className="font-semibold">{editingExistingUser.fullName || editingExistingUser.email}</span>
+                    {editingExistingUser.username && (
+                      <span className="text-blue-500"> · @{editingExistingUser.username}</span>
+                    )}
+                  </p>
+                </div>
+
+                <form onSubmit={saveEditUser} className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        First Name
+                      </label>
+                      <input
+                        value={editUserForm.first_name}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, first_name: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Last Name
+                      </label>
+                      <input
+                        value={editUserForm.last_name}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, last_name: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={editUserForm.email}
+                      onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Phone
+                      </label>
+                      <input
+                        value={editUserForm.phone}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, phone: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Department
+                      </label>
+                      <input
+                        value={editUserForm.department}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, department: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Location
+                      </label>
+                      <input
+                        value={editUserForm.location}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, location: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Status
+                      </label>
+                      <select
+                        value={editUserForm.status}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, status: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="pending">Pending</option>
+                        <option value="suspended">Suspended</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t">
+                    <p className="text-xs text-gray-500 mb-2">Reset Password (optional — leave blank to keep current)</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          New Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showEditPassword ? "text" : "password"}
+                            value={editUserForm.password}
+                            onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })}
+                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                            minLength={8}
+                            placeholder="Min 8 characters"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditPassword(!showEditPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                          >
+                            {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Confirm Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showEditConfirmPassword ? "text" : "password"}
+                            value={editUserForm.confirmPassword}
+                            onChange={(e) => setEditUserForm({ ...editUserForm, confirmPassword: e.target.value })}
+                            className={`w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
+                              editUserForm.confirmPassword && !editPasswordsMatch ? "border-red-500" : ""
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+                          >
+                            {showEditConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                        {editUserForm.confirmPassword && !editPasswordsMatch && (
+                          <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={savingUser}
+                      className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {savingUser ? (
+                        <>
+                          <Loader2 className="animate-spin" size={18} />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save size={18} />
+                          Save Changes
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditUser}
+                      disabled={savingUser}
+                      className="px-6 bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : bulkMode ? (
               <>
                 <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                   <Users className="w-5 h-5" />
@@ -983,7 +1351,7 @@ const UserCreationPage: React.FC = () => {
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Confirm
+                          Confirm Password
                         </label>
                         <div className="relative">
                           <input
@@ -991,7 +1359,9 @@ const UserCreationPage: React.FC = () => {
                             name="confirmPassword"
                             value={formData.confirmPassword}
                             onChange={handleSingleChange}
-                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                            className={`w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
+                              formData.confirmPassword && !passwordsMatch ? "border-red-500" : ""
+                            }`}
                             required
                           />
                           <button
@@ -1002,6 +1372,9 @@ const UserCreationPage: React.FC = () => {
                             {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                           </button>
                         </div>
+                        {formData.confirmPassword && !passwordsMatch && (
+                          <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
+                        )}
                       </div>
                     </div>
 
@@ -1045,7 +1418,7 @@ const UserCreationPage: React.FC = () => {
 
                     <button
                       type="submit"
-                      disabled={creating}
+                      disabled={creating || !passwordsMatch || formData.password.trim().length < 8}
                       className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       {creating ? (
@@ -1066,6 +1439,214 @@ const UserCreationPage: React.FC = () => {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Right-side User List Drawer */}
+      <div
+        className={`fixed inset-0 z-50 transition-opacity duration-300 ${
+          showUserListDrawer ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+        }`}
+        aria-hidden={!showUserListDrawer}
+      >
+        <div
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setShowUserListDrawer(false)}
+        />
+        <aside
+          className={`absolute top-0 right-0 h-full w-full sm:w-[420px] md:w-[480px] bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-out ${
+            showUserListDrawer ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                User List
+              </h2>
+              <p className="text-xs text-blue-100 mt-0.5">
+                {loadingUsers ? "Loading..." : `${adminUsers.length} user${adminUsers.length === 1 ? "" : "s"} total`}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => refetchUsers()}
+                disabled={loadingUsers}
+                className="p-2 rounded-md hover:bg-white/10 disabled:opacity-50"
+                title="Refresh user list"
+              >
+                <RefreshCw size={16} className={loadingUsers ? "animate-spin" : ""} />
+              </button>
+              <button
+                onClick={() => setShowUserListDrawer(false)}
+                className="p-2 rounded-md hover:bg-white/10"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="px-5 py-3 border-b border-gray-200">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                placeholder="Search by name, email, department..."
+                value={userListSearch}
+                onChange={(e) => setUserListSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3">
+            {loadingUsers ? (
+              <div className="flex flex-col items-center justify-center py-16 text-gray-500 gap-3">
+                <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
+                <span className="text-sm">Loading users...</span>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="text-center py-16 text-gray-400 text-sm">
+                {userListSearch ? `No users match "${userListSearch}".` : "No users found."}
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {filteredUsers.map((u) => {
+                  const displayName = u.fullName || u.username || u.email || "—";
+                  const initials = displayName
+                    .split(" ")
+                    .map((s) => s[0])
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .join("")
+                    .toUpperCase();
+                  const isAdmin = u.unitsAndRoles?.some((ur) => ur.role?.isAdmin);
+                  const phoneNumber = u.phone || u.mobile;
+                  const joinDateStr = u.joinDate
+                    ? new Date(u.joinDate).toLocaleDateString()
+                    : u.createdAt
+                      ? new Date(u.createdAt).toLocaleDateString()
+                      : null;
+
+                  const isDeleting = deletingUserId === u.id;
+
+                  return (
+                    <li
+                      key={u.id}
+                      className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50/30 transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-sm font-semibold flex items-center justify-center overflow-hidden">
+                          {u.avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={u.avatar} alt={displayName} className="w-full h-full object-cover" />
+                          ) : (
+                            initials
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-gray-900 truncate flex-1 min-w-0">
+                              {displayName}
+                            </p>
+                            {isAdmin && (
+                              <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-0.5">
+                                <Shield size={10} /> ADMIN
+                              </span>
+                            )}
+                            {u.status && (
+                              <span
+                                className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
+                                  u.status.toLowerCase() === "active"
+                                    ? "bg-green-100 text-green-700 border-green-200"
+                                    : "bg-gray-100 text-gray-600 border-gray-200"
+                                }`}
+                              >
+                                {u.status}
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1 ml-auto">
+                              <button
+                                onClick={() => startEditUser(u)}
+                                className="p-1.5 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-100 transition"
+                                title="Edit user"
+                                disabled={isDeleting}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUser(u)}
+                                className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-100 transition disabled:opacity-50"
+                                title="Delete user"
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-1 space-y-0.5 text-xs">
+                            {u.username && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <AtSign size={11} className="text-gray-400 flex-shrink-0" />
+                                {u.username}
+                              </p>
+                            )}
+                            <p className="text-gray-600 truncate flex items-center gap-1.5">
+                              <Mail size={11} className="text-gray-400 flex-shrink-0" />
+                              {u.email}
+                            </p>
+                            {phoneNumber && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <Phone size={11} className="text-gray-400 flex-shrink-0" />
+                                {phoneNumber}
+                              </p>
+                            )}
+                            {u.department && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <Building2 size={11} className="text-gray-400 flex-shrink-0" />
+                                {u.department}
+                              </p>
+                            )}
+                            {u.location && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <MapPin size={11} className="text-gray-400 flex-shrink-0" />
+                                {u.location}
+                              </p>
+                            )}
+                            {joinDateStr && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <CalendarDays size={11} className="text-gray-400 flex-shrink-0" />
+                                Joined {joinDateStr}
+                              </p>
+                            )}
+                          </div>
+
+                          {u.unitsAndRoles && u.unitsAndRoles.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {u.unitsAndRoles.map((ur, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                  title={`${ur.unit?.name || ""} → ${ur.role?.name || ""}`}
+                                >
+                                  <Shield size={9} />
+                                  {ur.role?.name}
+                                  {ur.unit?.name && (
+                                    <span className="text-indigo-400">· {ur.unit.name}</span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

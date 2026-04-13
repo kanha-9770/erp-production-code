@@ -100,7 +100,7 @@ export default function AdminUsersTable() {
 
       if (sortField === "fullName") { aVal = a.fullName; bVal = b.fullName; }
       if (sortField === "unitsAndRoles") { aVal = a.unitsAndRoles.length; bVal = b.unitsAndRoles.length; }
-      if (sortField === "permissions") { aVal = a.permissions.length; bVal = b.permissions.length; }
+      if (sortField === "permissions") { aVal = (a.permissions ?? []).length; bVal = (b.permissions ?? []).length; }
 
       if (aVal == null) return 1;
       if (bVal == null) return -1;
@@ -267,7 +267,7 @@ export default function AdminUsersTable() {
                       <div className="h-14 border-r px-3 flex items-center" style={{ width: columnWidths.get("createdAt") }}>{new Date(user.createdAt).toLocaleDateString()}</div>
                       {/* Permissions — comma separated */}
                       <div className="h-14 border-r px-3 flex items-center text-xs" style={{ width: columnWidths.get("permissions") }}>
-                        <ExcelCell content={user.permissions.map(p => p.name).join(", ")} isExpanded={expandedCells.has(`${user.id}-permissions`)} onToggleExpand={() => setExpandedCells(s => { const n = new Set(s); n.has(`${user.id}-permissions`) ? n.delete(`${user.id}-permissions`) : n.add(`${user.id}-permissions`); return n; })} />
+                        <ExcelCell content={(user.permissions ?? []).map(p => p.name).join(", ")} isExpanded={expandedCells.has(`${user.id}-permissions`)} onToggleExpand={() => setExpandedCells(s => { const n = new Set(s); n.has(`${user.id}-permissions`) ? n.delete(`${user.id}-permissions`) : n.add(`${user.id}-permissions`); return n; })} />
                       </div>
                     </div>
                   ))}

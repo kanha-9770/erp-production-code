@@ -28,7 +28,7 @@ import type {
   Permission,
   Comment,
   ConditionalFormatRule,
-  FormGroup,  
+  FormGroup,
 } from "@/types/records";
 
 // ─── Options ─────────────────────────────────────────────────────────────────
@@ -854,8 +854,11 @@ export function useRecordsDisplay({
           type FieldValue = { raw: any; display: string };
           const candidates: FieldValue[] = [];
           if (fd) {
-            const rawStaticDisplay = (fd.displayValue ?? fd.value ?? "")
-              .toString();
+            const rawStaticDisplay = (
+              fd.displayValue ??
+              fd.value ??
+              ""
+            ).toString();
             if (
               fd.value !== null &&
               fd.value !== undefined &&
@@ -908,8 +911,7 @@ export function useRecordsDisplay({
           // No values at all — only "is empty" passes; nothing else matches.
           if (candidates.length === 0) {
             return (
-              filter.operator === "is empty" ||
-              filter.operator === "isEmpty"
+              filter.operator === "is empty" || filter.operator === "isEmpty"
             );
           }
 
@@ -932,9 +934,7 @@ export function useRecordsDisplay({
               return true; // candidates.length > 0 reached this branch
             case "is true":
             case "isTrue":
-              return anyCandidate(
-                (v) => v.raw === true || v.raw === "true",
-              );
+              return anyCandidate((v) => v.raw === true || v.raw === "true");
             case "is false":
             case "isFalse":
               return anyCandidate(
@@ -963,9 +963,7 @@ export function useRecordsDisplay({
               return everyCandidate((v) => {
                 const rawL = String(v.raw ?? "").toLowerCase();
                 const dispL = v.display.toLowerCase();
-                return (
-                  !dispL.includes(fvLower) && !rawL.includes(fvLower)
-                );
+                return !dispL.includes(fvLower) && !rawL.includes(fvLower);
               });
             case "starts with":
             case "startsWith":
@@ -1037,9 +1035,7 @@ export function useRecordsDisplay({
               return anyCandidate((v) => {
                 const rawL = String(v.raw ?? "").toLowerCase();
                 const dispL = v.display.toLowerCase();
-                return wanted.some(
-                  (c: string) => rawL === c || dispL === c,
-                );
+                return wanted.some((c: string) => rawL === c || dispL === c);
               });
             }
             default:

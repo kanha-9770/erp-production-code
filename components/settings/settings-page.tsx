@@ -55,7 +55,7 @@ const settingsData: SettingCategory[] = [
       { name: "Notification SMS", href: "/settings/notification-sms" },
       { name: "Webforms", href: "/settings/webforms" },
       { name: "Social", href: "/settings/social" },
-      { name: "Chat", href: "/settings/chat" },
+      { name: "Chat", href: "/admin/chatbot" },
       { name: "Portals", href: "/settings/portals" },
     ],
   },

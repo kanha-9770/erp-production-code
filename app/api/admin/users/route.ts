@@ -28,15 +28,21 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         email: true,
+        username: true,
         first_name: true,
         last_name: true,
         department: true,
         avatar: true,
         status: true,
+        phone: true,
+        mobile: true,
+        location: true,
+        joinDate: true,
+        createdAt: true,
         unitAssignments: {
           include: {
             unit: { select: { name: true } },
-            role: { select: { id: true, name: true } },
+            role: { select: { id: true, name: true, isAdmin: true } },
           },
         },
       },
@@ -46,11 +52,22 @@ export async function GET(request: NextRequest) {
       ],
     })
 
+    const data = users.map((u) => {
+      const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username || u.email
+      const unitsAndRoles = (u.unitAssignments || [])
+        .filter((ua) => ua.unit && ua.role)
+        .map((ua) => ({
+          unit: { name: ua.unit!.name },
+          role: { name: ua.role!.name, isAdmin: ua.role!.isAdmin || false },
+        }))
+      return { ...u, fullName, unitsAndRoles }
+    })
+
     return NextResponse.json({
       success: true,
-      data: users,
+      data,
       meta: {
-        count: users.length,
+        count: data.length,
         organizationId,
       }
     })

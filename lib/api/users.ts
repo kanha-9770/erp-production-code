@@ -5,23 +5,30 @@ import { baseApi } from "./baseApi"
 export interface AdminUser {
   id: string
   email: string
-  username: string
+  username: string | null
   first_name: string | null
   last_name: string | null
   fullName: string
   avatar: string | null
   status: string
   department: string | null
+  phone: string | null
+  mobile: string | null
+  location: string | null
   joinDate: string | null
   createdAt: string
   unitsAndRoles: Array<{ unit: { name: string }; role: { name: string; isAdmin?: boolean } }>
-  permissions: Array<{ id: string; name: string; category: string }>
+  unitAssignments?: Array<{
+    unit: { name: string } | null
+    role: { id?: string; name: string; isAdmin?: boolean } | null
+  }>
+  permissions?: Array<{ id: string; name: string; category: string }>
 }
 
 interface AdminUsersResponse {
   success: boolean
   data: AdminUser[]
-  count: number
+  meta?: { count: number; organizationId: string }
 }
 
 // ─── Inject user management endpoints ────────────────────────────────────────
