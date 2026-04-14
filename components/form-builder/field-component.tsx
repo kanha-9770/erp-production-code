@@ -45,9 +45,6 @@ import {
   Copy,
   Upload,
   Calculator,
-  Lock,
-  Loader2,
-  ShieldCheck,
 } from "lucide-react";
 import type { FormField, FieldOption } from "@/types/form-builder";
 import { LookupField } from "@/components/forms/lookup-field";
@@ -55,21 +52,6 @@ import FieldSettings from "@/components/form-builder/field-settings";
 import FormulaConfigurationDialog from "@/components/form-builder/FormulaConfigurationDialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { useLazyGetFieldPermissionQuery, useUpdateFieldPermissionMutation } from "@/lib/api/forms";
-
-// --- PERMISSION TYPES ---
-interface PermissionDefinition {
-  id: string;
-  name: string;
-  category: string;
-  resource: string;
-}
-
-interface RolePermission {
-  id: string;     // roleId
-  name: string;   // roleName
-  permission: string; // The ID from PermissionDefinition or "NONE"
-}
 
 interface FieldComponentProps {
   field: FormField;
@@ -99,19 +81,8 @@ export default function FieldComponent({
   );
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
-  // --- DYNAMIC PERMISSION STATES ---
-  const [showPermissionsDialog, setShowPermissionsDialog] = useState(false);
-  const [permissions, setPermissions] = useState<RolePermission[]>([]);
-  const [availablePermissions, setAvailablePermissions] = useState<
-    PermissionDefinition[]
-  >([]);
-  const [permissionsLoading, setPermissionsLoading] = useState(false);
-  const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
-
   const labelInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const [triggerGetFieldPermission] = useLazyGetFieldPermissionQuery();
-  const [updateFieldPermission] = useUpdateFieldPermissionMutation();
 
   // ==================== FORM ID: PROP FIRST → URL FALLBACK ====================
   const params = useParams();
@@ -203,62 +174,6 @@ export default function FieldComponent({
       );
     }
   }, [field.type, field.id]);
-
-  // --- FETCH PERMISSIONS ---
-  useEffect(() => {
-    if (showPermissionsDialog && !hasLoadedPermissions) {
-      const fetchPermissions = async () => {
-        setPermissionsLoading(true);
-        try {
-          const data = await triggerGetFieldPermission(field.id).unwrap();
-
-          setPermissions(data.profiles ?? []);
-          setAvailablePermissions(data.availablePermissions ?? []);
-          setHasLoadedPermissions(true);
-        } catch (err) {
-          toast({
-            variant: "destructive",
-            title: "Error",
-            description: "Could not load field permissions",
-          });
-        } finally {
-          setPermissionsLoading(false);
-        }
-      };
-      fetchPermissions();
-    }
-  }, [showPermissionsDialog, hasLoadedPermissions, field.id, toast]);
-
-  // --- HANDLE PERMISSION CHANGE ---
-  const handlePermissionChange = async (
-    roleId: string,
-    permissionId: string,
-  ) => {
-    try {
-      await updateFieldPermission({
-        fieldId: field.id,
-        body: { roleId, permissionId },
-      }).unwrap();
-
-      setPermissions((prev) =>
-        prev.map((p) =>
-          p.id === roleId ? { ...p, permission: permissionId } : p
-        )
-      );
-
-      toast({
-        title: "Success",
-        description: "Field permission updated",
-      });
-    } catch (err: any) {
-      console.error("Permission save failed:", err);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: err.message || "Failed to update permission",
-      });
-    }
-  };
 
   if (!field) {
     return (
@@ -704,12 +619,6 @@ export default function FieldComponent({
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setShowPermissionsDialog(true)}
-                >
-                  <Lock className="h-4 w-4 mr-2" />
-                  Permissions
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setIsDeleteDialogOpen(true)}
@@ -730,100 +639,6 @@ export default function FieldComponent({
             renderFieldPreview()}
         </CardContent>
       </Card>
-
-      {/* --- FIELD PERMISSIONS DIALOG --- */}
-      <Dialog
-        open={showPermissionsDialog}
-        onOpenChange={setShowPermissionsDialog}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              Field Permissions — {field.label}
-            </DialogTitle>
-          </DialogHeader>
-
-          {permissionsLoading ? (
-            <div className="py-12 flex justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : permissions.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground">
-              No roles found
-            </div>
-          ) : (
-            <div className="space-y-2.5 py-4 max-h-[55vh] overflow-y-auto pr-1">
-              {permissions
-                .filter((role) => {
-                  const nameLower = (role.name || "").toLowerCase();
-                  return (
-                    nameLower !== "admin" &&
-                    nameLower !== "administrator" &&
-                    !nameLower.includes("admin")
-                  );
-                })
-                .map((role) => (
-                  <div
-                    key={role.id}
-                    className="flex items-center justify-between gap-4 px-3 py-2.5 rounded-md hover:bg-muted transition-colors"
-                  >
-                    <span className="font-medium">{role.name}</span>
-
-                    <Select
-                      value={role.permission ?? "NONE"}
-                      onValueChange={(v) => handlePermissionChange(role.id, v)}
-                    >
-                      <SelectTrigger className="w-52 h-9">
-                        <SelectValue placeholder="Select permission..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem
-                          value="NONE"
-                          className="text-muted-foreground italic"
-                        >
-                          No access (Hidden)
-                        </SelectItem>
-
-                        <DropdownMenuSeparator />
-
-                        {availablePermissions.map((perm) => (
-                          <SelectItem key={perm.id} value={perm.id}>
-                            <div className="flex flex-col items-start">
-                              <span className="font-medium text-sm">
-                                {perm.name.replace(/_/g, " ")}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground opacity-70 uppercase">
-                                {perm.category} • {perm.resource}
-                              </span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          <DialogFooter className="flex items-center justify-between w-full">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setHasLoadedPermissions(false)}
-              className="text-xs opacity-50 hover:opacity-100"
-            >
-              Force Refresh
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowPermissionsDialog(false)}
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

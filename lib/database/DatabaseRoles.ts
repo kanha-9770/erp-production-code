@@ -549,40 +549,50 @@ export class DatabaseRoles {
         throw new Error(`User not found: ${data.userId}`)
       }
 
-      // Upsert permission
-      await prisma.userPermission.upsert({
+      // Upsert the "flag-style" module/form permission row (one row per user+resource+null-permissionId).
+      // We look up by (userId, resourceType, resourceId, permissionId: null) and update-or-create so that
+      // we don't clash with field-level UserPermission rows which have a non-null permissionId.
+      const existing = await prisma.userPermission.findFirst({
         where: {
-          unique_user_resource_permission: {
-            userId: data.userId,
-            resourceType: data.resourceType,
-            resourceId: data.resourceId
-          }
-        },
-        update: {
-          canView: data.permissions.canView ?? false,
-          canCreate: data.permissions.canCreate ?? false,
-          canEdit: data.permissions.canEdit ?? false,
-          canDelete: data.permissions.canDelete ?? false,
-          isSystemAdmin: data.isSystemAdmin ?? false,
-          grantedBy: data.grantedBy,
-          expiresAt: data.expiresAt,
-          isActive: true,
-          updatedAt: new Date()
-        },
-        create: {
           userId: data.userId,
           resourceType: data.resourceType,
           resourceId: data.resourceId,
-          canView: data.permissions.canView ?? false,
-          canCreate: data.permissions.canCreate ?? false,
-          canEdit: data.permissions.canEdit ?? false,
-          canDelete: data.permissions.canDelete ?? false,
-          isSystemAdmin: data.isSystemAdmin ?? false,
-          grantedBy: data.grantedBy,
-          expiresAt: data.expiresAt,
-          isActive: true
-        }
+          permissionId: null,
+        },
       })
+
+      if (existing) {
+        await prisma.userPermission.update({
+          where: { id: existing.id },
+          data: {
+            canView: data.permissions.canView ?? false,
+            canCreate: data.permissions.canCreate ?? false,
+            canEdit: data.permissions.canEdit ?? false,
+            canDelete: data.permissions.canDelete ?? false,
+            isSystemAdmin: data.isSystemAdmin ?? false,
+            grantedBy: data.grantedBy,
+            expiresAt: data.expiresAt,
+            isActive: true,
+            updatedAt: new Date(),
+          },
+        })
+      } else {
+        await prisma.userPermission.create({
+          data: {
+            userId: data.userId,
+            resourceType: data.resourceType,
+            resourceId: data.resourceId,
+            canView: data.permissions.canView ?? false,
+            canCreate: data.permissions.canCreate ?? false,
+            canEdit: data.permissions.canEdit ?? false,
+            canDelete: data.permissions.canDelete ?? false,
+            isSystemAdmin: data.isSystemAdmin ?? false,
+            grantedBy: data.grantedBy,
+            expiresAt: data.expiresAt,
+            isActive: true,
+          },
+        })
+      }
     } catch (error: any) {
       console.error("Database error granting user permission:", error)
       throw new Error(`Failed to grant user permission: ${error?.message}`)

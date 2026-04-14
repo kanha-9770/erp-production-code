@@ -31,40 +31,58 @@ import {
   ChevronRight,
   RefreshCw,
   CheckCircle2,
+  FormInput,
   Layers,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useGetFormSectionsQuery } from "@/lib/api/permissions"
-import { useSectionPermissionMatrix } from "@/hooks/use-section-permission-matrix"
+import { useGetFormSectionFieldsQuery } from "@/lib/api/permissions"
+import { useFieldPermissionMatrix } from "@/hooks/use-field-permission-matrix"
 import type { Permission, PermissionUser } from "@/types/permissions"
 
-interface SectionsPermissionMatrixProps {
+interface FieldsPermissionMatrixProps {
   selectedFormId: string | null
 }
 
-interface SectionInfo {
+interface FieldInfo {
+  id: string
+  label: string
+  type: string
+  order: number
+}
+
+interface SectionWithFields {
   id: string
   title: string
   order: number
   description?: string
+  fields: FieldInfo[]
 }
 
-export function SectionsPermissionMatrix({
+export function FieldsPermissionMatrix({
   selectedFormId,
-}: SectionsPermissionMatrixProps) {
+}: FieldsPermissionMatrixProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set())
 
   const {
     data: sectionsData,
     isLoading: sectionsLoading,
-  } = useGetFormSectionsQuery(selectedFormId!, { skip: !selectedFormId })
+  } = useGetFormSectionFieldsQuery(selectedFormId!, { skip: !selectedFormId })
 
-  const sections: SectionInfo[] = sectionsData?.success ? sectionsData.data : []
+  const sections: SectionWithFields[] = sectionsData?.success ? sectionsData.data : []
 
   const toggleSection = (sectionId: string) => {
     setExpandedSections((prev) => {
       const next = new Set(prev)
       next.has(sectionId) ? next.delete(sectionId) : next.add(sectionId)
+      return next
+    })
+  }
+
+  const toggleField = (fieldId: string) => {
+    setExpandedFields((prev) => {
+      const next = new Set(prev)
+      next.has(fieldId) ? next.delete(fieldId) : next.add(fieldId)
       return next
     })
   }
@@ -80,22 +98,24 @@ export function SectionsPermissionMatrix({
               <div className="absolute inset-0 rounded-full border-4 border-primary/30 animate-pulse" />
               <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
             </div>
-            <p className="text-sm font-medium">Loading sections...</p>
+            <p className="text-sm font-medium">Loading fields...</p>
           </div>
         </CardContent>
       </Card>
     )
   }
 
-  if (sections.length === 0) {
+  const totalFields = sections.reduce((sum, s) => sum + s.fields.length, 0)
+
+  if (totalFields === 0) {
     return (
       <Card className="border-dashed border-border">
         <CardContent className="flex flex-col items-center justify-center gap-3 py-10">
-          <Layers className="h-10 w-10 text-muted-foreground/60" />
+          <FormInput className="h-10 w-10 text-muted-foreground/60" />
           <div className="text-center">
-            <h3 className="font-semibold">No Sections Found</h3>
+            <h3 className="font-semibold">No Fields Found</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              This form has no sections to configure permissions for.
+              This form has no fields to configure permissions for.
             </p>
           </div>
         </CardContent>
@@ -107,12 +127,13 @@ export function SectionsPermissionMatrix({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Layers className="h-5 w-5" />
-          Section Permissions
+          <FormInput className="h-5 w-5" />
+          Field Permissions
         </CardTitle>
         <CardDescription>
-          Control access for each role on individual sections of this form.
-          Expand a section to configure its permissions.
+          Control access for each role on individual fields of this form. Expand
+          a section to see its fields, then expand a field to configure its
+          permissions.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -138,19 +159,65 @@ export function SectionsPermissionMatrix({
                   ) : (
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   )}
+                  <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="font-medium text-sm flex-1">{section.title}</span>
                   <Badge variant="outline" className="text-xs">
-                    Section {section.order + 1}
+                    {section.fields.length} field{section.fields.length === 1 ? "" : "s"}
                   </Badge>
                 </button>
               </CollapsibleTrigger>
 
               <CollapsibleContent>
-                <div className="mt-2 ml-2">
-                  <SectionPermissionTable
-                    sectionId={section.id}
-                    formId={selectedFormId}
-                  />
+                <div className="mt-2 ml-4 space-y-2">
+                  {section.fields.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2 px-2">
+                      This section has no fields.
+                    </p>
+                  ) : (
+                    section.fields.map((field) => {
+                      const isFieldExpanded = expandedFields.has(field.id)
+
+                      return (
+                        <Collapsible
+                          key={field.id}
+                          open={isFieldExpanded}
+                          onOpenChange={() => toggleField(field.id)}
+                        >
+                          <CollapsibleTrigger asChild>
+                            <button
+                              className={cn(
+                                "flex items-center gap-3 w-full p-2.5 rounded-md border text-left transition-colors",
+                                "hover:bg-muted/60",
+                                isFieldExpanded && "bg-muted/40 border-primary/30",
+                              )}
+                            >
+                              {isFieldExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              )}
+                              <span className="font-medium text-sm flex-1">
+                                {field.label}
+                              </span>
+                              <Badge variant="secondary" className="text-xs">
+                                {field.type}
+                              </Badge>
+                            </button>
+                          </CollapsibleTrigger>
+
+                          <CollapsibleContent>
+                            <div className="mt-2 ml-2">
+                              <FieldPermissionTable
+                                sectionId={section.id}
+                                fieldId={field.id}
+                                formId={selectedFormId}
+                              />
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )
+                    })
+                  )}
                 </div>
               </CollapsibleContent>
             </Collapsible>
@@ -161,13 +228,13 @@ export function SectionsPermissionMatrix({
   )
 }
 
-// ─── Per-section permission table ──────────────────────────────────────────────
-
-function SectionPermissionTable({
+function FieldPermissionTable({
   sectionId,
+  fieldId,
   formId,
 }: {
   sectionId: string
+  fieldId: string
   formId: string
 }) {
   const [expandedRoles, setExpandedRoles] = useState<Set<string>>(new Set())
@@ -189,7 +256,7 @@ function SectionPermissionTable({
     getUsersForRole,
     getGrantedCountForRole,
     filteredRoles,
-  } = useSectionPermissionMatrix(sectionId, formId)
+  } = useFieldPermissionMatrix(fieldId, sectionId, formId)
 
   const toggleRole = (roleId: string) => {
     setExpandedRoles((prev) => {
@@ -247,7 +314,7 @@ function SectionPermissionTable({
 
           <TableBody>
             {filteredRoles.map((role) => {
-              const grantedCount = getGrantedCountForRole(role.id, sectionId)
+              const grantedCount = getGrantedCountForRole(role.id, fieldId)
               const usersInRole = getUsersForRole(role.id)
               const isExpanded = expandedRoles.has(role.id)
 
@@ -276,13 +343,15 @@ function SectionPermissionTable({
                       {permissions.map((p) => (
                         <TableCell key={p.id} className="text-center">
                           <Checkbox
-                            checked={hasRolePermission(role.id, sectionId, p.id)}
+                            checked={hasRolePermission(role.id, fieldId, p.id)}
                             disabled={saving}
                             title={
-                              isRoleInherited(role.id, p.id) ? "Inherited from form" : undefined
+                              isRoleInherited(role.id, p.id)
+                                ? "Inherited from form or section"
+                                : undefined
                             }
                             onCheckedChange={() =>
-                              togglePermission("role", role.id, sectionId, p.id)
+                              togglePermission("role", role.id, fieldId, p.id)
                             }
                           />
                         </TableCell>
@@ -308,10 +377,10 @@ function SectionPermissionTable({
                           </TableRow>
                         ) : (
                           usersInRole.map((user) => (
-                            <SectionUserRow
+                            <FieldUserRow
                               key={user.id}
                               user={user}
-                              sectionId={sectionId}
+                              fieldId={fieldId}
                               permissions={permissions}
                               saving={saving}
                               hasUserPermission={hasUserPermission}
@@ -330,7 +399,6 @@ function SectionPermissionTable({
         </Table>
       </ScrollArea>
 
-      {/* Action bar */}
       <div className="flex gap-3 justify-end border-t pt-4">
         <Button
           variant="outline"
@@ -343,7 +411,7 @@ function SectionPermissionTable({
         <Button
           size="sm"
           disabled={!hasChanges || saving}
-          onClick={() => saveChanges(sectionId)}
+          onClick={() => saveChanges(sectionId, fieldId)}
         >
           {saving ? (
             <>
@@ -367,30 +435,30 @@ function SectionPermissionTable({
   )
 }
 
-interface SectionUserRowProps {
+interface FieldUserRowProps {
   user: PermissionUser
-  sectionId: string
+  fieldId: string
   permissions: Permission[]
   saving: boolean
-  hasUserPermission: (userId: string, sectionId: string, permId: string) => boolean
+  hasUserPermission: (userId: string, fieldId: string, permId: string) => boolean
   isUserInherited: (userId: string, permId: string) => boolean
   togglePermission: (
     prefix: "role" | "user",
     id: string,
-    sectionId: string,
+    fieldId: string,
     permId: string,
   ) => void
 }
 
-function SectionUserRow({
+function FieldUserRow({
   user,
-  sectionId,
+  fieldId,
   permissions,
   saving,
   hasUserPermission,
   isUserInherited,
   togglePermission,
-}: SectionUserRowProps) {
+}: FieldUserRowProps) {
   return (
     <TableRow className="bg-muted/30 hover:bg-muted/50">
       <TableCell className="pl-12 text-sm">
@@ -401,10 +469,12 @@ function SectionUserRow({
       {permissions.map((p) => (
         <TableCell key={p.id} className="text-center">
           <Checkbox
-            checked={hasUserPermission(user.id, sectionId, p.id)}
+            checked={hasUserPermission(user.id, fieldId, p.id)}
             disabled={saving}
-            title={isUserInherited(user.id, p.id) ? "Inherited from form" : undefined}
-            onCheckedChange={() => togglePermission("user", user.id, sectionId, p.id)}
+            title={
+              isUserInherited(user.id, p.id) ? "Inherited from form or section" : undefined
+            }
+            onCheckedChange={() => togglePermission("user", user.id, fieldId, p.id)}
           />
         </TableCell>
       ))}

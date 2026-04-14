@@ -1,4 +1,4 @@
-// app/api/section-role-permissions/route.ts
+// app/api/field-role-permissions/route.ts
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -6,11 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 /**
- * GET /api/section-role-permissions?sectionId=xxx
+ * GET /api/field-role-permissions?fieldId=xxx
  *
- * Fetches role permissions scoped to a specific form section.
- * Returns records from `rolePermission` where sectionId matches
- * and formFieldId is null (section-level, not field-level).
+ * Fetches role permissions scoped to a specific form field.
+ * Returns records from `rolePermission` where formFieldId matches.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -24,15 +23,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "No organization context" }, { status: 403 });
     }
 
-    const sectionId = request.nextUrl.searchParams.get("sectionId");
-    if (!sectionId) {
-      return NextResponse.json({ error: "sectionId query parameter is required" }, { status: 400 });
+    const fieldId = request.nextUrl.searchParams.get("fieldId");
+    if (!fieldId) {
+      return NextResponse.json({ error: "fieldId query parameter is required" }, { status: 400 });
     }
 
     const rolePermissions = await prisma.rolePermission.findMany({
       where: {
-        sectionId,
-        formFieldId: null,
+        formFieldId: fieldId,
         role: { organizationId },
       },
       select: {
@@ -41,6 +39,7 @@ export async function GET(request: NextRequest) {
         permissionId: true,
         moduleId: true,
         sectionId: true,
+        formFieldId: true,
         granted: true,
         canDelegate: true,
       },
@@ -53,9 +52,9 @@ export async function GET(request: NextRequest) {
       count: rolePermissions.length,
     });
   } catch (error) {
-    console.error("[GET /api/section-role-permissions] Error:", error);
+    console.error("[GET /api/field-role-permissions] Error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch section role permissions", details: String(error) },
+      { error: "Failed to fetch field role permissions", details: String(error) },
       { status: 500 },
     );
   }
@@ -70,12 +69,9 @@ export async function PUT(request: NextRequest) {
 }
 
 /**
- * PUT/PATCH /api/section-role-permissions
+ * PUT/PATCH /api/field-role-permissions
  *
- * Body: Array of { roleId, permissionId, sectionId, granted }
- *
- * Uses a delete-then-create approach inside a transaction to avoid
- * constraint name mismatches with Prisma's generated client.
+ * Body: Array of { roleId, permissionId, sectionId, fieldId, granted }
  */
 async function handleUpdate(request: NextRequest) {
   try {
@@ -94,38 +90,41 @@ async function handleUpdate(request: NextRequest) {
       return NextResponse.json({ error: "Body must be a non-empty array" }, { status: 400 });
     }
 
-    // Validate all items first
     const validItems: Array<{
       roleId: string
       permissionId: string
       sectionId: string
+      fieldId: string
       granted: boolean
     }> = [];
     const skipped: any[] = [];
 
-    // Collect unique roleIds for org verification
     const uniqueRoleIds = new Set<string>();
 
     for (const [index, item] of body.entries()) {
-      const { roleId, permissionId, sectionId, granted } = item;
+      const { roleId, permissionId, sectionId, fieldId, granted } = item;
 
-      if (!roleId || !permissionId || !sectionId) {
-        skipped.push({ index, reason: "missing roleId, permissionId, or sectionId" });
+      if (!roleId || !permissionId || !sectionId || !fieldId) {
+        skipped.push({ index, reason: "missing roleId, permissionId, sectionId, or fieldId" });
         continue;
       }
 
       uniqueRoleIds.add(roleId);
-      validItems.push({ roleId, permissionId, sectionId, granted: Boolean(granted) });
+      validItems.push({
+        roleId,
+        permissionId,
+        sectionId,
+        fieldId,
+        granted: Boolean(granted),
+      });
     }
 
-    // Batch verify roles belong to the organization
     const orgRoles = await prisma.role.findMany({
       where: { id: { in: Array.from(uniqueRoleIds) }, organizationId },
       select: { id: true },
     });
     const validRoleIds = new Set(orgRoles.map((r) => r.id));
 
-    // Filter out items with invalid roles
     const finalItems = validItems.filter((item) => {
       if (!validRoleIds.has(item.roleId)) {
         skipped.push({ reason: "role not in organization", roleId: item.roleId });
@@ -143,8 +142,8 @@ async function handleUpdate(request: NextRequest) {
       });
     }
 
-    // Always write an explicit row (granted true OR false) so that section-level
-    // entries can override an inherited form-level grant.
+    // Always write an explicit row (granted true OR false) so field rows can
+    // override an inherited form/section grant.
     await prisma.$transaction(async (tx) => {
       for (const item of finalItems) {
         await tx.rolePermission.deleteMany({
@@ -152,7 +151,7 @@ async function handleUpdate(request: NextRequest) {
             roleId: item.roleId,
             permissionId: item.permissionId,
             sectionId: item.sectionId,
-            formFieldId: null,
+            formFieldId: item.fieldId,
           },
         });
 
@@ -161,7 +160,7 @@ async function handleUpdate(request: NextRequest) {
             roleId: item.roleId,
             permissionId: item.permissionId,
             sectionId: item.sectionId,
-            formFieldId: null,
+            formFieldId: item.fieldId,
             granted: item.granted,
             canDelegate: false,
           },
@@ -176,11 +175,11 @@ async function handleUpdate(request: NextRequest) {
       skippedItems: skipped.length > 0 ? skipped : undefined,
     });
   } catch (error) {
-    console.error("[PUT /api/section-role-permissions] Critical error:", error);
+    console.error("[PUT /api/field-role-permissions] Critical error:", error);
     return NextResponse.json(
       {
         success: false,
-        error: "Failed to process section permission updates",
+        error: "Failed to process field permission updates",
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },

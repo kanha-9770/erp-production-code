@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useLazyGetSectionPermissionDetailQuery, useUpdateSectionPermissionMutation, useCreateFieldMutation } from "@/lib/api/forms";
+import { useCreateFieldMutation } from "@/lib/api/forms";
 import { useDroppable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import {
@@ -31,21 +31,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-import {
   GripVertical,
   MoreHorizontal,
   Settings,
@@ -60,15 +45,12 @@ import {
   Edit3,
   Loader2,
   AlertTriangle,
-  Layers,
-  Lock,
   Type,
   List,
   Calendar,
   Mail,
   Phone,
   FileText,
-  ShieldCheck,
 } from "lucide-react";
 
 import FieldComponent from "./field-component";
@@ -78,20 +60,6 @@ import type { FormSection, FormField } from "@/types/form-builder";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-
-// --- UPDATED TYPES ---
-interface PermissionDefinition {
-  id: string;
-  name: string;
-  category: string;
-  resource: string;
-}
-
-interface RolePermission {
-  id: string; // roleId
-  name: string; // roleName
-  permission: string; // The ID from PermissionDefinition or "NONE"
-}
 
 interface SectionComponentProps {
   section: FormSection;
@@ -121,21 +89,11 @@ export default function SectionComponent({
 }: SectionComponentProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showPermissionsDialog, setShowPermissionsDialog] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState(section.title);
 
-  const [permissions, setPermissions] = useState<RolePermission[]>([]);
-  const [availablePermissions, setAvailablePermissions] = useState<
-    PermissionDefinition[]
-  >([]);
-  const [permissionsLoading, setPermissionsLoading] = useState(false);
-  const [hasLoadedPermissions, setHasLoadedPermissions] = useState(false);
-
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const [triggerGetSectionPerms] = useLazyGetSectionPermissionDetailQuery();
-  const [updateSectionPerm] = useUpdateSectionPermissionMutation();
   const [createFieldMutation] = useCreateFieldMutation();
 
   const {
@@ -148,7 +106,7 @@ export default function SectionComponent({
   } = useSortable({
     id: section.id,
     data: { type: "Section", section },
-    disabled: isOverlay || isEditingTitle || isDeleting || showDeleteDialog || showSettings || showPermissionsDialog,
+    disabled: isOverlay || isEditingTitle || isDeleting || showDeleteDialog || showSettings,
   });
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -201,52 +159,6 @@ export default function SectionComponent({
       onUpdateSection({ title: trimmed });
     }
     setIsEditingTitle(false);
-  };
-
-  useEffect(() => {
-    if (showPermissionsDialog && !hasLoadedPermissions) {
-      const fetchPermissions = async () => {
-        setPermissionsLoading(true);
-        try {
-          const data = await triggerGetSectionPerms(section.id).unwrap();
-          setPermissions(data.profiles ?? []);
-          setAvailablePermissions(data.availablePermissions ?? []);
-          setHasLoadedPermissions(true);
-        } catch (err) {
-          toast({
-            variant: "destructive",
-            title: "Error",
-            description: "Could not load section permissions",
-          });
-        } finally {
-          setPermissionsLoading(false);
-        }
-      };
-      fetchPermissions();
-    }
-  }, [showPermissionsDialog, hasLoadedPermissions, section.id, toast]);
-
-  const handlePermissionChange = async (
-    roleId: string,
-    permissionId: string,
-  ) => {
-    try {
-      await updateSectionPerm({ sectionId: section.id, body: { roleId, permissionId } }).unwrap();
-
-      setPermissions((prev) =>
-        prev.map((p) =>
-          p.id === roleId ? { ...p, permission: permissionId } : p,
-        ),
-      );
-
-      toast({ title: "Success", description: "Permission saved to database" });
-    } catch {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to update permission in database",
-      });
-    }
   };
 
   const createField = async (type: string) => {
@@ -423,11 +335,10 @@ export default function SectionComponent({
       <Card
         ref={setNodeRef}
         style={style}
-        className={`group border transition-all duration-200 ${
-          isDragging
+        className={`group border transition-all duration-200 ${isDragging
             ? "shadow-2xl scale-[1.015] rotate-[0.5deg] border-blue-400 bg-blue-50/30 z-50"
             : "hover:shadow-md hover:border-gray-300"
-        }`}
+          }`}
       >
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-4">
@@ -438,10 +349,9 @@ export default function SectionComponent({
                   {...listeners}
                   className={`
                     p-1.5 rounded opacity-0 group-hover:opacity-100 transition
-                    ${
-                      isDragging
-                        ? "bg-blue-600 text-white"
-                        : "hover:bg-gray-200"
+                    ${isDragging
+                      ? "bg-blue-600 text-white"
+                      : "hover:bg-gray-200"
                     }
                   `}
                 >
@@ -511,13 +421,6 @@ export default function SectionComponent({
                   {section.collapsed ? <ChevronDown /> : <ChevronUp />}
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowPermissionsDialog(true)}
-              >
-                <Lock className="h-4 w-4" />
-              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon">
@@ -527,11 +430,6 @@ export default function SectionComponent({
                 <DropdownMenuContent align="end" className="w-60">
                   <DropdownMenuItem onClick={() => setShowSettings(true)}>
                     <Settings className="mr-2 h-4 w-4" /> Section settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setShowPermissionsDialog(true)}
-                  >
-                    <Lock className="mr-2 h-4 w-4" /> Permissions
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -584,13 +482,12 @@ export default function SectionComponent({
           <CardContent className="pt-1 pb-6">
             <div
               ref={setDroppableRef}
-              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all duration-200 ${
-                isOver
+              className={`min-h-[160px] rounded-lg border-2 border-dashed transition-all duration-200 ${isOver
                   ? "border-blue-500 bg-blue-50/60 shadow-inner ring-2 ring-blue-200/50"
                   : isExternalDragging
                     ? "border-blue-300/60 bg-blue-50/20"
                     : "border-muted-foreground/30"
-              }`}
+                }`}
             >
               {section.fields.length > 0 ? (
                 <SortableContext
@@ -611,13 +508,12 @@ export default function SectionComponent({
                   </div>
                 </SortableContext>
               ) : (
-                <div className={`flex flex-col items-center justify-center min-h-[140px] transition-all duration-200 ${
-                  isOver
+                <div className={`flex flex-col items-center justify-center min-h-[140px] transition-all duration-200 ${isOver
                     ? "text-blue-600"
                     : isExternalDragging
                       ? "text-blue-400"
                       : "text-muted-foreground"
-                }`}>
+                  }`}>
                   <Plus className={`h-8 w-8 mb-2 transition-transform duration-200 ${isOver ? "scale-125" : ""}`} />
                   <p className="text-sm font-medium">{isOver ? "Drop here" : "Empty section"}</p>
                   <p className="text-xs mt-1">{isOver ? "Release to add field" : "Drag & drop fields here"}</p>
@@ -628,96 +524,6 @@ export default function SectionComponent({
           </CardContent>
         )}
       </Card>
-
-      <Dialog
-        open={showPermissionsDialog}
-        onOpenChange={setShowPermissionsDialog}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              Section Permissions — {section.title}
-            </DialogTitle>
-          </DialogHeader>
-
-          {permissionsLoading ? (
-            <div className="py-12 flex justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : permissions.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground">
-              No roles found in your organization
-            </div>
-          ) : (
-            <div className="space-y-2.5 py-4 max-h-[55vh] overflow-y-auto pr-1">
-              {permissions
-                .filter((role) => {
-                  const nameLower = (role.name || "").toLowerCase();
-                  return (
-                    nameLower !== "admin" &&
-                    nameLower !== "administrator" &&
-                    !nameLower.includes("admin")
-                  );
-                })
-                .map((role) => (
-                  <div
-                    key={role.id}
-                    className="flex items-center justify-between gap-4 px-3 py-2.5 rounded-md hover:bg-muted transition-colors"
-                  >
-                    <span className="font-medium">{role.name}</span>
-                    <Select
-                      value={role.permission ?? "NONE"}
-                      onValueChange={(v) => handlePermissionChange(role.id, v)}
-                    >
-                      <SelectTrigger className="w-52 h-9">
-                        <SelectValue placeholder="Select Access" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem
-                          value="NONE"
-                          className="text-muted-foreground italic"
-                        >
-                          View
-                        </SelectItem>
-                        <DropdownMenuSeparator />
-                        {availablePermissions.map((perm) => (
-                          <SelectItem key={perm.id} value={perm.id}>
-                            <div className="flex flex-col items-start">
-                              <span className="font-medium text-sm">
-                                {perm.name.replace(/_/g, " ")}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground opacity-70 uppercase tracking-tighter">
-                                {perm.category} • {perm.resource}
-                              </span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          <DialogFooter className="flex items-center justify-between w-full">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setHasLoadedPermissions(false)}
-              className="text-xs opacity-50 hover:opacity-100"
-            >
-              Force Refresh
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowPermissionsDialog(false)}
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {showSettings && (
         <SectionSettings

@@ -61,24 +61,117 @@ export async function GET(
 
     console.log("[Permissions GET] Available permissions:", availablePermissions.length);
 
-    // Map profiles — return ALL granted permissions per role (not just the first)
+    // ── Nested users per role (via unit assignments) ────────────────────
+    // Admin roles/users are excluded — admins always have full access.
+    const roleIds = roles.map((r) => r.id);
+
+    const unitAssignments = await prisma.userUnitAssignment.findMany({
+      where: { roleId: { in: roleIds } },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            avatar: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    // Users who also hold an admin role anywhere → exclude everywhere
+    const adminRoleIds = allRoles.filter((r) => r.isAdmin).map((r) => r.id);
+    const adminUserIds = new Set(
+      adminRoleIds.length
+        ? (
+            await prisma.userUnitAssignment.findMany({
+              where: { roleId: { in: adminRoleIds } },
+              select: { userId: true },
+            })
+          ).map((a) => a.userId)
+        : []
+    );
+
+    const userResourceType =
+      resourceType === "sections" ? "section" : resourceType;
+
+    const userPermRecords = await prisma.userPermission.findMany({
+      where: {
+        resourceType: userResourceType,
+        resourceId,
+        isActive: true,
+        permissionId: { not: null },
+      },
+      select: { userId: true, permissionId: true },
+    });
+    // One user may now have multiple rows (multi-permission).
+    const userPermMap = new Map<string, string[]>();
+    for (const rec of userPermRecords) {
+      if (!rec.permissionId) continue;
+      const arr = userPermMap.get(rec.userId) ?? [];
+      arr.push(rec.permissionId);
+      userPermMap.set(rec.userId, arr);
+    }
+
+    // Map profiles — return ALL granted permissions per role + nested users
     const profiles = roles.map((role) => {
       const roleAssignments = assignments.filter((a) => a.roleId === role.id);
       const firstAssigned = roleAssignments[0];
-      // `permissions` is an array of all granted permission names.
-      // Empty array [] means "no section permissions configured" (inherit form-level).
       const permissionNames = roleAssignments.map(
         (a) => a.permission?.name || a.permissionId
       );
+      const permissionIds = roleAssignments.map((a) => a.permissionId);
+
+      // Users assigned to this role (deduped, active, non-admin)
+      const seen = new Set<string>();
+      const usersInRole = unitAssignments
+        .filter(
+          (ua) =>
+            ua.roleId === role.id &&
+            ua.user &&
+            ua.user.status === "ACTIVE" &&
+            !adminUserIds.has(ua.user.id)
+        )
+        .reduce<
+          {
+            id: string;
+            name: string;
+            email: string;
+            avatar: string | null;
+            permission: string;
+            permissionIds: string[];
+          }[]
+        >((acc, ua) => {
+          const u = ua.user!;
+          if (seen.has(u.id)) return acc;
+          seen.add(u.id);
+          const fullName =
+            `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email;
+          const ids = userPermMap.get(u.id) ?? [];
+          acc.push({
+            id: u.id,
+            name: fullName,
+            email: u.email,
+            avatar: u.avatar,
+            permission: ids[0] || "NONE",
+            permissionIds: ids,
+          });
+          return acc;
+        }, []);
+
       return {
         id: role.id,
         name: role.name,
         permission: firstAssigned?.permissionId || "NONE",
         permissions: permissionNames,
+        permissionIds,
+        users: usersInRole,
       };
     });
 
-    console.log("[Permissions GET] Profiles:", profiles);
+    console.log("[Permissions GET] Profiles:", profiles.length);
     return NextResponse.json({ profiles, availablePermissions });
   } catch (error: any) {
     console.error("[Permissions GET Error]:", error);
@@ -101,16 +194,107 @@ export async function POST(
   { params }: { params: { resourceType: string; resourceId: string } }
 ) {
   try {
-    const { roleId, permissionId } = await request.json();
+    const body = await request.json();
+    const { roleId, userId, permissionId, permissionIds } = body;
     const { resourceType, resourceId } = params;
 
-    console.log("[Permissions POST] resourceType:", resourceType, "resourceId:", resourceId, "roleId:", roleId, "permissionId:", permissionId);
+    // Normalize both role and user writes to an array of permission ids.
+    const targetPermissionIds: string[] = Array.isArray(permissionIds)
+      ? permissionIds.filter((p: string) => p && p !== "NONE")
+      : permissionId && permissionId !== "NONE"
+        ? [permissionId]
+        : [];
 
-    if (!resourceId || !roleId) {
-      return NextResponse.json({ error: "Resource ID and Role ID are required" }, { status: 400 });
+    console.log(
+      "[Permissions POST] resourceType:",
+      resourceType,
+      "resourceId:",
+      resourceId,
+      "roleId:",
+      roleId,
+      "userId:",
+      userId,
+      "permissionId:",
+      permissionId,
+      "permissionIds:",
+      permissionIds
+    );
+
+    if (!resourceId || (!roleId && !userId)) {
+      return NextResponse.json(
+        { error: "Resource ID and either Role ID or User ID are required" },
+        { status: 400 }
+      );
     }
 
-    // 1. Verify role exists
+    // Verify all permissions exist (batch)
+    if (targetPermissionIds.length > 0) {
+      const existingPerms = await prisma.permission.findMany({
+        where: { id: { in: targetPermissionIds } },
+        select: { id: true },
+      });
+      if (existingPerms.length !== targetPermissionIds.length) {
+        const missing = targetPermissionIds.filter(
+          (id) => !existingPerms.find((p) => p.id === id)
+        );
+        return NextResponse.json(
+          { error: "One or more permissions not found", missing },
+          { status: 404 }
+        );
+      }
+    }
+
+    // ── USER-LEVEL permission write (multi-permission) ──────────────────
+    if (userId) {
+      const userExists = await prisma.user.findUnique({
+        where: { id: userId },
+      });
+      if (!userExists) {
+        return NextResponse.json(
+          { error: "User not found", userId },
+          { status: 404 }
+        );
+      }
+
+      const userResourceType =
+        resourceType === "sections" ? "section" : resourceType;
+
+      await prisma.$transaction(async (tx) => {
+        // Wipe only the permission-scoped rows; preserve any flag-style rows
+        // (permissionId=null) owned by module/form grants so we don't trample
+        // DatabaseRoles.grantUserPermission's writes.
+        await tx.userPermission.deleteMany({
+          where: {
+            userId,
+            resourceType: userResourceType,
+            resourceId,
+            permissionId: { not: null },
+          },
+        });
+
+        if (targetPermissionIds.length > 0) {
+          await tx.userPermission.createMany({
+            data: targetPermissionIds.map((pid) => ({
+              userId,
+              permissionId: pid,
+              resourceType: userResourceType,
+              resourceId,
+              granted: true,
+              isActive: true,
+              reason: `Direct ${userResourceType} assignment`,
+            })),
+          });
+          console.log(
+            "[Permissions POST] Created user permissions:",
+            targetPermissionIds.length
+          );
+        }
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
+    // ── ROLE-LEVEL permission write ──────────────────────────────────────
     const roleExists = await prisma.role.findUnique({
       where: { id: roleId },
     });
@@ -122,24 +306,9 @@ export async function POST(
       return NextResponse.json({ error: "Role not found", roleId }, { status: 404 });
     }
 
-    // 2. Verify permission exists (if not NONE)
-    if (permissionId !== "NONE") {
-      const permExists = await prisma.permission.findUnique({
-        where: { id: permissionId },
-      });
-
-      console.log("[Permissions POST] permission found:", !!permExists);
-
-      if (!permExists) {
-        console.error("[Permissions POST] Permission not found:", permissionId);
-        return NextResponse.json({ error: "Permission not found", permissionId }, { status: 404 });
-      }
-    }
-
-    // 3. Update permission based on resource type
     await prisma.$transaction(async (tx) => {
       if (resourceType === "field") {
-        // For fields: delete and recreate field-level permission
+        // For fields: delete and recreate field-level permissions (one row per permission)
         await tx.rolePermission.deleteMany({
           where: {
             roleId,
@@ -147,19 +316,22 @@ export async function POST(
           },
         });
 
-        if (permissionId !== "NONE") {
-          await tx.rolePermission.create({
-            data: {
+        if (targetPermissionIds.length > 0) {
+          await tx.rolePermission.createMany({
+            data: targetPermissionIds.map((pid) => ({
               roleId,
-              permissionId,
+              permissionId: pid,
               granted: true,
               formFieldId: resourceId,
-            },
+            })),
           });
-          console.log("[Permissions POST] Created field permission");
+          console.log(
+            "[Permissions POST] Created field permissions:",
+            targetPermissionIds.length
+          );
         }
       } else if (resourceType === "section") {
-        // For sections: delete and recreate section-level permission (formFieldId must be null)
+        // For sections: delete and recreate section-level permissions
         await tx.rolePermission.deleteMany({
           where: {
             roleId,
@@ -168,17 +340,20 @@ export async function POST(
           },
         });
 
-        if (permissionId !== "NONE") {
-          await tx.rolePermission.create({
-            data: {
+        if (targetPermissionIds.length > 0) {
+          await tx.rolePermission.createMany({
+            data: targetPermissionIds.map((pid) => ({
               roleId,
-              permissionId,
+              permissionId: pid,
               granted: true,
               sectionId: resourceId,
               formFieldId: null,
-            },
+            })),
           });
-          console.log("[Permissions POST] Created section permission");
+          console.log(
+            "[Permissions POST] Created section permissions:",
+            targetPermissionIds.length
+          );
         }
       }
     });

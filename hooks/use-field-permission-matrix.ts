@@ -8,9 +8,11 @@ import {
   useGetRolePermissionsQuery,
   useGetUserPermissionsQuery,
   useGetSectionRolePermissionsQuery,
-  useUpdateSectionRolePermissionsMutation,
   useGetSectionUserPermissionsQuery,
-  useUpdateSectionUserPermissionsMutation,
+  useGetFieldRolePermissionsQuery,
+  useUpdateFieldRolePermissionsMutation,
+  useGetFieldUserPermissionsQuery,
+  useUpdateFieldUserPermissionsMutation,
 } from "@/lib/api/permissions"
 import { useGetAdminUsersQuery } from "@/lib/api/users"
 import type {
@@ -31,7 +33,7 @@ const EMPTY_USERS: PermissionUser[] = []
 const EMPTY_ROLE_PERMS: RolePermission[] = []
 const EMPTY_USER_PERMS: UserPermission[] = []
 
-interface UseSectionPermissionMatrixResult {
+interface UseFieldPermissionMatrixResult {
   roles: PermissionRole[]
   users: PermissionUser[]
   permissions: Permission[]
@@ -42,55 +44,56 @@ interface UseSectionPermissionMatrixResult {
   changes: Map<ChangeKey, boolean>
   saving: boolean
   hasChanges: boolean
-  hasRolePermission: (roleId: string, sectionId: string, permId: string) => boolean
-  hasUserPermission: (userId: string, sectionId: string, permId: string) => boolean
-  /** True when the role's checkbox is forced on by a form-level grant. */
+  hasRolePermission: (roleId: string, fieldId: string, permId: string) => boolean
+  hasUserPermission: (userId: string, fieldId: string, permId: string) => boolean
+  /** True when the role's checkbox is forced on by a form- or section-level grant. */
   isRoleInherited: (roleId: string, permId: string) => boolean
-  /** True when the user's checkbox is forced on by a form-level grant (direct or via role). */
+  /** True when the user's checkbox is forced on by a form- or section-level grant. */
   isUserInherited: (userId: string, permId: string) => boolean
   togglePermission: (
     prefix: "role" | "user",
     id: string,
-    sectionId: string,
+    fieldId: string,
     permId: string,
   ) => void
   resetChanges: () => void
-  saveChanges: (sectionId: string) => Promise<void>
+  saveChanges: (sectionId: string, fieldId: string) => Promise<void>
   getUsersForRole: (roleId: string) => PermissionUser[]
-  getGrantedCountForRole: (roleId: string, sectionId: string) => number
+  getGrantedCountForRole: (roleId: string, fieldId: string) => number
   filteredRoles: PermissionRole[]
 }
 
 function makeKey(
   prefix: "role" | "user",
   id: string,
-  sectionId: string,
+  fieldId: string,
   permId: string,
 ): ChangeKey {
-  return `${prefix}${SEP}${id}${SEP}${sectionId}${SEP}${permId}`
+  return `${prefix}${SEP}${id}${SEP}${fieldId}${SEP}${permId}`
 }
 
 function parseKey(
   key: string,
-): { prefix: "role" | "user"; id: string; sectionId: string; permissionId: string } | null {
+): { prefix: "role" | "user"; id: string; fieldId: string; permissionId: string } | null {
   const parts = key.split(SEP)
   if (parts.length !== 4) return null
   const prefix = parts[0] as "role" | "user"
   if (prefix !== "role" && prefix !== "user") return null
-  return { prefix, id: parts[1], sectionId: parts[2], permissionId: parts[3] }
+  return { prefix, id: parts[1], fieldId: parts[2], permissionId: parts[3] }
 }
 
-export function useSectionPermissionMatrix(
-  selectedSectionId: string | null,
+export function useFieldPermissionMatrix(
+  selectedFieldId: string | null,
+  sectionId: string | null,
   formId: string | null,
-): UseSectionPermissionMatrixResult {
+): UseFieldPermissionMatrixResult {
   const { toast } = useToast()
   const [changes, setChanges] = useState<Map<ChangeKey, boolean>>(new Map())
   const [saving, setSaving] = useState(false)
 
-  const changesSectionRef = useRef<string | null>(selectedSectionId)
+  const changesFieldRef = useRef<string | null>(selectedFieldId)
 
-  const shouldFetch = !!selectedSectionId
+  const shouldFetch = !!selectedFieldId
 
   const {
     data: rolesData,
@@ -109,26 +112,25 @@ export function useSectionPermissionMatrix(
     isLoading: permsLoading,
   } = useGetPermissionsQuery(undefined, { skip: !shouldFetch })
 
-  // Section-level explicit permissions
   const {
     data: rpData,
     isLoading: rpLoading,
-    refetch: refetchSectionRolePerms,
-  } = useGetSectionRolePermissionsQuery(
-    { sectionId: selectedSectionId! },
+    refetch: refetchFieldRolePerms,
+  } = useGetFieldRolePermissionsQuery(
+    { fieldId: selectedFieldId! },
     { skip: !shouldFetch },
   )
 
   const {
     data: upData,
     isLoading: upLoading,
-    refetch: refetchSectionUserPerms,
-  } = useGetSectionUserPermissionsQuery(
-    { sectionId: selectedSectionId! },
+    refetch: refetchFieldUserPerms,
+  } = useGetFieldUserPermissionsQuery(
+    { fieldId: selectedFieldId! },
     { skip: !shouldFetch },
   )
 
-  // Form-level permissions used as inheritance source
+  // Parent (form + section) permissions used as inheritance sources
   const {
     data: formRpData,
     isLoading: formRpLoading,
@@ -142,8 +144,24 @@ export function useSectionPermissionMatrix(
     isLoading: formUpLoading,
   } = useGetUserPermissionsQuery(undefined, { skip: !shouldFetch || !formId })
 
-  const [updateSectionRolePerms] = useUpdateSectionRolePermissionsMutation()
-  const [updateSectionUserPerms] = useUpdateSectionUserPermissionsMutation()
+  const {
+    data: sectionRpData,
+    isLoading: sectionRpLoading,
+  } = useGetSectionRolePermissionsQuery(
+    { sectionId: sectionId ?? "" },
+    { skip: !shouldFetch || !sectionId },
+  )
+
+  const {
+    data: sectionUpData,
+    isLoading: sectionUpLoading,
+  } = useGetSectionUserPermissionsQuery(
+    { sectionId: sectionId ?? "" },
+    { skip: !shouldFetch || !sectionId },
+  )
+
+  const [updateFieldRolePerms] = useUpdateFieldRolePermissionsMutation()
+  const [updateFieldUserPerms] = useUpdateFieldUserPermissionsMutation()
 
   const roles: PermissionRole[] = useMemo(
     () => (rolesData?.success ? rolesData.data : EMPTY_ROLES),
@@ -180,24 +198,42 @@ export function useSectionPermissionMatrix(
     [formUpData],
   )
 
+  const sectionRolePermissions: RolePermission[] = useMemo(
+    () => (sectionRpData?.success ? sectionRpData.data : EMPTY_ROLE_PERMS),
+    [sectionRpData],
+  )
+
+  const sectionUserPermissions: UserPermission[] = useMemo(
+    () => (sectionUpData?.success ? sectionUpData.data : EMPTY_USER_PERMS),
+    [sectionUpData],
+  )
+
   const filteredRoles = useMemo(
     () => roles.filter((r) => r.name.toLowerCase() !== "admin"),
     [roles],
   )
 
   const loading =
-    rolesLoading || usersLoading || permsLoading || rpLoading || upLoading || formRpLoading || formUpLoading
+    rolesLoading ||
+    usersLoading ||
+    permsLoading ||
+    rpLoading ||
+    upLoading ||
+    formRpLoading ||
+    formUpLoading ||
+    sectionRpLoading ||
+    sectionUpLoading
   const error = rolesError || usersError ? "Failed to load permission data" : null
 
   useEffect(() => {
-    changesSectionRef.current = selectedSectionId
+    changesFieldRef.current = selectedFieldId
     setChanges(new Map())
-  }, [selectedSectionId])
+  }, [selectedFieldId])
 
-  const hasChanges = changes.size > 0 && changesSectionRef.current === selectedSectionId
+  const hasChanges = changes.size > 0 && changesFieldRef.current === selectedFieldId
 
-  // ── Inheritance helpers (form → section) ─────────────────────────────────
-  const isRoleInherited = useCallback(
+  // ── Inheritance helpers (form + section → field) ─────────────────────────
+  const isRoleInheritedFromForm = useCallback(
     (roleId: string, permId: string): boolean =>
       formRolePermissions.some(
         (rp) =>
@@ -211,49 +247,23 @@ export function useSectionPermissionMatrix(
     [formRolePermissions, formId],
   )
 
+  const isRoleInheritedFromSection = useCallback(
+    (roleId: string, permId: string): boolean =>
+      sectionRolePermissions.some(
+        (rp) => rp.roleId === roleId && rp.permissionId === permId && rp.granted,
+      ),
+    [sectionRolePermissions],
+  )
+
+  const isRoleInherited = useCallback(
+    (roleId: string, permId: string): boolean =>
+      isRoleInheritedFromForm(roleId, permId) || isRoleInheritedFromSection(roleId, permId),
+    [isRoleInheritedFromForm, isRoleInheritedFromSection],
+  )
+
   const isUserInherited = useCallback(
     (userId: string, permId: string): boolean => {
       // Direct form-level user override
-      const direct = formUserPermissions.find(
-        (up) =>
-          up.userId === userId &&
-          up.formId === formId &&
-          up.permissionId === permId &&
-          up.isActive &&
-          !(up as any).resourceType,
-      )
-      if (direct) return direct.granted
-
-      // Via any of the user's roles at form level
-      const userRoleIds =
-        users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
-      return userRoleIds.some((rid) => isRoleInherited(rid, permId))
-    },
-    [formUserPermissions, formId, users, isRoleInherited],
-  )
-
-  // ── Server-effective lookups (no change buffer) ──────────────────────────
-  // Most specific explicit row wins. An explicit section row with granted:false
-  // overrides an inherited form-level grant. If no section row exists, inherit
-  // from form.
-  const serverRoleEffective = useCallback(
-    (roleId: string, permId: string): boolean => {
-      const explicit = rolePermissions.find(
-        (rp) => rp.roleId === roleId && rp.permissionId === permId,
-      )
-      if (explicit) return explicit.granted
-      return isRoleInherited(roleId, permId)
-    },
-    [rolePermissions, isRoleInherited],
-  )
-
-  const serverUserEffective = useCallback(
-    (userId: string, permId: string): boolean => {
-      const sectionDirect = userPermissions.find(
-        (up) => up.userId === userId && up.permissionId === permId && up.isActive,
-      )
-      if (sectionDirect) return sectionDirect.granted
-
       const formDirect = formUserPermissions.find(
         (up) =>
           up.userId === userId &&
@@ -264,17 +274,87 @@ export function useSectionPermissionMatrix(
       )
       if (formDirect) return formDirect.granted
 
+      // Direct section-level user override
+      const sectionDirect = sectionUserPermissions.find(
+        (up) => up.userId === userId && up.permissionId === permId && up.isActive,
+      )
+      if (sectionDirect) return sectionDirect.granted
+
+      // Via any of the user's roles at form or section level
+      const userRoleIds =
+        users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
+      return userRoleIds.some((rid) => isRoleInherited(rid, permId))
+    },
+    [formUserPermissions, sectionUserPermissions, formId, users, isRoleInherited],
+  )
+
+  // ── Server-effective lookups (no change buffer) ──────────────────────────
+  // Most specific explicit row wins: field row > section row > form inherit.
+  // An explicit granted:false at any level overrides a higher-level grant.
+  const serverRoleEffective = useCallback(
+    (roleId: string, permId: string): boolean => {
+      // Field row (most specific)
+      const fieldExplicit = rolePermissions.find(
+        (rp) => rp.roleId === roleId && rp.permissionId === permId,
+      )
+      if (fieldExplicit) return fieldExplicit.granted
+
+      // Section row
+      const sectionExplicit = sectionRolePermissions.find(
+        (rp) => rp.roleId === roleId && rp.permissionId === permId,
+      )
+      if (sectionExplicit) return sectionExplicit.granted
+
+      // Form inherit
+      return isRoleInheritedFromForm(roleId, permId)
+    },
+    [rolePermissions, sectionRolePermissions, isRoleInheritedFromForm],
+  )
+
+  const serverUserEffective = useCallback(
+    (userId: string, permId: string): boolean => {
+      // Field user row
+      const fieldDirect = userPermissions.find(
+        (up) => up.userId === userId && up.permissionId === permId && up.isActive,
+      )
+      if (fieldDirect) return fieldDirect.granted
+
+      // Section user row
+      const sectionDirect = sectionUserPermissions.find(
+        (up) => up.userId === userId && up.permissionId === permId && up.isActive,
+      )
+      if (sectionDirect) return sectionDirect.granted
+
+      // Form user row
+      const formDirect = formUserPermissions.find(
+        (up) =>
+          up.userId === userId &&
+          up.formId === formId &&
+          up.permissionId === permId &&
+          up.isActive &&
+          !(up as any).resourceType,
+      )
+      if (formDirect) return formDirect.granted
+
+      // Fall back through user's roles
       const userRoleIds =
         users.find((u) => u.id === userId)?.unitAssignments?.map((a) => a.roleId) ?? []
       return userRoleIds.some((rid) => serverRoleEffective(rid, permId))
     },
-    [userPermissions, formUserPermissions, formId, users, serverRoleEffective],
+    [
+      userPermissions,
+      sectionUserPermissions,
+      formUserPermissions,
+      formId,
+      users,
+      serverRoleEffective,
+    ],
   )
 
-  // ── Effective permission used by the UI (pending buffer first) ───────────
+  // ── Effective permission used by the UI ──────────────────────────────────
   const hasRolePermission = useCallback(
-    (roleId: string, sectionId: string, permId: string): boolean => {
-      const key = makeKey("role", roleId, sectionId, permId)
+    (roleId: string, fieldId: string, permId: string): boolean => {
+      const key = makeKey("role", roleId, fieldId, permId)
       if (changes.has(key)) return changes.get(key)!
       return serverRoleEffective(roleId, permId)
     },
@@ -282,8 +362,8 @@ export function useSectionPermissionMatrix(
   )
 
   const hasUserPermission = useCallback(
-    (userId: string, sectionId: string, permId: string): boolean => {
-      const key = makeKey("user", userId, sectionId, permId)
+    (userId: string, fieldId: string, permId: string): boolean => {
+      const key = makeKey("user", userId, fieldId, permId)
       if (changes.has(key)) return changes.get(key)!
       return serverUserEffective(userId, permId)
     },
@@ -291,8 +371,8 @@ export function useSectionPermissionMatrix(
   )
 
   const togglePermission = useCallback(
-    (prefix: "role" | "user", id: string, sectionId: string, permId: string) => {
-      const key = makeKey(prefix, id, sectionId, permId)
+    (prefix: "role" | "user", id: string, fieldId: string, permId: string) => {
+      const key = makeKey(prefix, id, fieldId, permId)
 
       setChanges((prev) => {
         const next = new Map(prev)
@@ -317,7 +397,7 @@ export function useSectionPermissionMatrix(
   const resetChanges = useCallback(() => setChanges(new Map()), [])
 
   const saveChanges = useCallback(
-    async (sectionId: string) => {
+    async (savedSectionId: string, fieldId: string) => {
       if (changes.size === 0) return
       setSaving(true)
 
@@ -331,14 +411,15 @@ export function useSectionPermissionMatrix(
           if (parsed.prefix === "role") {
             roleUpdates.push({
               roleId: parsed.id,
-              sectionId: parsed.sectionId,
+              sectionId: savedSectionId,
+              fieldId: parsed.fieldId,
               permissionId: parsed.permissionId,
               granted,
             })
           } else {
             userUpdates.push({
               userId: parsed.id,
-              sectionId: parsed.sectionId,
+              fieldId: parsed.fieldId,
               permissionId: parsed.permissionId,
               granted,
             })
@@ -346,22 +427,22 @@ export function useSectionPermissionMatrix(
         })
 
         const promises: Promise<any>[] = []
-        if (roleUpdates.length) promises.push(updateSectionRolePerms(roleUpdates).unwrap())
-        if (userUpdates.length) promises.push(updateSectionUserPerms(userUpdates).unwrap())
+        if (roleUpdates.length) promises.push(updateFieldRolePerms(roleUpdates).unwrap())
+        if (userUpdates.length) promises.push(updateFieldUserPerms(userUpdates).unwrap())
 
         await Promise.all(promises)
-        await Promise.all([refetchSectionRolePerms(), refetchSectionUserPerms()])
+        await Promise.all([refetchFieldRolePerms(), refetchFieldUserPerms()])
         setChanges(new Map())
 
         toast({
-          title: "Section permissions saved",
+          title: "Field permissions saved",
           description: `${changes.size} change(s) applied.`,
         })
       } catch (err) {
-        console.error("[useSectionPermissionMatrix] Save failed:", err)
+        console.error("[useFieldPermissionMatrix] Save failed:", err)
         toast({
           title: "Save failed",
-          description: err instanceof Error ? err.message : "Failed to save section permissions",
+          description: err instanceof Error ? err.message : "Failed to save field permissions",
           variant: "destructive",
         })
       } finally {
@@ -370,10 +451,10 @@ export function useSectionPermissionMatrix(
     },
     [
       changes,
-      updateSectionRolePerms,
-      updateSectionUserPerms,
-      refetchSectionRolePerms,
-      refetchSectionUserPerms,
+      updateFieldRolePerms,
+      updateFieldUserPerms,
+      refetchFieldRolePerms,
+      refetchFieldUserPerms,
       toast,
     ],
   )
@@ -385,8 +466,8 @@ export function useSectionPermissionMatrix(
   )
 
   const getGrantedCountForRole = useCallback(
-    (roleId: string, sectionId: string): number =>
-      permissions.filter((p) => hasRolePermission(roleId, sectionId, p.id)).length,
+    (roleId: string, fieldId: string): number =>
+      permissions.filter((p) => hasRolePermission(roleId, fieldId, p.id)).length,
     [permissions, hasRolePermission],
   )
 

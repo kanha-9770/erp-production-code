@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { FormsSidebar } from "@/components/admin/forms-sidebar"
 import { FormsPermissionMatrix } from "@/components/admin/forms-permission-matrix"
 import { SectionsPermissionMatrix } from "@/components/admin/sections-permission-matrix"
+import { FieldsPermissionMatrix } from "@/components/admin/fields-permission-matrix"
 import { useModules } from "@/hooks/use-modules"
 import type { FormSelection } from "@/types/permissions"
 
@@ -56,6 +57,9 @@ export default function RolesPermissionsPage() {
             unsavedChangesRef={unsavedChangesRef}
           />
           <SectionsPermissionMatrix
+            selectedFormId={formSelection?.formId ?? null}
+          />
+          <FieldsPermissionMatrix
             selectedFormId={formSelection?.formId ?? null}
           />
         </div>

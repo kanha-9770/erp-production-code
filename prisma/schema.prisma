@@ -1205,7 +1205,9 @@ model UserPermission {
   updatedAt     DateTime    @updatedAt @map("updated_at")
 
   @@unique([userId, permissionId, moduleId, formId], name: "unique_user_permission")
-  @@unique([userId, resourceType, resourceId], name: "unique_user_resource_permission")
+  // Note: the prior @@unique([userId, resourceType, resourceId]) was removed
+  // to allow multiple permission rows per (user, resource) — required for
+  // multi-permission field/section access.
   @@index([userId])
   @@index([permissionId])
   @@index([moduleId])

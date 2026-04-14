@@ -34,6 +34,8 @@ interface UserPermissionRecord {
   permissionId: string | null
   moduleId: string | null
   formId: string | null
+  resourceType: string | null
+  resourceId: string | null
   granted: boolean
   canView: boolean
   canCreate: boolean
@@ -197,6 +199,11 @@ export function usePermissions(): PermissionsState {
 
     // 2. User-level permissions (override role-level)
     for (const up of userPermissions) {
+      // Skip section/field scoped rows — they are enforced by a separate
+      // layer (record/field visibility). Including them here would let a
+      // field-level deny poison the global form-level permission map.
+      if (up.resourceType === "section" || up.resourceType === "field") continue
+
       const flagPerms: { name: string; granted: boolean }[] = [
         { name: "view", granted: up.canView },
         { name: "create", granted: up.canCreate },

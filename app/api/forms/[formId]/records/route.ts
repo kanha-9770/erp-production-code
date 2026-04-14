@@ -142,6 +142,172 @@ export async function GET(
     }
 
     // ────────────────────────────────────────────────
+    // 3c. Field-level permission filter
+    //
+    // For non-admin callers, build `hiddenFieldIds` using the effective-perm
+    // cascade: field > section > form, with user overrides beating role rows
+    // at the same specificity. Any field whose effective VIEW resolves to
+    // false is excluded from both `allowedFieldIds` (which drives record-data
+    // filtering) and `formFieldsWithSections` (which drives table columns).
+    // Admins (`inheritanceUserIdFilter === null`) bypass this filter.
+    // ────────────────────────────────────────────────
+    const hiddenFieldIds = new Set<string>();
+
+    if (inheritanceUserIdFilter !== null) {
+      const viewPerm = await prisma.permission.findFirst({
+        where: { name: "VIEW" },
+        select: { id: true },
+      });
+
+      if (viewPerm?.id) {
+        const userAssignments = await prisma.userUnitAssignment.findMany({
+          where: { userId: authUser.id },
+          select: { roleId: true },
+        });
+        const userRoleIds = Array.from(new Set(userAssignments.map((u) => u.roleId)));
+
+        const sectionIds = form.sections.map((s: any) => s.id);
+        const sectionFieldIds: string[] = form.sections.flatMap((s: any) =>
+          s.fields.map((f: any) => f.id),
+        );
+        const subformFieldIds: string[] = [];
+        const collectSubformFieldIds = (sf: any) => {
+          sf.fields?.forEach((f: any) => subformFieldIds.push(f.id));
+          sf.childSubforms?.forEach(collectSubformFieldIds);
+        };
+        form.subforms?.forEach(collectSubformFieldIds);
+        const allFieldIds = [...sectionFieldIds, ...subformFieldIds];
+
+        const [rolePerms, userPerms] = await Promise.all([
+          userRoleIds.length > 0
+            ? prisma.rolePermission.findMany({
+                where: {
+                  roleId: { in: userRoleIds },
+                  permissionId: viewPerm.id,
+                  OR: [
+                    { formId: form.id, sectionId: null, formFieldId: null },
+                    { sectionId: { in: sectionIds }, formFieldId: null },
+                    { formFieldId: { in: allFieldIds } },
+                  ],
+                },
+                select: {
+                  roleId: true,
+                  formId: true,
+                  sectionId: true,
+                  formFieldId: true,
+                  granted: true,
+                },
+              })
+            : Promise.resolve([] as any[]),
+          prisma.userPermission.findMany({
+            where: {
+              userId: authUser.id,
+              isActive: true,
+              permissionId: viewPerm.id,
+              OR: [
+                { formId: form.id, resourceType: null },
+                { resourceType: "section", resourceId: { in: sectionIds } },
+                { resourceType: "field", resourceId: { in: allFieldIds } },
+              ],
+            },
+            select: {
+              formId: true,
+              resourceType: true,
+              resourceId: true,
+              granted: true,
+            },
+          }),
+        ]);
+
+        // Index user-level rows
+        const userFieldPerm = new Map<string, boolean>();
+        const userSectionPerm = new Map<string, boolean>();
+        let userFormPerm: boolean | undefined;
+        for (const up of userPerms as any[]) {
+          if (up.resourceType === "field" && up.resourceId) {
+            userFieldPerm.set(up.resourceId, up.granted);
+          } else if (up.resourceType === "section" && up.resourceId) {
+            userSectionPerm.set(up.resourceId, up.granted);
+          } else if (up.formId === form.id && !up.resourceType) {
+            userFormPerm = up.granted;
+          }
+        }
+
+        // Index role-level rows
+        const roleFieldPerm = new Map<string, Map<string, boolean>>();
+        const roleSectionPerm = new Map<string, Map<string, boolean>>();
+        const roleFormPerm = new Map<string, boolean>();
+        for (const rp of rolePerms as any[]) {
+          if (rp.formFieldId) {
+            let m = roleFieldPerm.get(rp.formFieldId);
+            if (!m) {
+              m = new Map();
+              roleFieldPerm.set(rp.formFieldId, m);
+            }
+            m.set(rp.roleId, rp.granted);
+          } else if (rp.sectionId) {
+            let m = roleSectionPerm.get(rp.sectionId);
+            if (!m) {
+              m = new Map();
+              roleSectionPerm.set(rp.sectionId, m);
+            }
+            m.set(rp.roleId, rp.granted);
+          } else if (rp.formId === form.id) {
+            roleFormPerm.set(rp.roleId, rp.granted);
+          }
+        }
+
+        const isFieldAllowed = (
+          fieldId: string,
+          sectionId: string | null,
+        ): boolean => {
+          // User explicit rows: field > section > form
+          if (userFieldPerm.has(fieldId)) return userFieldPerm.get(fieldId)!;
+          if (sectionId && userSectionPerm.has(sectionId))
+            return userSectionPerm.get(sectionId)!;
+          if (userFormPerm !== undefined) return userFormPerm;
+
+          // Fall back through user's roles — any role granting = allow
+          for (const roleId of userRoleIds) {
+            const fMap = roleFieldPerm.get(fieldId);
+            if (fMap?.has(roleId)) {
+              if (fMap.get(roleId)) return true;
+              continue;
+            }
+            if (sectionId) {
+              const sMap = roleSectionPerm.get(sectionId);
+              if (sMap?.has(roleId)) {
+                if (sMap.get(roleId)) return true;
+                continue;
+              }
+            }
+            if (roleFormPerm.has(roleId) && roleFormPerm.get(roleId)) {
+              return true;
+            }
+          }
+          return false;
+        };
+
+        for (const section of form.sections as any[]) {
+          for (const field of section.fields as any[]) {
+            if (!isFieldAllowed(field.id, section.id)) {
+              hiddenFieldIds.add(field.id);
+            }
+          }
+        }
+        const walkSubform = (sf: any) => {
+          sf.fields?.forEach((f: any) => {
+            if (!isFieldAllowed(f.id, null)) {
+              hiddenFieldIds.add(f.id);
+            }
+          });
+          sf.childSubforms?.forEach(walkSubform);
+        };
+        form.subforms?.forEach(walkSubform);
+      }
+    }
+
+    // ────────────────────────────────────────────────
     // 4. Build field & subform lookups for enrichment
     // ────────────────────────────────────────────────
     const allowedFieldIds = new Set<string>();
@@ -163,6 +329,7 @@ export async function GET(
     form.sections.forEach((section: any) => {
       const sectionTitle = section.title || "Default Section";
       section.fields.forEach((f: any) => {
+        if (hiddenFieldIds.has(f.id)) return;
         allowedFieldIds.add(f.id);
         fieldLookup[f.id] = {
           label: f.label,
@@ -184,6 +351,7 @@ export async function GET(
         fields: subform.fields,
       };
       subform.fields.forEach((f: any) => {
+        if (hiddenFieldIds.has(f.id)) return;
         allowedFieldIds.add(f.id);
         fieldLookup[f.id] = {
           label: f.label,
@@ -560,6 +728,7 @@ export async function GET(
 
     form.sections.forEach((section: any) => {
       section.fields.forEach((field: any) => {
+        if (hiddenFieldIds.has(field.id)) return;
         formFieldsWithSections.push({
           id: field.id,
           originalId: field.id,
@@ -585,6 +754,7 @@ export async function GET(
       const fullPath = parentPath ? `${parentPath} → ${subform.name}` : subform.name;
 
       subform.fields.forEach((field: any) => {
+        if (hiddenFieldIds.has(field.id)) return;
         formFieldsWithSections.push({
           id: field.id,
           originalId: field.id,

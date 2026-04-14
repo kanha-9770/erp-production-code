@@ -116,6 +116,80 @@ export const permissionsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["SectionRolePermissions"],
     }),
+
+    // Fetch sections of a form with their fields nested (for field permission matrix)
+    getFormSectionFields: builder.query<
+      ApiListResponse<{
+        id: string
+        title: string
+        order: number
+        description?: string
+        fields: Array<{ id: string; label: string; type: string; order: number }>
+      }>,
+      string
+    >({
+      query: (formId) => `/forms/${formId}/section-fields`,
+      providesTags: (result, error, formId) => [{ type: "FormSectionFields", id: formId }],
+      keepUnusedDataFor: 300,
+    }),
+
+    // Fetch field-level role permissions for a specific field
+    getFieldRolePermissions: builder.query<ApiListResponse<RolePermission>, { fieldId: string }>({
+      query: ({ fieldId }) => `/field-role-permissions?fieldId=${fieldId}`,
+      providesTags: (result, error, arg) => [
+        { type: "FieldRolePermissions", id: arg.fieldId },
+      ],
+      keepUnusedDataFor: 120,
+    }),
+
+    // Batch update field role permissions
+    updateFieldRolePermissions: builder.mutation<{ success: boolean }, object[]>({
+      query: (body) => ({
+        url: "/field-role-permissions",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["FieldRolePermissions"],
+    }),
+
+    // Section-level user permission overrides
+    getSectionUserPermissions: builder.query<ApiListResponse<UserPermission>, { sectionId: string }>({
+      query: ({ sectionId }) => `/section-user-permissions?sectionId=${sectionId}`,
+      providesTags: (result, error, arg) => [
+        { type: "SectionUserPermissions", id: arg.sectionId },
+      ],
+      keepUnusedDataFor: 120,
+    }),
+
+    updateSectionUserPermissions: builder.mutation<{ success: boolean }, object[]>({
+      query: (body) => ({
+        url: "/section-user-permissions",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["SectionUserPermissions"],
+    }),
+
+    // Field-level user permission overrides
+    getFieldUserPermissions: builder.query<ApiListResponse<UserPermission>, { fieldId: string }>({
+      query: ({ fieldId }) => `/field-user-permissions?fieldId=${fieldId}`,
+      providesTags: (result, error, arg) => [
+        { type: "FieldUserPermissions", id: arg.fieldId },
+      ],
+      keepUnusedDataFor: 120,
+    }),
+
+    updateFieldUserPermissions: builder.mutation<{ success: boolean }, object[]>({
+      query: (body) => ({
+        url: "/field-user-permissions",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["FieldUserPermissions"],
+    }),
   }),
 })
 
@@ -131,4 +205,11 @@ export const {
   useGetFormSectionsQuery,
   useGetSectionRolePermissionsQuery,
   useUpdateSectionRolePermissionsMutation,
+  useGetFormSectionFieldsQuery,
+  useGetFieldRolePermissionsQuery,
+  useUpdateFieldRolePermissionsMutation,
+  useGetSectionUserPermissionsQuery,
+  useUpdateSectionUserPermissionsMutation,
+  useGetFieldUserPermissionsQuery,
+  useUpdateFieldUserPermissionsMutation,
 } = permissionsApi
