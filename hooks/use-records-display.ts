@@ -80,7 +80,34 @@ export function useRecordsDisplay({
   onDeleteRecord,
   onViewDetails,
 }: UseRecordsDisplayOptions) {
-  const { fullName: currentUserName } = useCurrentUser();
+  const { fullName: currentUserName, user: currentUser } = useCurrentUser();
+
+  // Current user's primary role id — used to look up their row in the
+  // per-section permission profiles returned by /api/permissions/section/:id.
+  const userRoleId: string | null = React.useMemo(() => {
+    const assignments = (currentUser as any)?.unitAssignments;
+    if (Array.isArray(assignments) && assignments.length > 0) {
+      return assignments[0]?.role?.id ?? null;
+    }
+    return null;
+  }, [currentUser]);
+
+  // Effective section-level permissions for the current user, keyed by
+  // sectionId. Value is the list of granted permission names (e.g. ["VIEW",
+  // "EDIT"]). An empty array means the section was queried but the user has
+  // no explicit/inherited grants for it (treat as explicit deny). A missing
+  // key means we haven't fetched yet — fall back to form-level.
+  const [sectionPermissionsMap, setSectionPermissionsMap] = React.useState<
+    Record<string, string[]>
+  >({});
+
+  // Effective field-level permissions for the current user, keyed by fieldId.
+  // Same semantics as sectionPermissionsMap but at the field level. A missing
+  // key means the field has no explicit field-level rows — fall back to the
+  // section's permissions. An empty array means every permission is denied.
+  const [fieldPermissionsMap, setFieldPermissionsMap] = React.useState<
+    Record<string, string[]>
+  >({});
 
   // ── State ────────────────────────────────────────────────────────────────────
 
@@ -477,6 +504,130 @@ export function useRecordsDisplay({
       );
     },
     [permissions, isAdmin],
+  );
+
+  // Fetch effective per-section permissions for every section represented
+  // in the currently rendered fields. The /api/permissions/section/:id
+  // endpoint already merges form-level grants with explicit section rows,
+  // so we just need to read the current user's role profile from it.
+  React.useEffect(() => {
+    if (isAdmin) return;
+    if (!userRoleId) return;
+    const uniqueSectionIds = Array.from(
+      new Set(
+        formFieldsWithSections
+          .map((f) => f.sectionId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+    const missing = uniqueSectionIds.filter(
+      (id) => !(id in sectionPermissionsMap),
+    );
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        missing.map(async (id) => {
+          try {
+            const res = await fetch(`/api/permissions/section/${id}`);
+            if (!res.ok) {
+              return { id, perms: [] as string[], fieldPerms: {} as Record<string, string[]> };
+            }
+            const data = await res.json();
+            // Prefer currentUserEffective — it already merges role AND
+            // user-level overrides server-side. Fall back to role profile
+            // lookup for older response shapes.
+            const profile =
+              data.currentUserEffective ??
+              data.profiles?.find((p: any) => p.id === userRoleId);
+            if (!profile) {
+              return { id, perms: [] as string[], fieldPerms: {} as Record<string, string[]> };
+            }
+            const perms: string[] = Array.isArray(profile.permissions)
+              ? profile.permissions
+              : profile.permission && profile.permission !== "NONE"
+                ? [profile.permission]
+                : [];
+            // The server returns fieldPermissions as Record<fieldId, string[]>
+            // — pass it through so the inline cell editor can check per-field
+            // grants (needed when a field explicitly denies a permission that
+            // the section otherwise grants).
+            const fieldPerms: Record<string, string[]> =
+              profile.fieldPermissions && typeof profile.fieldPermissions === "object"
+                ? profile.fieldPermissions
+                : {};
+            return { id, perms, fieldPerms };
+          } catch {
+            return { id, perms: [] as string[], fieldPerms: {} as Record<string, string[]> };
+          }
+        }),
+      );
+      if (cancelled) return;
+      setSectionPermissionsMap((prev) => {
+        const next = { ...prev };
+        for (const r of results) next[r.id] = r.perms;
+        return next;
+      });
+      setFieldPermissionsMap((prev) => {
+        const next = { ...prev };
+        for (const r of results) {
+          for (const [fid, fperms] of Object.entries(r.fieldPerms)) {
+            next[fid] = Array.isArray(fperms) ? fperms : [];
+          }
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [formFieldsWithSections, userRoleId, isAdmin, sectionPermissionsMap]);
+
+  // Section-aware permission check. Returns true when the current user has
+  // `permName` effective on the given section. If section permissions have
+  // been fetched and the section exists but the permission isn't in the list,
+  // that's an explicit deny (section-level overrides inherited form-level).
+  // If we haven't fetched yet, fall back to the form-level check so we don't
+  // break users while data is loading.
+  const hasPermissionForSection = React.useCallback(
+    (sectionId: string | undefined, formId: string, permName: string) => {
+      if (isAdmin) return true;
+      if (!sectionId) return hasPermissionForForm(formId, permName);
+      const target = permName.toUpperCase();
+      const perms = sectionPermissionsMap[sectionId];
+      if (perms === undefined) {
+        // Not loaded yet — fall back to form-level
+        return hasPermissionForForm(formId, permName);
+      }
+      return perms.some((p) => (p || "").toUpperCase() === target);
+    },
+    [isAdmin, sectionPermissionsMap, hasPermissionForForm],
+  );
+
+  // Field-aware permission check. Field-level explicit rows win over the
+  // section. If the field has no explicit entry, fall back to the section's
+  // effective permission. Used by the inline cell editor so a field with
+  // explicit EDIT=false stays read-only even when the section grants EDIT.
+  const hasPermissionForField = React.useCallback(
+    (
+      fieldId: string | undefined,
+      sectionId: string | undefined,
+      formId: string,
+      permName: string,
+    ) => {
+      if (isAdmin) return true;
+      const target = permName.toUpperCase();
+      if (fieldId) {
+        const fieldPerms = fieldPermissionsMap[fieldId];
+        if (fieldPerms !== undefined) {
+          // Field has explicit rows — effective state wins.
+          return fieldPerms.some((p) => (p || "").toUpperCase() === target);
+        }
+      }
+      return hasPermissionForSection(sectionId, formId, permName);
+    },
+    [isAdmin, fieldPermissionsMap, hasPermissionForSection],
   );
 
   const getRecordForms = React.useCallback(
@@ -1212,7 +1363,15 @@ export function useRecordsDisplay({
         isImageField(fieldDef.label)
       )
         return;
-      if (!hasPermissionForForm(fieldDef.formId, "EDIT")) return;
+      if (
+        !hasPermissionForField(
+          fieldDef.originalId,
+          fieldDef.sectionId,
+          fieldDef.formId,
+          "EDIT",
+        )
+      )
+        return;
       // ── Formula fields are read-only, cannot be edited ──
       if (fieldDef.type === "formula" && fieldDef.properties?.formulaConfig)
         return;
@@ -1235,7 +1394,7 @@ export function useRecordsDisplay({
         lastPointerDownTimeRef.current = now;
       }
     },
-    [editMode, savingChanges, hasPermissionForForm, enterCellEdit],
+    [editMode, savingChanges, hasPermissionForField, enterCellEdit],
   );
 
   // ── Column resize handler ────────────────────────────────────────────────────

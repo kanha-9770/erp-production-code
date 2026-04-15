@@ -140,14 +140,29 @@ export function usePublicForm({
   const [sectionPermissions, setSectionPermissions] = useState<
     Record<string, string[]>
   >({});
+  // Effective field-level permissions for the current user, keyed by
+  // fieldId. The value is the list of granted permission names (e.g.
+  // ["VIEW","CREATE"]) after form/section inheritance and explicit field
+  // rows are applied. An empty array means every permission for the field
+  // is explicitly denied — hide it. A missing key means inherit from the
+  // section.
   const [fieldPermissions, setFieldPermissions] = useState<
-    Record<string, string>
+    Record<string, string[]>
   >({});
   // Sections (and subforms) where the admin has granted at least one
   // explicit field-level permission for the current user's role. In those
   // sections we switch to allow-list mode: only fields with an explicit
   // grant are visible; everything else is hidden.
   const [sectionsWithFieldGrants, setSectionsWithFieldGrants] = useState<
+    Set<string>
+  >(new Set());
+  // Sections where the admin has explicitly configured the Section
+  // Permissions matrix for the current user's role (any granted/denied row
+  // exists). When a section IS in this set, field-level grants act as
+  // overrides and sibling fields inherit section-level. When a section is
+  // NOT in this set but has field-level grants, allow-list mode kicks in:
+  // only explicitly granted fields are visible.
+  const [sectionsWithExplicitSectionGrants, setSectionsWithExplicitSectionGrants] = useState<
     Set<string>
   >(new Set());
   const [availablePermissions, setAvailablePermissions] = useState<any[]>([]);
@@ -436,36 +451,43 @@ export function usePublicForm({
   );
 
   /**
-   * Returns:
+   * Mode-aware section read-only check.
    *  - `null`  → no section-level permissions configured (inherit form-level)
-   *  - `true`  → section is explicitly read-only (only VIEW granted)
-   *  - `false` → section is explicitly editable (CREATE/EDIT/DELETE granted)
+   *  - `true`  → section is read-only for the current mode
+   *  - `false` → section is editable for the current mode
+   *
+   * Create mode (no editingRecordId) requires CREATE on the section.
+   * Edit mode requires EDIT. Anything else (e.g. VIEW only, or only DELETE)
+   * makes the section read-only for input in that mode.
    */
   const isSectionReadOnly = useCallback(
     (id: string): boolean | null => {
       const perms = sectionPermissions[id];
-      // No perms, empty, or only "NONE" → no section config → inherit form-level
-      if (!perms || perms.length === 0) {
-        console.log("[isSectionReadOnly]", id, "→ null (inherit form-level), perms:", perms);
-        return null;
-      }
+      if (!perms || perms.length === 0) return null;
       const meaningful = perms.filter((p) => p !== "NONE");
-      if (meaningful.length === 0) {
-        console.log("[isSectionReadOnly]", id, "→ null (only NONE), perms:", perms);
-        return null;
-      }
-      // Read-only if only VIEW is granted (no CREATE, EDIT, or DELETE)
-      if (
-        meaningful.includes("VIEW") &&
-        !meaningful.includes("CREATE") &&
-        !meaningful.includes("EDIT") &&
-        !meaningful.includes("DELETE")
-      ) {
-        console.log("[isSectionReadOnly]", id, "→ true (VIEW only), perms:", meaningful);
-        return true;
-      }
-      console.log("[isSectionReadOnly]", id, "→ false (editable), perms:", meaningful);
-      return false; // Has CREATE/EDIT/DELETE → editable
+      if (meaningful.length === 0) return null;
+
+      const requiredPerm = editingRecordId ? "EDIT" : "CREATE";
+      if (meaningful.includes(requiredPerm)) return false;
+      return true;
+    },
+    [sectionPermissions, editingRecordId],
+  );
+
+  /**
+   * Per-section DELETE gate. Controls whether delete operations (e.g.
+   * removing a dynamic subform row) are allowed inside this section.
+   *  - `null`  → no section config → inherit form-level
+   *  - `true`  → section explicitly grants DELETE
+   *  - `false` → section is configured but DELETE is not granted
+   */
+  const canDeleteInSection = useCallback(
+    (id: string): boolean | null => {
+      const perms = sectionPermissions[id];
+      if (!perms || perms.length === 0) return null;
+      const meaningful = perms.filter((p) => p !== "NONE");
+      if (meaningful.length === 0) return null;
+      return meaningful.includes("DELETE");
     },
     [sectionPermissions],
   );
@@ -523,44 +545,46 @@ export function usePublicForm({
   };
 
   /**
-   * Returns true if a field should be read-only due to field-level permission.
-   * Only "VIEW" at field level makes it read-only.
-   * Returns null if no field-level permission is set (inherit section/form level).
+   * Mode-aware field read-only check.
+   *  - `null`  → no field-level override (inherit section/form)
+   *  - `true`  → field is read-only for the current mode
+   *  - `false` → field is editable for the current mode
+   *
+   * Create mode (no editingRecordId) needs CREATE on the field. Edit mode
+   * needs EDIT. A field with ["VIEW","CREATE"] is editable when creating
+   * and read-only when editing an existing record.
    */
   const isFieldReadOnly = useCallback(
     (fieldId: string): boolean | null => {
-      const perm = fieldPermissions[fieldId];
-      if (!perm) return null; // No field-level override → inherit
-      const permUpper = perm.toUpperCase();
-      if (permUpper === "VIEW") return true; // Field is view-only
-      if (permUpper === "NONE") return true; // Shouldn't be visible, but treat as read-only too
-      return false; // Has CREATE/EDIT/DELETE → editable
+      const perms = fieldPermissions[fieldId];
+      if (!perms) return null; // No field-level override → inherit
+      if (perms.length === 0) return true; // all denied (also hidden by isFieldVisible)
+      const requiredPerm = editingRecordId ? "EDIT" : "CREATE";
+      if (perms.includes(requiredPerm)) return false;
+      return true;
     },
-    [fieldPermissions],
+    [fieldPermissions, editingRecordId],
   );
 
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
     const fieldPerm = fieldPermissions[field.id];
-    // Field-level "NONE" hides the field entirely
-    if (fieldPerm && fieldPerm.toUpperCase() === "NONE") {
-      console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perm NONE)");
+    // Empty array means every field-level permission is explicitly denied
+    // for the current user — hide the field.
+    if (fieldPerm && fieldPerm.length === 0) {
+      console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perms denied)");
       return false;
     }
     const sectionPerms = sectionPermissions[sectionId];
-    const sectionHasGrants =
-      !!sectionPerms &&
-      sectionPerms.length > 0 &&
-      !(sectionPerms.length === 1 && sectionPerms[0] === "NONE");
-    // Allow-list mode: only when the section has NO section-level grants
-    // but DOES have explicit field-level grants. In that case, only fields
-    // that were explicitly granted at the field level are visible; others
-    // default to hidden because the admin chose the field-level route to
-    // carve out access. When the section itself grants access, field-level
-    // rows are overrides (handled elsewhere) and inheritance keeps sibling
-    // fields visible.
+    // Allow-list mode: when the admin configured field-level grants for
+    // this section but did NOT explicitly configure the section-level
+    // matrix, only fields with an explicit grant are visible. Siblings
+    // that weren't granted are hidden because the admin chose the
+    // field-level route to carve out access. When the section itself has
+    // explicit section-level grants, field rows are overrides and the
+    // rest of the fields inherit section-level.
     if (
       !fieldPerm &&
-      !sectionHasGrants &&
+      !sectionsWithExplicitSectionGrants.has(sectionId) &&
       sectionsWithFieldGrants.has(sectionId)
     ) {
       return false;
@@ -1208,8 +1232,9 @@ export function usePublicForm({
   const fetchSectionPermissions = async (formData: Form) => {
     let avails: any[] = availablePermissions;
     const rawPerms: Record<string, string[]> = {};
-    const allFieldPerms: Record<string, string> = {};
+    const allFieldPerms: Record<string, string[]> = {};
     const sectionsWithGrants = new Set<string>();
+    const sectionsWithExplicitGrants = new Set<string>();
     const allIds = getAllPermissionableIds(formData);
 
     await Promise.all(
@@ -1228,7 +1253,15 @@ export function usePublicForm({
           if (data.availablePermissions && avails.length === 0) {
             avails = data.availablePermissions;
           }
-          const profile = data.profiles?.find((p: any) => p.id === userRoleId);
+
+          // Prefer the API's `currentUserEffective` — it already merges role
+          // AND user-level overrides for the calling user. Fall back to the
+          // role profile lookup only if the server doesn't provide it (older
+          // response shape).
+          const effective = data.currentUserEffective;
+          const profile = effective
+            ? effective
+            : data.profiles?.find((p: any) => p.id === userRoleId);
           if (!profile) {
             // Role not listed (admin roles excluded) — no restrictions
             rawPerms[id] = [];
@@ -1250,6 +1283,9 @@ export function usePublicForm({
           Object.assign(allFieldPerms, sectionFieldPerms);
           if (Object.keys(sectionFieldPerms).length > 0) {
             sectionsWithGrants.add(id);
+          }
+          if (profile.hasExplicitSectionGrant === true) {
+            sectionsWithExplicitGrants.add(id);
           }
         } catch (e) {
           rawPerms[id] = [];
@@ -1295,6 +1331,7 @@ export function usePublicForm({
     setSectionPermissions(finalPerms);
     setFieldPermissions(allFieldPerms);
     setSectionsWithFieldGrants(sectionsWithGrants);
+    setSectionsWithExplicitSectionGrants(sectionsWithExplicitGrants);
   };
 
   const trackFormView = async () => {
@@ -1320,33 +1357,37 @@ export function usePublicForm({
   const getVisibleRequiredFields = (): FormField[] => {
     if (!form) return [];
     const visible: FormField[] = [];
+    // Read-only sections (due to section-level permissions) are excluded —
+    // their fields aren't editable, so they shouldn't block submission.
     form.sections.forEach((section) => {
-      if (isSectionVisible(section.id)) {
-        section.fields.forEach((f) => {
+      if (!isSectionVisible(section.id)) return;
+      if (isSectionReadOnly(section.id) === true) return;
+      section.fields.forEach((f) => {
+        if (
+          isFieldVisible(f, section.id) &&
+          f.validation?.required &&
+          f.type !== "formula" &&
+          isFieldReadOnly(f.id) !== true
+        ) {
+          visible.push(f);
+        }
+      });
+    });
+    const collectSubformFields = (subforms: Subform[]) => {
+      subforms.forEach((sf) => {
+        if (!isSectionVisible(sf.id)) return;
+        if (isSectionReadOnly(sf.id) === true) return;
+        sf.fields.forEach((f) => {
           if (
-            isFieldVisible(f, section.id) &&
+            isFieldVisible(f, sf.id) &&
             f.validation?.required &&
-            f.type !== "formula"
+            f.type !== "formula" &&
+            isFieldReadOnly(f.id) !== true
           ) {
             visible.push(f);
           }
         });
-      }
-    });
-    const collectSubformFields = (subforms: Subform[]) => {
-      subforms.forEach((sf) => {
-        if (isSectionVisible(sf.id)) {
-          sf.fields.forEach((f) => {
-            if (
-              isFieldVisible(f, sf.id) &&
-              f.validation?.required &&
-              f.type !== "formula"
-            ) {
-              visible.push(f);
-            }
-          });
-          if (sf.childSubforms) collectSubformFields(sf.childSubforms);
-        }
+        if (sf.childSubforms) collectSubformFields(sf.childSubforms);
       });
     };
     if (form.subforms) collectSubformFields(form.subforms);
@@ -1457,8 +1498,10 @@ export function usePublicForm({
     const validateAll = (sections: any[]) => {
       sections.forEach((section) => {
         if (!isSectionVisible(section.id)) return;
+        if (isSectionReadOnly(section.id) === true) return;
         section.fields.forEach((field: FormField) => {
           if (!isFieldVisible(field, section.id)) return;
+          if (isFieldReadOnly(field.id) === true) return;
           const err = validateField(field, formData[field.id]);
           if (err) {
             newErrors[field.id] = err;
@@ -1470,8 +1513,10 @@ export function usePublicForm({
     const validateSub = (subforms: Subform[]) => {
       subforms.forEach((subform) => {
         if (!isSectionVisible(subform.id)) return;
+        if (isSectionReadOnly(subform.id) === true) return;
         subform.fields.forEach((field: FormField) => {
           if (!isFieldVisible(field, subform.id)) return;
+          if (isFieldReadOnly(field.id) === true) return;
           const err = validateField(field, formData[field.id]);
           if (err) {
             newErrors[field.id] = err;
@@ -1973,6 +2018,7 @@ export function usePublicForm({
     isViewOnly: effectiveViewOnly,
     hasNoAccess,
     isSectionReadOnly,
+    canDeleteInSection,
     // dialog resize
     dialogSize,
     dialogRef,

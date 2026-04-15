@@ -86,6 +86,7 @@ interface FormBodyProps {
   isViewOnly?: boolean;
   isSectionReadOnly?: (sectionId: string) => boolean | null;
   isFieldReadOnly?: (fieldId: string) => boolean | null;
+  canDeleteInSection?: (sectionId: string) => boolean | null;
   dynamicSubformInstances?: Record<string, string[]>;
   addSubformRow?: (id: string) => void;
   removeSubformRow?: (id: string, instanceId: string) => void;
@@ -143,6 +144,7 @@ function SubformBlock({
     isViewOnly = false,
     isSectionReadOnly,
     isFieldReadOnly,
+    canDeleteInSection,
     dynamicSubformInstances = {},
     addSubformRow,
     removeSubformRow,
@@ -157,6 +159,16 @@ function SubformBlock({
     const sr = isSectionReadOnly(subform.id);
     if (sr === true) effectiveViewOnly = true;   // section is VIEW-only
     if (sr === false) effectiveViewOnly = false;  // section is explicitly editable
+  }
+
+  // Compute whether DELETE is allowed on this subform's rows.
+  // Defaults to !effectiveViewOnly (editable sections can delete rows), then
+  // the section-level DELETE grant overrides that if present.
+  let canDeleteRows = !effectiveViewOnly;
+  if (canDeleteInSection) {
+    const cd = canDeleteInSection(subform.id);
+    if (cd === true) canDeleteRows = true;
+    if (cd === false) canDeleteRows = false;
   }
 
   const colorScheme = NESTING_COLORS[level % NESTING_COLORS.length];
@@ -445,7 +457,7 @@ function SubformBlock({
                           })}
                           {removeSubformRow && (
                             <div className="min-w-[100px] px-3 py-2.5 border-r border-border/40 flex items-center">
-                              {(hasChildSubforms || rowIndex > 0) && (
+                              {(hasChildSubforms || rowIndex > 0) && canDeleteRows && (
                                 <Button
                                   type="button"
                                   variant="destructive"
