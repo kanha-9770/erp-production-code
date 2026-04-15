@@ -12,7 +12,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [currentView, setCurrentView] = useState<string>("home")
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-
+ 
   const publicRoutes = [
     "/login",
     "/register",

@@ -22,16 +22,11 @@ const STATIC_ROUTES: { pattern: string; description: string }[] = [
   { pattern: "/admin", description: "Admin panel home" },
   { pattern: "/admin/analytics", description: "Analytics dashboard" },
   { pattern: "/admin/analytics/settings", description: "Analytics settings" },
-  { pattern: "/admin/chatbot", description: "AI Chatbot" },
   { pattern: "/admin/dashboard", description: "Admin dashboard" },
   { pattern: "/admin/intelligence", description: "Intelligence dashboard" },
   { pattern: "/admin/modules", description: "Module management" },
   { pattern: "/admin/reports", description: "Reports" },
-  { pattern: "/admin/settings", description: "Admin settings" },
   { pattern: "/admin/users", description: "User management (admin)" },
-
-  // ─── Chatbot ───────────────────────────────────────────────────────────
-  { pattern: "/chatbot", description: "Chatbot" },
 
   // ─── Data Migration ────────────────────────────────────────────────────
   { pattern: "/data-migration/export", description: "Data export" },

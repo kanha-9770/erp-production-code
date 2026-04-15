@@ -156,7 +156,6 @@ export const defaultRouteConfig: RouteConfig = {
     '/admin/roles-permissions',
     '/admin/organization',
     '/admin/units',
-    '/admin/settings',
   ],
   
   // Routes that require module-specific permissions

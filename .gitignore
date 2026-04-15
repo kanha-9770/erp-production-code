@@ -25,3 +25,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ai subsystem auto-generated encryption secret
+.ai-keys-secret

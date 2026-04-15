@@ -434,7 +434,6 @@ Routes **not** using handlers (standalone raw Prisma or DatabaseService calls):
 |-------|--------|
 | `auth/*` | OTP/session/bcrypt — auth-specific, no DB service equivalent |
 | `payroll/*` | Complex domain logic specific to payroll calculations |
-| `chat/*`, `erp-chat` | Streaming AI responses, provider config |
 | `forms/[id]/submit` | Complex structured-data transformation + unique ID generation |
 | `forms/[id]/records` | Enriched subform processing beyond `DatabaseService.getFormRecords` |
 | `forms/[id]/analytics` | Already a thin wrapper around `DatabaseService` |
@@ -509,7 +508,6 @@ Some routes bypass the handler layer entirely and use `prisma` directly. This is
 |------|------------------------------|
 | **Auth** (`/api/auth/*`) | OTP generation, session tokens, bcrypt hashing — no `DatabaseService` equivalent |
 | **Payroll** (`/api/payroll/*`) | Multi-table aggregation, leave calculations, month/year filters — domain-specific |
-| **Chat/AI** (`/api/chat/*`, `/api/erp-chat`) | Streaming responses, AI provider config stored in DB |
 | **Subforms** (`/api/subforms/*`) | Schema uses `formId`-based model; `DatabaseModules.createSubform` uses `sectionId`-based model |
 | **Form submit** (`/api/forms/[id]/submit`) | Unique ID generation, structured-data transform before record creation |
 | **Form records list** (`/api/forms/[id]/records`) | Enriched field/subform lookup maps beyond what `DatabaseService.getFormRecords` provides |

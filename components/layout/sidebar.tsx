@@ -32,8 +32,9 @@ import {
   Zap,
   Database,
   Activity,
-  Sparkles,
   Trash,
+  MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -371,8 +372,8 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   }[] = [
       { icon: Folder, view: "modules", label: "Modules" },
       { icon: BarChart3, view: "reports", label: "Reports" },
+      { icon: Sparkles, route: "/chatbot", label: "AI Chatbot" },
       { icon: Settings, route: "/settings", label: "Settings" },
-      { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
     ];
 
   // Filter nav items based on route permissions.

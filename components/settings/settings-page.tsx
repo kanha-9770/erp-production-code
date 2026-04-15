@@ -55,7 +55,6 @@ const settingsData: SettingCategory[] = [
       { name: "Notification SMS", href: "/settings/notification-sms" },
       { name: "Webforms", href: "/settings/webforms" },
       { name: "Social", href: "/settings/social" },
-      { name: "Chat", href: "/admin/chatbot" },
       { name: "Portals", href: "/settings/portals" },
     ],
   },
@@ -111,6 +110,13 @@ const settingsData: SettingCategory[] = [
     items: [
       { name: "Data Enrichment", href: "/settings/data-enrichment" },
       { name: "Predictions", href: "/settings/predictions" },
+    ],
+  },
+  {
+    title: "AI & Chatbot",
+    items: [
+      { name: "Chatbot", href: "/chatbot" },
+      { name: "AI Providers", href: "/admin/ai" },
     ],
   },
 ]

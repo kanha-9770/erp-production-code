@@ -1,24 +1,11 @@
-import { cookies } from 'next/headers'
-import { validateSession } from '@/lib/auth'
-import { redirect } from 'next/navigation'
-import { FormChatbot } from '@/components/forms/FormChatbot'
+import type { Metadata } from "next";
+import ChatbotUI from "@/components/chatbot/chatbot-ui";
 
-export default async function ChatbotPage() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('auth-token')?.value
+export const metadata: Metadata = {
+  title: "Chatbot",
+  description: "Chat with your configured AI provider",
+};
 
-  if (!token) {
-    redirect('/login')
-  }
-
-  const session = await validateSession(token)
-  if (!session?.user?.id) {
-    redirect('/login')
-  }
-
-  return (
-    <main className="w-full">
-      <FormChatbot userId={session.user.id} />
-    </main>
-  )
+export default function ChatbotPage() {
+  return <ChatbotUI />;
 }

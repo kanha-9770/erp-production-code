@@ -22,9 +22,8 @@
 14. [Attendance APIs](#attendance-apis)
 15. [Payroll APIs](#payroll-apis)
 16. [Import / Export APIs](#import--export-apis)
-17. [Chat / AI APIs](#chat--ai-apis)
-18. [Audit & System APIs](#audit--system-apis)
-19. [Shared Utilities & Patterns](#shared-utilities--patterns)
+17. [Audit & System APIs](#audit--system-apis)
+18. [Shared Utilities & Patterns](#shared-utilities--patterns)
 
 ---
 
@@ -1425,52 +1424,6 @@ Base path: `/api/payroll`
 
 ---
 
-## Chat / AI APIs
-
-### GET `/api/chat`
-
-**Purpose:** List all conversations for the user.
-
----
-
-### POST `/api/chat`
-
-**Purpose:** Create a new conversation.
-
-| Field            | Type   | Required |
-| ---------------- | ------ | -------- |
-| `title`          | string | Yes      |
-| `initialMessage` | string | No       |
-
----
-
-### GET `/api/chat/[conversationId]`
-
-**Purpose:** Fetch conversation history (all messages).
-
----
-
-### POST `/api/chat/[conversationId]`
-
-**Purpose:** Send a message in a conversation.
-
-| Field     | Type   | Required |
-| --------- | ------ | -------- |
-| `content` | string | Yes      |
-
----
-
-### POST `/api/erp-chat`
-
-**Purpose:** ERP-specific AI chat with form and data context.
-
-| Field     | Type   | Required | Description                        |
-| --------- | ------ | -------- | ---------------------------------- |
-| `prompt`  | string | Yes      | User's question/request            |
-| `context` | JSON   | No       | Current form/module context for AI |
-
----
-
 ## Audit & System APIs
 
 ### GET `/api/audit-log`
@@ -1630,5 +1583,4 @@ lib/DatabaseTransforms.ts        → Data serialization
 | **Employees**          | Employee, Attendance                                          |
 | **Payroll**            | PayrollConfiguration, PayrollRecord, LeaveType, LeaveRule      |
 | **Import/Export**      | ImportJob, ImportFieldMapping, ImportRow, ExportJob            |
-| **Chat**               | ChatConversation, ChatMessage                                 |
-| **System**             | AuditLog, Activity, UniqueIdCounter, AIConfiguration, FormEvent |
+| **System**             | AuditLog, Activity, UniqueIdCounter, FormEvent |

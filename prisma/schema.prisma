@@ -159,7 +159,6 @@ model User {
   formRecords13    FormRecord13[]          @relation("FormRecord13User")
   formRecords14    FormRecord14[]          @relation("FormRecord14User")
   formRecords15    FormRecord15[]          @relation("FormRecord15User")
-  conversations    ChatConversation[]      @relation("UserConversations")
   routeAccess      RouteUserAccess[]
   lookupTemplates  LookupTemplate[]        @relation("LookupTemplateCreator")
   savedFilters     SavedFilter[]           @relation("SavedFilterCreator")
@@ -225,7 +224,6 @@ model Organization {
   dataSharingRules   DataSharingRule[]
   activities         Activity[]
   formModules        FormModule[]    @relation("UserOrganization")
-  aiConfigurations   AIConfiguration[] @relation("OrganizationAIConfigs")
   routePermissions   RoutePermission[]
   lookupTemplates    LookupTemplate[]
   savedFilters       SavedFilter[]
@@ -1595,60 +1593,6 @@ model UniqueIdCounter {
   @@map("unique_id_counters")
 }
 
-model AIConfiguration {
-  id             String       @id @default(cuid())
-  organizationId String       @map("organization_id")
-  organization   Organization @relation("OrganizationAIConfigs", fields: [organizationId], references: [id], onDelete: Cascade)
-  provider       String       // e.g., "openai", "anthropic", "grok"
-  apiKey         String
-  model          String       // e.g., "gpt-4", "claude-3", "grok-4"
-  temperature    Float        @default(0.7)
-  maxTokens      Int          @default(2048)
-  otherParams    Json         @default("{}") // Additional model parameters like top_p, frequency_penalty, etc.
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-
-  @@index([organizationId])
-  @@index([provider])
-  @@index([isActive])
-  @@map("ai_configurations")
-}
-
-model ChatConversation {
-  id        String         @id @default(cuid())
-  userId    String         @map("user_id")
-  user      User           @relation("UserConversations", fields: [userId], references: [id], onDelete: Cascade)
-  title     String?
-  startedAt DateTime       @default(now()) @map("started_at")
-  endedAt   DateTime?      @map("ended_at")
-  messages  ChatMessage[]
-  metadata  Json           @default("{}") // e.g., context, session data
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
-
-  @@index([userId])
-  @@index([startedAt])
-  @@map("chat_conversations")
-}
-
-model ChatMessage {
-  id              String           @id @default(cuid())
-  conversationId  String           @map("conversation_id")
-  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender          String           // "user" or "ai"
-  content         String
-  timestamp       DateTime         @default(now())
-  metadata        Json             @default("{}") // e.g., tokens used, confidence, attachments
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
-
-  @@index([conversationId])
-  @@index([sender])
-  @@index([timestamp])
-  @@map("chat_messages")
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // UNIFIED FORM RECORD (replaces 15 sharded tables)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1771,4 +1715,92 @@ model SavedFilter {
   @@index([createdById])
   @@index([moduleId])
   @@map("saved_filters")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI / Chatbot — cloud provider registry with multi-key rotation
+// Design: OpenAI-compatible upstream only. Providers speak POST /v1/chat/completions.
+// Keys are AES-256-GCM encrypted at rest; rotator lives in-process (swap for Redis later).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AIProvider {
+  id              String          @id @default(cuid())
+  organizationId  String          @map("organization_id")
+  name            String          // slug: "openai", "groq", "openrouter", "anthropic", "gemini", "together", "deepinfra", "custom"
+  displayName     String          @map("display_name")
+  baseUrl         String          @map("base_url")
+  defaultModel    String          @map("default_model")
+  availableModels Json            @default("[]") @map("available_models")
+  isActive        Boolean         @default(true) @map("is_active")
+  isDefault       Boolean         @default(false) @map("is_default")
+  priority        Int             @default(0)
+  temperature     Float?          @default(0.7)
+  maxTokens       Int?            @map("max_tokens")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  apiKeys         AIProviderKey[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([isActive])
+  @@index([isDefault])
+  @@map("ai_providers")
+}
+
+model AIProviderKey {
+  id             String     @id @default(cuid())
+  providerId     String     @map("provider_id")
+  provider       AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  organizationId String     @map("organization_id")
+  label          String
+  encryptedKey   String     @map("encrypted_key")
+  keyPreview     String     @map("key_preview")
+  isActive       Boolean    @default(true) @map("is_active")
+  lastUsedAt     DateTime?  @map("last_used_at")
+  failureCount   Int        @default(0) @map("failure_count")
+  cooldownUntil  DateTime?  @map("cooldown_until")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  @@index([providerId])
+  @@index([organizationId])
+  @@index([isActive])
+  @@map("ai_provider_keys")
+}
+
+model ChatConversation {
+  id             String        @id @default(cuid())
+  userId         String        @map("user_id")
+  organizationId String        @map("organization_id")
+  title          String        @default("New chat")
+  providerId     String?       @map("provider_id")
+  model          String?
+  systemPrompt   String?       @map("system_prompt")
+  temperature    Float?
+  isPinned       Boolean       @default(false) @map("is_pinned")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  messages       ChatMessage[]
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([updatedAt])
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String           @map("conversation_id")
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String           // "system" | "user" | "assistant"
+  content        String
+  providerName   String?          @map("provider_name")
+  model          String?
+  tokensIn       Int?             @map("tokens_in")
+  tokensOut      Int?             @map("tokens_out")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("chat_messages")
 }

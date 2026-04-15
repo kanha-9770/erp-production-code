@@ -126,7 +126,7 @@ All rules are defined in `lib/route-permissions.ts`:
 
 | Route Pattern | Description |
 |---------------|-------------|
-| `/admin/**` | All admin pages (dashboard, analytics, intelligence, reports, chatbot, settings) |
+| `/admin/**` | All admin pages (dashboard, analytics, intelligence, reports) |
 | `/builder/**` | Form builder |
 | `/data-migration/**` | Data import/export |
 | `/settings/roles` | Role management |
@@ -150,7 +150,6 @@ All routes not listed above are accessible to any authenticated user, including:
 - `/` (Dashboard)
 - `/forms/**`
 - `/modules/**`
-- `/chatbot`
 - `/profile/**`
 - `/settings` (root settings page)
 
@@ -281,7 +280,6 @@ Navigation items are filtered based on the user's role:
 const allIconButtons = [
   { icon: Folder, view: "modules", label: "Modules" },
   { icon: Settings, route: "/settings", label: "Settings" },
-  { icon: Sparkles, route: "/admin/chatbot", label: "AI Assistant", requireAdmin: true },
   // ...
 ];
 
