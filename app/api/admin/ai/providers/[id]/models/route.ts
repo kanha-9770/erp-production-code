@@ -13,6 +13,12 @@ import {
 import { preflight } from "@/lib/ai/preflight";
 import { pickKey } from "@/lib/ai/key-rotator";
 import { getPreset } from "@/lib/ai/provider-presets";
+import {
+  isLocalProvider,
+  normalizeLocalBaseUrl,
+  describeUpstreamError,
+  SYNTHETIC_LOCAL_KEY_PLAINTEXT,
+} from "@/lib/ai/local-provider";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,8 +50,20 @@ export async function GET(
 
     const preset = getPreset(provider.name);
     const suggested = preset?.suggestedModels ?? [];
+    const local = isLocalProvider({ name: provider.name, baseUrl: provider.baseUrl });
 
-    if (provider._count.apiKeys === 0) {
+    // Resolve which key to use. Local providers (Ollama/vLLM/…) don't need
+    // one — fall back to a synthetic placeholder so /v1/models still gets
+    // hit. Cloud providers must have an active key or we can't discover.
+    let apiKey: string | null = null;
+    if (provider._count.apiKeys > 0) {
+      const k = await pickKey(provider.id);
+      if (k) apiKey = k.plaintext;
+    }
+    if (!apiKey && local) {
+      apiKey = SYNTHETIC_LOCAL_KEY_PLAINTEXT;
+    }
+    if (!apiKey) {
       return apiSuccess({
         source: "preset",
         models: suggested,
@@ -53,20 +71,12 @@ export async function GET(
       });
     }
 
-    const key = await pickKey(provider.id);
-    if (!key) {
-      return apiSuccess({
-        source: "preset",
-        models: suggested,
-        warning: "No usable API key available — showing preset suggestions",
-      });
-    }
+    const baseURL = local
+      ? normalizeLocalBaseUrl(provider.baseUrl)
+      : provider.baseUrl;
 
     try {
-      const client = new OpenAI({
-        apiKey: key.plaintext,
-        baseURL: provider.baseUrl,
-      });
+      const client = new OpenAI({ apiKey, baseURL });
       const page = await client.models.list();
       const discovered = page.data
         .map((m) => m.id)
@@ -84,14 +94,15 @@ export async function GET(
         discoveredCount: discovered.length,
       });
     } catch (err) {
+      const detail = describeUpstreamError(err, provider.baseUrl);
       console.warn(
-        `[discover-models] ${provider.name} failed:`,
-        (err as Error).message
+        `[discover-models] ${provider.name} (${provider.baseUrl}) failed:`,
+        detail
       );
       return apiSuccess({
         source: "preset",
         models: suggested,
-        warning: `Live discovery failed: ${(err as Error).message}. Showing preset suggestions.`,
+        warning: `Live discovery failed: ${detail} — showing preset suggestions.`,
       });
     }
   } catch (err) {

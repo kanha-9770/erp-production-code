@@ -5,6 +5,7 @@ export interface ProviderDTO {
   defaultModel: string;
   availableModels: string[];
   isDefault: boolean;
+  isLocal?: boolean;
 }
 
 export interface ConversationSummary {

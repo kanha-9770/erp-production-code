@@ -17,6 +17,13 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
   // Node is visible (expanded) when its ID is NOT in the collapsed set
   const isExpanded = !state.expandedOrgNodes?.has(unit.id)
 
+  // NEW LOGIC: Check if this is the ONLY root node in the entire organization
+  const isOnlyRootNode = 
+    isRoot && 
+    state.organizationUnits && 
+    state.organizationUnits.length === 1 && 
+    state.organizationUnits[0].id === unit.id
+
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation()
     dispatch({ type: "TOGGLE_ORG_EXPAND", payload: { unitId: unit.id } })
@@ -90,12 +97,16 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
           >
             <Settings2 className="h-3 w-3" />
           </button>
-          <button
-            onClick={handleDelete}
-            className="bg-red-500 text-white p-1 rounded-full shadow-lg hover:bg-red-700"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
+
+          {/* Delete Button - Hidden when this is the only root node */}
+          {!isOnlyRootNode && (
+            <button
+              onClick={handleDelete}
+              className="bg-red-500 text-white p-1 rounded-full shadow-lg hover:bg-red-700"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
         </div>
       </div>
 

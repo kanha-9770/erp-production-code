@@ -11,6 +11,7 @@
 import { prisma } from "@/lib/prisma";
 import { decryptApiKey } from "./crypto";
 import type { ResolvedKey } from "./types";
+import { isSyntheticLocalKey } from "./local-provider";
 
 interface KeyState {
   id: string;
@@ -87,6 +88,10 @@ export async function pickKey(providerId: string): Promise<ResolvedKey | null> {
 }
 
 export async function markSuccess(providerId: string, keyId: string): Promise<void> {
+  // Synthetic local keys exist only in-memory for self-hosted providers that
+  // don't need auth. Skip the DB write-back — there's no row to update.
+  if (isSyntheticLocalKey(keyId)) return;
+
   const k = stateByProvider.get(providerId)?.get(keyId);
   if (k) {
     k.failureCount = 0;
@@ -105,6 +110,10 @@ export async function markFailure(
   keyId: string,
   kind: "auth" | "rate_limit" | "server"
 ): Promise<void> {
+  // Synthetic local keys can't cool down or be disabled — the user's local
+  // server is the problem, not the key. Surface the error to the caller.
+  if (isSyntheticLocalKey(keyId)) return;
+
   const k = stateByProvider.get(providerId)?.get(keyId);
   if (!k) return;
 

@@ -8,6 +8,11 @@ import {
   unauthorized,
   forbidden,
 } from "@/lib/api-helpers";
+import {
+  isLocalBaseUrl,
+  normalizeLocalBaseUrl,
+  describeUpstreamError,
+} from "@/lib/ai/local-provider";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,10 +42,16 @@ export async function POST(request: NextRequest) {
     const baseUrl = body.baseUrl?.trim();
     if (!baseUrl) return apiError("baseUrl is required", 400);
 
+    // Rewrite localhost → 127.0.0.1 for local endpoints to dodge Node 18+
+    // dual-stack IPv6 resolution issues (::1 vs 127.0.0.1).
+    const probeUrl = isLocalBaseUrl(baseUrl)
+      ? normalizeLocalBaseUrl(baseUrl)
+      : baseUrl;
+
     try {
       const client = new OpenAI({
         apiKey: body.apiKey?.trim() || "not-needed",
-        baseURL: baseUrl,
+        baseURL: probeUrl,
       });
       const page = await client.models.list();
       const models = page.data
@@ -49,10 +60,11 @@ export async function POST(request: NextRequest) {
         .sort((a, b) => a.localeCompare(b));
       return apiSuccess({ models, count: models.length });
     } catch (err) {
-      return apiError(
-        `Could not reach ${baseUrl}: ${(err as Error).message}`,
-        502
+      console.warn(
+        `[discover-models/POST] probe ${baseUrl} failed:`,
+        (err as Error).message
       );
+      return apiError(describeUpstreamError(err, baseUrl), 502);
     }
   } catch (err) {
     console.error("[POST /api/admin/ai/discover-models] error", err);

@@ -36,7 +36,10 @@ export default function AddKeyDialog({
     }
   }, [open]);
 
-  const canSubmit = label.trim().length > 0 && apiKey.trim().length >= 8;
+  // Min length of 1 — self-hosted servers accept any non-empty string
+  // (vLLM/Ollama with optional --api-key). Cloud keys are typically 20+ chars
+  // anyway; the upstream will reject anything too short on first request.
+  const canSubmit = label.trim().length > 0 && apiKey.trim().length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

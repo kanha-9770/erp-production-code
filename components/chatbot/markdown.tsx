@@ -10,28 +10,72 @@
  */
 
 import { useState, Fragment } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ChartRenderer,
+  parseChartSpec,
+  type ChartSpec,
+} from "./analytics/chart-renderer";
+import { KpiGrid, parseKpiBlock, type KpiEntry } from "./analytics/kpi-card";
 
 type Block =
   | { kind: "code"; lang: string; content: string }
-  | { kind: "text"; content: string };
+  | { kind: "text"; content: string }
+  | { kind: "chart"; raw: string; spec: ChartSpec | null; complete: boolean }
+  | { kind: "kpi"; raw: string; entries: KpiEntry[] | null; complete: boolean };
+
+// Matches either a fenced code block (```lang ... ```) or a container block
+// (:::type\n...\n:::). Both alternatives fall back to end-of-string so that
+// unclosed blocks during streaming still match and can be rendered as
+// skeletons instead of leaking raw JSON into the text flow.
+const BLOCK_RE =
+  /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)(?:```|$)|:::([a-zA-Z][a-zA-Z0-9_-]*)\n?([\s\S]*?)(?:\n?:::|$)/g;
 
 function splitBlocks(src: string): Block[] {
   const blocks: Block[] = [];
-  const re = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)(?:```|$)/g;
   let last = 0;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(src)) !== null) {
+  BLOCK_RE.lastIndex = 0;
+  while ((match = BLOCK_RE.exec(src)) !== null) {
     if (match.index > last) {
       blocks.push({ kind: "text", content: src.slice(last, match.index) });
     }
-    blocks.push({
-      kind: "code",
-      lang: match[1] ?? "",
-      content: match[2] ?? "",
-    });
-    last = re.lastIndex;
+    const whole = match[0] ?? "";
+    if (match[1] !== undefined) {
+      // Fenced code block. The `chart` language is rendered as a chart,
+      // everything else goes through CodeBlock as before.
+      const lang = match[1] ?? "";
+      const content = match[2] ?? "";
+      const complete = whole.trimEnd().endsWith("```");
+      if (lang.toLowerCase() === "chart") {
+        blocks.push({
+          kind: "chart",
+          raw: content,
+          spec: parseChartSpec(content),
+          complete,
+        });
+      } else {
+        blocks.push({ kind: "code", lang, content });
+      }
+    } else if (match[3] !== undefined) {
+      // Container block (:::type ... :::).
+      const type = (match[3] ?? "").toLowerCase();
+      const content = match[4] ?? "";
+      const complete = whole.trimEnd().endsWith(":::");
+      if (type === "kpi") {
+        blocks.push({
+          kind: "kpi",
+          raw: content,
+          entries: parseKpiBlock(content),
+          complete,
+        });
+      } else {
+        // Unknown container type — keep as text so nothing is lost.
+        blocks.push({ kind: "text", content: whole });
+      }
+    }
+    last = BLOCK_RE.lastIndex;
   }
   if (last < src.length) {
     blocks.push({ kind: "text", content: src.slice(last) });
@@ -46,9 +90,99 @@ function escapeHtml(s: string) {
     .replace(/>/g, "&gt;");
 }
 
-// Inline: `code`, **bold**, *italic*, [text](url)
+// Allow-list for LLM-emitted HTML. Anything not in this set is stripped
+// (the element is removed and its children are promoted into the parent).
+const ALLOWED_TAGS = new Set([
+  "a", "abbr", "address", "article", "aside", "b", "blockquote", "br",
+  "caption", "cite", "code", "data", "dd", "del", "details", "dfn", "div",
+  "dl", "dt", "em", "figcaption", "figure", "footer", "h1", "h2", "h3",
+  "h4", "h5", "h6", "header", "hr", "i", "img", "ins", "kbd", "li", "main",
+  "mark", "nav", "ol", "p", "pre", "q", "s", "samp", "section", "small",
+  "span", "strong", "sub", "summary", "sup", "table", "tbody", "td",
+  "tfoot", "th", "thead", "time", "tr", "u", "ul", "var", "wbr",
+]);
+
+const ALLOWED_ATTRS_BY_TAG: Record<string, Set<string>> = {
+  a: new Set(["href", "title", "target", "rel"]),
+  img: new Set(["src", "alt", "title", "width", "height"]),
+  td: new Set(["colspan", "rowspan", "align"]),
+  th: new Set(["colspan", "rowspan", "align", "scope"]),
+  table: new Set(["align"]),
+  col: new Set(["span"]),
+  colgroup: new Set(["span"]),
+};
+const GLOBAL_ATTRS = new Set(["class", "id", "style"]);
+
+// Block-level tags: when a line starts with one of these, treat the
+// following non-blank lines as a raw HTML block (rendered via a sanitized
+// dangerouslySetInnerHTML) instead of feeding it through the paragraph/list
+// grouper, which would otherwise wrap it in <p> and break the structure.
+const BLOCK_HTML_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "details", "div", "dl",
+  "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr",
+  "main", "nav", "ol", "p", "pre", "section", "table", "ul",
+]);
+
+function sanitizeHtml(html: string): string {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+    // SSR fallback: no DOM available, escape everything.
+    return escapeHtml(html);
+  }
+  const doc = new DOMParser().parseFromString(
+    `<div id="__md_root__">${html}</div>`,
+    "text/html"
+  );
+  const root = doc.getElementById("__md_root__");
+  if (!root) return escapeHtml(html);
+
+  const walk = (node: Element) => {
+    // Iterate a snapshot because we mutate children during the loop.
+    const children = Array.from(node.children);
+    for (const child of children) {
+      const tag = child.tagName.toLowerCase();
+      if (!ALLOWED_TAGS.has(tag)) {
+        // Unwrap: promote children into the parent, drop the element.
+        while (child.firstChild) {
+          node.insertBefore(child.firstChild, child);
+        }
+        node.removeChild(child);
+        continue;
+      }
+      for (const attr of Array.from(child.attributes)) {
+        const name = attr.name.toLowerCase();
+        const tagAllowed = ALLOWED_ATTRS_BY_TAG[tag];
+        const isAllowed =
+          GLOBAL_ATTRS.has(name) || (tagAllowed?.has(name) ?? false);
+        if (!isAllowed || name.startsWith("on")) {
+          child.removeAttribute(attr.name);
+          continue;
+        }
+        if (
+          name === "href" &&
+          /^\s*(javascript|vbscript|data):/i.test(attr.value)
+        ) {
+          child.removeAttribute(attr.name);
+        }
+        if (name === "src" && /^\s*(javascript|vbscript):/i.test(attr.value)) {
+          child.removeAttribute(attr.name);
+        }
+      }
+      if (tag === "a" && child.getAttribute("href")) {
+        child.setAttribute("target", "_blank");
+        child.setAttribute("rel", "noopener noreferrer");
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  return root.innerHTML;
+}
+
+// Inline: `code`, **bold**, *italic*, [text](url). Inline HTML tags
+// survive via sanitizeHtml so things like <strong>, <br>, <code>, <a>
+// render correctly when the LLM emits them mid-sentence.
 function renderInline(text: string): string {
-  let out = escapeHtml(text);
+  let out = sanitizeHtml(text);
   // inline code first so its content isn't matched by bold/italic
   out = out.replace(
     /`([^`\n]+)`/g,
@@ -72,10 +206,16 @@ function renderInline(text: string): string {
 }
 
 interface LineGroup {
-  type: "p" | "h1" | "h2" | "h3" | "ul" | "ol" | "quote" | "table";
+  type: "p" | "h1" | "h2" | "h3" | "ul" | "ol" | "quote" | "table" | "html";
   lines: string[];
   headers?: string[];
   rows?: string[][];
+}
+
+function lineStartsHtmlBlock(line: string): boolean {
+  const m = line.trim().match(/^<\/?([a-zA-Z][a-zA-Z0-9]*)\b/);
+  if (!m) return false;
+  return BLOCK_HTML_TAGS.has(m[1].toLowerCase());
 }
 
 function isTableRow(line: string): boolean {
@@ -125,6 +265,19 @@ function groupLines(text: string): LineGroup[] {
         i++;
       }
       groups.push({ type: "table", lines: [], headers, rows });
+      continue;
+    }
+
+    // Raw HTML block: a line starting with a known block-level tag
+    // pulls in consecutive non-blank lines as a single HTML group so
+    // <table>, <div>, etc. aren't mangled by the paragraph grouper.
+    if (line.trim() !== "" && lineStartsHtmlBlock(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && lines[i].trim() !== "") {
+        buf.push(lines[i]);
+        i++;
+      }
+      groups.push({ type: "html", lines: buf });
       continue;
     }
 
@@ -244,6 +397,16 @@ function TextBlock({ content }: { content: string }) {
                 ))}
               </ol>
             );
+          case "html":
+            return (
+              <div
+                key={idx}
+                className="chat-html my-1 [&_table]:w-full [&_table]:text-xs [&_table]:border-collapse [&_table]:my-2 [&_table]:rounded-md [&_table]:border [&_table]:overflow-hidden [&_thead]:bg-muted/60 [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2 [&_th]:border-b [&_td]:px-3 [&_td]:py-1.5 [&_td]:border-t [&_td]:border-border/60 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-black/10 [&_code]:dark:bg-white/10 [&_code]:text-[0.85em] [&_code]:font-mono [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-1 [&_p]:my-1 [&_p]:leading-relaxed [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded"
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(g.lines.join("\n")),
+                }}
+              />
+            );
           case "table":
             return (
               <div
@@ -299,8 +462,20 @@ function TextBlock({ content }: { content: string }) {
   );
 }
 
+// Languages whose fenced code blocks should render as a live visualization
+// by default. Users can still flip to source via the "Code" toggle.
+const VISUAL_LANGS = new Set(["html", "svg", "xml"]);
+
+const VISUAL_PREVIEW_CLASS =
+  "chat-html [&_table]:w-full [&_table]:text-xs [&_table]:border-collapse [&_table]:my-2 [&_table]:rounded-md [&_table]:border [&_table]:overflow-hidden [&_thead]:bg-muted/60 [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2 [&_th]:border-b [&_td]:px-3 [&_td]:py-1.5 [&_td]:border-t [&_td]:border-border/60 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-black/10 [&_code]:dark:bg-white/10 [&_code]:text-[0.85em] [&_code]:font-mono [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-semibold [&_p]:my-1 [&_p]:leading-relaxed [&_svg]:max-w-full [&_svg]:h-auto [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded";
+
 function CodeBlock({ lang, content }: { lang: string; content: string }) {
   const [copied, setCopied] = useState(false);
+  const normalizedLang = lang.toLowerCase();
+  const isVisual = VISUAL_LANGS.has(normalizedLang);
+  const [viewMode, setViewMode] = useState<"preview" | "code">(
+    isVisual ? "preview" : "code"
+  );
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(content);
@@ -310,28 +485,83 @@ function CodeBlock({ lang, content }: { lang: string; content: string }) {
       /* ignore */
     }
   };
+
+  if (isVisual && viewMode === "preview") {
+    return (
+      <div className="my-2 rounded-md border bg-background overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b text-[11px] text-muted-foreground">
+          <span className="font-mono">{normalizedLang} · preview</span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setViewMode("code")}
+              className="hover:text-foreground transition-colors"
+              title="Show source"
+            >
+              Code
+            </button>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex items-center gap-1 hover:text-foreground transition-colors"
+              title="Copy"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3 w-3" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3 w-3" />
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+        <div
+          className={cn("p-3 overflow-x-auto", VISUAL_PREVIEW_CLASS)}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(content) }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="my-2 rounded-md border bg-zinc-950 text-zinc-100 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 text-[11px] text-zinc-400">
         <span className="font-mono">{lang || "code"}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-zinc-100 transition-colors"
-          title="Copy"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3 w-3" />
-              Copied
-            </>
-          ) : (
-            <>
-              <Copy className="h-3 w-3" />
-              Copy
-            </>
+        <div className="flex items-center gap-3">
+          {isVisual && (
+            <button
+              type="button"
+              onClick={() => setViewMode("preview")}
+              className="hover:text-zinc-100 transition-colors"
+              title="Render as visualization"
+            >
+              Preview
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1 hover:text-zinc-100 transition-colors"
+            title="Copy"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                Copy
+              </>
+            )}
+          </button>
+        </div>
       </div>
       <pre className="px-3 py-2 overflow-x-auto text-[13px] leading-relaxed">
         <code className="font-mono">{content}</code>
@@ -340,23 +570,154 @@ function CodeBlock({ lang, content }: { lang: string; content: string }) {
   );
 }
 
+function ChartSkeleton() {
+  return (
+    <div className="my-3 rounded-xl border border-border/70 bg-gradient-to-br from-background to-muted/20 p-3 shadow-sm">
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <BarChart3 className="h-3.5 w-3.5 text-primary animate-pulse" />
+        <div className="h-3 w-32 rounded bg-muted/70 animate-pulse" />
+      </div>
+      <div className="h-[220px] rounded-lg bg-gradient-to-t from-muted/40 to-muted/10 flex items-end gap-2 p-3">
+        {[0.4, 0.7, 0.5, 0.85, 0.6, 0.9, 0.55].map((h, i) => (
+          <div
+            key={i}
+            className="flex-1 rounded-t bg-primary/20 animate-pulse"
+            style={{
+              height: `${h * 100}%`,
+              animationDelay: `${i * 80}ms`,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KpiSkeleton() {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-3">
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="rounded-xl border border-border/70 bg-gradient-to-br from-background to-muted/20 p-3 space-y-2 shadow-sm"
+        >
+          <div
+            className="h-2 w-16 rounded bg-muted/70 animate-pulse"
+            style={{ animationDelay: `${i * 100}ms` }}
+          />
+          <div
+            className="h-6 w-20 rounded bg-muted/60 animate-pulse"
+            style={{ animationDelay: `${i * 100 + 50}ms` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChartBlock({
+  raw,
+  spec,
+  complete,
+  pending,
+}: {
+  raw: string;
+  spec: ChartSpec | null;
+  complete: boolean;
+  pending: boolean;
+}) {
+  // Streaming: block hasn't finished arriving OR JSON not yet valid → skeleton.
+  if (pending && (!complete || !spec)) {
+    return <ChartSkeleton />;
+  }
+  if (!spec) {
+    return (
+      <div className="my-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+        <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-semibold mb-1">
+          <BarChart3 className="h-3.5 w-3.5" />
+          Invalid chart spec
+        </div>
+        <div className="text-muted-foreground">
+          Chart JSON could not be parsed — falling back to source.
+        </div>
+        <pre className="mt-2 overflow-x-auto rounded bg-muted/40 p-2 font-mono text-[11px]">
+          {raw}
+        </pre>
+      </div>
+    );
+  }
+  return <ChartRenderer spec={spec} />;
+}
+
+function KpiBlock({
+  raw,
+  entries,
+  complete,
+  pending,
+}: {
+  raw: string;
+  entries: KpiEntry[] | null;
+  complete: boolean;
+  pending: boolean;
+}) {
+  if (pending && (!complete || !entries || entries.length === 0)) {
+    return <KpiSkeleton />;
+  }
+  if (!entries || entries.length === 0) {
+    return (
+      <div className="my-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+        <div className="text-amber-700 dark:text-amber-400 font-semibold mb-1">
+          Invalid KPI block
+        </div>
+        <pre className="mt-1 overflow-x-auto rounded bg-muted/40 p-2 font-mono text-[11px]">
+          {raw}
+        </pre>
+      </div>
+    );
+  }
+  return <KpiGrid entries={entries} />;
+}
+
 export function Markdown({
   content,
   className,
+  pending = false,
 }: {
   content: string;
   className?: string;
+  pending?: boolean;
 }) {
   const blocks = splitBlocks(content);
   return (
     <div className={cn("text-sm", className)}>
-      {blocks.map((b, i) =>
-        b.kind === "code" ? (
-          <CodeBlock key={i} lang={b.lang} content={b.content} />
-        ) : (
-          <TextBlock key={i} content={b.content} />
-        )
-      )}
+      {blocks.map((b, i) => {
+        if (b.kind === "code") {
+          return <CodeBlock key={i} lang={b.lang} content={b.content} />;
+        }
+        if (b.kind === "chart") {
+          return (
+            <ChartBlock
+              key={i}
+              raw={b.raw}
+              spec={b.spec}
+              complete={b.complete}
+              pending={pending}
+            />
+          );
+        }
+        if (b.kind === "kpi") {
+          return (
+            <KpiBlock
+              key={i}
+              raw={b.raw}
+              entries={b.entries}
+              complete={b.complete}
+              pending={pending}
+            />
+          );
+        }
+        return <TextBlock key={i} content={b.content} />;
+      })}
     </div>
   );
 }

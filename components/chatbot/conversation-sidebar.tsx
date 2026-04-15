@@ -212,7 +212,7 @@ export default function ConversationSidebar({
 
   return (
     <aside
-      className="relative flex flex-col border-r bg-background shrink-0 h-full"
+      className="relative flex flex-col border-r border-border/70 bg-gradient-to-b from-background to-muted/20 shrink-0 h-full"
       style={{ width: `${width}px` }}
     >
       {/* Drag handle — 6px hit area on the right edge */}
@@ -238,24 +238,28 @@ export default function ConversationSidebar({
           )}
         />
       </div>
-      <div className="p-3 border-b space-y-2">
-        <Button onClick={onNew} size="sm" className="w-full justify-start">
+      <div className="p-3 border-b border-border/70 space-y-2">
+        <Button
+          onClick={onNew}
+          size="sm"
+          className="w-full justify-start rounded-xl bg-gradient-to-br from-primary to-primary/85 hover:from-primary hover:to-primary shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25 transition-all"
+        >
           <Plus className="h-4 w-4 mr-2" />
           New chat
         </Button>
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <div className="relative group">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none group-focus-within:text-primary transition-colors" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search conversations…"
-            className="h-8 pl-7 text-xs"
+            className="h-8 pl-8 text-xs rounded-lg bg-background/60 border-border/70 focus-visible:ring-1 focus-visible:ring-primary/30"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors"
             >
               <X className="h-3 w-3 text-muted-foreground" />
             </button>
@@ -284,13 +288,14 @@ export default function ConversationSidebar({
           <div className="p-1.5 space-y-3">
             {buckets.map((bucket) => (
               <div key={bucket.name}>
-                <div className="px-2 pt-1 pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <div className="px-2.5 pt-2 pb-1.5 text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider flex items-center gap-1.5">
                   {bucket.name === "Pinned" && (
-                    <Pin className="h-2.5 w-2.5 text-primary" />
+                    <Pin className="h-2.5 w-2.5 text-primary fill-primary/40" />
                   )}
-                  {bucket.name}
-                  <span className="text-muted-foreground/50">
-                    · {bucket.items.length}
+                  <span>{bucket.name}</span>
+                  <span className="h-px flex-1 bg-gradient-to-r from-border/60 to-transparent" />
+                  <span className="text-muted-foreground/60 font-mono text-[9px]">
+                    {bucket.items.length}
                   </span>
                 </div>
                 <ul className="space-y-0.5">
@@ -301,22 +306,22 @@ export default function ConversationSidebar({
                       <li key={c.id}>
                         <div
                           className={cn(
-                            "group relative flex items-center gap-1.5 rounded-md px-2 py-1.5 cursor-pointer transition-colors",
+                            "group relative flex items-center gap-2 rounded-lg px-2.5 py-2 cursor-pointer transition-all duration-200",
                             isActive
-                              ? "bg-muted"
-                              : "hover:bg-muted/60"
+                              ? "bg-gradient-to-r from-primary/10 via-primary/5 to-transparent shadow-sm ring-1 ring-primary/20"
+                              : "hover:bg-muted/60 hover:translate-x-0.5"
                           )}
                           onClick={() => !isEditing && onSelect(c.id)}
                         >
                           {isActive && (
-                            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 bg-primary" />
+                            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r-full bg-gradient-to-b from-primary via-primary to-primary/60 shadow-[0_0_6px_rgba(var(--primary-rgb,59,130,246),0.4)]" />
                           )}
                           <MessageSquare
                             className={cn(
-                              "h-3.5 w-3.5 shrink-0",
+                              "h-3.5 w-3.5 shrink-0 transition-colors",
                               isActive
-                                ? "text-foreground"
-                                : "text-muted-foreground"
+                                ? "text-primary"
+                                : "text-muted-foreground group-hover:text-foreground"
                             )}
                           />
                           {isEditing ? (
@@ -354,19 +359,19 @@ export default function ConversationSidebar({
                               <div className="flex-1 min-w-0">
                                 <div
                                   className={cn(
-                                    "text-xs truncate",
+                                    "text-xs truncate transition-colors",
                                     isActive
-                                      ? "font-medium text-foreground"
-                                      : "text-foreground/90"
+                                      ? "font-semibold text-foreground"
+                                      : "text-foreground/90 group-hover:text-foreground"
                                   )}
                                 >
                                   {c.title}
                                 </div>
-                                <div className="text-[10px] text-muted-foreground">
+                                <div className="text-[10px] text-muted-foreground/80 font-mono">
                                   {c.messageCount} msg · {timeAgo(c.updatedAt)}
                                 </div>
                               </div>
-                              <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 bg-background/80 backdrop-blur-sm rounded px-0.5">
+                              <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 bg-background/90 backdrop-blur-sm rounded-md border border-border/60 px-0.5 shadow-sm">
                                 <button
                                   type="button"
                                   onClick={(e) => {

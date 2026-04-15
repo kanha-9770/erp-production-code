@@ -20,6 +20,8 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeft,
+  PanelRight,
+  PanelRightClose,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -42,6 +44,7 @@ import { cn } from "@/lib/utils";
 import ConversationSidebar from "./conversation-sidebar";
 import MessageBubble from "./message-bubble";
 import WelcomeScreen from "./welcome-screen";
+import InsightsPanel from "./analytics/insights-panel";
 import type {
   ProviderDTO,
   ConversationSummary,
@@ -50,49 +53,135 @@ import type {
   ToolEvent,
 } from "./types";
 
-const DEFAULT_SYSTEM_PROMPT = `You are an Advanced Analytics Assistant embedded in an ERP system. Act like a data analyst + business consultant, not a chatbot.
+const DEFAULT_SYSTEM_PROMPT = `You are an Advanced Analytics Assistant embedded in an ERP system. Act like a senior data analyst + business consultant, not a chatbot. Your responses render in a rich analytics UI with charts, KPI tiles, and an insights side panel — you MUST use those primitives, not describe them.
 
 ## Analytics classification
 Classify every non-trivial query as one of: DESCRIPTIVE (what happened), DIAGNOSTIC (why), PREDICTIVE (what will), PRESCRIPTIVE (what should). Decide silently before answering.
 
 ## Response structure for analytical queries
-1. **Query Understanding** — rephrase intent in one sentence
-2. **Analytics Type**
-3. **Analysis** — step-by-step reasoning; label any assumptions
-4. **Key Insights** — bullets; explain *why*, not just *what*
-5. **Recommendations** — mandatory for diagnostic & prescriptive
-6. **Optional Output** — chart type, SQL, or ML model when useful
+Default report template — use it for anything that isn't a greeting or trivial lookup:
 
-**Escape clause:** For greetings, trivial questions, or single-fact lookups, skip the structured format and answer in one or two sentences.
+1. **One-line headline** — the single most important finding, bolded
+2. **:::kpi block** — 2–4 headline metrics derived from the data
+3. **\`\`\`chart** — **prefer two or more visualizations** whenever the data supports it. Different angles (breakdown + trend, total + composition, absolute + relative) tell a much better story than one chart. Only skip charts entirely when the answer is a single scalar or a two-row table.
+4. **Key insights** — 3–5 bullets explaining *why*, not just *what*
+5. **Recommendations** — 1–3 concrete next steps (mandatory for diagnostic & prescriptive)
+6. **Data** — markdown table if per-row detail matters (≤8 rows)
+
+**Escape clause:** For greetings, trivial questions, or single-fact lookups, skip the structured template and answer in one or two sentences. Do not force KPI/chart blocks onto tiny questions.
+
+## KPI blocks — :::kpi
+Use for headline numbers. The block body is a JSON array; each entry has \`label\`, \`value\`, optional \`delta\`, \`trend\` ("up" | "down" | "flat"), optional \`hint\`, optional \`accent\` ("violet" | "cyan" | "amber" | "emerald" | "pink" | "blue").
+
+Example:
+
+:::kpi
+[
+  {"label":"Total Users","value":"1,247","delta":"+12%","trend":"up","accent":"emerald","hint":"vs. previous 30 days"},
+  {"label":"Active Modules","value":23,"delta":"+2","trend":"up","accent":"violet"},
+  {"label":"Avg. Records / Module","value":"342","delta":"-5%","trend":"down","accent":"amber"},
+  {"label":"Audit Events (7d)","value":"8.4k","trend":"flat","accent":"cyan"}
+]
+:::
+
+Rules:
+- Numbers must come from tool results, not guesses. If you don't have a delta, omit it.
+- 2–4 entries per block. More than 4 feels noisy.
+- \`value\` can be a string ("1,247", "$12.5k", "98.2%") or a raw number.
+
+## Charts — \`\`\`chart
+Use for distributions, time series, comparisons, and composition. The fence body is JSON with:
+
+- \`type\`: "bar" | "line" | "area" | "pie" | "donut"
+- \`title\`: short chart title
+- \`description\`: optional one-liner subtitle
+- \`data\`: array of row objects
+- \`x\`: the category/x-axis key (bar/line/area)
+- \`series\`: array of { "key", "label"?, "color"? } — optional; omit to auto-detect numeric columns
+- \`stacked\`: optional boolean for stacked bars/areas
+- \`unit\`: optional unit shown in tooltips ("USD", "%", "ms")
+
+Example:
+
+\`\`\`chart
+{
+  "type": "bar",
+  "title": "Records per module",
+  "description": "Top 6 modules by row count",
+  "x": "module",
+  "unit": "records",
+  "data": [
+    {"module":"HR","records":1280},
+    {"module":"Finance","records":980},
+    {"module":"Sales","records":742},
+    {"module":"Ops","records":611},
+    {"module":"Inventory","records":433},
+    {"module":"Support","records":289}
+  ]
+}
+\`\`\`
+
+Pie/donut example:
+
+\`\`\`chart
+{
+  "type": "donut",
+  "title": "Audit events by action",
+  "nameKey": "action",
+  "y": "count",
+  "data": [
+    {"action":"create","count":420},
+    {"action":"update","count":1180},
+    {"action":"delete","count":95},
+    {"action":"view","count":3640}
+  ]
+}
+\`\`\`
+
+Rules:
+- Prefer \`bar\` or \`donut\` for categorical breakdowns, \`line\`/\`area\` for time series.
+- Derive data from tool results only — never invent numbers for a chart.
+- Keep data arrays short enough to be legible (<=20 rows for bar/line, <=6 slices for pie/donut).
+- Do NOT wrap chart data in \`\`\`json / \`\`\`python / \`\`\`javascript — only \`\`\`chart is rendered as a chart.
+- **Pair charts.** Emitting two complementary charts in one response is normal and expected. E.g. a bar of absolute counts next to a donut of percentage share; a line of trend next to a bar of per-category totals. The analytics panel shows them side-by-side.
+
+## Multi-chart examples
+
+Example — "records per module":
+1. Bar chart of record counts per module (absolute)
+2. Donut of the same data (share of total)
+
+Example — "audit activity":
+1. Line chart of daily event count over time (trend)
+2. Bar chart of events by action type (composition)
+
+Example — "users overview":
+1. Bar chart of users per role
+2. Donut of active vs inactive status
+
+## Other visualizations
+For layouts that don't fit KPI/chart primitives (org charts, diagrams, custom cards) you may still use:
+- \`\`\`svg — inline SVG with explicit \`viewBox\`, \`currentColor\` or hex fills, no external fonts or scripts.
+- \`\`\`html — small HTML with inline \`style="…"\` (no Tailwind classes, no \`<script>\`).
 
 ## Tools
-Tool definitions are provided separately — use them when you need real ERP data (users, modules, records, audit log). Do not answer "insufficient data" without calling the relevant tool first. For conversational or clearly-out-of-scope questions, answer directly without tools.
+Tool definitions are provided separately — use them when you need real ERP data (users, modules, records, audit log). Do not answer "insufficient data" without calling the relevant tool first. For conversational or clearly out-of-scope questions, answer directly without tools.
 
-**Batch tool calls.** When you need multiple tool calls to answer a question, emit ALL of them in a single assistant response. The server executes parallel tool calls concurrently — sequential rounds multiply latency. Example: if the user asks "how many records per module", call \`list_modules\` first, then on the next turn emit \`count_records\` for every module in one response, not one at a time.
+**Batch tool calls.** Emit ALL independent tool calls for one turn in a single response so the server can run them in parallel. Sequential rounds multiply latency.
 
-## Data presentation — tables mandatory for row data
-When a tool returns multiple records/users/modules/audit entries, render them as a **GitHub-flavored markdown table**. Never dump JSON. Never use bullets for tabular data.
-
-- 3–6 most relevant columns, Title Case headers (not snake_case ids)
+## Data presentation — tables for row data
+When the user wants per-row detail, render a GitHub-flavored markdown table:
+- 3–6 most relevant columns, Title Case headers
 - Truncate cells > 40 chars with \`…\`
 - Numeric summary in one sentence *before* the table
 - Zero results → one sentence, no empty table
 
-Example:
-
-Found 3 matching records:
-
-| Name | Department | Status | Submitted |
-|------|------------|--------|-----------|
-| Alice Smith | Engineering | Approved | 2026-04-12 |
-| Bob Chen | Sales | Pending | 2026-04-11 |
-| Carol Diaz | HR | Approved | 2026-04-10 |
-
 ## Rules
-- Precise, not verbose
+- Precise, not verbose — every paragraph must earn its keep
 - Never hallucinate — if a tool returns nothing, say so
 - SQL suggestions must be read-only SELECTs; you can't execute them
-- Ask ONE clarifying question only if the query is genuinely ambiguous`;
+- Ask ONE clarifying question only if the query is genuinely ambiguous
+- The headline, KPI block, and chart are your most valuable real estate — put the best finding there, not buried in prose`;
 
 function genId() {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -104,11 +193,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json?.success === false) {
-    throw new Error(json?.error ?? `${res.status} ${res.statusText}`);
+  const json: unknown = await res.json().catch(() => null);
+  const obj = (json ?? {}) as { success?: boolean; data?: unknown; error?: string };
+  if (!res.ok || obj.success === false) {
+    throw new Error(obj.error ?? `${res.status} ${res.statusText}`);
   }
-  return (json?.data ?? json) as T;
+  // Route handlers wrap payloads in { success: true, data }. Unwrap when
+  // present; otherwise return the raw body (some endpoints may return data
+  // directly).
+  return (obj.success === true ? obj.data : (json ?? obj)) as T;
 }
 
 export default function ChatbotUI() {
@@ -126,6 +219,13 @@ export default function ChatbotUI() {
     null
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Insights panel defaults to open on wide screens only. Below ~1280px the
+  // three-column layout becomes cramped, so we start collapsed and let the
+  // user toggle it back on via the header button.
+  const [insightsOpen, setInsightsOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth >= 1280;
+  });
 
   // Chat state
   const [messages, setMessages] = useState<LocalMessage[]>([]);
@@ -175,8 +275,13 @@ export default function ChatbotUI() {
       setLoadingProviders(true);
       setProviderError(null);
       try {
-        const list = await fetchJson<ProviderDTO[]>("/api/chat/providers");
+        const raw = await fetchJson<unknown>("/api/chat/providers");
         if (cancelled) return;
+        const list: ProviderDTO[] = Array.isArray(raw)
+          ? (raw as ProviderDTO[])
+          : Array.isArray((raw as { data?: unknown })?.data)
+          ? ((raw as { data: ProviderDTO[] }).data)
+          : [];
         setProviders(list);
         if (list.length > 0) {
           const def = list.find((p) => p.isDefault) ?? list[0];
@@ -758,14 +863,17 @@ export default function ChatbotUI() {
         />
       )}
 
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative">
         {/* Header */}
-        <div className="border-b bg-background px-4 py-3 flex items-center gap-2 flex-wrap shrink-0">
+        <div className="relative border-b bg-background/80 backdrop-blur-md px-4 py-3 flex items-center gap-2 flex-wrap shrink-0 z-10">
+          {/* Bottom accent line */}
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setSidebarOpen((v) => !v)}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            className="hover:bg-muted/60"
           >
             {sidebarOpen ? (
               <PanelLeftClose className="h-4 w-4" />
@@ -774,7 +882,9 @@ export default function ChatbotUI() {
             )}
           </Button>
           <div className="flex items-center gap-2 mr-auto min-w-0">
-            <Sparkles className="h-4 w-4 text-primary shrink-0" />
+            <div className="relative h-6 w-6 rounded-lg bg-gradient-to-br from-primary/80 to-primary/50 border border-primary/30 shadow-sm shadow-primary/10 flex items-center justify-center shrink-0">
+              <Sparkles className="h-3.5 w-3.5 text-primary-foreground" />
+            </div>
             <h1 className="text-sm font-semibold truncate max-w-[260px] text-foreground">
               {activeConversationId
                 ? conversations.find((c) => c.id === activeConversationId)?.title ??
@@ -782,9 +892,12 @@ export default function ChatbotUI() {
                 : "New chat"}
             </h1>
             {streaming && (
-              <span className="flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/5 text-[10px] font-medium text-primary">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+                </span>
+                streaming
               </span>
             )}
           </div>
@@ -829,22 +942,57 @@ export default function ChatbotUI() {
             </Select>
           </div>
 
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setInsightsOpen((v) => !v)}
+            title={insightsOpen ? "Hide insights panel" : "Show insights panel"}
+            className={cn(
+              "h-8 px-2",
+              insightsOpen && "bg-primary/5 border-primary/40 text-primary"
+            )}
+          >
+            {insightsOpen ? (
+              <PanelRightClose className="h-4 w-4" />
+            ) : (
+              <PanelRight className="h-4 w-4" />
+            )}
+          </Button>
+
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" disabled={streaming}>
                 <Settings2 className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-80" align="end">
+            <PopoverContent className="w-96" align="end">
               <div className="space-y-3">
                 <div>
-                  <Label className="text-xs">System prompt</Label>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs">System prompt</Label>
+                    {systemPrompt !== DEFAULT_SYSTEM_PROMPT && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+                          toast.success("Reset to analytics template");
+                        }}
+                        className="text-[10px] text-primary hover:underline"
+                      >
+                        Reset to default
+                      </button>
+                    )}
+                  </div>
                   <Textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={5}
-                    className="text-xs mt-1 font-mono"
+                    rows={8}
+                    className="text-[11px] mt-1 font-mono leading-relaxed"
                   />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    The default prompt is tuned for KPI blocks and chart
+                    fences. If you&apos;re not seeing charts, reset it.
+                  </p>
                 </div>
                 <div>
                   <Label className="text-xs">Temperature</Label>
@@ -870,9 +1018,19 @@ export default function ChatbotUI() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto bg-muted/30 min-h-0"
+          className="relative flex-1 overflow-y-auto min-h-0 bg-gradient-to-b from-background via-muted/20 to-muted/40"
         >
-          <div className="max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-4">
+          {/* Subtle decorative dot grid */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.04] dark:opacity-[0.06]"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle, currentColor 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          />
+          <div className="relative max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-5">
             {loadingProviders ? (
               <Card className="p-8 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-5 w-5 mx-auto mb-2 animate-spin" />
@@ -924,16 +1082,23 @@ export default function ChatbotUI() {
         {/* Composer */}
         <form
           onSubmit={handleSubmit}
-          className="border-t bg-background p-4 shrink-0"
+          className="relative border-t bg-background/80 backdrop-blur-md p-4 shrink-0"
         >
+          {/* Top accent line */}
+          <div className="pointer-events-none absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
           <div className="max-w-3xl mx-auto">
             <div
               className={cn(
-                "relative flex items-end gap-2 rounded-lg border bg-background px-2 py-1.5 transition-colors",
-                "focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20",
+                "group relative flex items-end gap-2 rounded-2xl border border-border/70 bg-background px-3 py-2 transition-all duration-300 shadow-sm",
+                "focus-within:border-primary/50 focus-within:shadow-lg focus-within:shadow-primary/10 focus-within:ring-2 focus-within:ring-primary/15",
                 (streaming || providers.length === 0) && "opacity-60"
               )}
             >
+              {/* Ambient glow behind the composer on focus */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-primary/0 via-primary/10 to-primary/0 opacity-0 group-focus-within:opacity-100 blur-md transition-opacity duration-500 -z-10"
+              />
               <Textarea
                 ref={textareaRef}
                 value={input}
@@ -946,7 +1111,7 @@ export default function ChatbotUI() {
                 }
                 rows={1}
                 disabled={streaming || providers.length === 0}
-                className="resize-none min-h-[36px] max-h-[200px] border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-1 py-1.5"
+                className="resize-none min-h-[36px] max-h-[200px] border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-1 py-1.5 text-sm placeholder:text-muted-foreground/70"
               />
               {streaming ? (
                 <Button
@@ -955,9 +1120,9 @@ export default function ChatbotUI() {
                   size="icon"
                   onClick={cancelStream}
                   title="Stop generating"
-                  className="shrink-0 h-8 w-8"
+                  className="shrink-0 h-9 w-9 rounded-xl shadow-md shadow-destructive/20"
                 >
-                  <Square className="h-4 w-4" />
+                  <Square className="h-4 w-4 fill-current" />
                 </Button>
               ) : (
                 <Button
@@ -965,29 +1130,53 @@ export default function ChatbotUI() {
                   size="icon"
                   disabled={!input.trim() || providers.length === 0}
                   title="Send (Enter)"
-                  className="shrink-0 h-8 w-8"
+                  className={cn(
+                    "shrink-0 h-9 w-9 rounded-xl transition-all duration-200",
+                    "bg-gradient-to-br from-primary to-primary/80 hover:from-primary hover:to-primary",
+                    "shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30",
+                    "disabled:shadow-none disabled:from-muted disabled:to-muted disabled:text-muted-foreground",
+                    input.trim() && "hover:-translate-y-0.5 active:translate-y-0"
+                  )}
                 >
                   <Send className="h-4 w-4" />
                 </Button>
               )}
             </div>
-            <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-muted-foreground">
-              <span>
-                <kbd className="px-1 py-0.5 rounded border bg-muted font-mono">
+            <div className="flex items-center justify-center gap-3 mt-2.5 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-muted/60 font-mono text-[9px]">
                   Enter
-                </kbd>{" "}
+                </kbd>
                 to send
               </span>
-              <span>
-                <kbd className="px-1 py-0.5 rounded border bg-muted font-mono">
+              <span className="text-border">·</span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-muted/60 font-mono text-[9px]">
                   Shift+Enter
-                </kbd>{" "}
-                for newline
+                </kbd>
+                newline
               </span>
             </div>
           </div>
         </form>
       </div>
+
+      {insightsOpen && providers.length > 0 && !providerError && (
+        <InsightsPanel
+          messages={messages}
+          activeConversationTitle={
+            activeConversationId
+              ? conversations.find((c) => c.id === activeConversationId)?.title ??
+                "Analysis"
+              : "New analysis"
+          }
+          providerLabel={activeProvider?.displayName}
+          modelLabel={model}
+          streaming={streaming}
+          onClose={() => setInsightsOpen(false)}
+          onPickFollowUp={(text) => sendMessage(text)}
+        />
+      )}
     </div>
   );
 }

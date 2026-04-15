@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import AddKeyDialog from "./add-key-dialog";
 import type { AIProviderDTO, ProviderPresetDTO } from "./types";
+import { isLocalProvider } from "@/lib/ai/local-provider";
 
 interface Props {
   provider: AIProviderDTO;
@@ -69,6 +70,11 @@ export default function ProviderCard({
         new Set([provider.defaultModel, ...provider.availableModels])
       ).filter(Boolean),
     [provider.defaultModel, provider.availableModels]
+  );
+
+  const isLocal = useMemo(
+    () => isLocalProvider({ name: provider.name, baseUrl: provider.baseUrl }),
+    [provider.name, provider.baseUrl]
   );
 
   const presetSuggestions = preset?.suggestedModels ?? [];
@@ -363,6 +369,11 @@ export default function ProviderCard({
             <h4 className="text-sm font-medium flex items-center gap-2">
               <KeyRound className="h-4 w-4" />
               API keys ({provider.apiKeys.length})
+              {isLocal && (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  optional
+                </Badge>
+              )}
             </h4>
             <Button size="sm" variant="outline" onClick={() => setAddKeyOpen(true)}>
               <Plus className="h-4 w-4 mr-1" />
@@ -371,7 +382,9 @@ export default function ProviderCard({
           </div>
           {provider.apiKeys.length === 0 ? (
             <p className="text-xs text-muted-foreground py-2">
-              No keys yet. Add at least one to enable this provider.
+              {isLocal
+                ? "No key required — self-hosted servers (Ollama, vLLM, llama.cpp, LM Studio) accept requests without auth. Add a key here only if you started the server with --api-key."
+                : "No keys yet. Add at least one to enable this provider."}
             </p>
           ) : (
             <div className="space-y-1.5">
