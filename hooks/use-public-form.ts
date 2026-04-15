@@ -143,6 +143,13 @@ export function usePublicForm({
   const [fieldPermissions, setFieldPermissions] = useState<
     Record<string, string>
   >({});
+  // Sections (and subforms) where the admin has granted at least one
+  // explicit field-level permission for the current user's role. In those
+  // sections we switch to allow-list mode: only fields with an explicit
+  // grant are visible; everything else is hidden.
+  const [sectionsWithFieldGrants, setSectionsWithFieldGrants] = useState<
+    Set<string>
+  >(new Set());
   const [availablePermissions, setAvailablePermissions] = useState<any[]>([]);
   // Default to "CREATE" (editable) — the permission check will downgrade to
   // "VIEW" if the user only has view access.  This ensures forms are never
@@ -175,6 +182,7 @@ export function usePublicForm({
       setFormulaValues({});
       setSectionPermissions({});
       setFieldPermissions({});
+      setSectionsWithFieldGrants(new Set());
       setAvailablePermissions([]);
       setUserRoleId(null);
       setCurrentUser(null);
@@ -538,9 +546,27 @@ export function usePublicForm({
       console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perm NONE)");
       return false;
     }
+    const sectionPerms = sectionPermissions[sectionId];
+    const sectionHasGrants =
+      !!sectionPerms &&
+      sectionPerms.length > 0 &&
+      !(sectionPerms.length === 1 && sectionPerms[0] === "NONE");
+    // Allow-list mode: only when the section has NO section-level grants
+    // but DOES have explicit field-level grants. In that case, only fields
+    // that were explicitly granted at the field level are visible; others
+    // default to hidden because the admin chose the field-level route to
+    // carve out access. When the section itself grants access, field-level
+    // rows are overrides (handled elsewhere) and inheritance keeps sibling
+    // fields visible.
+    if (
+      !fieldPerm &&
+      !sectionHasGrants &&
+      sectionsWithFieldGrants.has(sectionId)
+    ) {
+      return false;
+    }
     // If no field-level perm, check section-level
     if (!fieldPerm) {
-      const sectionPerms = sectionPermissions[sectionId];
       if (sectionPerms && sectionPerms.length === 1 && sectionPerms[0] === "NONE") return false;
     }
     if (field.type === "formula") {
@@ -1183,6 +1209,7 @@ export function usePublicForm({
     let avails: any[] = availablePermissions;
     const rawPerms: Record<string, string[]> = {};
     const allFieldPerms: Record<string, string> = {};
+    const sectionsWithGrants = new Set<string>();
     const allIds = getAllPermissionableIds(formData);
 
     await Promise.all(
@@ -1221,6 +1248,9 @@ export function usePublicForm({
           const sectionFieldPerms = profile.fieldPermissions || {};
           rawPerms[id] = permNames;
           Object.assign(allFieldPerms, sectionFieldPerms);
+          if (Object.keys(sectionFieldPerms).length > 0) {
+            sectionsWithGrants.add(id);
+          }
         } catch (e) {
           rawPerms[id] = [];
         }
@@ -1230,15 +1260,23 @@ export function usePublicForm({
     // ── KEY LOGIC: If ANY section has explicit permissions, then sections
     // with NO permissions (empty []) are intentionally excluded → mark as NONE.
     // This ensures: "I gave Section A all perms, Section B has nothing → B is hidden."
-    const anySectionHasExplicitPerms = Object.values(rawPerms).some(
-      (perms) => perms.length > 0,
-    );
+    // Field-level grants count as "explicit" too — a section that was only
+    // configured via field-level rows is still an intentional choice.
+    const anySectionHasExplicitPerms =
+      Object.values(rawPerms).some((perms) => perms.length > 0) ||
+      sectionsWithGrants.size > 0;
 
     const finalPerms: Record<string, string[]> = {};
     for (const [id, perms] of Object.entries(rawPerms)) {
       if (perms.length > 0) {
-        // Has explicit permissions — use as-is
+        // Has explicit section-level permissions — use as-is
         finalPerms[id] = perms;
+      } else if (sectionsWithGrants.has(id)) {
+        // No section-level perms but the admin carved out access via
+        // field-level grants. Keep the section visible (empty perms)
+        // and let isFieldVisible's allow-list mode show only the
+        // explicitly granted fields.
+        finalPerms[id] = [];
       } else if (anySectionHasExplicitPerms) {
         // No permissions BUT other sections do → this section is hidden
         finalPerms[id] = ["NONE"];
@@ -1256,6 +1294,7 @@ export function usePublicForm({
     setAvailablePermissions(avails);
     setSectionPermissions(finalPerms);
     setFieldPermissions(allFieldPerms);
+    setSectionsWithFieldGrants(sectionsWithGrants);
   };
 
   const trackFormView = async () => {
