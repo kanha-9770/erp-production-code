@@ -459,7 +459,10 @@ export async function GET(
       };
     };
 
-    const transformRecordData = (recordData: any): Record<string, any> => {
+    const transformRecordData = (
+      recordData: any,
+      isOwnRecord: boolean,
+    ): Record<string, any> => {
       if (!recordData) return {};
 
       const transformed: Record<string, any> = {};
@@ -476,7 +479,9 @@ export async function GET(
         Object.entries(recordData.sections).forEach(([sectionId, sectionData]: [string, any]) => {
           if (!sectionData.fields) return;
           Object.entries(sectionData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-            if (!allowedFieldIds.has(fieldId)) return;
+            // Field-level VIEW filter: only applies to records the caller
+            // did NOT create themselves. You always see your own data in full.
+            if (!isOwnRecord && !allowedFieldIds.has(fieldId)) return;
 
             if (slim) {
               transformed[fieldId] = enrichField(fieldId, fieldEntry, { sectionId });
@@ -503,7 +508,7 @@ export async function GET(
 
           if (subformData.fields) {
             Object.entries(subformData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-              if (!allowedFieldIds.has(fieldId)) return;
+              if (!isOwnRecord && !allowedFieldIds.has(fieldId)) return;
 
               if (slim) {
                 transformed[fieldId] = enrichField(fieldId, fieldEntry, {
@@ -537,7 +542,7 @@ export async function GET(
           }
 
           if (subformData.childSubforms) {
-            processChildSubforms(subformData.childSubforms, subformName, transformed, slim);
+            processChildSubforms(subformData.childSubforms, subformName, transformed, slim, isOwnRecord);
           }
         });
       }
@@ -577,7 +582,8 @@ export async function GET(
       childSubforms: Record<string, any>,
       parentPath: string,
       transformed: Record<string, any>,
-      slim: boolean
+      slim: boolean,
+      isOwnRecord: boolean,
     ) => {
       Object.entries(childSubforms).forEach(([childId, childData]: [string, any]) => {
         const childInfo = subformLookup[childId];
@@ -586,7 +592,7 @@ export async function GET(
 
         if (childData.fields) {
           Object.entries(childData.fields).forEach(([fieldId, fieldEntry]: [string, any]) => {
-            if (!allowedFieldIds.has(fieldId)) return;
+            if (!isOwnRecord && !allowedFieldIds.has(fieldId)) return;
 
             if (slim) {
               transformed[fieldId] = enrichField(fieldId, fieldEntry, {
@@ -623,7 +629,7 @@ export async function GET(
         }
 
         if (childData.childSubforms) {
-          processChildSubforms(childData.childSubforms, fullPath, transformed, slim);
+          processChildSubforms(childData.childSubforms, fullPath, transformed, slim, isOwnRecord);
         }
       });
     };
@@ -688,8 +694,13 @@ export async function GET(
     const processedRecords = records.map((record: any) => {
       const isInherited =
         !callerIsAdminBypass && record.userId && record.userId !== authUser.id;
+      // Admins bypass field filters entirely. Non-admins bypass the filter
+      // for records they created themselves (seeing their own submissions
+      // in full is always expected). The filter only strips fields from
+      // records the caller is viewing via hierarchy.
+      const isOwnRecord = callerIsAdminBypass || !isInherited;
 
-      let transformedData = transformRecordData(record.recordData || {});
+      let transformedData = transformRecordData(record.recordData || {}, isOwnRecord);
 
       if (isInherited && hasExcludedFields) {
         const filtered: Record<string, any> = {};
