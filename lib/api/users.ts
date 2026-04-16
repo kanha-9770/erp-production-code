@@ -17,6 +17,7 @@ export interface AdminUser {
   location: string | null
   joinDate: string | null
   createdAt: string
+  employeeEngagementTeamName?: string | null
   unitsAndRoles: Array<{ unit: { name: string }; role: { name: string; isAdmin?: boolean } }>
   unitAssignments?: Array<{
     unit: { name: string } | null

@@ -95,6 +95,14 @@ export const UserManagementHandlers = {
           unitAssignments: { include: { unit: true, role: true } },
           organization: true,
           permissionOverrides: { include: { permission: true } },
+          employee: {
+            select: {
+              department: true,
+              designation: true,
+              companyName: true,
+              employeeEngagementTeamName: true,
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
       });
@@ -106,6 +114,17 @@ export const UserManagementHandlers = {
           avatar: u.avatar, department: u.department || "",
           unitAssignments: u.unitAssignments,
           email_verified: u.email_verified,
+          // Employee data sourced for audit-log display (department + management
+          // team). `companyName` is the closest field to "management team" in
+          // the Employee model.
+          employee: u.employee
+            ? {
+                department: u.employee.department || "",
+                designation: u.employee.designation || "",
+                companyName: u.employee.companyName || "",
+                employeeEngagementTeamName: u.employee.employeeEngagementTeamName || "",
+              }
+            : null,
         }))
       );
     }, "getUsers");
@@ -239,6 +258,15 @@ export const UserManagementHandlers = {
       }
 
       if (employeeData) {
+        const derivedName = [
+          employeeData.employeeName,
+          [updatedData.first_name ?? user.first_name, updatedData.last_name ?? user.last_name]
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+          user.email,
+        ].find((v) => typeof v === "string" && v.trim().length > 0);
+
         await prisma.employee.upsert({
           where: { userId },
           update: {
@@ -250,7 +278,10 @@ export const UserManagementHandlers = {
           create: {
             userId,
             ...employeeData,
+            employeeName: derivedName || "Unknown",
             totalSalary: employeeData.totalSalary ? parseFloat(employeeData.totalSalary) : undefined,
+            dob: employeeData.dob ? new Date(employeeData.dob) : undefined,
+            dateOfJoining: employeeData.dateOfJoining ? new Date(employeeData.dateOfJoining) : undefined,
           },
         });
       }

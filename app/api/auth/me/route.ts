@@ -111,6 +111,7 @@ export async function GET(request: NextRequest) {
               yearsOfAgreement: session.user.employee.yearsOfAgreement,
               bonusAfterYears: session.user.employee.bonusAfterYears,
               companyName: session.user.employee.companyName,
+              employeeEngagementTeamName: session.user.employee.employeeEngagementTeamName,
               totalSalary: session.user.employee.totalSalary
                 ? Number(session.user.employee.totalSalary.toString())
                 : null,

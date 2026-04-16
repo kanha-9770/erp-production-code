@@ -81,6 +81,7 @@ interface Employee {
   yearsOfAgreement: number | null;
   bonusAfterYears: number | null;
   companyName: string | null;
+  employeeEngagementTeamName: string | null;
   totalSalary: number | null;
   givenSalary: number | null;
   bonusAmount: number | null;
@@ -187,6 +188,7 @@ export default function DashboardPage() {
             yearsOfAgreement: emp.yearsOfAgreement ? Number(emp.yearsOfAgreement) : null,
             bonusAfterYears: emp.bonusAfterYears ? Number(emp.bonusAfterYears) : null,
             companyName: emp.companyName ?? null,
+            employeeEngagementTeamName: emp.employeeEngagementTeamName ?? null,
             totalSalary: emp.totalSalary ? Number(emp.totalSalary) : null,
             givenSalary: emp.givenSalary ? Number(emp.givenSalary) : null,
             bonusAmount: emp.bonusAmount ? Number(emp.bonusAmount) : null,
@@ -785,6 +787,14 @@ export default function DashboardPage() {
                       </span>
                       <span className="text-sm font-medium text-gray-900">
                         {user.employee.companyName || "N/A"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">
+                        Employee Engagement Team Name
+                      </span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {user.employee.employeeEngagementTeamName || "N/A"}
                       </span>
                     </div>
                   </div>

@@ -212,6 +212,8 @@ export async function POST(request: NextRequest) {
             personalContact: parsedData.phone || null,
             alternateNo1: parsedData.alternateNo1 || null,
             alternateNo2: parsedData.alternateNo2 || null,
+            employeeEngagementTeamName:
+              parsedData.employeeEngagementTeamName || null,
           }
         });
       } else {
@@ -253,6 +255,8 @@ export async function POST(request: NextRequest) {
             yearsOfAgreement: parsedData.yearsOfAgreement ? parseInt(parsedData.yearsOfAgreement) || null : null,
             bonusAfterYears: parsedData.bonusAfterYears ? parseInt(parsedData.bonusAfterYears) || null : null,
             companyName: parsedData.companyName || null,
+            employeeEngagementTeamName:
+              parsedData.employeeEngagementTeamName || null,
             aadharCardUpload: parsedData.aadharCardUpload || null,
             aadharCardNo: parsedData.aadharCardNo || null,
             panCardUpload: parsedData.panCardUpload || null,

@@ -1251,6 +1251,7 @@ model Employee {
   yearsOfAgreement Int?          @map("years_of_agreement")
   bonusAfterYears  Int?          @map("bonus_after_years")
   companyName      String?       @map("company_name")
+  employeeEngagementTeamName String? @map("employee_engagement_team_name")
   totalSalary      Decimal?      @map("total_salary")
   givenSalary      Decimal?      @map("given_salary")
   bonusAmount      Decimal?      @map("bonus_amount")

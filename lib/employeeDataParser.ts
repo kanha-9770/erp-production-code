@@ -28,6 +28,7 @@ export interface ParsedEmployeeData {
   yearsOfAgreement?: string;
   bonusAfterYears?: string;
   companyName?: string;
+  employeeEngagementTeamName?: string;
   totalSalary?: string;
   givenSalary?: string;
   bonusAmount?: string;
@@ -162,6 +163,12 @@ const FIELD_PATTERNS: Record<string, RegExp[]> = {
     /bonus\s*years/i,
   ],
   companyName: [/company\s*name/i, /organization/i, /employer/i, /firm/i],
+  employeeEngagementTeamName: [
+    /employee\s*engagement\s*team\s*name/i,
+    /employee\s*engagement\s*team/i,
+    /engagement\s*team/i,
+    /emp\s*engagement\s*team/i,
+  ],
   totalSalary: [
     /total\s*salary/i,
     /gross\s*salary/i,

@@ -136,6 +136,7 @@ export interface GetUserResponse {
       yearsOfAgreement?: string
       bonusAfterYears?: string
       companyName?: string
+      employeeEngagementTeamName?: string
       totalSalary?: number
       givenSalary?: number
       bonusAmount?: number

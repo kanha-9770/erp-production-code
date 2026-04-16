@@ -139,6 +139,7 @@ const UserCreationPage: React.FC = () => {
     email: "",
     phone: "",
     department: "",
+    employeeEngagementTeamName: "",
     location: "",
     status: "active",
     password: "",
@@ -164,6 +165,7 @@ const UserCreationPage: React.FC = () => {
       email: u.email || "",
       phone: u.phone || u.mobile || "",
       department: u.department || "",
+      employeeEngagementTeamName: u.employeeEngagementTeamName || "",
       location: u.location || "",
       status: u.status || "active",
       password: "",
@@ -183,6 +185,7 @@ const UserCreationPage: React.FC = () => {
       email: "",
       phone: "",
       department: "",
+      employeeEngagementTeamName: "",
       location: "",
       status: "active",
       password: "",
@@ -224,6 +227,10 @@ const UserCreationPage: React.FC = () => {
       department: editUserForm.department.trim(),
       location: editUserForm.location.trim(),
       status: editUserForm.status,
+      employeeData: {
+        employeeEngagementTeamName:
+          editUserForm.employeeEngagementTeamName.trim() || null,
+      },
     };
     if (pw) body.password = pw;
 
@@ -793,6 +800,9 @@ const UserCreationPage: React.FC = () => {
                           {record.parsedData?.department && (
                             <span>Dept: <span className="text-gray-700 font-medium">{record.parsedData.department}</span></span>
                           )}
+                          {record.parsedData?.employeeEngagementTeamName && (
+                            <span>Team: <span className="text-gray-700 font-medium">{record.parsedData.employeeEngagementTeamName}</span></span>
+                          )}
                           {record.parsedData?.designation && (
                             <span>Role: <span className="text-gray-700 font-medium">{record.parsedData.designation}</span></span>
                           )}
@@ -949,6 +959,18 @@ const UserCreationPage: React.FC = () => {
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Employee Engagement Team Name
+                    </label>
+                    <input
+                      value={editUserForm.employeeEngagementTeamName}
+                      onChange={(e) => setEditUserForm({ ...editUserForm, employeeEngagementTeamName: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Pulled from employee record — editable"
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1605,6 +1627,12 @@ const UserCreationPage: React.FC = () => {
                               <p className="text-gray-600 truncate flex items-center gap-1.5">
                                 <Building2 size={11} className="text-gray-400 flex-shrink-0" />
                                 {u.department}
+                              </p>
+                            )}
+                            {u.employeeEngagementTeamName && (
+                              <p className="text-gray-600 truncate flex items-center gap-1.5">
+                                <Users size={11} className="text-gray-400 flex-shrink-0" />
+                                {u.employeeEngagementTeamName}
                               </p>
                             )}
                             {u.location && (

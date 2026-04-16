@@ -45,6 +45,11 @@ export async function GET(request: NextRequest) {
             role: { select: { id: true, name: true, isAdmin: true } },
           },
         },
+        employee: {
+          select: {
+            employeeEngagementTeamName: true,
+          },
+        },
       },
       orderBy: [
         { first_name: 'asc' },
@@ -60,7 +65,12 @@ export async function GET(request: NextRequest) {
           unit: { name: ua.unit!.name },
           role: { name: ua.role!.name, isAdmin: ua.role!.isAdmin || false },
         }))
-      return { ...u, fullName, unitsAndRoles }
+      return {
+        ...u,
+        fullName,
+        unitsAndRoles,
+        employeeEngagementTeamName: u.employee?.employeeEngagementTeamName || null,
+      }
     })
 
     return NextResponse.json({

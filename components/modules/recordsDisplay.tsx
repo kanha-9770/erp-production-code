@@ -164,6 +164,30 @@ const AUDIT_FIELDS: FormFieldWithSection[] = [
     isSystem: true,
   },
   {
+    id: "__createdByRole",
+    label: "Role",
+    type: "text",
+    sectionId: null,
+    originalId: null,
+    isSystem: true,
+  },
+  {
+    id: "__createdByDepartment",
+    label: "Department",
+    type: "text",
+    sectionId: null,
+    originalId: null,
+    isSystem: true,
+  },
+  {
+    id: "__createdByTeam",
+    label: "Employee Engagement Team Name",
+    type: "text",
+    sectionId: null,
+    originalId: null,
+    isSystem: true,
+  },
+  {
     id: "__updatedAt",
     label: "Updated At",
     type: "datetime",
@@ -181,14 +205,116 @@ const AUDIT_FIELDS: FormFieldWithSection[] = [
   },
 ];
 
-// Helper: Always show actual user name, never raw user ID
-const getUserDisplayName = (users: User[], userId?: string | null): string => {
-  if (!userId) return "—";
-  const user = users.find((u) => u.id === userId);
-  if (!user) return "Unknown User";
-  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-  return fullName || user.email || user.username || "Unknown User";
+// Helper: Try to resolve a user reference (which may be an id OR an email,
+// depending on how the record was saved) to a human-readable name.
+// Falls back to the raw value when it already looks like an email/name so
+// older records that stored an email in `submittedBy` don't render as
+// "Unknown User".
+const findUserByRef = (users: User[], ref?: string | null) => {
+  if (!ref) return undefined;
+  return users.find(
+    (u) =>
+      u.id === ref ||
+      (u as any).email === ref ||
+      (u as any).username === ref,
+  );
 };
+const getUserDisplayName = (
+  users: User[],
+  ref?: string | null,
+  ...fallbackRefs: (string | null | undefined)[]
+): string => {
+  // Try each ref in order — userId, submittedBy, etc. — until one resolves
+  // to a real user row. Records created via email-based submitters can have
+  // an email in `submittedBy` while `userId` is a cuid; either will match.
+  const refs = [ref, ...fallbackRefs].filter(
+    (r): r is string => typeof r === "string" && r.length > 0,
+  );
+  for (const r of refs) {
+    const user = findUserByRef(users, r);
+    if (user) {
+      const fullName = [user.first_name, user.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      return fullName || (user as any).email || (user as any).username || r;
+    }
+  }
+  // No matching user row found — still show something sensible rather than
+  // "Unknown User" when one of the refs is obviously human-readable.
+  const readable = refs.find(
+    (r) => typeof r === "string" && (r.includes("@") || r.includes(" ")),
+  );
+  if (readable) return readable;
+  return "Unknown User";
+};
+
+// Try multiple refs to find the first matching user row.
+const findUserFromRefs = (
+  users: User[],
+  refs: (string | null | undefined)[],
+) => {
+  for (const r of refs) {
+    if (!r) continue;
+    const user = findUserByRef(users, r);
+    if (user) return user;
+  }
+  return undefined;
+};
+
+// Helper: Resolve the user's primary role name (from unitAssignments[0]).
+const getUserRole = (
+  users: User[],
+  ref?: string | null,
+  ...fallbackRefs: (string | null | undefined)[]
+): string => {
+  const user = findUserFromRefs(users, [ref, ...fallbackRefs]) as any;
+  if (!user) return "—";
+  const assignments = user.unitAssignments;
+  const roleName = Array.isArray(assignments) && assignments.length > 0
+    ? assignments[0]?.role?.name
+    : undefined;
+  return roleName || "—";
+};
+
+// Helper: Resolve the user's department. Prefers the employee record's
+// department (`user.employee.department`) and falls back to the user row's
+// department column when the user has no linked employee record.
+const getUserDepartment = (
+  users: User[],
+  ref?: string | null,
+  ...fallbackRefs: (string | null | undefined)[]
+): string => {
+  const user = findUserFromRefs(users, [ref, ...fallbackRefs]) as any;
+  if (!user) return "—";
+  const empDept = user.employee?.department;
+  if (typeof empDept === "string" && empDept.trim()) return empDept;
+  const dept = user.department;
+  return (typeof dept === "string" && dept.trim()) || "—";
+};
+
+// Helper: Resolve the employee's Employee Engagement Team name. Prefers the
+// explicit `employee.employeeEngagementTeamName` field, falls back to
+// `employee.companyName` for older records, and finally to the
+// OrganizationUnit assigned to the user.
+const getUserTeam = (
+  users: User[],
+  ref?: string | null,
+  ...fallbackRefs: (string | null | undefined)[]
+): string => {
+  const user = findUserFromRefs(users, [ref, ...fallbackRefs]) as any;
+  if (!user) return "—";
+  const empTeam = user.employee?.employeeEngagementTeamName;
+  if (typeof empTeam === "string" && empTeam.trim()) return empTeam;
+  const company = user.employee?.companyName;
+  if (typeof company === "string" && company.trim()) return company;
+  const assignments = user.unitAssignments;
+  const unitName = Array.isArray(assignments) && assignments.length > 0
+    ? assignments[0]?.unit?.name
+    : undefined;
+  return unitName || "—";
+};
+
 
 const formatDateTime = (dateValue: any): string => {
   if (!dateValue) return "—";
@@ -481,10 +607,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
         displayValue = formatDateTime(record.updatedAt);
       }
       if (fieldDef.id === "__createdBy") {
-        displayValue = getUserDisplayName(users, record.userId || record.submittedBy);
+        displayValue = getUserDisplayName(users, record.userId, record.submittedBy);
+      }
+      if (fieldDef.id === "__createdByRole") {
+        displayValue = getUserRole(users, record.userId, record.submittedBy);
+      }
+      if (fieldDef.id === "__createdByDepartment") {
+        displayValue = getUserDepartment(users, record.userId, record.submittedBy);
+      }
+      if (fieldDef.id === "__createdByTeam") {
+        displayValue = getUserTeam(users, record.userId, record.submittedBy);
       }
       if (fieldDef.id === "__updatedBy") {
-        displayValue = getUserDisplayName(users, record.userId);
+        displayValue = getUserDisplayName(users, record.userId, record.submittedBy);
       }
       return (
         <Input
@@ -1193,17 +1328,28 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
                                   {/* Audit Fields */}
                                   {showAuditFields && AUDIT_FIELDS.map((auditField) => {
+                                    const primaryRef = record.userId;
+                                    const fallbackRef = record.submittedBy;
                                     let value: any = "—";
                                     if (auditField.id === "__createdAt") value = record.createdAt || record.submittedAt;
-                                    else if (auditField.id === "__createdBy") value = record.userId || record.submittedBy;
+                                    else if (auditField.id === "__createdBy") value = primaryRef;
+                                    else if (auditField.id === "__createdByRole") value = primaryRef;
+                                    else if (auditField.id === "__createdByDepartment") value = primaryRef;
+                                    else if (auditField.id === "__createdByTeam") value = primaryRef;
                                     else if (auditField.id === "__updatedAt") value = record.updatedAt;
                                     else if (auditField.id === "__updatedBy") value = record.userId;
 
                                     let displayText = value;
-                                    if (auditField.id.includes("At")) {
+                                    if (auditField.id.endsWith("At")) {
                                       displayText = formatDateTime(value);
+                                    } else if (auditField.id === "__createdByRole") {
+                                      displayText = getUserRole(users, primaryRef, fallbackRef);
+                                    } else if (auditField.id === "__createdByDepartment") {
+                                      displayText = getUserDepartment(users, primaryRef, fallbackRef);
+                                    } else if (auditField.id === "__createdByTeam") {
+                                      displayText = getUserTeam(users, primaryRef, fallbackRef);
                                     } else if (auditField.id.includes("By")) {
-                                      displayText = getUserDisplayName(users, value);
+                                      displayText = getUserDisplayName(users, primaryRef, fallbackRef);
                                     }
 
                                     return (
@@ -1521,8 +1667,13 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
           {/* View Details Dialog */}
           {viewDetailsOpen && selectedRecord && (() => {
             const plainData = flattenRecordData(selectedRecord.recordData);
-            const createdByName = getUserDisplayName(users, selectedRecord.userId || selectedRecord.submittedBy);
-            const updatedByName = getUserDisplayName(users, selectedRecord.userId);
+            const primaryRef = selectedRecord.userId;
+            const fallbackRef = selectedRecord.submittedBy;
+            const createdByName = getUserDisplayName(users, primaryRef, fallbackRef);
+            const createdByRole = getUserRole(users, primaryRef, fallbackRef);
+            const createdByDepartment = getUserDepartment(users, primaryRef, fallbackRef);
+            const createdByTeam = getUserTeam(users, primaryRef, fallbackRef);
+            const updatedByName = getUserDisplayName(users, selectedRecord.userId, selectedRecord.submittedBy);
             return (
               <PublicFormDialog
                 formId={selectedRecord.formId}
@@ -1545,6 +1696,18 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     <div>
                       <p className="text-gray-500">Created At</p>
                       <p className="font-medium">{formatDateTime(selectedRecord.createdAt || selectedRecord.submittedAt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Role</p>
+                      <p className="font-medium">{createdByRole}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Department</p>
+                      <p className="font-medium">{createdByDepartment}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Employee Engagement Team Name</p>
+                      <p className="font-medium">{createdByTeam}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Last Updated By</p>
