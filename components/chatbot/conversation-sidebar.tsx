@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
-  MessageSquare,
   Trash2,
   Pin,
   PinOff,
@@ -12,15 +11,24 @@ import {
   X,
   Loader2,
   Search,
+  MoreHorizontal,
+  MessageSquareText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { ConversationSummary } from "./types";
 
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 480;
-const DEFAULT_WIDTH = 256;
+const MIN_WIDTH = 220;
+const MAX_WIDTH = 420;
+const DEFAULT_WIDTH = 272;
 const STORAGE_KEY = "chatbot-sidebar-width";
 
 interface Props {
@@ -35,17 +43,17 @@ interface Props {
 }
 
 const BUCKET_ORDER = [
-  "Pinned",
+  "Starred",
   "Today",
   "Yesterday",
-  "Last 7 days",
-  "Last 30 days",
+  "Previous 7 days",
+  "Previous 30 days",
   "Older",
 ] as const;
 
 type BucketName = (typeof BUCKET_ORDER)[number];
 
-function dateBucket(iso: string): Exclude<BucketName, "Pinned"> {
+function dateBucket(iso: string): Exclude<BucketName, "Starred"> {
   const d = new Date(iso);
   const now = new Date();
   const dayMs = 86_400_000;
@@ -60,22 +68,9 @@ function dateBucket(iso: string): Exclude<BucketName, "Pinned"> {
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (sameDay(d, yesterday)) return "Yesterday";
-  if (diff < 7 * dayMs) return "Last 7 days";
-  if (diff < 30 * dayMs) return "Last 30 days";
+  if (diff < 7 * dayMs) return "Previous 7 days";
+  if (diff < 30 * dayMs) return "Previous 30 days";
   return "Older";
-}
-
-function timeAgo(iso: string) {
-  const d = new Date(iso).getTime();
-  const diff = Date.now() - d;
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  return new Date(iso).toLocaleDateString();
 }
 
 export default function ConversationSidebar({
@@ -97,7 +92,6 @@ export default function ConversationSidebar({
   const [dragging, setDragging] = useState(false);
   const dragStartRef = useRef<{ x: number; width: number } | null>(null);
 
-  // Load persisted width on mount (client-only to avoid SSR hydration mismatch)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -142,7 +136,6 @@ export default function ConversationSidebar({
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-    // Disable text selection + show resize cursor while dragging
     const prevUserSelect = document.body.style.userSelect;
     const prevCursor = document.body.style.cursor;
     document.body.style.userSelect = "none";
@@ -153,12 +146,9 @@ export default function ConversationSidebar({
       document.body.style.userSelect = prevUserSelect;
       document.body.style.cursor = prevCursor;
     };
-    // `width` is intentionally not in deps — we read it via closure in onUp,
-    // and including it would rebind the move listener on every drag frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragging]);
 
-  // Persist width whenever the drag ends (above) and on any programmatic change
   useEffect(() => {
     if (dragging) return;
     try {
@@ -191,11 +181,10 @@ export default function ConversationSidebar({
 
     const map = new Map<BucketName, ConversationSummary[]>();
     for (const c of filtered) {
-      const key: BucketName = c.isPinned ? "Pinned" : dateBucket(c.updatedAt);
+      const key: BucketName = c.isPinned ? "Starred" : dateBucket(c.updatedAt);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(c);
     }
-    // Sort each bucket by updatedAt desc (pinned keeps original order — already sorted by parent)
     for (const [k, list] of map) {
       list.sort(
         (a, b) =>
@@ -212,10 +201,10 @@ export default function ConversationSidebar({
 
   return (
     <aside
-      className="relative flex flex-col border-r border-border/70 bg-gradient-to-b from-background to-muted/20 shrink-0 h-full"
+      className="relative flex flex-col bg-sidebar text-sidebar-foreground shrink-0 h-full border-r border-sidebar-border"
       style={{ width: `${width}px` }}
     >
-      {/* Drag handle — 6px hit area on the right edge */}
+      {/* Resize handle */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -223,43 +212,52 @@ export default function ConversationSidebar({
         onMouseDown={handleResizeMouseDown}
         onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
         className={cn(
-          "absolute top-0 right-0 h-full w-1.5 -mr-0.5 cursor-col-resize z-10 group",
-          "hover:bg-primary/20",
-          dragging && "bg-primary/40"
+          "absolute top-0 right-0 h-full w-1 -mr-0.5 cursor-col-resize z-10 transition-colors",
+          "hover:bg-primary/30",
+          dragging && "bg-primary/50"
         )}
         title="Drag to resize · double-click to reset"
-      >
-        <div
-          className={cn(
-            "absolute top-1/2 right-0 -translate-y-1/2 w-0.5 h-8 rounded-full transition-colors",
-            dragging
-              ? "bg-primary"
-              : "bg-transparent group-hover:bg-primary/60"
-          )}
-        />
+      />
+
+      {/* Brand row */}
+      <div className="px-3 pt-4 pb-2 flex items-center gap-2">
+        <div className="h-7 w-7 rounded-md bg-primary/90 flex items-center justify-center shrink-0">
+          <MessageSquareText className="h-4 w-4 text-primary-foreground" />
+        </div>
+        <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+          Assistant
+        </span>
       </div>
-      <div className="p-3 border-b border-border/70 space-y-2">
+
+      {/* New chat */}
+      <div className="px-3 pt-1 pb-2">
         <Button
           onClick={onNew}
+          variant="ghost"
           size="sm"
-          className="w-full justify-start rounded-xl bg-gradient-to-br from-primary to-primary/85 hover:from-primary hover:to-primary shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25 transition-all"
+          className="w-full justify-start h-9 px-2.5 rounded-lg bg-sidebar-accent/40 hover:bg-sidebar-accent text-sidebar-foreground font-medium border border-sidebar-border/60 hover:border-sidebar-border transition-colors"
         >
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="h-4 w-4 mr-2 text-muted-foreground" />
           New chat
         </Button>
-        <div className="relative group">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none group-focus-within:text-primary transition-colors" />
+      </div>
+
+      {/* Search */}
+      <div className="px-3 pb-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search conversations…"
-            className="h-8 pl-8 text-xs rounded-lg bg-background/60 border-border/70 focus-visible:ring-1 focus-visible:ring-primary/30"
+            placeholder="Search chats…"
+            className="h-8 pl-8 pr-7 text-[13px] rounded-lg bg-transparent border-sidebar-border/60 focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-sidebar-border placeholder:text-muted-foreground/70"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-sidebar-accent transition-colors"
+              aria-label="Clear search"
             >
               <X className="h-3 w-3 text-muted-foreground" />
             </button>
@@ -267,36 +265,30 @@ export default function ConversationSidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* Conversation list */}
+      <div className="flex-1 overflow-y-auto claude-scroll px-2">
         {loading && conversations.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
           </div>
         ) : totalVisible === 0 ? (
-          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+          <div className="px-3 py-10 text-center text-[12px] text-muted-foreground">
             {query ? (
-              <>No conversations match &quot;{query}&quot;.</>
+              <>No chats match &quot;{query}&quot;</>
             ) : (
               <>
-                No conversations yet.
+                No chats yet.
                 <br />
-                Start a new chat.
+                Start a new conversation.
               </>
             )}
           </div>
         ) : (
-          <div className="p-1.5 space-y-3">
+          <div className="pb-4">
             {buckets.map((bucket) => (
-              <div key={bucket.name}>
-                <div className="px-2.5 pt-2 pb-1.5 text-[10px] font-semibold text-muted-foreground/80 uppercase tracking-wider flex items-center gap-1.5">
-                  {bucket.name === "Pinned" && (
-                    <Pin className="h-2.5 w-2.5 text-primary fill-primary/40" />
-                  )}
-                  <span>{bucket.name}</span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-border/60 to-transparent" />
-                  <span className="text-muted-foreground/60 font-mono text-[9px]">
-                    {bucket.items.length}
-                  </span>
+              <div key={bucket.name} className="mt-4 first:mt-2">
+                <div className="px-2.5 pb-1 text-[11px] font-medium text-muted-foreground/80 tracking-wide">
+                  {bucket.name}
                 </div>
                 <ul className="space-y-0.5">
                   {bucket.items.map((c) => {
@@ -306,24 +298,13 @@ export default function ConversationSidebar({
                       <li key={c.id}>
                         <div
                           className={cn(
-                            "group relative flex items-center gap-2 rounded-lg px-2.5 py-2 cursor-pointer transition-all duration-200",
+                            "group relative flex items-center rounded-lg h-8 pl-2.5 pr-1 cursor-pointer transition-colors",
                             isActive
-                              ? "bg-gradient-to-r from-primary/10 via-primary/5 to-transparent shadow-sm ring-1 ring-primary/20"
-                              : "hover:bg-muted/60 hover:translate-x-0.5"
+                              ? "bg-sidebar-accent text-sidebar-foreground"
+                              : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
                           )}
                           onClick={() => !isEditing && onSelect(c.id)}
                         >
-                          {isActive && (
-                            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-0.5 rounded-r-full bg-gradient-to-b from-primary via-primary to-primary/60 shadow-[0_0_6px_rgba(var(--primary-rgb,59,130,246),0.4)]" />
-                          )}
-                          <MessageSquare
-                            className={cn(
-                              "h-3.5 w-3.5 shrink-0 transition-colors",
-                              isActive
-                                ? "text-primary"
-                                : "text-muted-foreground group-hover:text-foreground"
-                            )}
-                          />
                           {isEditing ? (
                             <div
                               className="flex-1 flex items-center gap-1"
@@ -336,80 +317,101 @@ export default function ConversationSidebar({
                                   if (e.key === "Enter") commitEdit();
                                   else if (e.key === "Escape") cancelEdit();
                                 }}
-                                className="h-6 text-xs px-1.5"
+                                className="h-6 text-[13px] px-1.5"
                                 autoFocus
                               />
                               <button
                                 type="button"
                                 onClick={commitEdit}
-                                className="p-0.5 hover:text-primary"
+                                className="p-1 rounded hover:bg-background text-muted-foreground hover:text-primary"
+                                aria-label="Save"
                               >
                                 <Check className="h-3 w-3" />
                               </button>
                               <button
                                 type="button"
                                 onClick={cancelEdit}
-                                className="p-0.5 hover:text-destructive"
+                                className="p-1 rounded hover:bg-background text-muted-foreground hover:text-destructive"
+                                aria-label="Cancel"
                               >
                                 <X className="h-3 w-3" />
                               </button>
                             </div>
                           ) : (
                             <>
-                              <div className="flex-1 min-w-0">
-                                <div
+                              <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                                {c.isPinned && (
+                                  <Pin className="h-3 w-3 text-muted-foreground/80 shrink-0 fill-current" />
+                                )}
+                                <span
                                   className={cn(
-                                    "text-xs truncate transition-colors",
-                                    isActive
-                                      ? "font-semibold text-foreground"
-                                      : "text-foreground/90 group-hover:text-foreground"
+                                    "truncate text-[13px] leading-tight",
+                                    isActive ? "font-medium" : "font-normal"
                                   )}
                                 >
                                   {c.title}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground/80 font-mono">
-                                  {c.messageCount} msg · {timeAgo(c.updatedAt)}
-                                </div>
+                                </span>
                               </div>
-                              <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 bg-background/90 backdrop-blur-sm rounded-md border border-border/60 px-0.5 shadow-sm">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onTogglePin(c.id, !c.isPinned);
-                                  }}
-                                  className="p-0.5 hover:text-primary"
-                                  title={c.isPinned ? "Unpin" : "Pin"}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn(
+                                      "shrink-0 p-1 rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-background/80 transition-all",
+                                      "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
+                                      isActive && "opacity-100"
+                                    )}
+                                    aria-label="Chat options"
+                                  >
+                                    <MoreHorizontal className="h-3.5 w-3.5" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                  align="end"
+                                  className="w-44"
+                                  onClick={(e) => e.stopPropagation()}
                                 >
-                                  {c.isPinned ? (
-                                    <PinOff className="h-3 w-3" />
-                                  ) : (
-                                    <Pin className="h-3 w-3" />
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startEdit(c);
-                                  }}
-                                  className="p-0.5 hover:text-primary"
-                                  title="Rename"
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete(c.id);
-                                  }}
-                                  className="p-0.5 hover:text-destructive"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              </div>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onTogglePin(c.id, !c.isPinned);
+                                    }}
+                                  >
+                                    {c.isPinned ? (
+                                      <>
+                                        <PinOff className="h-3.5 w-3.5 mr-2" />
+                                        Unstar
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Pin className="h-3.5 w-3.5 mr-2" />
+                                        Star
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEdit(c);
+                                    }}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 mr-2" />
+                                    Rename
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDelete(c.id);
+                                    }}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </>
                           )}
                         </div>

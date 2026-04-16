@@ -9,6 +9,8 @@ import {
   Copy,
   Database,
   Download,
+  FileDown,
+  FileJson,
   FileText,
   Gauge,
   Lightbulb,
@@ -21,10 +23,22 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { LocalMessage, ToolEvent } from "../types";
 import { KpiCard, type KpiEntry } from "./kpi-card";
 import { ChartRenderer, type ChartSpec } from "./chart-renderer";
 import { extractAnalytics } from "./extract";
+import {
+  exportReportAsPDF,
+  exportReportAsMarkdown,
+  exportReportAsJSON,
+} from "@/lib/chatbot-export";
 
 interface Props {
   messages: LocalMessage[];
@@ -140,31 +154,53 @@ function InsightsPanelImpl({
     [insights.lastUserQuestion]
   );
 
-  const exportMarkdown = async () => {
+  const buildCtx = () => ({
+    messages,
+    conversationTitle: activeConversationTitle || "Analysis",
+    providerLabel,
+    modelLabel,
+    lastAnswerOnly: true,
+  });
+
+  const exportAsPDF = async () => {
     if (!insights.lastAssistantContent) {
       toast.error("Nothing to export yet");
       return;
     }
     setBusyExport(true);
     try {
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const title = activeConversationTitle || "analysis";
-      const safe = title.replace(/[^a-z0-9-_ ]/gi, "").trim() || "analysis";
-      const header = `# ${title}\n\n_Exported ${new Date().toLocaleString()}_\n\n---\n\n`;
-      const blob = new Blob([header + insights.lastAssistantContent], {
-        type: "text/markdown;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${safe}-${stamp}.md`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success("Report downloaded");
+      await exportReportAsPDF(buildCtx());
+      toast.success("PDF downloaded");
     } catch (err) {
-      toast.error(`Export failed: ${(err as Error).message}`);
+      toast.error(`PDF export failed: ${(err as Error).message}`);
     } finally {
       setBusyExport(false);
+    }
+  };
+
+  const exportAsMarkdown = () => {
+    if (!insights.lastAssistantContent) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    try {
+      exportReportAsMarkdown(buildCtx());
+      toast.success("Markdown downloaded");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const exportAsJSON = () => {
+    if (!insights.lastAssistantContent) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    try {
+      exportReportAsJSON(buildCtx());
+      toast.success("JSON downloaded");
+    } catch (err) {
+      toast.error((err as Error).message);
     }
   };
 
@@ -376,20 +412,49 @@ function InsightsPanelImpl({
             <Copy className="h-3 w-3 mr-1.5" />
             Copy
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={exportMarkdown}
-            disabled={!insights.lastAssistantContent || busyExport}
-            className="h-8 text-xs rounded-lg"
-          >
-            {busyExport ? (
-              <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-            ) : (
-              <Download className="h-3 w-3 mr-1.5" />
-            )}
-            Export
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!insights.lastAssistantContent || busyExport}
+                className="h-8 text-xs rounded-lg"
+              >
+                {busyExport ? (
+                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3 mr-1.5" />
+                )}
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">
+                Export this analysis
+              </DropdownMenuLabel>
+              <DropdownMenuItem onClick={exportAsPDF} disabled={busyExport}>
+                <FileDown className="h-3.5 w-3.5 mr-2 text-primary" />
+                <span className="flex-1">PDF report</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  .pdf
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportAsMarkdown}>
+                <FileText className="h-3.5 w-3.5 mr-2" />
+                <span className="flex-1">Markdown</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  .md
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportAsJSON}>
+                <FileJson className="h-3.5 w-3.5 mr-2" />
+                <span className="flex-1">JSON data</span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  .json
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {(providerLabel || modelLabel) && (
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">

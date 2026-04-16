@@ -13,7 +13,6 @@ import Link from "next/link";
 import {
   Send,
   Square,
-  Sparkles,
   Settings2,
   Bot,
   AlertCircle,
@@ -22,6 +21,12 @@ import {
   PanelLeft,
   PanelRight,
   PanelRightClose,
+  Download,
+  FileText,
+  FileJson,
+  Copy,
+  Printer,
+  FileDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,11 +45,27 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import ConversationSidebar from "./conversation-sidebar";
 import MessageBubble from "./message-bubble";
 import WelcomeScreen from "./welcome-screen";
 import InsightsPanel from "./analytics/insights-panel";
+import {
+  exportReportAsPDF,
+  exportReportAsMarkdown,
+  exportReportAsJSON,
+  copyReportAsText,
+  printReport,
+  type ExportContext,
+} from "@/lib/chatbot-export";
 import type {
   ProviderDTO,
   ConversationSummary,
@@ -848,6 +869,84 @@ export default function ChatbotUI() {
     [streaming, messages]
   );
 
+  // ── Export handlers ─────────────────────────────────────────────────────
+  const [exporting, setExporting] = useState(false);
+  const canExport = messages.some(
+    (m) => m.role === "assistant" && !m.error && m.content.trim().length > 0
+  );
+
+  const buildExportContext = useCallback(
+    (lastAnswerOnly = false): ExportContext => ({
+      messages,
+      conversationTitle:
+        conversations.find((c) => c.id === activeConversationId)?.title ||
+        "Analytics Report",
+      providerLabel: activeProvider?.displayName,
+      modelLabel: model,
+      lastAnswerOnly,
+    }),
+    [messages, conversations, activeConversationId, activeProvider, model]
+  );
+
+  const handleExportPDF = useCallback(async () => {
+    if (!canExport) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportReportAsPDF(buildExportContext(false));
+      toast.success("PDF downloaded");
+    } catch (err) {
+      toast.error(`PDF export failed: ${(err as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [canExport, buildExportContext]);
+
+  const handleExportMarkdown = useCallback(() => {
+    if (!canExport) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    try {
+      exportReportAsMarkdown(buildExportContext(false));
+      toast.success("Markdown downloaded");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }, [canExport, buildExportContext]);
+
+  const handleExportJSON = useCallback(() => {
+    if (!canExport) {
+      toast.error("Nothing to export yet");
+      return;
+    }
+    try {
+      exportReportAsJSON(buildExportContext(false));
+      toast.success("JSON downloaded");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  }, [canExport, buildExportContext]);
+
+  const handleCopyConversation = useCallback(async () => {
+    if (!canExport) {
+      toast.error("Nothing to copy yet");
+      return;
+    }
+    try {
+      await copyReportAsText(buildExportContext(false));
+      toast.success("Conversation copied");
+    } catch {
+      toast.error("Clipboard blocked");
+    }
+  }, [canExport, buildExportContext]);
+
+  const handlePrint = useCallback(() => {
+    printReport();
+  }, []);
+
   return (
     <div className="flex h-full overflow-hidden bg-background">
       {sidebarOpen && (
@@ -863,17 +962,15 @@ export default function ChatbotUI() {
         />
       )}
 
-      <div className="flex-1 flex flex-col min-w-0 h-full relative">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative bg-background">
         {/* Header */}
-        <div className="relative border-b bg-background/80 backdrop-blur-md px-4 py-3 flex items-center gap-2 flex-wrap shrink-0 z-10">
-          {/* Bottom accent line */}
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+        <div className="border-b border-border/60 bg-background px-4 py-2.5 flex items-center gap-2 flex-wrap shrink-0">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setSidebarOpen((v) => !v)}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            className="hover:bg-muted/60"
+            className="h-8 w-8 p-0 hover:bg-muted text-muted-foreground"
           >
             {sidebarOpen ? (
               <PanelLeftClose className="h-4 w-4" />
@@ -882,35 +979,31 @@ export default function ChatbotUI() {
             )}
           </Button>
           <div className="flex items-center gap-2 mr-auto min-w-0">
-            <div className="relative h-6 w-6 rounded-lg bg-gradient-to-br from-primary/80 to-primary/50 border border-primary/30 shadow-sm shadow-primary/10 flex items-center justify-center shrink-0">
-              <Sparkles className="h-3.5 w-3.5 text-primary-foreground" />
-            </div>
-            <h1 className="text-sm font-semibold truncate max-w-[260px] text-foreground">
+            <h1 className="text-[13px] font-medium truncate max-w-[320px] text-foreground/90">
               {activeConversationId
                 ? conversations.find((c) => c.id === activeConversationId)?.title ??
                   "Chat"
                 : "New chat"}
             </h1>
             {streaming && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/5 text-[10px] font-medium text-primary">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
                 </span>
-                streaming
+                thinking
               </span>
             )}
           </div>
 
           <div className="flex items-center gap-1.5">
-            <Label className="text-[10px] text-muted-foreground">Provider</Label>
             <Select
               value={providerId}
               onValueChange={setProviderId}
               disabled={streaming || providers.length === 0}
             >
-              <SelectTrigger className="h-8 w-[160px] text-xs">
-                <SelectValue placeholder="None" />
+              <SelectTrigger className="h-8 w-[140px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+                <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
                 {providers.map((p) => (
@@ -923,14 +1016,13 @@ export default function ChatbotUI() {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <Label className="text-[10px] text-muted-foreground">Model</Label>
             <Select
               value={model}
               onValueChange={setModel}
               disabled={streaming || modelOptions.length === 0}
             >
-              <SelectTrigger className="h-8 w-[180px] text-xs">
-                <SelectValue placeholder="None" />
+              <SelectTrigger className="h-8 w-[170px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+                <SelectValue placeholder="Model" />
               </SelectTrigger>
               <SelectContent>
                 {modelOptions.map((m) => (
@@ -943,13 +1035,13 @@ export default function ChatbotUI() {
           </div>
 
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => setInsightsOpen((v) => !v)}
             title={insightsOpen ? "Hide insights panel" : "Show insights panel"}
             className={cn(
-              "h-8 px-2",
-              insightsOpen && "bg-primary/5 border-primary/40 text-primary"
+              "h-8 w-8 p-0 hover:bg-muted rounded-lg",
+              insightsOpen ? "text-primary bg-primary/10" : "text-muted-foreground"
             )}
           >
             {insightsOpen ? (
@@ -959,9 +1051,61 @@ export default function ChatbotUI() {
             )}
           </Button>
 
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!canExport || exporting}
+                title="Export / download report"
+                className="h-8 w-8 p-0 hover:bg-muted rounded-lg text-muted-foreground disabled:opacity-40"
+              >
+                {exporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">
+                Export conversation
+              </DropdownMenuLabel>
+              <DropdownMenuItem onClick={handleExportPDF} disabled={exporting}>
+                <FileDown className="h-4 w-4 mr-2 text-primary" />
+                <span className="flex-1">Download PDF</span>
+                <span className="text-[10px] text-muted-foreground font-mono">.pdf</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportMarkdown}>
+                <FileText className="h-4 w-4 mr-2" />
+                <span className="flex-1">Download Markdown</span>
+                <span className="text-[10px] text-muted-foreground font-mono">.md</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportJSON}>
+                <FileJson className="h-4 w-4 mr-2" />
+                <span className="flex-1">Download JSON</span>
+                <span className="text-[10px] text-muted-foreground font-mono">.json</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleCopyConversation}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy as text
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handlePrint}>
+                <Printer className="h-4 w-4 mr-2" />
+                Print…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" disabled={streaming}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={streaming}
+                className="h-8 w-8 p-0 hover:bg-muted rounded-lg text-muted-foreground"
+              >
                 <Settings2 className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
@@ -1018,19 +1162,9 @@ export default function ChatbotUI() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="relative flex-1 overflow-y-auto min-h-0 bg-gradient-to-b from-background via-muted/20 to-muted/40"
+          className="relative flex-1 overflow-y-auto claude-scroll min-h-0 bg-background"
         >
-          {/* Subtle decorative dot grid */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.04] dark:opacity-[0.06]"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, currentColor 1px, transparent 1px)",
-              backgroundSize: "24px 24px",
-            }}
-          />
-          <div className="relative max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-5">
+          <div className="relative max-w-3xl mx-auto w-full px-4 sm:px-6 pt-6 pb-8 space-y-6">
             {loadingProviders ? (
               <Card className="p-8 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-5 w-5 mx-auto mb-2 animate-spin" />
@@ -1080,25 +1214,15 @@ export default function ChatbotUI() {
         </div>
 
         {/* Composer */}
-        <form
-          onSubmit={handleSubmit}
-          className="relative border-t bg-background/80 backdrop-blur-md p-4 shrink-0"
-        >
-          {/* Top accent line */}
-          <div className="pointer-events-none absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+        <form onSubmit={handleSubmit} className="bg-background px-4 pt-2 pb-4 shrink-0">
           <div className="max-w-3xl mx-auto">
             <div
               className={cn(
-                "group relative flex items-end gap-2 rounded-2xl border border-border/70 bg-background px-3 py-2 transition-all duration-300 shadow-sm",
-                "focus-within:border-primary/50 focus-within:shadow-lg focus-within:shadow-primary/10 focus-within:ring-2 focus-within:ring-primary/15",
+                "group relative flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 transition-all duration-200",
+                "focus-within:border-primary/50 focus-within:shadow-[0_2px_16px_-2px_rgba(201,100,66,0.12)]",
                 (streaming || providers.length === 0) && "opacity-60"
               )}
             >
-              {/* Ambient glow behind the composer on focus */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-primary/0 via-primary/10 to-primary/0 opacity-0 group-focus-within:opacity-100 blur-md transition-opacity duration-500 -z-10"
-              />
               <Textarea
                 ref={textareaRef}
                 value={input}
@@ -1107,22 +1231,21 @@ export default function ChatbotUI() {
                 placeholder={
                   providers.length === 0
                     ? "Configure a provider first…"
-                    : "Ask me anything about your ERP data…"
+                    : "Reply to Claude…"
                 }
                 rows={1}
                 disabled={streaming || providers.length === 0}
-                className="resize-none min-h-[36px] max-h-[200px] border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-1 py-1.5 text-sm placeholder:text-muted-foreground/70"
+                className="resize-none min-h-[28px] max-h-[200px] border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 px-1 py-1 text-[14px] leading-relaxed placeholder:text-muted-foreground/70"
               />
               {streaming ? (
                 <Button
                   type="button"
-                  variant="destructive"
                   size="icon"
                   onClick={cancelStream}
                   title="Stop generating"
-                  className="shrink-0 h-9 w-9 rounded-xl shadow-md shadow-destructive/20"
+                  className="shrink-0 h-8 w-8 rounded-lg bg-foreground hover:bg-foreground/90 text-background"
                 >
-                  <Square className="h-4 w-4 fill-current" />
+                  <Square className="h-3.5 w-3.5 fill-current" />
                 </Button>
               ) : (
                 <Button
@@ -1131,27 +1254,25 @@ export default function ChatbotUI() {
                   disabled={!input.trim() || providers.length === 0}
                   title="Send (Enter)"
                   className={cn(
-                    "shrink-0 h-9 w-9 rounded-xl transition-all duration-200",
-                    "bg-gradient-to-br from-primary to-primary/80 hover:from-primary hover:to-primary",
-                    "shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30",
-                    "disabled:shadow-none disabled:from-muted disabled:to-muted disabled:text-muted-foreground",
-                    input.trim() && "hover:-translate-y-0.5 active:translate-y-0"
+                    "shrink-0 h-8 w-8 rounded-lg transition-colors",
+                    "bg-primary hover:bg-primary/90 text-primary-foreground",
+                    "disabled:bg-muted disabled:text-muted-foreground/60"
                   )}
                 >
-                  <Send className="h-4 w-4" />
+                  <Send className="h-3.5 w-3.5" />
                 </Button>
               )}
             </div>
-            <div className="flex items-center justify-center gap-3 mt-2.5 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-muted/60 font-mono text-[9px]">
+            <div className="flex items-center justify-center gap-2 mt-2 text-[11px] text-muted-foreground/70">
+              <span>
+                <kbd className="px-1 py-px rounded border border-border/70 font-mono text-[10px] mr-1">
                   Enter
                 </kbd>
                 to send
               </span>
-              <span className="text-border">·</span>
-              <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 rounded border border-border/70 bg-muted/60 font-mono text-[9px]">
+              <span className="opacity-50">·</span>
+              <span>
+                <kbd className="px-1 py-px rounded border border-border/70 font-mono text-[10px] mr-1">
                   Shift+Enter
                 </kbd>
                 newline
