@@ -188,13 +188,16 @@ export function FormsPermissionMatrix({
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10">
                   <TableRow>
-                    <TableHead className="min-w-[220px] font-semibold">Role / User</TableHead>
+                    <TableHead className="w-[160px] min-w-[160px] px-2 font-semibold">Role / User</TableHead>
                     {permissions.map((p) => (
-                      <TableHead key={p.id} className="min-w-[140px] text-center font-semibold">
+                      <TableHead
+                        key={p.id}
+                        className="w-[88px] min-w-[88px] px-1 text-center text-xs font-semibold uppercase tracking-tight"
+                      >
                         {p.name}
                       </TableHead>
                     ))}
-                    <TableHead className="w-[120px] text-center font-semibold">Granted</TableHead>
+                    <TableHead className="w-[72px] min-w-[72px] px-1 text-center text-xs font-semibold">Granted</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -214,15 +217,15 @@ export function FormsPermissionMatrix({
                         <>
                           {/* Role row */}
                           <TableRow className="hover:bg-muted/60">
-                            <TableCell className="font-medium">
+                            <TableCell className="px-2 font-medium">
                               <CollapsibleTrigger asChild>
-                                <button className="flex items-center gap-2 hover:text-primary focus:outline-none">
+                                <button className="flex items-center gap-1.5 text-sm hover:text-primary focus:outline-none">
                                   {isExpanded ? (
-                                    <ChevronDown className="h-4 w-4" />
+                                    <ChevronDown className="h-4 w-4 shrink-0" />
                                   ) : (
-                                    <ChevronRight className="h-4 w-4" />
+                                    <ChevronRight className="h-4 w-4 shrink-0" />
                                   )}
-                                  {role.name}
+                                  <span className="truncate">{role.name}</span>
                                 </button>
                               </CollapsibleTrigger>
                             </TableCell>
@@ -238,8 +241,8 @@ export function FormsPermissionMatrix({
                               />
                             ))}
 
-                            <TableCell className="text-center">
-                              <Badge variant="outline">
+                            <TableCell className="px-1 text-center">
+                              <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
                                 {grantedCount}/{permissions.length}
                               </Badge>
                             </TableCell>
@@ -337,7 +340,7 @@ interface PermissionCellProps {
 
 function PermissionCell({ checked, disabled, onChange }: PermissionCellProps) {
   return (
-    <TableCell className="text-center">
+    <TableCell className="px-1 text-center">
       <Checkbox checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </TableCell>
   )
@@ -362,9 +365,9 @@ function UserRow({
 }: UserRowProps) {
   return (
     <TableRow className="bg-muted/30 hover:bg-muted/50">
-      <TableCell className="pl-12 text-sm">
-        {user.first_name} {user.last_name}
-        <div className="text-xs text-muted-foreground">{user.email}</div>
+      <TableCell className="pl-8 pr-2 text-sm">
+        <div className="truncate">{user.first_name} {user.last_name}</div>
+        <div className="truncate text-xs text-muted-foreground">{user.email}</div>
       </TableCell>
 
       {permissions.map((p) => (

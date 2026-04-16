@@ -20,7 +20,7 @@ import type {
   RolePermission,
   UserPermission,
 } from "@/types/permissions"
-import { STANDARD_PERMISSIONS } from "@/types/permissions"
+import { STANDARD_PERMISSIONS, FORM_ONLY_PERMISSIONS } from "@/types/permissions"
 
 const SEP = "::"
 
@@ -155,10 +155,14 @@ export function useSectionPermissionMatrix(
     return usersData.data as unknown as PermissionUser[]
   }, [usersData])
 
-  const permissions: Permission[] = useMemo(
-    () => (permsData?.success && permsData.data?.length ? permsData.data : STANDARD_PERMISSIONS),
-    [permsData],
-  )
+  const permissions: Permission[] = useMemo(() => {
+    const base: Permission[] =
+      permsData?.success && permsData.data?.length
+        ? permsData.data
+        : STANDARD_PERMISSIONS
+    // Section-level matrix hides form-only permissions (IMPORT/EXPORT/PRINT).
+    return base.filter((p) => !FORM_ONLY_PERMISSIONS.has((p.name || "").toUpperCase()))
+  }, [permsData])
 
   const rolePermissions: RolePermission[] = useMemo(
     () => (rpData?.success ? rpData.data : EMPTY_ROLE_PERMS),

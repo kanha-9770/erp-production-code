@@ -296,6 +296,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     canEditRecord,
     canDeleteRecord,
     canDeleteAny,
+    canExportForm,
+    canImportForm,
+    canPrintForm,
     getFieldData,
     getConditionalStyle,
     recalculateFormulasForRecord,
@@ -370,6 +373,22 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
   }, [orderedFields, formFieldsWithSections, showAuditFields]);
 
   const moduleId = allModuleForms[0]?.moduleId || allModuleForms[0]?.id || "";
+
+  // Subsets of module forms the user is allowed to act on. Drive the
+  // Print / Import / Export toolbar buttons: a button is only shown when at
+  // least one form in the module grants the matching permission.
+  const printableForms = React.useMemo(
+    () => allModuleForms.filter((f) => canPrintForm(f.id)),
+    [allModuleForms, canPrintForm],
+  );
+  const exportableForms = React.useMemo(
+    () => allModuleForms.filter((f) => canExportForm(f.id)),
+    [allModuleForms, canExportForm],
+  );
+  const importableForms = React.useMemo(
+    () => allModuleForms.filter((f) => canImportForm(f.id)),
+    [allModuleForms, canImportForm],
+  );
 
   const [createSavedFilter, { isLoading: isSavingFilter }] = useCreateSavedFilterMutation();
 
@@ -999,6 +1018,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   setActiveFieldFilters(filters);
                   setCurrentPage(1);
                 }}
+                printableForms={printableForms}
+                exportableForms={exportableForms}
+                importableForms={importableForms}
               />
 
               <div className="border border-gray-200 bg-white rounded-xl overflow-hidden shadow-lg flex-1 flex flex-col">

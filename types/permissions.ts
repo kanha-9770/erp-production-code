@@ -118,4 +118,13 @@ export const STANDARD_PERMISSIONS: Permission[] = [
   { id: "2", name: "CREATE", category: "WRITE",  resource: "form" },
   { id: "3", name: "EDIT",   category: "WRITE",  resource: "form" },
   { id: "4", name: "DELETE", category: "DELETE", resource: "form" },
+  { id: "5", name: "IMPORT", category: "WRITE",  resource: "form" },
+  { id: "6", name: "EXPORT", category: "READ",   resource: "form" },
+  { id: "7", name: "PRINT",  category: "READ",   resource: "form" },
 ]
+
+// Permissions that are meaningful ONLY at the form level. Section and field
+// permission matrices hide these columns because they operate on whole
+// records (delete a record, import/export a file, print a page), not on
+// individual sections or fields.
+export const FORM_ONLY_PERMISSIONS = new Set(["DELETE", "IMPORT", "EXPORT", "PRINT"])

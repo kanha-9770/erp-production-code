@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from "next/server"
 import { exportFormRecords } from "@/lib/api-handlers/data-migration"
+import { getAuthenticatedUser, hasFormPermission } from "@/lib/api-helpers"
 
 export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
   try {
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const allowed = await hasFormPermission(
+      authUser.id,
+      authUser.organizationId,
+      params.formId,
+      "EXPORT",
+    )
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "You don't have permission to export this form" },
+        { status: 403 },
+      )
+    }
+
     const { searchParams } = new URL(request.url)
     const format = searchParams.get("format") || "csv"
     const fieldIds = searchParams.get("fields")?.split(",").filter(Boolean)

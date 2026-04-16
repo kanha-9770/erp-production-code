@@ -104,6 +104,71 @@ export async function isUserAdmin(
   );
 }
 
+/**
+ * Returns `true` if the user has `permissionName` on the given form, merging
+ * role-level and user-level rows. Mirrors the form-level check used by the
+ * client (`hasPermissionForForm`) so the server behaves consistently.
+ *
+ *  - Admins always pass.
+ *  - An active user-level deny (granted:false) overrides a role grant.
+ *  - An active user-level grant, or any role grant on the form (or
+ *    module-level row with no formId), returns true.
+ */
+export async function hasFormPermission(
+  userId: string,
+  organizationId: string | null,
+  formId: string,
+  permissionName: string,
+): Promise<boolean> {
+  if (!userId || !formId || !permissionName) return false;
+  if (await isUserAdmin(userId, organizationId)) return true;
+
+  const target = permissionName.toUpperCase();
+
+  // Permission row (by name, scoped to `form` resource)
+  const permission = await prisma.permission.findFirst({
+    where: { name: target },
+    select: { id: true },
+  });
+  if (!permission) return false;
+
+  // Active user-level overrides for this permission + form-level scope
+  const userOverrides = await prisma.userPermission.findMany({
+    where: {
+      userId,
+      permissionId: permission.id,
+      isActive: true,
+      resourceType: null,
+      resourceId: null,
+      OR: [{ formId }, { formId: null }],
+    },
+    select: { granted: true },
+  });
+  if (userOverrides.some((o) => o.granted === false)) return false;
+  if (userOverrides.some((o) => o.granted === true)) return true;
+
+  // Role-level rows for any of the user's assigned roles
+  const assignments = await prisma.userUnitAssignment.findMany({
+    where: { userId },
+    select: { roleId: true },
+  });
+  const roleIds = assignments.map((a) => a.roleId);
+  if (roleIds.length === 0) return false;
+
+  const rolePerm = await prisma.rolePermission.findFirst({
+    where: {
+      roleId: { in: roleIds },
+      permissionId: permission.id,
+      granted: true,
+      sectionId: null,
+      formFieldId: null,
+      OR: [{ formId }, { formId: null }],
+    },
+    select: { id: true },
+  });
+  return !!rolePerm;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Request meta
 // ─────────────────────────────────────────────────────────────────────────────

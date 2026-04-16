@@ -155,6 +155,9 @@ async function ensureStandardPermissionsExist(): Promise<void> {
       { id: "2", name: "CREATE", category: "WRITE", resource: "form" },
       { id: "3", name: "EDIT", category: "WRITE", resource: "form" },
       { id: "4", name: "DELETE", category: "DELETE", resource: "form" },
+      { id: "5", name: "IMPORT", category: "WRITE", resource: "form" },
+      { id: "6", name: "EXPORT", category: "READ", resource: "form" },
+      { id: "7", name: "PRINT", category: "READ", resource: "form" },
     ];
 
     for (const perm of standardPermissions) {

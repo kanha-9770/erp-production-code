@@ -38,13 +38,18 @@ import {
   Plus,
   X,
   ChevronDown,
+  Printer,
+  Upload,
+  Download,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type {
   FieldFilter,
   ConditionalFormatRule,
   FormFieldWithSection,
 } from "@/types/records";
+import type { Form } from "@/types/forms";
 import {
   useGetSavedFiltersQuery,
   useDeleteSavedFilterMutation,
@@ -74,6 +79,12 @@ interface RecordTableToolbarProps {
   canSaveFilter?: boolean;
   moduleId?: string;
   onApplySavedFilter?: (filters: FieldFilter[]) => void;
+  /** Forms the current user is allowed to print (shows Print button if any) */
+  printableForms?: Form[];
+  /** Forms the current user is allowed to export to CSV */
+  exportableForms?: Form[];
+  /** Forms the current user is allowed to import records into */
+  importableForms?: Form[];
 }
 
 export function RecordTableToolbar({
@@ -98,7 +109,31 @@ export function RecordTableToolbar({
   canSaveFilter = false,
   moduleId,
   onApplySavedFilter,
+  printableForms = [],
+  exportableForms = [],
+  importableForms = [],
 }: RecordTableToolbarProps) {
+  const router = useRouter();
+
+  const handlePrint = React.useCallback(() => {
+    if (typeof window !== "undefined") window.print();
+  }, []);
+
+  const handleExport = React.useCallback((formId: string) => {
+    if (typeof window === "undefined") return;
+    window.open(
+      `/api/forms/${formId}/export?format=csv`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, []);
+
+  const handleImport = React.useCallback(
+    (formId: string) => {
+      router.push(`/data-migration/import?formId=${encodeURIComponent(formId)}`);
+    },
+    [router],
+  );
   const [sortPopoverOpen, setSortPopoverOpen] = React.useState(false);
   const [sortFieldSearch, setSortFieldSearch] = React.useState("");
   const [fieldDropdownOpen, setFieldDropdownOpen] = React.useState(false);
@@ -669,6 +704,109 @@ export function RecordTableToolbar({
           </button>
         )}
       </div>
+
+      {/* Print / Import / Export — gated by permission (parent supplies lists) */}
+      {(printableForms.length > 0 ||
+        importableForms.length > 0 ||
+        exportableForms.length > 0) && (
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {printableForms.length > 0 && (
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 transition-all text-xs text-gray-700"
+              title="Print records"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Print</span>
+            </button>
+          )}
+
+          {importableForms.length > 0 &&
+            (importableForms.length === 1 ? (
+              <button
+                type="button"
+                onClick={() => handleImport(importableForms[0].id)}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 transition-all text-xs text-gray-700"
+                title={`Import records into ${importableForms[0].name}`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Import</span>
+              </button>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-8 px-2.5 inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 transition-all text-xs text-gray-700"
+                    title="Import records"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Import</span>
+                    <ChevronDown className="w-3 h-3 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="text-xs">
+                    Import into…
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {importableForms.map((f) => (
+                    <DropdownMenuItem
+                      key={f.id}
+                      onClick={() => handleImport(f.id)}
+                      className="cursor-pointer text-xs"
+                    >
+                      {f.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ))}
+
+          {exportableForms.length > 0 &&
+            (exportableForms.length === 1 ? (
+              <button
+                type="button"
+                onClick={() => handleExport(exportableForms[0].id)}
+                className="h-8 px-2.5 inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 transition-all text-xs text-gray-700"
+                title={`Export ${exportableForms[0].name} as CSV`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Export</span>
+              </button>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-8 px-2.5 inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 transition-all text-xs text-gray-700"
+                    title="Export records"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Export</span>
+                    <ChevronDown className="w-3 h-3 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="text-xs">
+                    Export as CSV…
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {exportableForms.map((f) => (
+                    <DropdownMenuItem
+                      key={f.id}
+                      onClick={() => handleExport(f.id)}
+                      className="cursor-pointer text-xs"
+                    >
+                      {f.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ))}
+        </div>
+      )}
 
       {/* Right group: Per-page, Column options */}
       <div className="flex items-center gap-1.5 flex-shrink-0">

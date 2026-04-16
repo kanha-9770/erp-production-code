@@ -664,6 +664,48 @@ export function useRecordsDisplay({
     return permissions.some((p) => (p.name || "").toUpperCase() === "DELETE");
   }, [permissions, isAdmin]);
 
+  // Per-form-permission check (mirrors `canDeleteAny`) used by toolbar
+  // actions that aren't tied to a specific record.
+  const canPerformAny = React.useCallback(
+    (permName: string) => {
+      if (isAdmin) return true;
+      const target = permName.toUpperCase();
+      return permissions.some((p) => (p.name || "").toUpperCase() === target);
+    },
+    [permissions, isAdmin],
+  );
+
+  // Toolbar-level flags for Import / Export / Print. True when the user has
+  // the permission on any form in the current view, so the corresponding
+  // toolbar button can be shown.
+  const canImportAny = React.useMemo(
+    () => canPerformAny("IMPORT"),
+    [canPerformAny],
+  );
+  const canExportAny = React.useMemo(
+    () => canPerformAny("EXPORT"),
+    [canPerformAny],
+  );
+  const canPrintAny = React.useMemo(
+    () => canPerformAny("PRINT"),
+    [canPerformAny],
+  );
+
+  // Per-form variants for record-level operations (same pattern as
+  // canEditRecord / canDeleteRecord).
+  const canImportForm = React.useCallback(
+    (formId: string) => hasPermissionForForm(formId, "IMPORT"),
+    [hasPermissionForForm],
+  );
+  const canExportForm = React.useCallback(
+    (formId: string) => hasPermissionForForm(formId, "EXPORT"),
+    [hasPermissionForForm],
+  );
+  const canPrintForm = React.useCallback(
+    (formId: string) => hasPermissionForForm(formId, "PRINT"),
+    [hasPermissionForForm],
+  );
+
   // ── Formula evaluation ───────────────────────────────────────────────────────
 
   const recalculateFormulasForRecord = React.useCallback(
@@ -1998,6 +2040,12 @@ export function useRecordsDisplay({
     canDeleteRecord,
     hasPermissionForForm,
     canDeleteAny,
+    canImportAny,
+    canExportAny,
+    canPrintAny,
+    canImportForm,
+    canExportForm,
+    canPrintForm,
     getFieldData,
     getConditionalStyle,
     recalculateFormulasForRecord,

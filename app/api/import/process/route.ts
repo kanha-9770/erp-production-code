@@ -3,7 +3,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { DatabaseService } from "@/lib/database/database-service";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, hasFormPermission } from "@/lib/api-helpers";
 import { v4 as uuidv4 } from "uuid";
 import { transformToStructuredData } from "@/lib/utils/form-utils";
 
@@ -158,6 +158,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: "Job not found" },
         { status: 404 }
+      );
+    }
+
+    // === 3a. Check IMPORT permission on the target form ===
+    if (authUser) {
+      const allowed = await hasFormPermission(
+        authUser.id,
+        authUser.organizationId,
+        job.formId,
+        "IMPORT",
+      );
+      if (!allowed) {
+        return NextResponse.json(
+          { success: false, error: "You don't have permission to import into this form" },
+          { status: 403 },
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
       );
     }
 
