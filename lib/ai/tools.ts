@@ -525,6 +525,331 @@ const getRecentAuditLog: {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
+// Tool: list_conversations — user's own past chat conversations
+// ─────────────────────────────────────────────────────────────────────────
+const listConversations: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "list_conversations",
+      description:
+        "List the current user's past chat conversations with this assistant. " +
+        "Use this when the user asks about their conversation history, wants to " +
+        "see previous chats, or references a past session (e.g. 'what did I ask " +
+        "yesterday?', 'show my previous chats', 'list my chat history'). " +
+        "Returns conversations ordered by most recent first. Does NOT return " +
+        "message bodies — use read_conversation(id) for a specific thread.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: {
+            type: "integer",
+            description: "Max conversations to return (default 20, cap 50).",
+            minimum: 1,
+            maximum: 50,
+          },
+          pinned_only: {
+            type: "boolean",
+            description:
+              "If true, only return conversations the user has pinned/starred.",
+          },
+        },
+      },
+    },
+  },
+  handler: async (args, ctx) => {
+    const limit = Math.min(Number(args.limit) || 20, 50);
+    const pinnedOnly = args.pinned_only === true;
+    const convs = await prisma.chatConversation.findMany({
+      where: {
+        userId: ctx.userId,
+        organizationId: ctx.organizationId,
+        ...(pinnedOnly ? { isPinned: true } : {}),
+      },
+      orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        isPinned: true,
+        providerId: true,
+        model: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: { select: { messages: true } },
+      },
+    });
+    return clip({
+      count: convs.length,
+      conversations: convs.map((c) => ({
+        id: c.id,
+        title: c.title,
+        isPinned: c.isPinned,
+        model: c.model,
+        messageCount: c._count.messages,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      })),
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: search_conversations — keyword search across titles + message content
+// ─────────────────────────────────────────────────────────────────────────
+const searchConversations: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "search_conversations",
+      description:
+        "Search the user's past chat conversations by keyword. Matches both " +
+        "the conversation title and the content of any message in it. Use this " +
+        "when the user asks 'when did we discuss X?', 'find my chats about Y', " +
+        "or 'what did I ask about Z before?'. Returns matching conversations " +
+        "with a short snippet of where the keyword appeared.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Keyword to search for. Case-insensitive substring match.",
+          },
+          limit: {
+            type: "integer",
+            description: "Max matches to return (default 10, cap 25).",
+            minimum: 1,
+            maximum: 25,
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  handler: async (args, ctx) => {
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    if (!query) return { error: "query is required" };
+    const limit = Math.min(Number(args.limit) || 10, 25);
+
+    // Two-stage search: title match OR message match. We look up conversations
+    // with a title hit OR containing a message whose content matches, then
+    // return them with a snippet.
+    const [titleHits, messageHits] = await Promise.all([
+      prisma.chatConversation.findMany({
+        where: {
+          userId: ctx.userId,
+          organizationId: ctx.organizationId,
+          title: { contains: query, mode: "insensitive" as const },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: limit,
+        select: {
+          id: true,
+          title: true,
+          isPinned: true,
+          updatedAt: true,
+          _count: { select: { messages: true } },
+        },
+      }),
+      prisma.chatMessage.findMany({
+        where: {
+          conversation: {
+            userId: ctx.userId,
+            organizationId: ctx.organizationId,
+          },
+          role: { in: ["user", "assistant"] },
+          content: { contains: query, mode: "insensitive" as const },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit * 3, // oversample to dedupe by conversation
+        select: {
+          conversationId: true,
+          content: true,
+          role: true,
+          createdAt: true,
+          conversation: {
+            select: {
+              id: true,
+              title: true,
+              isPinned: true,
+              updatedAt: true,
+              _count: { select: { messages: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Merge results: deduplicate by conversation id, prefer message snippets
+    // over title-only matches because they tell the user where the keyword
+    // actually appeared.
+    const byConv = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        isPinned: boolean;
+        updatedAt: Date;
+        messageCount: number;
+        matchKind: "title" | "message";
+        snippet?: string;
+      }
+    >();
+    const lcQuery = query.toLowerCase();
+    const buildSnippet = (content: string) => {
+      const lc = content.toLowerCase();
+      const idx = lc.indexOf(lcQuery);
+      if (idx === -1) return content.slice(0, 140);
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(content.length, idx + query.length + 100);
+      return (start > 0 ? "…" : "") + content.slice(start, end) +
+        (end < content.length ? "…" : "");
+    };
+
+    for (const t of titleHits) {
+      byConv.set(t.id, {
+        id: t.id,
+        title: t.title,
+        isPinned: t.isPinned,
+        updatedAt: t.updatedAt,
+        messageCount: t._count.messages,
+        matchKind: "title",
+      });
+    }
+    for (const m of messageHits) {
+      const c = m.conversation;
+      if (!c || byConv.has(c.id)) {
+        // Keep first (most recent) message snippet for the conversation
+        const existing = byConv.get(c?.id ?? "");
+        if (existing && !existing.snippet) {
+          existing.matchKind = "message";
+          existing.snippet = `${m.role === "user" ? "You: " : "Assistant: "}${buildSnippet(m.content)}`;
+        }
+        continue;
+      }
+      byConv.set(c.id, {
+        id: c.id,
+        title: c.title,
+        isPinned: c.isPinned,
+        updatedAt: c.updatedAt,
+        messageCount: c._count.messages,
+        matchKind: "message",
+        snippet: `${m.role === "user" ? "You: " : "Assistant: "}${buildSnippet(m.content)}`,
+      });
+    }
+
+    const merged = Array.from(byConv.values())
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, limit);
+
+    return clip({
+      query,
+      count: merged.length,
+      matches: merged,
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: read_conversation — fetch a specific conversation's messages
+// ─────────────────────────────────────────────────────────────────────────
+const readConversation: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "read_conversation",
+      description:
+        "Fetch the messages from a specific past conversation by id. Use after " +
+        "list_conversations or search_conversations surface a conversation the " +
+        "user wants to revisit. Returns messages ordered oldest-first, capped " +
+        "at the `limit` most recent exchanges. Do NOT invent ids — only use " +
+        "ids returned by list_conversations or search_conversations.",
+      parameters: {
+        type: "object",
+        properties: {
+          conversation_id: {
+            type: "string",
+            description: "The conversation id to read.",
+          },
+          limit: {
+            type: "integer",
+            description:
+              "Max messages to return (default 15, cap 40). Returns the most-recent N and orders oldest-first.",
+            minimum: 1,
+            maximum: 40,
+          },
+        },
+        required: ["conversation_id"],
+      },
+    },
+  },
+  handler: async (args, ctx) => {
+    const conversationId =
+      typeof args.conversation_id === "string" ? args.conversation_id : "";
+    if (!conversationId) return { error: "conversation_id is required" };
+    const limit = Math.min(Number(args.limit) || 15, 40);
+
+    // Permission check: must belong to this user + org. findFirst with scoped
+    // where returns null if the id doesn't exist OR isn't theirs, so we don't
+    // leak existence.
+    const conv = await prisma.chatConversation.findFirst({
+      where: {
+        id: conversationId,
+        userId: ctx.userId,
+        organizationId: ctx.organizationId,
+      },
+      select: {
+        id: true,
+        title: true,
+        isPinned: true,
+        model: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!conv) {
+      return { error: "Conversation not found or not accessible." };
+    }
+
+    // Fetch most-recent `limit` messages, then reverse to oldest-first for
+    // readable chronology.
+    const recent = await prisma.chatMessage.findMany({
+      where: {
+        conversationId,
+        role: { in: ["user", "assistant"] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        role: true,
+        content: true,
+        createdAt: true,
+      },
+    });
+    const messages = recent.reverse();
+
+    return clip({
+      conversation: conv,
+      messageCount: messages.length,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        at: m.createdAt,
+      })),
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
 // Registry
 // ─────────────────────────────────────────────────────────────────────────
 const ALL_TOOLS = {
@@ -535,6 +860,9 @@ const ALL_TOOLS = {
   count_records: countRecords,
   list_org_users: listOrgUsers,
   get_recent_audit_log: getRecentAuditLog,
+  list_conversations: listConversations,
+  search_conversations: searchConversations,
+  read_conversation: readConversation,
 } as const;
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = Object.values(ALL_TOOLS).map(

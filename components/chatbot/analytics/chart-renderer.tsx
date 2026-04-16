@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useRef } from "react";
 import {
   Area,
   AreaChart,
@@ -18,7 +18,21 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertCircle } from "lucide-react";
+import {
+  AlertCircle,
+  FileDown,
+  FileImage,
+  FileSpreadsheet,
+  Copy,
+} from "lucide-react";
+import { toast } from "sonner";
+import VisualToolbar from "./visual-toolbar";
+import {
+  downloadChartPDF,
+  downloadChartPNG,
+  downloadChartCSV,
+  copyChartData,
+} from "@/lib/visual-export";
 
 export interface ChartSeries {
   key: string;
@@ -119,6 +133,16 @@ const AXIS_STYLE = {
 function ChartRendererImpl({ spec }: { spec: ChartSpec }) {
   const height = spec.height ?? 260;
   const data = spec.data;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const runExport = async (fn: () => Promise<void> | void, name: string) => {
+    try {
+      await fn();
+      toast.success(`${name} downloaded`);
+    } catch (err) {
+      toast.error(`${name} failed: ${(err as Error).message}`);
+    }
+  };
 
   // Derive series: explicit spec, or everything numeric except x.
   const effectiveSeries = useMemo<ChartSeries[]>(() => {
@@ -326,9 +350,69 @@ function ChartRendererImpl({ spec }: { spec: ChartSpec }) {
   };
 
   return (
-    <div className="my-3 rounded-xl border border-border/70 bg-gradient-to-br from-background to-muted/20 p-3 shadow-sm">
+    <div
+      ref={containerRef}
+      data-visual-kind="chart"
+      data-visual-title={spec.title ?? ""}
+      className="group relative my-3 rounded-xl border border-border/70 bg-card p-3 shadow-sm"
+    >
+      <VisualToolbar
+        label="Download chart"
+        groups={[
+          {
+            label: "Chart",
+            items: [
+              {
+                label: "PDF report",
+                icon: <FileDown className="h-3.5 w-3.5" />,
+                onSelect: () =>
+                  runExport(
+                    () =>
+                      containerRef.current
+                        ? downloadChartPDF(containerRef.current, spec)
+                        : Promise.reject(new Error("Chart not ready")),
+                    "PDF"
+                  ),
+              },
+              {
+                label: "PNG image",
+                icon: <FileImage className="h-3.5 w-3.5" />,
+                onSelect: () =>
+                  runExport(
+                    () =>
+                      containerRef.current
+                        ? downloadChartPNG(containerRef.current, spec)
+                        : Promise.reject(new Error("Chart not ready")),
+                    "PNG"
+                  ),
+              },
+              {
+                label: "CSV data",
+                icon: <FileSpreadsheet className="h-3.5 w-3.5" />,
+                onSelect: () => runExport(() => downloadChartCSV(spec), "CSV"),
+              },
+            ],
+          },
+          {
+            items: [
+              {
+                label: "Copy data",
+                icon: <Copy className="h-3.5 w-3.5" />,
+                onSelect: async () => {
+                  try {
+                    await copyChartData(spec);
+                    toast.success("Data copied");
+                  } catch {
+                    toast.error("Clipboard blocked");
+                  }
+                },
+              },
+            ],
+          },
+        ]}
+      />
       {(spec.title || spec.description) && (
-        <div className="mb-2 px-1">
+        <div className="mb-2 px-1 pr-10">
           {spec.title && (
             <div className="text-sm font-semibold text-foreground">
               {spec.title}

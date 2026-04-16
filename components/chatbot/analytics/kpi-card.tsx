@@ -2,8 +2,22 @@
 
 import { memo } from "react";
 import { motion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Minus,
+  FileDown,
+  FileSpreadsheet,
+  Copy,
+} from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import VisualToolbar from "./visual-toolbar";
+import {
+  downloadKpiGridPDF,
+  downloadKpiGridCSV,
+  copyKpiGrid,
+} from "@/lib/visual-export";
 
 export interface KpiEntry {
   label: string;
@@ -122,9 +136,11 @@ export const KpiCard = memo(KpiCardImpl);
 export function KpiGrid({
   entries,
   compact = false,
+  titleHint = "Key metrics",
 }: {
   entries: KpiEntry[];
   compact?: boolean;
+  titleHint?: string;
 }) {
   if (!entries || entries.length === 0) return null;
   const cols =
@@ -135,16 +151,67 @@ export function KpiGrid({
         : entries.length === 3
           ? "grid-cols-1 sm:grid-cols-3"
           : "grid-cols-2 sm:grid-cols-2 lg:grid-cols-4";
+
+  const run = async (fn: () => Promise<void> | void, name: string) => {
+    try {
+      await fn();
+      toast.success(`${name} downloaded`);
+    } catch (err) {
+      toast.error(`${name} failed: ${(err as Error).message}`);
+    }
+  };
+
   return (
-    <div className={cn("grid gap-2.5 my-3", cols)}>
-      {entries.map((entry, i) => (
-        <KpiCard
-          key={`${entry.label}-${i}`}
-          entry={entry}
-          index={i}
-          compact={compact}
-        />
-      ))}
+    <div className="group relative my-3">
+      <VisualToolbar
+        label="Download KPIs"
+        className="top-1 right-1"
+        groups={[
+          {
+            label: "Key metrics",
+            items: [
+              {
+                label: "PDF report",
+                icon: <FileDown className="h-3.5 w-3.5" />,
+                onSelect: () =>
+                  run(() => downloadKpiGridPDF(entries, titleHint), "PDF"),
+              },
+              {
+                label: "CSV data",
+                icon: <FileSpreadsheet className="h-3.5 w-3.5" />,
+                onSelect: () =>
+                  run(() => downloadKpiGridCSV(entries, titleHint), "CSV"),
+              },
+            ],
+          },
+          {
+            items: [
+              {
+                label: "Copy as text",
+                icon: <Copy className="h-3.5 w-3.5" />,
+                onSelect: async () => {
+                  try {
+                    await copyKpiGrid(entries);
+                    toast.success("Metrics copied");
+                  } catch {
+                    toast.error("Clipboard blocked");
+                  }
+                },
+              },
+            ],
+          },
+        ]}
+      />
+      <div className={cn("grid gap-2.5", cols)}>
+        {entries.map((entry, i) => (
+          <KpiCard
+            key={`${entry.label}-${i}`}
+            entry={entry}
+            index={i}
+            compact={compact}
+          />
+        ))}
+      </div>
     </div>
   );
 }

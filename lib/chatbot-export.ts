@@ -15,6 +15,7 @@ import {
 } from "@/components/chatbot/analytics/extract";
 import type { ChartSpec } from "@/components/chatbot/analytics/chart-renderer";
 import type { KpiEntry } from "@/components/chatbot/analytics/kpi-card";
+import { svgToPngBlob, blobToDataUrl, chartToRows } from "@/lib/visual-export";
 
 export interface ExportContext {
   messages: LocalMessage[];
@@ -72,8 +73,11 @@ function toPlainText(md: string): string {
   return md
     // Remove KPI blocks (rendered separately as cards)
     .replace(/:::kpi[\s\S]*?:::/g, "")
-    // Remove chart fences (rendered separately as titled tables)
+    // Remove chart fences (rendered separately as titled tables / images)
     .replace(/```chart[\s\S]*?```/g, "")
+    // Remove HTML/SVG/XML fences ENTIRELY — they can't render inside jsPDF
+    // text and dumping raw tags is worse than silently omitting the block.
+    .replace(/```(?:html|svg|xml)[\s\S]*?```/gi, "")
     // Strip other fenced code blocks but keep their content
     .replace(/```[a-z]*\n?([\s\S]*?)```/g, "$1")
     // Headings — keep the text, drop #
@@ -143,30 +147,35 @@ function partitionContent(md: string): Array<
   return parts;
 }
 
-// Convert a chart spec's data into a printable [headers, rows] table.
-function chartToTable(spec: ChartSpec): { headers: string[]; rows: string[][] } {
-  if (spec.type === "pie" || spec.type === "donut") {
-    const nameKey = spec.nameKey ?? "name";
-    const yKey = spec.y ?? "value";
-    return {
-      headers: [nameKey, yKey],
-      rows: spec.data.map((r) => [
-        String(r[nameKey] ?? ""),
-        String(r[yKey] ?? ""),
-      ]),
-    };
+// Locate rendered chart SVGs in document order so we can pair them up with
+// extracted chart specs (same order). Used to embed real chart images in
+// the exported PDF.
+function findRenderedChartSvgs(): SVGElement[] {
+  const roots = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-visual-kind="chart"]')
+  );
+  const svgs: SVGElement[] = [];
+  for (const root of roots) {
+    const svg = root.querySelector("svg");
+    if (svg) svgs.push(svg as SVGElement);
   }
-  const xKey = spec.x ?? Object.keys(spec.data[0] ?? {})[0] ?? "x";
-  const seriesKeys =
-    spec.series?.map((s) => s.key) ??
-    Object.keys(spec.data[0] ?? {}).filter((k) => k !== xKey);
-  return {
-    headers: [xKey, ...seriesKeys],
-    rows: spec.data.map((r) => [
-      String(r[xKey] ?? ""),
-      ...seriesKeys.map((k) => String(r[k] ?? "")),
-    ]),
-  };
+  return svgs;
+}
+
+// Try to rasterize a rendered chart SVG to a PNG data URL. Returns null on
+// any failure so the caller can fall back to the data-table renderer.
+async function tryChartPng(
+  svg: SVGElement | undefined
+): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  if (!svg) return null;
+  try {
+    const blob = await svgToPngBlob(svg);
+    const dataUrl = await blobToDataUrl(blob);
+    const bbox = svg.getBoundingClientRect();
+    return { dataUrl, width: bbox.width, height: bbox.height };
+  } catch {
+    return null;
+  }
 }
 
 // ── PDF export ────────────────────────────────────────────────────────────
@@ -306,7 +315,7 @@ export async function exportReportAsPDF(ctx: ExportContext): Promise<void> {
     y += cardHeight + gap * (rows > 1 ? 1 : 0) + 8;
   }
 
-  // ── Charts section — titles + underlying data tables ─────────────────
+  // ── Charts section — real rendered chart images + data tables ───────
   if (allCharts.length > 0) {
     ensureSpace(40);
     doc.setFont("helvetica", "bold");
@@ -315,8 +324,17 @@ export async function exportReportAsPDF(ctx: ExportContext): Promise<void> {
     doc.text("CHARTS & DATA", margin, y);
     y += 14;
 
-    for (const { spec } of allCharts) {
-      ensureSpace(60);
+    // Grab the currently-rendered chart SVGs so we can embed them as PNG.
+    // Chart extraction order matches DOM order because extractAnalytics walks
+    // messages top-to-bottom and the markdown renderer emits charts in the
+    // same sequence.
+    const renderedSvgs = findRenderedChartSvgs();
+
+    for (let i = 0; i < allCharts.length; i++) {
+      const spec = allCharts[i].spec;
+      ensureSpace(80);
+
+      // Title
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10.5);
       doc.setTextColor(40, 35, 30);
@@ -329,7 +347,24 @@ export async function exportReportAsPDF(ctx: ExportContext): Promise<void> {
         doc.text(spec.description, margin, y);
         y += 12;
       }
-      const { headers, rows } = chartToTable(spec);
+
+      // Try to embed the actual rendered chart as a PNG
+      const png = await tryChartPng(renderedSvgs[i]);
+      if (png && png.width > 0 && png.height > 0) {
+        const targetW = Math.min(contentWidth, 420);
+        const targetH = (png.height / png.width) * targetW;
+        // Page break if the chart image wouldn't fit
+        if (y + targetH > pageHeight - margin - 40) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.addImage(png.dataUrl, "PNG", margin, y, targetW, targetH);
+        y += targetH + 10;
+      }
+
+      // Data table underneath (so readers can copy the underlying numbers)
+      const { headers, rows } = chartToRows(spec);
+      ensureSpace(40);
       autoTable(doc, {
         head: [headers],
         body: rows,
@@ -436,6 +471,57 @@ export async function exportReportAsPDF(ctx: ExportContext): Promise<void> {
 }
 
 // ── Markdown export ───────────────────────────────────────────────────────
+
+// Rewrite raw chart/KPI/HTML/SVG blocks inside an assistant message into
+// reader-friendly markdown so the downloaded .md file is actually readable
+// instead of dumping JSON or HTML tags.
+function rewriteMessageForMarkdown(content: string): string {
+  // :::kpi ... :::  →  ### Key metrics + bullet list
+  let out = content.replace(/:::kpi\n?([\s\S]*?)(?:\n?:::|$)/g, (_, raw) => {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return "";
+      const lines: string[] = ["", "**Key metrics**", ""];
+      for (const k of parsed) {
+        if (!k || typeof k !== "object") continue;
+        const parts = [`- **${k.label}** — ${k.value}`];
+        if (k.delta) parts.push(`(${k.delta}${k.trend ? ` ${k.trend}` : ""})`);
+        if (k.hint) parts.push(`_${k.hint}_`);
+        lines.push(parts.join(" "));
+      }
+      lines.push("");
+      return lines.join("\n");
+    } catch {
+      return "";
+    }
+  });
+
+  // ```chart ... ```  →  markdown title + description + data table
+  out = out.replace(/```chart\n?([\s\S]*?)(?:```|$)/g, (_, raw) => {
+    try {
+      const spec = JSON.parse(raw) as ChartSpec;
+      if (!spec || !Array.isArray(spec.data)) return "";
+      const { headers, rows } = chartToRows(spec);
+      const lines: string[] = [""];
+      if (spec.title) lines.push(`**${spec.title}**`);
+      if (spec.description) lines.push(`_${spec.description}_`);
+      lines.push("");
+      lines.push(`| ${headers.join(" | ")} |`);
+      lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+      for (const r of rows) lines.push(`| ${r.join(" | ")} |`);
+      lines.push("");
+      return lines.join("\n");
+    } catch {
+      return "";
+    }
+  });
+
+  // ```html / ```svg / ```xml fences → omit entirely (unreadable as source)
+  out = out.replace(/```(?:html|svg|xml)[\s\S]*?```/gi, "");
+
+  return out;
+}
+
 export function exportReportAsMarkdown(ctx: ExportContext): void {
   const lines: string[] = [];
   const title = ctx.conversationTitle || "Analysis";
@@ -468,7 +554,7 @@ export function exportReportAsMarkdown(ctx: ExportContext): void {
     } else {
       lines.push(`## Assistant`);
       lines.push("");
-      lines.push(m.content);
+      lines.push(rewriteMessageForMarkdown(m.content));
     }
     lines.push("");
     lines.push("---");

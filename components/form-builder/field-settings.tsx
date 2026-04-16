@@ -1887,9 +1887,7 @@ function DependentOptionsEditor({
       t === "single-select"
     );
   });
-
   const selectedParent = allFormFields.find((f) => f.id === field.parentFieldId);
-
   let parentOptions: FieldOption[] = [];
   if (selectedParent) {
     if (selectedParent.isDependent) {
@@ -1905,7 +1903,6 @@ function DependentOptionsEditor({
       parentOptions = selectedParent.options ?? [];
     }
   }
-
   const addGroup = () => {
     const newGroup: DependentOptionGroup = {
       parentValue: "",
@@ -1920,18 +1917,15 @@ function DependentOptionsEditor({
     };
     onUpdate({ dependentGroups: [...(field.dependentGroups || []), newGroup] });
   };
-
   const updateGroup = (groupIndex: number, updates: Partial<DependentOptionGroup>) => {
     const groups = [...(field.dependentGroups || [])];
     groups[groupIndex] = { ...groups[groupIndex], ...updates };
     onUpdate({ dependentGroups: groups });
   };
-
   const removeGroup = (groupIndex: number) => {
     const groups = (field.dependentGroups || []).filter((_, i) => i !== groupIndex);
     onUpdate({ dependentGroups: groups });
   };
-
   const addChildOption = (groupIndex: number) => {
     const group = field.dependentGroups?.[groupIndex];
     if (!group) return;
@@ -1944,7 +1938,6 @@ function DependentOptionsEditor({
     const newOptions = [...group.options, newOption];
     updateGroup(groupIndex, { options: newOptions });
   };
-
   const updateChildOption = (groupIndex: number, optionIndex: number, updates: Partial<FieldOption>) => {
     const group = field.dependentGroups?.[groupIndex];
     if (!group) return;
@@ -1952,14 +1945,12 @@ function DependentOptionsEditor({
     newOptions[optionIndex] = { ...newOptions[optionIndex], ...updates };
     updateGroup(groupIndex, { options: newOptions });
   };
-
   const removeChildOption = (groupIndex: number, optionIndex: number) => {
     const group = field.dependentGroups?.[groupIndex];
     if (!group) return;
     const newOptions = group.options.filter((_, i) => i !== optionIndex);
     updateGroup(groupIndex, { options: newOptions });
   };
-
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -2118,7 +2109,6 @@ interface MultiValueSelectorProps {
 
 function MultiValueSelector({ options, selectedValues, onChange }: MultiValueSelectorProps) {
   const [open, setOpen] = useState(false);
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -2202,9 +2192,7 @@ export default function FieldSettings({
     params?.formId || params?.id || params?.form_id || params?.slug;
   const effectiveFormId =
     propFormId || (typeof routeFormId === "string" ? routeFormId : undefined);
-
   const { toast } = useToast();
-
   const [localField, setLocalField] = useState<FormField>(field);
   const [allFormFields, setAllFormFields] = useState<FormField[]>([]);
   const [loadingFields, setLoadingFields] = useState(true);
@@ -2217,7 +2205,6 @@ export default function FieldSettings({
   const [saving, setSaving] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showLookupReconfigure, setShowLookupReconfigure] = useState(false);
-
   const [triggerGetFormFull] = useLazyGetFormFullQuery();
   const [triggerGetLookupSources] = useLazyGetLookupSourcesQuery();
   const [triggerGetLookupFields] = useLazyGetLookupFieldsQuery();
@@ -2483,6 +2470,7 @@ export default function FieldSettings({
   );
 
   const isLocationField = ["location", "newlocation"].includes(localField.type ?? "");
+
   const supportsPattern = [
     "text",
     "textarea",
@@ -2686,7 +2674,6 @@ export default function FieldSettings({
                     )}
                   </CardContent>
                 </Card>
-
                 {localField.type === "lookup" && (
                   <Card>
                     <CardHeader>
@@ -2852,7 +2839,6 @@ export default function FieldSettings({
                   </Card>
                 )}
               </TabsContent>
-
               <TabsContent value="validation" className="space-y-6 p-6">
                 <Card>
                   <CardHeader>
@@ -2954,7 +2940,6 @@ export default function FieldSettings({
                   </CardContent>
                 </Card>
               </TabsContent>
-
               <TabsContent value="options" className="space-y-6 p-6">
                 {["select", "multi-select", "radio"].includes(
                   localField.type ?? "",
@@ -3087,7 +3072,6 @@ export default function FieldSettings({
                   </Card>
                 )}
               </TabsContent>
-
               <TabsContent value="advanced" className="space-y-6 p-6">
                 <Card>
                   <CardHeader>
@@ -3123,7 +3107,6 @@ export default function FieldSettings({
                         }}
                       />
                     </div>
-
                     {localField.conditional && (
                       <div className="pl-6 border-l-2 border-gray-200 space-y-5">
                         <div className="space-y-2">
@@ -3148,7 +3131,6 @@ export default function FieldSettings({
                             </SelectContent>
                           </Select>
                         </div>
-
                         <div className="space-y-2">
                           <Label>Parent Field</Label>
                           <Select
@@ -3176,7 +3158,6 @@ export default function FieldSettings({
                             </SelectContent>
                           </Select>
                         </div>
-
                         {localField.conditional?.parentFieldId && (
                           <div className="flex items-center justify-between">
                             <div className="space-y-0.5">
@@ -3186,19 +3167,17 @@ export default function FieldSettings({
                               </p>
                             </div>
                             <Switch
-                              checked={Array.isArray(localField.conditional?.values) && localField.conditional.values.length > 0}
+                              checked={Array.isArray(localField.conditional?.values)}
                               onCheckedChange={toggleMultiValue}
                             />
                           </div>
                         )}
-
                         <div className="space-y-2">
                           <Label>
                             {Array.isArray(localField.conditional?.values) && localField.conditional.values.length > 0
                               ? "Trigger Values (Any of these)"
                               : "Condition Value"}
                           </Label>
-
                           {conditionalParentHasOptions ? (
                             Array.isArray(localField.conditional?.values) && localField.conditional.values.length > 0 ? (
                               <MultiValueSelector
@@ -3256,14 +3235,12 @@ export default function FieldSettings({
                               placeholder="e.g. Yes, Rajasthan, Approved"
                             />
                           )}
-
                           <p className="text-xs text-muted-foreground mt-1">
                             {Array.isArray(localField.conditional?.values) && localField.conditional.values.length > 0
                               ? "Condition will trigger if the parent field matches ANY of the selected values."
                               : "Enter the exact value that should trigger visibility (case-sensitive)"}
                           </p>
                         </div>
-
                         {localField.conditional?.parentFieldId &&
                           (localField.conditional.value ||
                             (Array.isArray(localField.conditional.values) && localField.conditional.values.length > 0)) && (
@@ -3283,7 +3260,6 @@ export default function FieldSettings({
                           )}
                       </div>
                     )}
-
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label>Custom Styling</Label>
@@ -3298,7 +3274,6 @@ export default function FieldSettings({
                         }
                       />
                     </div>
-
                     {localField.styling && (
                       <div className="pl-6 border-l-2 border-gray-200 space-y-4">
                         <div className="grid grid-cols-2 gap-3">
@@ -3353,7 +3328,6 @@ export default function FieldSettings({
                             </div>
                           </div>
                         </div>
-
                         {["dropdown", "select", "lookup", "radio"].includes(localField.type) && (
                           <>
                             <div className="flex items-center justify-between">
@@ -3416,7 +3390,6 @@ export default function FieldSettings({
                             )}
                           </>
                         )}
-
                         <div className="space-y-2">
                           <Label className="text-xs">Custom Class (advanced)</Label>
                           <Input
@@ -3432,7 +3405,6 @@ export default function FieldSettings({
                         </div>
                       </div>
                     )}
-
                     {localField.type === "unique-id" && (
                       <>
                         <Separator className="my-6" />
@@ -3580,7 +3552,6 @@ export default function FieldSettings({
               </TabsContent>
             </ScrollArea>
           </Tabs>
-
           <div className="flex justify-between items-center gap-2 pt-4 border-t px-6 py-4">
             <div className="text-sm text-muted-foreground">
               {hasChanges && "You have unsaved changes"}
@@ -3606,7 +3577,6 @@ export default function FieldSettings({
           </div>
         </DialogContent>
       </Dialog>
-
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -3626,7 +3596,6 @@ export default function FieldSettings({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
       {localField.type === "lookup" && (
         <LookupConfigurationDialog
           open={showLookupReconfigure}

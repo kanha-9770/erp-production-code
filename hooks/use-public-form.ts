@@ -24,6 +24,88 @@ interface FormulaConfig {
   visibleInForm?: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Conditional visibility matcher
+//
+// Handles every permutation the field-settings UI can produce:
+//   - scalar parent + single target `value`  (legacy)
+//   - scalar parent + multi  target `values` (single → any of)
+//   - multiselect parent (array) + single target `value`  (any selected)
+//   - multiselect parent (array) + multi  target `values` (any overlap)
+//
+// Supports `type: "show" | "hide"` and a no-op return (true = visible) when
+// the rule is incomplete or has no targets.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface ConditionalRule {
+  type?: "show" | "hide";
+  parentFieldId?: string;
+  value?: unknown;
+  values?: unknown[];
+  operator?: string;
+}
+
+function normalizeCondValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "object") {
+    // Multiselect components sometimes emit `{ value: string, label: string }`
+    // shapes. Extract the underlying identifier.
+    const o = v as Record<string, unknown>;
+    if (typeof o.value === "string") return o.value;
+    if (typeof o.id === "string") return o.id;
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return "";
+    }
+  }
+  return String(v);
+}
+
+function matchesConditionalRule(
+  rule: ConditionalRule | null | undefined,
+  formData: Record<string, unknown>,
+): boolean {
+  if (!rule) return true;
+  const type = rule.type ?? "show";
+  const parentFieldId = rule.parentFieldId;
+  if (!parentFieldId) return true;
+
+  // Build the set of target values the rule triggers on. `values` (array)
+  // takes precedence when present; fall back to single `value` otherwise.
+  const targets: string[] = [];
+  if (Array.isArray(rule.values) && rule.values.length > 0) {
+    for (const v of rule.values) {
+      const s = normalizeCondValue(v);
+      if (s !== "") targets.push(s);
+    }
+  } else if (rule.value !== undefined && rule.value !== null && rule.value !== "") {
+    const s = normalizeCondValue(rule.value);
+    if (s !== "") targets.push(s);
+  }
+  // No targets means the rule is incomplete — treat as pass-through.
+  if (targets.length === 0) return true;
+
+  // Normalize the parent's selected value(s) to an array of strings so we
+  // can compute intersection uniformly.
+  const parentVal = formData[parentFieldId];
+  let selected: string[];
+  if (parentVal === null || parentVal === undefined) {
+    selected = [];
+  } else if (Array.isArray(parentVal)) {
+    selected = parentVal
+      .map((v) => normalizeCondValue(v))
+      .filter((s) => s !== "");
+  } else {
+    const s = normalizeCondValue(parentVal);
+    selected = s === "" ? [] : [s];
+  }
+
+  const matches = selected.some((v) => targets.includes(v));
+  return type === "show" ? matches : !matches;
+}
+
 interface LookupFieldData {
   field_id: string;
   field_value: string;
@@ -367,42 +449,25 @@ export function usePublicForm({
   ]);
 
   // ── VISIBILITY HELPERS ──
-  // AFTER:
+  // All three evaluators (field / section / subform) share the same rule
+  // shape and delegate to `matchesConditionalRule`, which handles both
+  // single-target (`value`) and multi-target (`values`) rules against both
+  // scalar and multiselect parent fields.
   const evaluateSubformConditional = useCallback(
-    (subform: Subform): boolean => {
-      if (!subform.conditional) return true;
-      const { type = "show", parentFieldId, value: targetValue } = subform.conditional;
-      if (!parentFieldId || targetValue === undefined) return true;
-      const parentVal = formData[parentFieldId];
-      const parentStr = Array.isArray(parentVal)
-        ? parentVal
-        : [String(parentVal ?? "")];
-      const matches = parentStr.some((v) => String(v) === String(targetValue));
-      return type === "show" ? matches : !matches;
-    },
+    (subform: Subform): boolean =>
+      matchesConditionalRule(
+        subform.conditional as ConditionalRule | null | undefined,
+        formData as Record<string, unknown>,
+      ),
     [formData],
   );
 
-  // Evaluate a section's own conditional visibility rule (mirrors the
-  // field & subform conditional logic). Returns true when the section
-  // should remain visible.
   const evaluateSectionConditional = useCallback(
-    (section: Form["sections"][number]): boolean => {
-      if (!section.conditional) return true;
-      const { type = "show", parentFieldId, value: targetValue } =
-        section.conditional as {
-          type?: "show" | "hide";
-          parentFieldId?: string;
-          value?: any;
-        };
-      if (!parentFieldId || targetValue === undefined) return true;
-      const parentVal = formData[parentFieldId];
-      const parentStr = Array.isArray(parentVal)
-        ? parentVal
-        : [String(parentVal ?? "")];
-      const matches = parentStr.some((v) => String(v) === String(targetValue));
-      return type === "show" ? matches : !matches;
-    },
+    (section: Form["sections"][number]): boolean =>
+      matchesConditionalRule(
+        section.conditional as ConditionalRule | null | undefined,
+        formData as Record<string, unknown>,
+      ),
     [formData],
   );
 
@@ -528,21 +593,11 @@ export function usePublicForm({
   const evaluateConditionalVisibility = (
     field: FormField,
     formData: Record<string, any>,
-  ): boolean => {
-    if (!field.conditional) return true;
-    const {
-      type = "show",
-      parentFieldId,
-      value: targetValue,
-    } = field.conditional;
-    if (!parentFieldId || targetValue === undefined) return true;
-    const parentVal = formData[parentFieldId];
-    const parentStr = Array.isArray(parentVal)
-      ? parentVal
-      : [String(parentVal ?? "")];
-    const matches = parentStr.some((v) => String(v) === String(targetValue));
-    return type === "show" ? matches : !matches;
-  };
+  ): boolean =>
+    matchesConditionalRule(
+      field.conditional as ConditionalRule | null | undefined,
+      formData as Record<string, unknown>,
+    );
 
   /**
    * Mode-aware field read-only check.

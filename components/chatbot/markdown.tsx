@@ -10,7 +10,14 @@
  */
 
 import { useState, Fragment } from "react";
-import { Check, Copy, BarChart3 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  BarChart3,
+  FileDown,
+  FileSpreadsheet,
+} from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ChartRenderer,
@@ -18,6 +25,26 @@ import {
   type ChartSpec,
 } from "./analytics/chart-renderer";
 import { KpiGrid, parseKpiBlock, type KpiEntry } from "./analytics/kpi-card";
+import VisualToolbar from "./analytics/visual-toolbar";
+import {
+  downloadTableCSV,
+  downloadTablePDF,
+  copyTable,
+} from "@/lib/visual-export";
+
+// Strip inline markdown formatting (bold, italic, code, links) from a cell
+// string so CSV/PDF exports receive clean text. Keep this narrow — matches
+// the `inline(...)` transforms below just enough for data export.
+function stripInlineMd(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
 
 type Block =
   | { kind: "code"; lang: string; content: string }
@@ -407,12 +434,82 @@ function TextBlock({ content }: { content: string }) {
                 }}
               />
             );
-          case "table":
+          case "table": {
+            const rawHeaders = (g.headers ?? []).map(stripInlineMd);
+            const rawRows = (g.rows ?? []).map((r) => r.map(stripInlineMd));
+            const titleHint =
+              rawHeaders.length > 0 ? rawHeaders.join("-") : "table";
+            const runTable = async (
+              fn: () => Promise<void> | void,
+              name: string
+            ) => {
+              try {
+                await fn();
+                toast.success(`${name} downloaded`);
+              } catch (err) {
+                toast.error(`${name} failed: ${(err as Error).message}`);
+              }
+            };
             return (
               <div
                 key={idx}
-                className="my-2 rounded-md border overflow-hidden bg-background"
+                className="group relative my-2 rounded-md border overflow-hidden bg-background"
               >
+                <VisualToolbar
+                  label="Download table"
+                  className="top-1.5 right-1.5"
+                  groups={[
+                    {
+                      label: "Table",
+                      items: [
+                        {
+                          label: "PDF report",
+                          icon: <FileDown className="h-3.5 w-3.5" />,
+                          onSelect: () =>
+                            runTable(
+                              () =>
+                                downloadTablePDF(
+                                  rawHeaders,
+                                  rawRows,
+                                  titleHint
+                                ),
+                              "PDF"
+                            ),
+                        },
+                        {
+                          label: "CSV data",
+                          icon: <FileSpreadsheet className="h-3.5 w-3.5" />,
+                          onSelect: () =>
+                            runTable(
+                              () =>
+                                downloadTableCSV(
+                                  rawHeaders,
+                                  rawRows,
+                                  titleHint
+                                ),
+                              "CSV"
+                            ),
+                        },
+                      ],
+                    },
+                    {
+                      items: [
+                        {
+                          label: "Copy as TSV",
+                          icon: <Copy className="h-3.5 w-3.5" />,
+                          onSelect: async () => {
+                            try {
+                              await copyTable(rawHeaders, rawRows);
+                              toast.success("Table copied");
+                            } catch {
+                              toast.error("Clipboard blocked");
+                            }
+                          },
+                        },
+                      ],
+                    },
+                  ]}
+                />
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs border-collapse">
                     <thead className="bg-muted/60 border-b">
@@ -445,6 +542,7 @@ function TextBlock({ content }: { content: string }) {
                 </div>
               </div>
             );
+          }
           default:
             return (
               <p key={idx} className="my-1 leading-relaxed">

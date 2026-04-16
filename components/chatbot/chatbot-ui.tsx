@@ -863,6 +863,33 @@ export default function ChatbotUI() {
     [sendMessage]
   );
 
+  // Edit a previously-sent user message: truncate history up to (not
+  // including) that message, then resend with the new content. Updates the
+  // `messagesRef` synchronously so sendMessage's closure reads the truncated
+  // state rather than stale React state.
+  const editUserMessage = useCallback(
+    (messageId: string, newContent: string) => {
+      if (streaming) {
+        toast.error("Wait for the current response to finish");
+        return;
+      }
+      const idx = messagesRef.current.findIndex((m) => m.id === messageId);
+      if (idx === -1) return;
+      const truncated = messagesRef.current.slice(0, idx);
+      messagesRef.current = truncated;
+      setMessages(truncated);
+      sendMessage(newContent);
+    },
+    [streaming, sendMessage]
+  );
+
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   // Memoize computed flags so memoized bubbles don't re-render from these
   const canRegenerate = useMemo(
     () => !streaming && messages.some((x) => x.role === "user"),
@@ -1205,8 +1232,11 @@ export default function ChatbotUI() {
                   key={m.id}
                   message={m}
                   isLast={idx === messages.length - 1}
+                  isLastUserMessage={m.id === lastUserMessageId}
                   canRegenerate={canRegenerate}
                   onRegenerate={regenerate}
+                  onEditUserMessage={editUserMessage}
+                  streaming={streaming}
                 />
               ))
             )}

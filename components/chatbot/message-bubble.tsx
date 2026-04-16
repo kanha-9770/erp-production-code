@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Copy,
@@ -11,6 +11,9 @@ import {
   Wrench,
   CheckCircle2,
   Sparkles,
+  Pencil,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
@@ -19,18 +22,71 @@ import type { LocalMessage, ToolEvent } from "./types";
 interface Props {
   message: LocalMessage;
   isLast: boolean;
+  isLastUserMessage?: boolean;
   canRegenerate: boolean;
   onRegenerate: () => void;
+  onEditUserMessage?: (id: string, newContent: string) => void;
+  streaming?: boolean;
+}
+
+const FEEDBACK_KEY = "chatbot-message-feedback";
+
+function readFeedback(): Record<string, "up" | "down"> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(FEEDBACK_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, "up" | "down">) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFeedback(map: Record<string, "up" | "down">): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(FEEDBACK_KEY, JSON.stringify(map));
+  } catch {
+    /* storage may be unavailable */
+  }
 }
 
 function MessageBubbleImpl({
   message,
   isLast,
+  isLastUserMessage,
   canRegenerate,
   onRegenerate,
+  onEditUserMessage,
+  streaming,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(message.content);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const isUser = message.role === "user";
+
+  // Hydrate stored feedback on mount / message change
+  useEffect(() => {
+    if (isUser) return;
+    const map = readFeedback();
+    setFeedback(map[message.id] ?? null);
+  }, [isUser, message.id]);
+
+  useEffect(() => {
+    if (editing) {
+      setEditValue(message.content);
+      queueMicrotask(() => {
+        const el = editRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+        }
+      });
+    }
+  }, [editing, message.content]);
 
   const copy = async () => {
     try {
@@ -40,6 +96,28 @@ function MessageBubbleImpl({
     } catch {
       /* ignore */
     }
+  };
+
+  const submitEdit = () => {
+    const trimmed = editValue.trim();
+    if (!trimmed || trimmed === message.content.trim()) {
+      setEditing(false);
+      return;
+    }
+    onEditUserMessage?.(message.id, trimmed);
+    setEditing(false);
+  };
+
+  const setFeedbackValue = (next: "up" | "down") => {
+    const map = readFeedback();
+    if (map[message.id] === next) {
+      delete map[message.id];
+      setFeedback(null);
+    } else {
+      map[message.id] = next;
+      setFeedback(next);
+    }
+    writeFeedback(map);
   };
 
   // Collapse duplicate tool events ({calling, done} for same name → one pill)
@@ -62,30 +140,94 @@ function MessageBubbleImpl({
         transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         className="group flex justify-end"
       >
-        <div className="flex flex-col items-end max-w-[85%] min-w-0">
-          <div className="rounded-2xl bg-secondary text-foreground px-4 py-2.5 text-[14.5px] leading-relaxed break-words whitespace-pre-wrap">
-            {message.content}
-          </div>
-          <div className="flex items-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <button
-              type="button"
-              onClick={copy}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors"
-              title="Copy"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3 w-3" />
-                  Copy
-                </>
+        <div className="flex flex-col items-end max-w-[85%] min-w-0 w-full">
+          {editing ? (
+            <div className="w-full rounded-2xl border border-primary/40 bg-background p-2 shadow-sm">
+              <textarea
+                ref={editRef}
+                value={editValue}
+                onChange={(e) => {
+                  setEditValue(e.target.value);
+                  const el = e.currentTarget;
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    submitEdit();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditing(false);
+                  }
+                }}
+                rows={1}
+                className="w-full resize-none bg-transparent text-[14.5px] leading-relaxed outline-none px-2 py-1.5 placeholder:text-muted-foreground"
+                placeholder="Edit your message…"
+              />
+              <div className="flex items-center justify-end gap-1 mt-1 pt-1 border-t border-border/60">
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="px-2 py-1 text-[11px] rounded-md text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitEdit}
+                  disabled={
+                    !editValue.trim() ||
+                    editValue.trim() === message.content.trim() ||
+                    streaming
+                  }
+                  className="px-2.5 py-1 text-[11px] font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save & resend
+                  <kbd className="ml-1.5 opacity-70 text-[9px] font-mono">
+                    ⌘↵
+                  </kbd>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-secondary text-foreground px-4 py-2.5 text-[14.5px] leading-relaxed break-words whitespace-pre-wrap">
+              {message.content}
+            </div>
+          )}
+          {!editing && (
+            <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              {isLastUserMessage && onEditUserMessage && !streaming && (
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors"
+                  title="Edit message and resend"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </button>
               )}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={copy}
+                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors"
+                title="Copy"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    Copy
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     );
@@ -147,7 +289,7 @@ function MessageBubbleImpl({
         </div>
 
         {!message.pending && message.content && (
-          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
             <button
               type="button"
               onClick={copy}
@@ -178,6 +320,48 @@ function MessageBubbleImpl({
                 <RefreshCw className="h-3 w-3" />
                 Retry
               </button>
+            )}
+            {!message.error && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackValue("up")}
+                  className={cn(
+                    "flex items-center gap-1 text-[11px] px-1.5 py-1 rounded-md transition-colors",
+                    feedback === "up"
+                      ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  title="Good response"
+                  aria-pressed={feedback === "up"}
+                >
+                  <ThumbsUp
+                    className={cn(
+                      "h-3 w-3",
+                      feedback === "up" && "fill-current"
+                    )}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackValue("down")}
+                  className={cn(
+                    "flex items-center gap-1 text-[11px] px-1.5 py-1 rounded-md transition-colors",
+                    feedback === "down"
+                      ? "text-rose-600 dark:text-rose-400 bg-rose-500/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  title="Bad response"
+                  aria-pressed={feedback === "down"}
+                >
+                  <ThumbsDown
+                    className={cn(
+                      "h-3 w-3",
+                      feedback === "down" && "fill-current"
+                    )}
+                  />
+                </button>
+              </>
             )}
             {(message.providerName || message.model) && (
               <span className="ml-auto text-[10px] text-muted-foreground/70 font-mono">
@@ -228,8 +412,11 @@ const MessageBubble = memo(MessageBubbleImpl, (prev, next) => {
   return (
     prev.message === next.message &&
     prev.isLast === next.isLast &&
+    prev.isLastUserMessage === next.isLastUserMessage &&
     prev.canRegenerate === next.canRegenerate &&
-    prev.onRegenerate === next.onRegenerate
+    prev.onRegenerate === next.onRegenerate &&
+    prev.onEditUserMessage === next.onEditUserMessage &&
+    prev.streaming === next.streaming
   );
 });
 

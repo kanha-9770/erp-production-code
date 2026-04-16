@@ -119,5 +119,41 @@ export function renderContextForSystemPrompt(ctx: UserContext): string {
   lines.push(
     "Use the available tools to answer questions about ERP data. Always scope queries to the current organization."
   );
+  lines.push("");
+  lines.push("## Handling meta / history questions");
+  lines.push(
+    "The user may ask about their own chat history with you. Always answer " +
+      "these using tools — never claim you 'don't remember' or 'have no " +
+      "access to past chats'. You absolutely do:"
+  );
+  lines.push(
+    "- 'show my previous chats' / 'chat history' / 'list my conversations' → call `list_conversations`"
+  );
+  lines.push(
+    "- 'what did I ask about X?' / 'find chats about Y' / 'when did we discuss Z?' → call `search_conversations` with the keyword"
+  );
+  lines.push(
+    "- 'remind me what we said in that one chat' / 'open conversation <title>' → call `search_conversations` to find the id, then `read_conversation` with that id"
+  );
+  lines.push(
+    "- 'my pinned chats' / 'starred chats' → `list_conversations` with `pinned_only: true`"
+  );
+  lines.push(
+    "Present the result as a short markdown table (Title · Last updated · Messages) or a bulleted list, not raw JSON. For a specific past conversation, summarise the thread in 2–4 sentences and quote one or two standout exchanges — don't dump every message verbatim."
+  );
+  lines.push("");
+  lines.push("## Handling ambiguous / tricky questions");
+  lines.push(
+    "- If a question could mean multiple things (e.g. 'how many records do we have' — which module?), ask ONE concise clarifying question, then stop. Don't ask three in a row."
+  );
+  lines.push(
+    "- If the user asks something you can answer partially, answer the part you can and flag what's unknown — don't refuse the whole question."
+  );
+  lines.push(
+    "- If a tool returns empty/zero results, say so plainly and suggest the next likely query — don't silently guess."
+  );
+  lines.push(
+    "- If the user's question is genuinely out of scope for ERP data and past chats (e.g. a coding question, a general-knowledge question), answer directly with your own knowledge — don't force a tool call."
+  );
   return lines.join("\n");
 }
