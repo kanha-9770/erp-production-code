@@ -34,6 +34,7 @@ const noShiftStrategy = () => null;
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 import {
   Search,
   ArrowUpDown,
@@ -517,6 +518,37 @@ export default function ModuleSidebar({
   const historyStateRef = useRef(historyState);
   historyStateRef.current = historyState;
 
+  // Toast helper for user-visible feedback on undo/redo actions. Without
+  // this, a successful undo is silent and users can't tell whether the
+  // keyboard shortcut fired (the common cause of "undo/redo not working"
+  // reports).
+  const { toast } = useToast();
+
+  // Shift-held tracker — while a drag is in progress and Shift is held,
+  // the "inside" (nest) zone expands to cover almost the entire row so
+  // deliberate nesting is trivial. Without Shift, the narrower default zone
+  // prevents accidental nesting when the user just wants to reorder.
+  const shiftHeldRef = useRef(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftHeldRef.current = true;
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftHeldRef.current = false;
+    };
+    const blur = () => {
+      shiftHeldRef.current = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
   const canUndo = historyState.index >= 0;
   const canRedo = historyState.index < historyState.stack.length - 1;
 
@@ -529,7 +561,10 @@ export default function ModuleSidebar({
 
   const undo = useCallback(async () => {
     const cur = historyStateRef.current;
-    if (cur.index < 0) return;
+    if (cur.index < 0) {
+      toast({ title: "Nothing to undo" });
+      return;
+    }
     const entry = cur.stack[cur.index];
     // Optimistically move the pointer back so rapid Ctrl+Z presses chain
     // through history without waiting on the in-flight network request.
@@ -540,25 +575,46 @@ export default function ModuleSidebar({
         entry.fromParentId,
         entry.fromIndex
       );
+      toast({
+        title: "Undone",
+        description: "Module move reverted.",
+      });
     } catch (err) {
       console.error("[Sidebar] undo failed", err);
       // Roll the pointer back forward — the action did not succeed.
       setHistoryState((prev) => ({ ...prev, index: prev.index + 1 }));
+      toast({
+        title: "Undo failed",
+        description: (err as Error).message ?? "Please try again.",
+        variant: "destructive",
+      });
     }
-  }, [onReorderModule]);
+  }, [onReorderModule, toast]);
 
   const redo = useCallback(async () => {
     const cur = historyStateRef.current;
-    if (cur.index >= cur.stack.length - 1) return;
+    if (cur.index >= cur.stack.length - 1) {
+      toast({ title: "Nothing to redo" });
+      return;
+    }
     const entry = cur.stack[cur.index + 1];
     setHistoryState((prev) => ({ ...prev, index: prev.index + 1 }));
     try {
       await onReorderModule(entry.moduleId, entry.toParentId, entry.toIndex);
+      toast({
+        title: "Redone",
+        description: "Module move reapplied.",
+      });
     } catch (err) {
       console.error("[Sidebar] redo failed", err);
       setHistoryState((prev) => ({ ...prev, index: prev.index - 1 }));
+      toast({
+        title: "Redo failed",
+        description: (err as Error).message ?? "Please try again.",
+        variant: "destructive",
+      });
     }
-  }, [onReorderModule]);
+  }, [onReorderModule, toast]);
 
   // ── Manual FLIP animation for smooth reorder ───────────────────────────────
   //
@@ -836,28 +892,39 @@ export default function ModuleSidebar({
       }
 
       // Compute position from the LIVE cursor Y (tracked via pointermove),
-      // not the start position. We use a 33/34/33 split — 13/14/13 px on a
-      // 40 px row — so above/below are big enough to actually hit reliably
-      // (the old 20/60/20 split gave only 8 px above/below, which is what
-      // made nested submodule reordering feel impossible).
+      // not the start position.
+      //
+      // Default split 35/30/35 — 14/12/14 px on a 40 px row — gives roughly
+      // equal-sized targets for above / inside / below. Small enough that
+      // sibling reordering doesn't accidentally nest, big enough that
+      // center-aim nesting is discoverable.
+      //
+      // Shift-held override: when the user holds Shift during a drag, we
+      // expand "inside" to cover almost the whole row (10/80/10). This is
+      // the explicit "nest this" gesture — hard to miss, reserved for
+      // deliberate nesting, no guesswork.
       const rect = over.rect;
       const cursorY = cursorYRef.current;
       const offset = cursorY - rect.top;
       const ratio = Math.max(0, Math.min(1, offset / rect.height));
 
+      const shift = shiftHeldRef.current;
+      const insideLow = shift ? 0.1 : 0.35;
+      const insideHigh = shift ? 0.9 : 0.65;
+
       let position: "above" | "inside" | "below";
-      if (ratio < 0.33) position = "above";
-      else if (ratio > 0.67) position = "below";
+      if (ratio < insideLow) position = "above";
+      else if (ratio > insideHigh) position = "below";
       else position = "inside";
 
-      // Smart "below" → "inside" remap. When the user hovers the bottom
-      // of an EXPANDED parent that already has visible children, "below"
-      // visually points at the parent's first child. The user expects the
-      // dragged item to slot in as a new first child, NOT to skip over
-      // every visible child and land as a sibling after the parent. So we
-      // promote that drop to "inside" — the indicator turns into the green
-      // "DROP INSIDE" badge and the child gets prepended on drop.
-      if (position === "below") {
+      // Smart "below" → "inside" remap. When the user hovers the VERY
+      // bottom edge of an EXPANDED parent that has visible children, the
+      // insertion line visually points right above the parent's first
+      // child, so the user expects the drop to land as a new first child.
+      // We only promote in the last 15% of the row (ratio > 0.85) — not
+      // the whole "below" zone — so the rest of the "below" area behaves
+      // as a normal sibling-after-parent reorder.
+      if (position === "below" && ratio > 0.85) {
         const overModule = findModule(filteredModules, overIdStr);
         const isExpanded = expanded.has(overIdStr);
         if (overModule?.children?.length && isExpanded) {
@@ -1275,19 +1342,27 @@ export default function ModuleSidebar({
             >
               {activeNode ? (
                 <div
-                  className="bg-white border-2 border-blue-500 shadow-2xl rounded-lg px-3 py-2.5 flex items-center gap-2 max-w-[300px] backdrop-blur-sm bg-white/95"
+                  className="bg-white border-2 border-blue-500 shadow-2xl rounded-lg px-3 py-2.5 flex flex-col gap-1 max-w-[320px] backdrop-blur-sm bg-white/95"
                   style={{ transform: "rotate(-1.5deg)" }}
                 >
-                  <GripVertical className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  <LayoutDashboard className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                  <span className="text-[12px] font-bold tracking-wide text-blue-900 truncate">
-                    {activeNode.module.name.toUpperCase()}
-                  </span>
-                  {activeNode.module.children?.length ? (
-                    <span className="ml-auto pl-2 text-[10px] font-bold text-blue-500 tabular-nums">
-                      +{activeNode.module.children.length}
+                  <div className="flex items-center gap-2">
+                    <GripVertical className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                    <LayoutDashboard className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span className="text-[12px] font-bold tracking-wide text-blue-900 truncate">
+                      {activeNode.module.name.toUpperCase()}
                     </span>
-                  ) : null}
+                    {activeNode.module.children?.length ? (
+                      <span className="ml-auto pl-2 text-[10px] font-bold text-blue-500 tabular-nums">
+                        +{activeNode.module.children.length}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-[9.5px] text-gray-500 leading-tight pl-6 flex items-center gap-1 font-medium">
+                    <kbd className="px-1 py-[1px] rounded border border-gray-300 bg-gray-50 font-mono text-[9px]">
+                      Shift
+                    </kbd>
+                    <span>hold to nest inside</span>
+                  </div>
                 </div>
               ) : null}
             </DragOverlay>

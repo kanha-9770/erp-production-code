@@ -16,6 +16,7 @@ import {
 import type { ChartSpec } from "@/components/chatbot/analytics/chart-renderer";
 import type { KpiEntry } from "@/components/chatbot/analytics/kpi-card";
 import { svgToPngBlob, blobToDataUrl, chartToRows } from "@/lib/visual-export";
+import { buildMindmapExportSvg } from "@/components/chatbot/analytics/mindmap-renderer";
 
 export interface ExportContext {
   messages: LocalMessage[];
@@ -75,6 +76,9 @@ function toPlainText(md: string): string {
     .replace(/:::kpi[\s\S]*?:::/g, "")
     // Remove chart fences (rendered separately as titled tables / images)
     .replace(/```chart[\s\S]*?```/g, "")
+    // Remove mindmap / flowmap fences — rendered separately as images
+    .replace(/```mindmap[\s\S]*?```/gi, "")
+    .replace(/```flowmap[\s\S]*?```/gi, "")
     // Remove HTML/SVG/XML fences ENTIRELY — they can't render inside jsPDF
     // text and dumping raw tags is worse than silently omitting the block.
     .replace(/```(?:html|svg|xml)[\s\S]*?```/gi, "")
@@ -160,6 +164,58 @@ function findRenderedChartSvgs(): SVGElement[] {
     if (svg) svgs.push(svg as SVGElement);
   }
   return svgs;
+}
+
+// Capture rendered visualisations for PDF embedding.
+// - Flowmaps: rasterise the live React Flow SVG from the DOM.
+// - Mindmaps: the renderer uses HTML divs + a skeleton SVG of edges, which
+//   would rasterise WITHOUT the node boxes. Instead we rebuild a complete
+//   standalone SVG from the mindmap's source (extracted from assistant
+//   message content) so the exported image has everything — nodes, edges,
+//   labels — regardless of pan/zoom or collapsed state.
+interface RenderedVisual {
+  kind: "mindmap" | "flowmap";
+  title: string;
+  // For flowmaps: the live DOM SVG element.
+  svg?: SVGElement;
+  // For mindmaps: a freshly-built SVG string + its natural pixel size.
+  svgString?: string;
+  svgWidth?: number;
+  svgHeight?: number;
+}
+
+function findRenderedFlowmaps(): RenderedVisual[] {
+  const roots = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-visual-kind="flowmap"]')
+  );
+  const out: RenderedVisual[] = [];
+  for (const root of roots) {
+    const svg = root.querySelector("svg");
+    if (!svg) continue;
+    const title = root.getAttribute("data-visual-title") ?? "flowmap";
+    out.push({ kind: "flowmap", title, svg: svg as SVGElement });
+  }
+  return out;
+}
+
+// Extract every ```mindmap fenced block from an assistant message (in order)
+// and build a printable SVG for each one.
+function extractMindmapsFromContent(content: string): RenderedVisual[] {
+  const out: RenderedVisual[] = [];
+  const re = /```mindmap\n?([\s\S]*?)(?:```|$)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const built = buildMindmapExportSvg(m[1] ?? "");
+    if (!built) continue;
+    out.push({
+      kind: "mindmap",
+      title: built.title,
+      svgString: built.svg,
+      svgWidth: built.width,
+      svgHeight: built.height,
+    });
+  }
+  return out;
 }
 
 // Try to rasterize a rendered chart SVG to a PNG data URL. Returns null on
@@ -385,6 +441,81 @@ export async function exportReportAsPDF(ctx: ExportContext): Promise<void> {
     }
   }
 
+  // ── Mindmaps & Flowmaps — embed as full-width images ────────────────
+  // Mindmaps are built fresh from the markdown source per message, so the
+  // exported picture always contains every node + edge regardless of the
+  // user's current pan/zoom or collapsed state. Flowmaps are captured from
+  // the live DOM (React Flow owns the canonical layout).
+  const mindmaps: RenderedVisual[] = [];
+  for (const m of includedMessages) {
+    if (m.role !== "assistant") continue;
+    mindmaps.push(...extractMindmapsFromContent(m.content));
+  }
+  const flowmaps = findRenderedFlowmaps();
+  const renderedVisuals: RenderedVisual[] = [...mindmaps, ...flowmaps];
+
+  if (renderedVisuals.length > 0) {
+    ensureSpace(60);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(60, 60, 60);
+    doc.text("DIAGRAMS", margin, y);
+    y += 14;
+
+    for (const v of renderedVisuals) {
+      ensureSpace(80);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(40, 35, 30);
+      doc.text(
+        `${v.kind === "mindmap" ? "Mindmap" : "Flowmap"} — ${v.title}`,
+        margin,
+        y
+      );
+      y += 12;
+
+      // Rasterise: flowmaps have a live SVGElement; mindmaps have a string.
+      let png: { dataUrl: string; width: number; height: number } | null = null;
+      if (v.svg) {
+        png = await tryChartPng(v.svg);
+      } else if (v.svgString && v.svgWidth && v.svgHeight) {
+        try {
+          const holder = document.createElement("div");
+          holder.style.position = "absolute";
+          holder.style.left = "-99999px";
+          holder.innerHTML = v.svgString;
+          document.body.appendChild(holder);
+          const svgEl = holder.querySelector("svg");
+          if (svgEl) {
+            const blob = await svgToPngBlob(svgEl as SVGElement);
+            const dataUrl = await blobToDataUrl(blob);
+            png = { dataUrl, width: v.svgWidth, height: v.svgHeight };
+          }
+          holder.remove();
+        } catch {
+          png = null;
+        }
+      }
+
+      if (png && png.width > 0 && png.height > 0) {
+        const targetW = Math.min(contentWidth, 520);
+        const targetH = (png.height / png.width) * targetW;
+        if (y + targetH > pageHeight - margin - 40) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.addImage(png.dataUrl, "PNG", margin, y, targetW, targetH);
+        y += targetH + 16;
+      } else {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(140, 135, 130);
+        doc.text("(diagram could not be embedded)", margin, y);
+        y += 16;
+      }
+    }
+  }
+
   // ── Conversation section ─────────────────────────────────────────────
   if (includedMessages.length > 0) {
     ensureSpace(40);
@@ -509,6 +640,55 @@ function rewriteMessageForMarkdown(content: string): string {
       lines.push(`| ${headers.join(" | ")} |`);
       lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
       for (const r of rows) lines.push(`| ${r.join(" | ")} |`);
+      lines.push("");
+      return lines.join("\n");
+    } catch {
+      return "";
+    }
+  });
+
+  // ```mindmap fences already contain a valid markdown outline — keep the
+  // contents inline under a short heading so the .md file stays readable.
+  out = out.replace(/```mindmap\n?([\s\S]*?)(?:```|$)/gi, (_, raw) => {
+    const src = String(raw).trim();
+    if (!src) return "";
+    return `\n**Mindmap**\n\n${src}\n`;
+  });
+
+  // ```flowmap fences are JSON — unreadable in .md. Render as a bullet list
+  // of nodes and a "→" list of edges.
+  out = out.replace(/```flowmap\n?([\s\S]*?)(?:```|$)/gi, (_, raw) => {
+    try {
+      const spec = JSON.parse(raw) as {
+        title?: string;
+        description?: string;
+        nodes?: Array<{ id: string; label?: string; kind?: string }>;
+        edges?: Array<{ from: string; to: string; label?: string }>;
+      };
+      if (
+        !spec ||
+        !Array.isArray(spec.nodes) ||
+        !Array.isArray(spec.edges)
+      ) {
+        return "";
+      }
+      const lines: string[] = [];
+      if (spec.title) lines.push(`**Flowmap — ${spec.title}**`);
+      else lines.push(`**Flowmap**`);
+      if (spec.description) lines.push(`_${spec.description}_`);
+      lines.push("");
+      lines.push("_Nodes_");
+      for (const n of spec.nodes) {
+        const label = n.label ?? n.id;
+        const kind = n.kind ? ` (${n.kind})` : "";
+        lines.push(`- \`${n.id}\` — ${label}${kind}`);
+      }
+      lines.push("");
+      lines.push("_Edges_");
+      for (const e of spec.edges) {
+        const lbl = e.label ? ` — ${e.label}` : "";
+        lines.push(`- ${e.from} → ${e.to}${lbl}`);
+      }
       lines.push("");
       return lines.join("\n");
     } catch {

@@ -33,7 +33,12 @@ import {
 } from "./local-provider";
 
 const MAX_KEY_ATTEMPTS = 5;
-const MAX_TOOL_ROUNDS = 5;
+// Hard ceiling on consecutive tool-call rounds per request. Complex
+// multi-form / multi-module analyses legitimately chain 10+ tool calls
+// (list modules → list forms → structure of form A → structure of form B →
+// find_fields → etc). 25 is well above real workflows but still cuts off
+// genuinely runaway loops where the LLM keeps re-calling the same tool.
+const MAX_TOOL_ROUNDS = 25;
 
 /**
  * Local providers (Ollama/vLLM/llama.cpp/LM Studio) don't need a real API key.
@@ -470,12 +475,46 @@ export async function chatStream(
             // Loop — the LLM will see tool results and continue.
           }
 
-          // Exited via MAX_TOOL_ROUNDS on this provider — tell the user and
-          // stop (this is not a failure we want to failover on).
-          emit({
-            delta:
-              "\n\n(I reached the maximum number of tool-call rounds and stopped. Please rephrase.)",
+          // Exited via MAX_TOOL_ROUNDS on this provider. Rather than bail
+          // with "please rephrase" (which discards everything we just
+          // fetched), do ONE final non-tool call so the LLM synthesises
+          // whatever it has into a useful answer. This only fires in the
+          // rare pathological case where the model kept chaining tools
+          // instead of writing up its findings.
+          messageBuffer.push({
+            role: "system",
+            content:
+              "You have used the maximum number of tool calls for this " +
+              "request. Do not call any more tools. Using ONLY the " +
+              "information already gathered above, write the best final " +
+              "answer you can now. If some requested details are still " +
+              "missing, note them briefly and suggest a concrete follow-up " +
+              "question the user can send next.",
           });
+
+          const finalArgs: Record<string, unknown> = {
+            model: providerModel,
+            messages: messageBuffer,
+            temperature: req.temperature ?? provider.temperature ?? undefined,
+            max_tokens: req.maxTokens ?? provider.maxTokens ?? undefined,
+            stream: true,
+            // Explicitly disable tools on this final call.
+          };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const finalStream = await client.chat.completions.create(
+            finalArgs as any
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          for await (const chunk of finalStream as any) {
+            const choice = chunk?.choices?.[0];
+            if (!choice) continue;
+            const delta = choice.delta ?? {};
+            if (typeof delta.content === "string" && delta.content.length > 0) {
+              emit({ delta: delta.content });
+              hasEmittedUserFacingContent = true;
+            }
+          }
+          markSuccess(provider.id, key.id);
           emitDone();
           controller.close();
           return;

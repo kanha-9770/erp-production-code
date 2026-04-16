@@ -525,6 +525,437 @@ const getRecentAuditLog: {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
+// Tool: get_module_tree — nested module hierarchy with form counts
+// ─────────────────────────────────────────────────────────────────────────
+const getModuleTree: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "get_module_tree",
+      description:
+        "Return the hierarchical tree of modules in the current organization, " +
+        "with submodule nesting and the number of forms + direct-child modules " +
+        "per node. Use this when the user asks about module structure, " +
+        "organization, or 'what do we have?'. For a flat list use list_modules.",
+      parameters: {
+        type: "object",
+        properties: {
+          rootId: {
+            type: "string",
+            description:
+              "Optional module id to root the tree at. Omit to start at top-level.",
+          },
+          maxDepth: {
+            type: "integer",
+            description: "Max nesting depth to return (default 4, cap 8).",
+            minimum: 1,
+            maximum: 8,
+          },
+        },
+      },
+    },
+  },
+  async handler(args, ctx) {
+    const rootId = typeof args.rootId === "string" ? args.rootId : null;
+    const maxDepth = Math.min(Math.max(Number(args.maxDepth) || 4, 1), 8);
+
+    const rows = await prisma.formModule.findMany({
+      where: { organizationId: ctx.organizationId, isActive: true },
+      orderBy: [{ level: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        parentId: true,
+        level: true,
+        moduleType: true,
+        icon: true,
+        _count: { select: { forms: true, children: true } },
+      },
+    });
+
+    type Node = {
+      id: string;
+      name: string;
+      description: string | null;
+      moduleType: string;
+      icon: string | null;
+      level: number;
+      formCount: number;
+      submoduleCount: number;
+      children: Node[];
+    };
+    const byId = new Map<string, Node>();
+    for (const r of rows) {
+      byId.set(r.id, {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        moduleType: r.moduleType,
+        icon: r.icon,
+        level: r.level,
+        formCount: r._count.forms,
+        submoduleCount: r._count.children,
+        children: [],
+      });
+    }
+    const roots: Node[] = [];
+    for (const r of rows) {
+      const node = byId.get(r.id)!;
+      if (r.parentId && byId.has(r.parentId)) {
+        byId.get(r.parentId)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    const trim = (nodes: Node[], depth: number): Node[] => {
+      if (depth >= maxDepth) {
+        return nodes.map((n) => ({ ...n, children: [] }));
+      }
+      return nodes.map((n) => ({
+        ...n,
+        children: trim(n.children, depth + 1),
+      }));
+    };
+
+    let tree: Node[];
+    if (rootId) {
+      const start = byId.get(rootId);
+      if (!start) return { error: "Module not found in your organization" };
+      tree = trim([start], 0);
+    } else {
+      tree = trim(roots, 0);
+    }
+
+    return clip({ moduleCount: rows.length, tree });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: get_form_structure — deep form definition (sections + fields)
+// ─────────────────────────────────────────────────────────────────────────
+const getFormStructure: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "get_form_structure",
+      description:
+        "Return the full structure of a single form — sections, fields " +
+        "(with type, label, required flag, options for select/multiselect, " +
+        "conditional visibility rules, lookup/formula references), and any " +
+        "subforms. Use this to answer detailed questions about a specific " +
+        "form's fields. Requires a formId — get one from list_forms_in_module " +
+        "or find_fields first. Do not invent form ids.",
+      parameters: {
+        type: "object",
+        properties: {
+          formId: { type: "string", description: "The form id to describe." },
+          includeOptions: {
+            type: "boolean",
+            description:
+              "Include full select/multiselect options arrays (default true). Turn off for large forms where only labels matter.",
+          },
+          includeValidation: {
+            type: "boolean",
+            description:
+              "Include the validation JSON on each field (default false). Enable only when the user asks about validation rules.",
+          },
+        },
+        required: ["formId"],
+      },
+    },
+  },
+  async handler(args, ctx) {
+    const formId = typeof args.formId === "string" ? args.formId : "";
+    if (!formId) return { error: "formId is required" };
+    const includeOptions = args.includeOptions !== false;
+    const includeValidation = args.includeValidation === true;
+
+    const form = await prisma.form.findFirst({
+      where: {
+        id: formId,
+        module: { organizationId: ctx.organizationId },
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        isPublished: true,
+        allowAnonymous: true,
+        requireLogin: true,
+        conditional: true,
+        moduleId: true,
+        module: { select: { id: true, name: true, path: true } },
+        sections: {
+          orderBy: { order: "asc" },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            order: true,
+            columns: true,
+            visible: true,
+            collapsible: true,
+            conditional: true,
+            fields: {
+              orderBy: { order: "asc" },
+              select: {
+                id: true,
+                type: true,
+                label: true,
+                placeholder: true,
+                description: true,
+                defaultValue: true,
+                options: includeOptions,
+                validation: includeValidation,
+                visible: true,
+                readonly: true,
+                width: true,
+                order: true,
+                conditional: true,
+                isDependent: true,
+                parentFieldId: true,
+                lookup: true,
+                formula: {
+                  select: {
+                    expression: true,
+                    returnType: true,
+                    autoRefresh: true,
+                    dependencies: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        subforms: {
+          orderBy: { order: "asc" },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            order: true,
+            visible: true,
+            parentSubformId: true,
+            parentSectionId: true,
+            conditional: true,
+            _count: { select: { fields: true, childSubforms: true } },
+          },
+        },
+      },
+    });
+
+    if (!form) {
+      return { error: "Form not found in your organization" };
+    }
+
+    // Pull `required` out of the validation JSON for a top-level flag. Drop
+    // empty/heavy sub-objects so the result fits inside the 5 KB cap.
+    type FieldIn = {
+      id: string;
+      type: string;
+      label: string;
+      placeholder: string | null;
+      defaultValue: string | null;
+      options?: unknown;
+      validation?: unknown;
+      visible: boolean;
+      readonly: boolean;
+      conditional: unknown;
+      isDependent: boolean;
+      parentFieldId: string | null;
+      lookup: unknown;
+      formula: unknown;
+    };
+    const shapeField = (f: FieldIn) => {
+      const v = f.validation as Record<string, unknown> | null | undefined;
+      const required =
+        v && typeof v === "object" && "required" in v
+          ? Boolean(v.required)
+          : false;
+      const opts = Array.isArray(f.options) ? f.options : [];
+      const out: Record<string, unknown> = {
+        id: f.id,
+        type: f.type,
+        label: f.label,
+        required,
+        readonly: f.readonly,
+        visible: f.visible,
+        placeholder: f.placeholder,
+        defaultValue: f.defaultValue,
+        optionsCount: opts.length,
+      };
+      if (includeOptions && opts.length > 0) out.options = opts;
+      if (includeValidation && v) out.validation = v;
+      if (f.conditional) out.conditional = f.conditional;
+      if (f.isDependent) {
+        out.isDependent = true;
+        out.parentFieldId = f.parentFieldId;
+      }
+      if (f.lookup) out.lookup = f.lookup;
+      if (f.formula) out.formula = f.formula;
+      return out;
+    };
+
+    const sections = form.sections.map((s) => ({
+      id: s.id,
+      title: s.title,
+      description: s.description,
+      order: s.order,
+      columns: s.columns,
+      visible: s.visible,
+      collapsible: s.collapsible,
+      hasConditional: !!s.conditional,
+      conditional: s.conditional ?? undefined,
+      fieldCount: s.fields.length,
+      fields: s.fields.map(shapeField as (f: FieldIn) => unknown),
+    }));
+
+    const totalFields = sections.reduce((n, s) => n + s.fieldCount, 0);
+
+    return clip({
+      form: {
+        id: form.id,
+        name: form.name,
+        description: form.description,
+        isPublished: form.isPublished,
+        allowAnonymous: form.allowAnonymous,
+        requireLogin: form.requireLogin,
+        module: form.module,
+      },
+      totalSections: sections.length,
+      totalFields,
+      totalSubforms: form.subforms.length,
+      sections,
+      subforms: form.subforms,
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tool: find_fields — cross-form field search by label / type
+// ─────────────────────────────────────────────────────────────────────────
+const findFields: {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+} = {
+  definition: {
+    type: "function",
+    function: {
+      name: "find_fields",
+      description:
+        "Search for fields across every form in the organization by label " +
+        "substring and/or field type. Use this when the user asks questions " +
+        "like 'which forms have an email field?', 'find all lookup fields', " +
+        "'do we have a date of birth field?'. Each match returns the field's " +
+        "id, label, type, plus its form id/name and module id/name so you " +
+        "can point the user at the right form.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Case-insensitive label substring to match.",
+          },
+          type: {
+            type: "string",
+            description:
+              "Exact field type to filter by — e.g. EMAIL, TEXT, NUMBER, SELECT, MULTISELECT, DATE, LOOKUP, FORMULA, PHONE. Case-sensitive; matches the stored FormField.type value.",
+          },
+          moduleId: {
+            type: "string",
+            description: "Limit the search to fields in forms under this module.",
+          },
+          formId: {
+            type: "string",
+            description: "Limit the search to a single form.",
+          },
+          limit: {
+            type: "integer",
+            description: "Max matches to return (default 15, cap 30).",
+            minimum: 1,
+            maximum: 30,
+          },
+        },
+      },
+    },
+  },
+  async handler(args, ctx) {
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    const type = typeof args.type === "string" ? args.type.trim() : "";
+    const moduleId = typeof args.moduleId === "string" ? args.moduleId : "";
+    const formId = typeof args.formId === "string" ? args.formId : "";
+    const limit = Math.min(Number(args.limit) || 15, 30);
+
+    if (!query && !type && !moduleId && !formId) {
+      return {
+        error: "Provide at least one filter: query, type, moduleId, or formId.",
+      };
+    }
+
+    const rows = await prisma.formField.findMany({
+      where: {
+        section: {
+          form: {
+            module: { organizationId: ctx.organizationId },
+            ...(formId ? { id: formId } : {}),
+            ...(moduleId ? { moduleId } : {}),
+          },
+        },
+        ...(query
+          ? { label: { contains: query, mode: "insensitive" as const } }
+          : {}),
+        ...(type ? { type } : {}),
+      },
+      orderBy: [{ label: "asc" }],
+      take: limit,
+      select: {
+        id: true,
+        label: true,
+        type: true,
+        section: {
+          select: {
+            id: true,
+            title: true,
+            form: {
+              select: {
+                id: true,
+                name: true,
+                module: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return clip({
+      query: query || undefined,
+      type: type || undefined,
+      count: rows.length,
+      matches: rows.map((f) => ({
+        fieldId: f.id,
+        label: f.label,
+        type: f.type,
+        sectionId: f.section?.id,
+        sectionTitle: f.section?.title,
+        formId: f.section?.form.id,
+        formName: f.section?.form.name,
+        moduleId: f.section?.form.module.id,
+        moduleName: f.section?.form.module.name,
+      })),
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
 // Tool: list_conversations — user's own past chat conversations
 // ─────────────────────────────────────────────────────────────────────────
 const listConversations: {
@@ -860,6 +1291,9 @@ const ALL_TOOLS = {
   count_records: countRecords,
   list_org_users: listOrgUsers,
   get_recent_audit_log: getRecentAuditLog,
+  get_module_tree: getModuleTree,
+  get_form_structure: getFormStructure,
+  find_fields: findFields,
   list_conversations: listConversations,
   search_conversations: searchConversations,
   read_conversation: readConversation,

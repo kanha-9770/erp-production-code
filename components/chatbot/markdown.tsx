@@ -25,6 +25,13 @@ import {
   type ChartSpec,
 } from "./analytics/chart-renderer";
 import { KpiGrid, parseKpiBlock, type KpiEntry } from "./analytics/kpi-card";
+import MindmapRenderer, {
+  parseMindmapSource,
+} from "./analytics/mindmap-renderer";
+import FlowmapRenderer, {
+  parseFlowmapSpec,
+  type FlowmapSpec,
+} from "./analytics/flowmap-renderer";
 import VisualToolbar from "./analytics/visual-toolbar";
 import {
   downloadTableCSV,
@@ -50,7 +57,9 @@ type Block =
   | { kind: "code"; lang: string; content: string }
   | { kind: "text"; content: string }
   | { kind: "chart"; raw: string; spec: ChartSpec | null; complete: boolean }
-  | { kind: "kpi"; raw: string; entries: KpiEntry[] | null; complete: boolean };
+  | { kind: "kpi"; raw: string; entries: KpiEntry[] | null; complete: boolean }
+  | { kind: "mindmap"; raw: string; source: string | null; complete: boolean }
+  | { kind: "flowmap"; raw: string; spec: FlowmapSpec | null; complete: boolean };
 
 // Matches either a fenced code block (```lang ... ```) or a container block
 // (:::type\n...\n:::). Both alternatives fall back to end-of-string so that
@@ -70,16 +79,31 @@ function splitBlocks(src: string): Block[] {
     }
     const whole = match[0] ?? "";
     if (match[1] !== undefined) {
-      // Fenced code block. The `chart` language is rendered as a chart,
-      // everything else goes through CodeBlock as before.
+      // Fenced code block. Special langs (`chart`, `mindmap`, `flowmap`)
+      // render as live visualizations; everything else is CodeBlock.
       const lang = match[1] ?? "";
       const content = match[2] ?? "";
       const complete = whole.trimEnd().endsWith("```");
-      if (lang.toLowerCase() === "chart") {
+      const lc = lang.toLowerCase();
+      if (lc === "chart") {
         blocks.push({
           kind: "chart",
           raw: content,
           spec: parseChartSpec(content),
+          complete,
+        });
+      } else if (lc === "mindmap") {
+        blocks.push({
+          kind: "mindmap",
+          raw: content,
+          source: parseMindmapSource(content),
+          complete,
+        });
+      } else if (lc === "flowmap") {
+        blocks.push({
+          kind: "flowmap",
+          raw: content,
+          spec: parseFlowmapSpec(content),
           complete,
         });
       } else {
@@ -814,8 +838,104 @@ export function Markdown({
             />
           );
         }
+        if (b.kind === "mindmap") {
+          return (
+            <MindmapBlock
+              key={i}
+              raw={b.raw}
+              source={b.source}
+              complete={b.complete}
+              pending={pending}
+            />
+          );
+        }
+        if (b.kind === "flowmap") {
+          return (
+            <FlowmapBlock
+              key={i}
+              raw={b.raw}
+              spec={b.spec}
+              complete={b.complete}
+              pending={pending}
+            />
+          );
+        }
         return <TextBlock key={i} content={b.content} />;
       })}
     </div>
   );
+}
+
+function MindmapBlock({
+  raw,
+  source,
+  complete,
+  pending,
+}: {
+  raw: string;
+  source: string | null;
+  complete: boolean;
+  pending?: boolean;
+}) {
+  // Show a compact skeleton while the mindmap block is still streaming.
+  if (pending && (!complete || !source)) {
+    return (
+      <div className="my-3 rounded-xl border border-dashed border-border/70 bg-muted/10 px-3 py-6 text-xs text-muted-foreground flex items-center gap-2">
+        <BarChart3 className="h-3.5 w-3.5" />
+        Building mindmap…
+      </div>
+    );
+  }
+  if (!source) {
+    return (
+      <div className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-3 text-xs">
+        <div className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+          <BarChart3 className="h-3.5 w-3.5" />
+          Invalid mindmap source
+        </div>
+        <pre className="mt-2 overflow-x-auto rounded bg-muted/40 p-2 font-mono text-[11px]">
+          {raw}
+        </pre>
+      </div>
+    );
+  }
+  return <MindmapRenderer source={source} />;
+}
+
+function FlowmapBlock({
+  raw,
+  spec,
+  complete,
+  pending,
+}: {
+  raw: string;
+  spec: FlowmapSpec | null;
+  complete: boolean;
+  pending?: boolean;
+}) {
+  if (pending && (!complete || !spec)) {
+    return (
+      <div className="my-3 rounded-xl border border-dashed border-border/70 bg-muted/10 px-3 py-6 text-xs text-muted-foreground flex items-center gap-2">
+        <BarChart3 className="h-3.5 w-3.5" />
+        Building flowmap…
+      </div>
+    );
+  }
+  if (!spec) {
+    return (
+      <div className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-3 text-xs">
+        <div className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+          <BarChart3 className="h-3.5 w-3.5" />
+          Invalid flowmap spec
+        </div>
+        <div className="text-muted-foreground">
+          Flowmap JSON could not be parsed — needs `nodes: [...]` and `edges: [...]`.
+        </div>
+        <pre className="mt-2 overflow-x-auto rounded bg-muted/40 p-2 font-mono text-[11px]">
+          {raw}
+        </pre>
+      </div>
+    );
+  }
+  return <FlowmapRenderer spec={spec} />;
 }
