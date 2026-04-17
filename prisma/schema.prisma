@@ -163,6 +163,7 @@ model User {
   lookupTemplates  LookupTemplate[]        @relation("LookupTemplateCreator")
   savedFilters     SavedFilter[]           @relation("SavedFilterCreator")
   workflowRules    WorkflowRule[]          @relation("WorkflowRuleCreator")
+  functions        CrmFunction[]           @relation("CrmFunctionCreator")
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
 
@@ -229,6 +230,7 @@ model Organization {
   lookupTemplates    LookupTemplate[]
   savedFilters       SavedFilter[]
   workflowRules      WorkflowRule[]
+  functions          CrmFunction[]
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
@@ -1837,4 +1839,31 @@ model WorkflowRule {
   @@index([createdById])
   @@index([moduleName])
   @@map("workflow_rules")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Functions — custom scripts that can be associated to automation features
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CrmFunction {
+  id              String       @id @default(cuid())
+  name            String
+  displayName     String       @map("display_name")
+  category        String       @default("Automation")
+  language        String       @default("Deluge")
+  description     String?
+  associated      Boolean      @default(false)
+  restApi         Boolean      @default(false) @map("rest_api")
+  script          String?      @db.Text
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById     String       @map("created_by_id")
+  createdBy       User         @relation("CrmFunctionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([category])
+  @@map("crm_functions")
 }

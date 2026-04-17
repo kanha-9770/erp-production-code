@@ -78,6 +78,7 @@ const settingsData: SettingCategory[] = [
       { name: "Workflow Rules", href: "/settings/workflow-rules" },
       { name: "Actions", href: "/settings/actions" },
       { name: "Schedules", href: "/settings/schedules" },
+      { name: "Functions", href: "/settings/functions" },
       { name: "Assignment", href: "/settings/assignment" },
       { name: "Case Escalation Rules", href: "/settings/case-escalation" },
       { name: "Scoring Rules", href: "/settings/scoring-rules" },
