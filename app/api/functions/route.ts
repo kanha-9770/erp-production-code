@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         description: true,
         associated: true,
         restApi: true,
+        script: true,
         createdAt: true,
         updatedAt: true,
         createdBy: {

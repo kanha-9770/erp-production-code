@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -62,6 +63,7 @@ interface FunctionItem {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function FunctionsPage() {
+  const router = useRouter()
   const { data: functionsData } = useGetFunctionsQuery()
   const [createFunction, { isLoading: isCreating }] = useCreateFunctionMutation()
   const [deleteFunction] = useDeleteFunctionMutation()
@@ -126,17 +128,35 @@ export default function FunctionsPage() {
     return ["All", ...Array.from(cats)]
   }, [functions])
 
+  const openEditor = (fn: FunctionItem) => {
+    const params = new URLSearchParams({
+      id: fn.id,
+      name: fn.name,
+      category: fn.category,
+      language: fn.language,
+    })
+    router.push(`/settings/functions/editor?${params.toString()}`)
+  }
+
   const handleCreate = async () => {
     try {
-      await createFunction({
+      const result = await createFunction({
         name: newFunction.name,
         displayName: newFunction.displayName || newFunction.name,
         category: newFunction.category,
         language: newFunction.language,
         description: newFunction.description || undefined,
       }).unwrap()
-      setNewFunction({ name: "", displayName: "", category: "Automation", language: "Deluge", description: "" })
       setCreateDialogOpen(false)
+      // Navigate to editor with the new function
+      const params = new URLSearchParams({
+        id: result.data.id,
+        name: newFunction.name,
+        category: newFunction.category,
+        language: newFunction.language,
+      })
+      setNewFunction({ name: "", displayName: "", category: "Automation", language: "Deluge", description: "" })
+      router.push(`/settings/functions/editor?${params.toString()}`)
     } catch (err) {
       console.error("Failed to create function:", err)
     }
@@ -285,7 +305,10 @@ export default function FunctionsPage() {
                       <TableRow key={fn.id} className="hover:bg-muted/30 group">
                         <TableCell className="py-2.5 px-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-foreground">
+                            <span
+                              className="text-sm font-medium text-primary cursor-pointer hover:underline"
+                              onClick={() => openEditor(fn)}
+                            >
                               {fn.displayName}
                             </span>
                             {fn.associated && (
@@ -318,7 +341,7 @@ export default function FunctionsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEditor(fn)}>
                                 <Pencil className="h-3.5 w-3.5 mr-2" />
                                 Edit
                               </DropdownMenuItem>
@@ -373,13 +396,13 @@ export default function FunctionsPage() {
 
       {/* ── Create Function Dialog ─────────────────────────────────────── */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">Create New Function</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-1">
             <div className="grid grid-cols-[100px_1fr] items-center gap-3">
-              <Label className="text-sm text-right text-muted-foreground">Function Name</Label>
+              <Label className="text-sm text-right text-muted-foreground whitespace-nowrap">Function Name</Label>
               <Input
                 placeholder="e.g. update_record_status"
                 value={newFunction.name}

@@ -15,6 +15,7 @@ export interface FunctionData {
   description: string | null
   associated: boolean
   restApi: boolean
+  script: string | null
   createdAt: string
   updatedAt: string
 }
@@ -45,7 +46,7 @@ export const functionsApi = baseApi.injectEndpoints({
 
     updateFunction: builder.mutation<
       ApiResponse<FunctionData>,
-      { id: string } & Partial<CreateFunctionBody> & { associated?: boolean; restApi?: boolean }
+      { id: string } & Partial<CreateFunctionBody> & { associated?: boolean; restApi?: boolean; script?: string }
     >({
       query: (body) => ({
         url: "/functions",
