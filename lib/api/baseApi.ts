@@ -57,6 +57,8 @@ export const baseApi = createApi({
     "LookupTemplates",
     // Saved Filters
     "SavedFilters",
+    // Workflow Rules
+    "WorkflowRules",
   ],
   endpoints: () => ({}),
 })

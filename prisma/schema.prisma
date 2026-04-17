@@ -162,6 +162,7 @@ model User {
   routeAccess      RouteUserAccess[]
   lookupTemplates  LookupTemplate[]        @relation("LookupTemplateCreator")
   savedFilters     SavedFilter[]           @relation("SavedFilterCreator")
+  workflowRules    WorkflowRule[]          @relation("WorkflowRuleCreator")
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
 
@@ -227,6 +228,7 @@ model Organization {
   routePermissions   RoutePermission[]
   lookupTemplates    LookupTemplate[]
   savedFilters       SavedFilter[]
+  workflowRules      WorkflowRule[]
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
@@ -1804,4 +1806,35 @@ model ChatMessage {
   @@index([conversationId])
   @@index([createdAt])
   @@map("chat_messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Rules — automation rules triggered by record actions or date fields
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WorkflowRule {
+  id              String       @id @default(cuid())
+  name            String
+  description     String?
+  moduleName      String       @map("module_name")
+  executeBasedOn  String       @map("execute_based_on")   // "record-action" | "record-field"
+  recordAction    String?      @map("record_action")      // "Create" | "Create or Edit" | "Edit" | "Delete"
+  dateField       String?      @map("date_field")         // "Created Time" | "Last Activity Time" etc.
+  conditionType   String       @default("all") @map("condition_type") // "all" | "matching"
+  conditions      Json?                                   // Array of condition objects
+  instantActions  Json?        @map("instant_actions")    // Array of selected instant action names
+  scheduledExecute String?     @map("scheduled_execute")  // Number value
+  scheduledUnit   String?      @map("scheduled_unit")     // "Minutes" | "Hours" | "Days"
+  active          Boolean      @default(true)
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById     String       @map("created_by_id")
+  createdBy       User         @relation("WorkflowRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([moduleName])
+  @@map("workflow_rules")
 }
