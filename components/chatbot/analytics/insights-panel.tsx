@@ -59,33 +59,19 @@ interface ExtractedInsights {
   explicitChartCount: number;
 }
 
-function extractInsights(messages: LocalMessage[]): ExtractedInsights {
-  const lastAssistant = [...messages]
-    .reverse()
-    .find((m) => m.role === "assistant" && !m.error);
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  if (!lastAssistant) {
-    return {
-      kpis: [],
-      charts: [],
-      lastAssistantContent: "",
-      lastUserQuestion: lastUser?.content ?? "",
-      autoChartCount: 0,
-      explicitChartCount: 0,
-    };
+function findLastAssistant(messages: LocalMessage[]): LocalMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && !m.error) return m;
   }
-  const analytics = extractAnalytics(lastAssistant.content);
-  return {
-    kpis: analytics.kpis,
-    charts: analytics.charts,
-    lastAssistantContent: lastAssistant.content,
-    lastUserQuestion: lastUser?.content ?? "",
-    autoChartCount: analytics.charts.filter((c) => c.source === "auto-table")
-      .length,
-    explicitChartCount: analytics.charts.filter(
-      (c) => c.source === "chart-fence"
-    ).length,
-  };
+  return null;
+}
+
+function findLastUser(messages: LocalMessage[]): LocalMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return messages[i];
+  }
+  return null;
 }
 
 function groupToolEvents(messages: LocalMessage[]): ToolEvent[] {
@@ -147,7 +133,30 @@ function InsightsPanelImpl({
 }: Props) {
   const [busyExport, setBusyExport] = useState(false);
 
-  const insights = useMemo(() => extractInsights(messages), [messages]);
+  const lastAssistant = useMemo(() => findLastAssistant(messages), [messages]);
+  const lastUser = useMemo(() => findLastUser(messages), [messages]);
+  const lastAssistantContent = lastAssistant?.content ?? "";
+  const lastUserQuestion = lastUser?.content ?? "";
+
+  // Only re-parse analytics when the assistant content string actually
+  // changes — not on every setMessages call during streaming.
+  const analytics = useMemo(() => {
+    if (!lastAssistantContent) return { kpis: [], charts: [] as ExtractedInsights["charts"] };
+    return extractAnalytics(lastAssistantContent);
+  }, [lastAssistantContent]);
+
+  const insights: ExtractedInsights = useMemo(
+    () => ({
+      kpis: analytics.kpis,
+      charts: analytics.charts,
+      lastAssistantContent,
+      lastUserQuestion,
+      autoChartCount: analytics.charts.filter((c) => c.source === "auto-table").length,
+      explicitChartCount: analytics.charts.filter((c) => c.source === "chart-fence").length,
+    }),
+    [analytics, lastAssistantContent, lastUserQuestion]
+  );
+
   const toolEvents = useMemo(() => groupToolEvents(messages), [messages]);
   const followUps = useMemo(
     () => generateFollowUps(insights.lastUserQuestion),
@@ -309,7 +318,11 @@ function InsightsPanelImpl({
           {insights.charts.length > 0 ? (
             <div className="space-y-2">
               {insights.charts.map((c, i) => (
-                <MiniChart key={i} spec={c.spec} source={c.source} />
+                <MiniChart
+                  key={`${c.source}-${c.spec.title ?? i}-${i}`}
+                  spec={c.spec}
+                  source={c.source}
+                />
               ))}
             </div>
           ) : streaming ? (

@@ -15,6 +15,7 @@ import {
   FileText,
   AlertCircle,
   Maximize2,
+  Minimize2,
   MinusSquare,
   PlusSquare,
   ChevronLeft,
@@ -22,6 +23,7 @@ import {
   ChevronDown,
   ChevronUp,
   LayoutGrid,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import VisualToolbar from "./visual-toolbar";
@@ -405,6 +407,7 @@ function MindmapRendererImpl({
   const root = useMemo(() => parseMarkdownToTree(source), [source]);
 
   const [direction, setDirection] = useState<MindmapDirection>(defaultDirection);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() =>
     root ? defaultExpanded(root) : new Set()
   );
@@ -448,11 +451,29 @@ function MindmapRendererImpl({
     setTransform({ x, y, scale });
   }, [bounds]);
 
-  // Re-fit whenever the tree identity OR direction changes
+  // Re-fit whenever the tree identity, direction, or fullscreen state changes.
+  // The fullscreen toggle resizes the viewport, so fit needs to run again
+  // after the new layout has been applied. rAF waits for paint.
   useEffect(() => {
-    fit();
+    const id = requestAnimationFrame(() => fit());
+    return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, direction]);
+  }, [root, direction, isFullscreen]);
+
+  // ESC exits fullscreen; also lock body scroll while the overlay is up.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isFullscreen]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -645,11 +666,24 @@ function MindmapRendererImpl({
   const oy = -bounds.minY + 20;
 
   return (
+    <>
+    {isFullscreen && (
+      <div
+        className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm"
+        onClick={() => setIsFullscreen(false)}
+        aria-hidden
+      />
+    )}
     <div
       data-visual-kind="mindmap"
       data-visual-title={title}
       data-visual-direction={direction}
-      className="group relative my-3 rounded-xl border border-border/70 bg-card p-3 shadow-sm overflow-hidden"
+      className={cn(
+        "group relative rounded-xl border border-border/70 bg-card p-3 shadow-sm overflow-hidden",
+        isFullscreen
+          ? "fixed inset-4 md:inset-8 z-[61] my-0 flex flex-col shadow-2xl"
+          : "my-3"
+      )}
     >
       <VisualToolbar
         label="Download mindmap"
@@ -715,6 +749,20 @@ function MindmapRendererImpl({
           <LayoutGrid className="h-3 w-3" />
           {direction === "TB" ? "Vertical" : "Horizontal"}
         </button>
+        {isFullscreen && (
+          <button
+            type="button"
+            onClick={() => setIsFullscreen(false)}
+            title="Close fullscreen (Esc)"
+            aria-label="Close fullscreen"
+            className={cn(
+              "shrink-0 inline-flex items-center justify-center rounded-md border border-border/70 bg-background/80 hover:bg-muted",
+              "h-7 w-7 text-muted-foreground hover:text-foreground transition-colors"
+            )}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Viewport */}
@@ -726,11 +774,14 @@ function MindmapRendererImpl({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         style={{
-          height,
+          height: isFullscreen ? undefined : height,
           touchAction: "pan-x pan-y",
           cursor: dragRef.current ? "grabbing" : "grab",
         }}
-        className="relative w-full rounded-lg bg-white dark:bg-[#1E1C1A] border border-border/40 overflow-hidden"
+        className={cn(
+          "relative w-full rounded-lg bg-white dark:bg-[#1E1C1A] border border-border/40 overflow-hidden",
+          isFullscreen && "flex-1 min-h-0"
+        )}
       >
         <div
           style={{
@@ -897,6 +948,7 @@ function MindmapRendererImpl({
         >
           <button
             type="button"
+            data-mindmap-interactive
             onClick={() => zoomBy(0.85)}
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
             title="Zoom out"
@@ -906,15 +958,24 @@ function MindmapRendererImpl({
           </button>
           <button
             type="button"
-            onClick={fit}
+            data-mindmap-interactive
+            onClick={() => {
+              if (isFullscreen) fit();
+              else setIsFullscreen(true);
+            }}
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            title="Fit to view"
-            aria-label="Fit to view"
+            title={isFullscreen ? "Fit to view" : "Open fullscreen"}
+            aria-label={isFullscreen ? "Fit to view" : "Open fullscreen"}
           >
-            <Maximize2 className="h-3.5 w-3.5" />
+            {isFullscreen ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
           </button>
           <button
             type="button"
+            data-mindmap-interactive
             onClick={() => zoomBy(1.15)}
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
             title="Zoom in"
@@ -933,6 +994,7 @@ function MindmapRendererImpl({
         >
           <button
             type="button"
+            data-mindmap-interactive
             onClick={expandAll}
             className="px-1 hover:text-foreground transition-colors"
             title="Expand all branches"
@@ -942,6 +1004,7 @@ function MindmapRendererImpl({
           <span className="text-muted-foreground/40">·</span>
           <button
             type="button"
+            data-mindmap-interactive
             onClick={collapseAll}
             className="px-1 hover:text-foreground transition-colors"
             title="Collapse all branches"
@@ -957,8 +1020,15 @@ function MindmapRendererImpl({
         <span>Ctrl / ⌘ + scroll to zoom</span>
         <span className="opacity-50">·</span>
         <span>Click chevrons to expand/collapse</span>
+        {isFullscreen && (
+          <>
+            <span className="opacity-50">·</span>
+            <span>Esc to close</span>
+          </>
+        )}
       </div>
     </div>
+    </>
   );
 }
 

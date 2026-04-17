@@ -53,23 +53,29 @@ const BUCKET_ORDER = [
 
 type BucketName = (typeof BUCKET_ORDER)[number];
 
-function dateBucket(iso: string): Exclude<BucketName, "Starred"> {
-  const d = new Date(iso);
-  const now = new Date();
-  const dayMs = 86_400_000;
-  const diff = now.getTime() - d.getTime();
+const DAY_MS = 86_400_000;
 
-  const sameDay = (a: Date, b: Date) =>
+function sameDay(a: Date, b: Date): boolean {
+  return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
+    a.getDate() === b.getDate()
+  );
+}
+
+function dateBucket(
+  iso: string,
+  now: Date,
+  yesterday: Date,
+  nowMs: number
+): Exclude<BucketName, "Starred"> {
+  const d = new Date(iso);
+  const diff = nowMs - d.getTime();
 
   if (sameDay(d, now)) return "Today";
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
   if (sameDay(d, yesterday)) return "Yesterday";
-  if (diff < 7 * dayMs) return "Previous 7 days";
-  if (diff < 30 * dayMs) return "Previous 30 days";
+  if (diff < 7 * DAY_MS) return "Previous 7 days";
+  if (diff < 30 * DAY_MS) return "Previous 30 days";
   return "Older";
 }
 
@@ -127,12 +133,6 @@ export default function ConversationSidebar({
     const onUp = () => {
       setDragging(false);
       dragStartRef.current = null;
-      try {
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        localStorage.setItem(STORAGE_KEY, String(width));
-      } catch {
-        /* ignore */
-      }
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -146,7 +146,6 @@ export default function ConversationSidebar({
       document.body.style.userSelect = prevUserSelect;
       document.body.style.cursor = prevCursor;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragging]);
 
   useEffect(() => {
@@ -179,21 +178,35 @@ export default function ConversationSidebar({
       ? conversations.filter((c) => c.title.toLowerCase().includes(q))
       : conversations;
 
-    const map = new Map<BucketName, ConversationSummary[]>();
-    for (const c of filtered) {
-      const key: BucketName = c.isPinned ? "Starred" : dateBucket(c.updatedAt);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(c);
+    // Snapshot "now" once per memo run so bucket assignment and the sort
+    // key share a single time reference (also avoids N `new Date()` allocs).
+    const now = new Date();
+    const nowMs = now.getTime();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    // Pre-parse updatedAt once per row; reuse for both bucketing and sort.
+    type Decorated = { c: ConversationSummary; ms: number; bucket: BucketName };
+    const decorated: Decorated[] = filtered.map((c) => ({
+      c,
+      ms: new Date(c.updatedAt).getTime(),
+      bucket: c.isPinned ? "Starred" : dateBucket(c.updatedAt, now, yesterday, nowMs),
+    }));
+
+    const map = new Map<BucketName, Decorated[]>();
+    for (const d of decorated) {
+      let list = map.get(d.bucket);
+      if (!list) {
+        list = [];
+        map.set(d.bucket, list);
+      }
+      list.push(d);
     }
-    for (const [k, list] of map) {
-      list.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-      map.set(k, list);
+    for (const list of map.values()) {
+      list.sort((a, b) => b.ms - a.ms);
     }
     return BUCKET_ORDER.filter((k) => (map.get(k)?.length ?? 0) > 0).map(
-      (k) => ({ name: k, items: map.get(k)! })
+      (k) => ({ name: k, items: map.get(k)!.map((d) => d.c) })
     );
   }, [conversations, query]);
 

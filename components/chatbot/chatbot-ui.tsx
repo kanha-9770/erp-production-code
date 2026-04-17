@@ -5,6 +5,7 @@ import {
   KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -272,15 +273,24 @@ export default function ChatbotUI() {
   const inflightRef = useRef<boolean>(false);
 
   // Keep messages accessible to the stable sendMessage callback without
-  // forcing it to recreate on every message update.
+  // forcing it to recreate on every message update. useLayoutEffect runs
+  // synchronously after commit (before paint) so the ref is up-to-date
+  // before any user event fires against the new DOM.
   const messagesRef = useRef<LocalMessage[]>(messages);
-  useEffect(() => {
+  useLayoutEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
   const activeProvider = useMemo(
     () => providers.find((p) => p.id === providerId),
     [providers, providerId]
+  );
+  const activeConversation = useMemo(
+    () =>
+      activeConversationId
+        ? conversations.find((c) => c.id === activeConversationId) ?? null
+        : null,
+    [conversations, activeConversationId]
   );
   const modelOptions = useMemo(() => {
     if (!activeProvider) return [];
@@ -905,14 +915,12 @@ export default function ChatbotUI() {
   const buildExportContext = useCallback(
     (lastAnswerOnly = false): ExportContext => ({
       messages,
-      conversationTitle:
-        conversations.find((c) => c.id === activeConversationId)?.title ||
-        "Analytics Report",
+      conversationTitle: activeConversation?.title || "Analytics Report",
       providerLabel: activeProvider?.displayName,
       modelLabel: model,
       lastAnswerOnly,
     }),
-    [messages, conversations, activeConversationId, activeProvider, model]
+    [messages, activeConversation, activeProvider, model]
   );
 
   const handleExportPDF = useCallback(async () => {
@@ -1008,8 +1016,7 @@ export default function ChatbotUI() {
           <div className="flex items-center gap-2 mr-auto min-w-0">
             <h1 className="text-[13px] font-medium truncate max-w-[320px] text-foreground/90">
               {activeConversationId
-                ? conversations.find((c) => c.id === activeConversationId)?.title ??
-                  "Chat"
+                ? activeConversation?.title ?? "Chat"
                 : "New chat"}
             </h1>
             {streaming && (
@@ -1317,8 +1324,7 @@ export default function ChatbotUI() {
           messages={messages}
           activeConversationTitle={
             activeConversationId
-              ? conversations.find((c) => c.id === activeConversationId)?.title ??
-                "Analysis"
+              ? activeConversation?.title ?? "Analysis"
               : "New analysis"
           }
           providerLabel={activeProvider?.displayName}

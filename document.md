@@ -2,7 +2,7 @@
 
 ## Table of Contents
 
-1. [Overview](#overview)
+1. [Overview](#overview) 
 2. [Architecture](#architecture)
 3. [How It Works](#how-it-works)
 4. [File Reference](#file-reference)

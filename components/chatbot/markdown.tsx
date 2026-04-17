@@ -250,10 +250,24 @@ function renderInline(text: string): string {
   );
   out = out.replace(
     /\[([^\]]+)\]\(([^)\s]+)\)/g,
-    (_m, label, url) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-primary underline underline-offset-2 hover:no-underline">${label}</a>`
+    (match, label, url) => {
+      if (!isSafeUrl(url)) return match;
+      const safeHref = String(url).replace(/"/g, "&quot;");
+      return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="text-primary underline underline-offset-2 hover:no-underline">${label}</a>`;
+    }
   );
   return out;
+}
+
+function isSafeUrl(url: string): boolean {
+  const trimmed = String(url).trim();
+  if (!trimmed) return false;
+  // Relative, fragment, mail/tel and http(s) are allowed; reject javascript:, vbscript:, data:, file:, etc.
+  if (/^(#|\/|\.\/|\.\.\/)/.test(trimmed)) return true;
+  if (/^(https?:|mailto:|tel:)/i.test(trimmed)) return true;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return false;
+  // Bare hostnames like "example.com/path"
+  return true;
 }
 
 interface LineGroup {
@@ -813,13 +827,17 @@ export function Markdown({
   return (
     <div className={cn("text-sm", className)}>
       {blocks.map((b, i) => {
+        // Key binds both position AND kind so a code→chart transition at the
+        // same index remounts the component (avoids bleeding viewMode /
+        // expanded state from an obsolete block into a new one).
+        const key = `${b.kind}-${i}`;
         if (b.kind === "code") {
-          return <CodeBlock key={i} lang={b.lang} content={b.content} />;
+          return <CodeBlock key={key} lang={b.lang} content={b.content} />;
         }
         if (b.kind === "chart") {
           return (
             <ChartBlock
-              key={i}
+              key={key}
               raw={b.raw}
               spec={b.spec}
               complete={b.complete}
@@ -830,7 +848,7 @@ export function Markdown({
         if (b.kind === "kpi") {
           return (
             <KpiBlock
-              key={i}
+              key={key}
               raw={b.raw}
               entries={b.entries}
               complete={b.complete}
@@ -841,7 +859,7 @@ export function Markdown({
         if (b.kind === "mindmap") {
           return (
             <MindmapBlock
-              key={i}
+              key={key}
               raw={b.raw}
               source={b.source}
               complete={b.complete}
@@ -852,7 +870,7 @@ export function Markdown({
         if (b.kind === "flowmap") {
           return (
             <FlowmapBlock
-              key={i}
+              key={key}
               raw={b.raw}
               spec={b.spec}
               complete={b.complete}
@@ -860,7 +878,7 @@ export function Markdown({
             />
           );
         }
-        return <TextBlock key={i} content={b.content} />;
+        return <TextBlock key={key} content={b.content} />;
       })}
     </div>
   );

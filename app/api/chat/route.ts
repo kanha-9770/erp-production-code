@@ -89,9 +89,12 @@ export async function POST(request: NextRequest) {
             })
           );
         }
-        Promise.all(writes).catch((err) =>
-          console.error("[api/chat] failed to persist user message", err)
-        );
+        try {
+          await Promise.all(writes);
+        } catch (err) {
+          console.error("[api/chat] failed to persist user message", err);
+          return apiError("Failed to save message", 500);
+        }
       }
     }
 
@@ -187,8 +190,8 @@ export async function POST(request: NextRequest) {
             controller.close();
           } finally {
             if (conversationId && assembled) {
-              prisma.chatMessage
-                .create({
+              try {
+                await prisma.chatMessage.create({
                   data: {
                     conversationId,
                     role: "assistant",
@@ -196,16 +199,14 @@ export async function POST(request: NextRequest) {
                     providerName,
                     model,
                   },
-                })
-                .then(() =>
-                  prisma.chatConversation.update({
-                    where: { id: conversationId! },
-                    data: { updatedAt: new Date() },
-                  })
-                )
-                .catch((e) =>
-                  console.error("[api/chat] failed to persist assistant message", e)
-                );
+                });
+                await prisma.chatConversation.update({
+                  where: { id: conversationId },
+                  data: { updatedAt: new Date() },
+                });
+              } catch (e) {
+                console.error("[api/chat] failed to persist assistant message", e);
+              }
             }
           }
         },
