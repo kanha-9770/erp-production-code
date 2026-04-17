@@ -182,9 +182,18 @@ export async function POST(request: NextRequest) {
             }
             controller.close();
           } catch (err) {
+            // Surface provider errors (LLMClientError is user-actionable) to
+            // the client; hide anything else behind a generic message so we
+            // don't leak internal stack traces or DB identifiers. Full detail
+            // still goes to the server log for debugging.
+            const clientError =
+              err instanceof LLMClientError
+                ? err.message
+                : "Stream failed. Please try again.";
+            console.error("[api/chat] stream error", err);
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ error: (err as Error).message })}\n\n`
+                `data: ${JSON.stringify({ error: clientError })}\n\n`
               )
             );
             controller.close();
@@ -248,7 +257,9 @@ export async function POST(request: NextRequest) {
     if (err instanceof LLMClientError) {
       return apiError(err.message, err.status);
     }
+    // Unknown errors (DB, runtime, etc.) can contain schema/identifier info
+    // that shouldn't reach the client. Log the detail, return a generic body.
     console.error("[api/chat] unexpected error", err);
-    return apiError((err as Error).message ?? "Internal error", 500);
+    return apiError("Internal server error", 500);
   }
 }

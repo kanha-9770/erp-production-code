@@ -382,6 +382,17 @@ export default function ChatbotUI() {
     el.style.height = `${next}px`;
   }, [input]);
 
+  // On unmount, abort any in-flight stream. Without this, the fetch reader
+  // keeps calling setState after the tree is gone — harmless in prod, but
+  // noisy in dev (React warnings) and wastes provider tokens on a response
+  // nobody will see.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, []);
+
   // ── rAF-batched flush of streaming content ─────────────────────────────
   const flushStreaming = useCallback(() => {
     rafPendingRef.current = false;
@@ -548,6 +559,19 @@ export default function ChatbotUI() {
       }
       if (!text.trim() && !opts?.regenerate) return;
 
+      // Guard against oversized inputs. Most providers cap the context window
+      // at ~128k tokens; accepting arbitrary paste sizes means the request
+      // either silently truncates or fails with an opaque provider error.
+      // MAX_INPUT_CHARS is a coarse-but-cheap pre-check (≈ MAX_INPUT_CHARS/4
+      // tokens). Refine server-side if a precise token count is needed.
+      const MAX_INPUT_CHARS = 32_000;
+      if (!opts?.regenerate && text.length > MAX_INPUT_CHARS) {
+        toast.error(
+          `Message is too long (${text.length.toLocaleString()} chars). Max is ${MAX_INPUT_CHARS.toLocaleString()}.`
+        );
+        return;
+      }
+
       // Claim the in-flight slot IMMEDIATELY so any re-entry blocks.
       inflightRef.current = true;
       // Flip streaming + clear the input so the UI reflects "busy" before
@@ -693,6 +717,26 @@ export default function ChatbotUI() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Idle-reset timeout: abort if no bytes arrive for IDLE_MS. Reset on
+      // every incoming chunk so long-but-healthy streams are never cut off.
+      // The initial window covers TTFB; once streaming starts, inactivity
+      // has to exceed IDLE_MS to trigger.
+      const IDLE_MS = 90_000;
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, IDLE_MS);
+      };
+      const clearIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = null;
+      };
+      resetIdleTimer();
+
       try {
         const tempNum = Number(temperature);
         const res = await fetch("/api/chat", {
@@ -734,6 +778,7 @@ export default function ChatbotUI() {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
+          resetIdleTimer();
           buffer += decoder.decode(value, { stream: true });
 
           let nlIdx;
@@ -803,10 +848,13 @@ export default function ChatbotUI() {
           )
         );
       } catch (err) {
-        const message =
-          (err as Error).name === "AbortError"
-            ? "Cancelled"
-            : (err as Error).message || "Request failed";
+        const isAbort = (err as Error).name === "AbortError";
+        const isUserCancel = isAbort && !timedOut;
+        const message = isAbort
+          ? timedOut
+            ? "Request timed out. Please try again."
+            : "Cancelled"
+          : (err as Error).message || "Request failed";
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -814,15 +862,16 @@ export default function ChatbotUI() {
                   ...m,
                   content: streamingContentRef.current || message,
                   pending: false,
-                  error: (err as Error).name !== "AbortError",
+                  error: !isUserCancel,
                 }
               : m
           )
         );
-        if ((err as Error).name !== "AbortError") {
+        if (!isUserCancel) {
           toast.error(message);
         }
       } finally {
+        clearIdleTimer();
         streamingIdRef.current = "";
         streamingContentRef.current = "";
         streamingMetaRef.current = {};
@@ -1314,6 +1363,20 @@ export default function ChatbotUI() {
                 </kbd>
                 newline
               </span>
+              {input.length > 24_000 && (
+                <>
+                  <span className="opacity-50">·</span>
+                  <span
+                    className={cn(
+                      input.length > 32_000
+                        ? "text-destructive font-medium"
+                        : "text-amber-600 dark:text-amber-500"
+                    )}
+                  >
+                    {input.length.toLocaleString()} / 32,000 chars
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </form>
