@@ -624,6 +624,24 @@ export interface Form {
   // Optional runtime / aggregated fields
   recordCount?: number;
   totalRecords?: number;
+
+  // Field-level FunctionBindings (onFieldChange / onFieldBlur) the client
+  // dispatches against the run route. Server-only events (beforeSubmit, etc.)
+  // are not shipped here.
+  functionBindings?: ClientFunctionBinding[];
+}
+
+export interface ClientFunctionBinding {
+  id: string;
+  functionId: string;
+  formId: string | null;
+  fieldId: string | null;
+  event: "onFieldChange" | "onFieldBlur";
+  inputMapping: Record<string, string>;
+  outputMapping: Record<string, string>;
+  condition?: any | null;
+  order: number;
+  function?: { displayName?: string; name?: string };
 }
 
 // NEW: Helper types for nested operations

@@ -17,6 +17,7 @@ import {
   useCreateFunctionMutation,
   useExecuteFunctionMutation,
 } from "@/lib/api/functions"
+import { BindingsPanel } from "@/components/functions/BindingsPanel"
 import {
   X,
   Save,
@@ -333,7 +334,12 @@ export default function FunctionEditorPage() {
   const activeTheme = useMemo(() => getTheme(themeId), [themeId])
 
   // AI Assistant state
-  const [rightTab, setRightTab] = useState<"details" | "ai">("details")
+  // Honor `?tab=bindings|details|ai` deep links from /settings/apis so an
+  // admin clicking "Edit" on a binding row lands directly on the right pane.
+  const initialTabParam = searchParams.get("tab")
+  const initialTab: "details" | "ai" | "bindings" =
+    initialTabParam === "bindings" || initialTabParam === "ai" ? initialTabParam : "details"
+  const [rightTab, setRightTab] = useState<"details" | "ai" | "bindings">(initialTab)
   const [aiPrompt, setAiPrompt] = useState("")
   const [aiResult, setAiResult] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
@@ -1079,7 +1085,7 @@ Task: ${prompt}`
             size="sm"
             className="h-7 text-xs text-[var(--ed-fg-2)] hover:text-white hover:bg-[var(--ed-border)]"
             onClick={() => {
-              setRightTab("ai")
+              setRightTab("ai" as const)
               requestAnimationFrame(() => {
                 document.getElementById("ai-prompt-input")?.focus()
               })
@@ -1319,15 +1325,22 @@ Task: ${prompt}`
             <div className="h-full bg-[var(--ed-bg-2)] flex flex-col overflow-hidden">
               <Tabs
                 value={rightTab}
-                onValueChange={(v) => setRightTab(v as "details" | "ai")}
+                onValueChange={(v) => setRightTab(v as "details" | "ai" | "bindings")}
                 className="flex-1 flex flex-col overflow-hidden"
               >
-                <TabsList className="grid w-full grid-cols-2 h-8 bg-[var(--ed-bg-3)] rounded-none border-b border-[var(--ed-border)] shrink-0">
+                <TabsList className="grid w-full grid-cols-3 h-8 bg-[var(--ed-bg-3)] rounded-none border-b border-[var(--ed-border)] shrink-0">
                   <TabsTrigger
                     value="details"
                     className="text-xs data-[state=active]:bg-[var(--ed-bg-2)] data-[state=active]:text-white text-[var(--ed-fg-2)]"
                   >
                     Details
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="bindings"
+                    className="text-xs data-[state=active]:bg-[var(--ed-bg-2)] data-[state=active]:text-white text-[var(--ed-fg-2)]"
+                  >
+                    <Zap className="h-3 w-3 mr-1 text-[var(--ed-blue)]" />
+                    Bindings
                   </TabsTrigger>
                   <TabsTrigger
                     value="ai"
@@ -1406,6 +1419,11 @@ Task: ${prompt}`
                       className="resize-none text-xs bg-[var(--ed-bg)] border-[var(--ed-border)] text-[var(--ed-fg)] placeholder:text-[var(--ed-fg-3)]"
                     />
                   </div>
+                </TabsContent>
+
+                {/* Bindings tab — attach this function to forms/fields */}
+                <TabsContent value="bindings" className="flex-1 overflow-y-auto m-0">
+                  <BindingsPanel functionId={functionId} />
                 </TabsContent>
 
                 {/* AI Assist tab */}

@@ -9,6 +9,7 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { DatabaseTransforms } from "@/lib/database/DatabaseTransforms";
 import { DatabaseService } from "@/lib/database/database-service";
 import { triggerWorkflowsForRecord } from "@/lib/workflow/trigger";
+import { runBindings } from "@/lib/functions/bindingRunner";
 
 // ──────────────────────────────────────────────
 // Type definitions
@@ -183,6 +184,32 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       submittedByDisplay
     );
 
+    // ─── 5b. beforeSubmit FunctionBindings ──────────────────────
+    // These bindings run AWAITED before any record is touched. Any binding
+    // returning `{ ok: false, error }` short-circuits the submit with 400.
+    // Skipped for unauthenticated users (no org/user context to scope).
+    if (organizationId && currentUserId) {
+      const beforeResults = await runBindings(
+        "beforeSubmit",
+        { formId: form.id },
+        {
+          organizationId,
+          userId: currentUserId,
+          formData: finalRecordData,
+        }
+      );
+      const failed = beforeResults.find((r) => !r.ok);
+      if (failed) {
+        return NextResponse.json(
+          {
+            error: failed.error || `Validation failed in ${failed.functionName}`,
+            binding: { id: failed.bindingId, functionName: failed.functionName },
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     // ─── 6. Client metadata ─────────────────────────────────────
     const headersList = headers();
     const userAgent = headersList.get("user-agent") || body.userAgent || "Unknown";
@@ -219,6 +246,20 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
             })
           })
           .catch((err) => console.error("[workflow] edit trigger failed", err))
+
+        // afterUpdate FunctionBindings — additive to workflow rules, also
+        // fire-and-forget so submit response isn't blocked.
+        runBindings(
+          "afterUpdate",
+          { formId: form.id, moduleId: form.moduleId },
+          {
+            organizationId,
+            userId: currentUserId,
+            formData: finalRecordData,
+            recordData: structuredRecordData,
+            recordId: updatedRecord.id,
+          }
+        ).catch((err) => console.error("[binding] afterUpdate failed", err));
       }
 
       return NextResponse.json({
@@ -260,6 +301,20 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
           })
         })
         .catch((err) => console.error("[workflow] create trigger failed", err))
+
+      // afterCreate FunctionBindings — additive to workflow rules, fire-and-
+      // forget so the response isn't blocked.
+      runBindings(
+        "afterCreate",
+        { formId: form.id, moduleId: form.moduleId },
+        {
+          organizationId,
+          userId: currentUserId,
+          formData: finalRecordData,
+          recordData: structuredRecordData,
+          recordId: record.id,
+        }
+      ).catch((err) => console.error("[binding] afterCreate failed", err));
     }
 
     return NextResponse.json({

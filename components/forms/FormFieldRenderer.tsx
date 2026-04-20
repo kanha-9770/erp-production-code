@@ -42,6 +42,11 @@ import { LookupField } from "@/components/forms/lookup-field";
 import CameraCapture from "@/components/forms/camera-capture";
 import { FileUploadZone } from "./file-upload-zone";
 import { getFormulaEvaluator } from "@/lib/formula/evaluator";
+import {
+  FunctionBindingRunner,
+  getBindingWriteTargets,
+  fireBlurBindings,
+} from "@/components/forms/FunctionBindingRunner";
 import { extractFieldReferences } from "@/lib/formula/parser";
 import type { FormulaReturnType, BlankPreference } from "@/lib/formula/types";
 import { useGetCurrentUserQuery } from "@/lib/api/auth";
@@ -1662,6 +1667,14 @@ export function PublicFormDialog({
     return valid;
   };
 
+  // Bulk field updater used by FunctionBindingRunner when a script returns
+  // outputMapping → field values. Keeps writes under a single setState so
+  // multiple fields populate atomically (e.g. city + state from one pincode).
+  const setBindingFieldValues = (updates: Record<string, any>) => {
+    if (!updates || Object.keys(updates).length === 0) return;
+    setFormData((prev) => ({ ...prev, ...updates }));
+  };
+
   const handleFieldChange = (fieldId: string, value: any, fullOption?: any) => {
     let storeValue = value;
     if (value && typeof value === "object") {
@@ -2659,6 +2672,14 @@ export function PublicFormDialog({
           </form>
         )}
         <FormulaCalculator form={form} formData={formData} setFormulaValues={setFormulaValues} />
+        <FunctionBindingRunner
+          form={form}
+          formData={formData}
+          setFieldValues={setBindingFieldValues}
+          onError={(msg) =>
+            toast({ title: "Function failed", description: msg, variant: "destructive" })
+          }
+        />
       </DialogContent>
     </Dialog>
   );

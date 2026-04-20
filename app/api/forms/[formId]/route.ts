@@ -3,6 +3,70 @@ import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 
+/**
+ * Collect every fieldId in the form (sections + nested subforms). Used to
+ * scope field-level FunctionBinding lookups so the form-detail response
+ * carries the bindings the client needs to dispatch onFieldChange / onBlur.
+ */
+function collectFieldIds(form: any): string[] {
+  const ids: string[] = [];
+  const walkFields = (fields: any[]) => {
+    if (!Array.isArray(fields)) return;
+    for (const f of fields) if (f?.id) ids.push(f.id);
+  };
+  const walkSubforms = (subforms: any[]) => {
+    if (!Array.isArray(subforms)) return;
+    for (const sf of subforms) {
+      walkFields(sf.fields);
+      if (Array.isArray(sf.childSubforms)) walkSubforms(sf.childSubforms);
+    }
+  };
+  if (Array.isArray(form?.sections)) {
+    for (const s of form.sections) {
+      walkFields(s.fields);
+      walkSubforms(s.subforms);
+    }
+  }
+  walkSubforms(form?.subforms);
+  return ids;
+}
+
+/**
+ * Fetch the bindings the client needs to wire field-level events for this
+ * form. We only ship onFieldChange / onFieldBlur — beforeSubmit / afterCreate
+ * / afterUpdate are evaluated server-side and don't need to be in the client
+ * payload. Returns a small, flat list — ids only, no script bodies.
+ */
+async function loadClientBindings(form: any) {
+  if (!form?.id) return [];
+  const fieldIds = collectFieldIds(form);
+  const where: any = {
+    active: true,
+    event: { in: ["onFieldChange", "onFieldBlur"] },
+    OR: [
+      { formId: form.id },
+      ...(fieldIds.length ? [{ fieldId: { in: fieldIds } }] : []),
+    ],
+  };
+  const bindings = await (prisma as any).functionBinding.findMany({
+    where,
+    select: {
+      id: true,
+      functionId: true,
+      formId: true,
+      fieldId: true,
+      event: true,
+      inputMapping: true,
+      outputMapping: true,
+      condition: true,
+      order: true,
+      function: { select: { displayName: true, name: true } },
+    },
+    orderBy: [{ event: "asc" }, { order: "asc" }],
+  });
+  return bindings;
+}
+
 function makePublishedView(form: any) {
   if (!form) return form;
   const clone = JSON.parse(JSON.stringify(form));
@@ -154,6 +218,8 @@ export async function GET(
           }
         }
 
+        published.functionBindings = await loadClientBindings(published);
+
         if (request.nextUrl.searchParams.get("debug") === "true") {
           const debugFields = (published.sections?.[0]?.fields || []).map((f: any) => ({
             id: f.id, label: f.label, visible: f.visible, readonly: f.readonly, properties: f.properties,
@@ -168,6 +234,7 @@ export async function GET(
       }
     }
 
+    (form as any).functionBindings = await loadClientBindings(form);
     return NextResponse.json({ success: true, data: form });
   } catch (error: any) {
     console.error("API: Error fetching form:", error);

@@ -61,6 +61,7 @@ export const baseApi = createApi({
     "WorkflowRules",
     // Functions
     "Functions",
+    "FunctionBindings",
   ],
   endpoints: () => ({}),
 })
