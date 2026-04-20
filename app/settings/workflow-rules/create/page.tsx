@@ -26,7 +26,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { ArrowLeft, ArrowRight, Clock, Code2, FileText, Pencil, Plus, Search, Sparkles, X, Zap } from "lucide-react"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { ArrowLeft, ArrowRight, Clock, Code2, FileText, HelpCircle, MinusCircle, Pencil, Plus, Search, Sparkles, X, Zap } from "lucide-react"
 import { format } from "date-fns"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -42,11 +47,18 @@ interface ConditionRow {
   value: string
 }
 
+interface ArgumentMapping {
+  name: string
+  value: string
+}
+
 interface InstantAction {
   type: string
   // For type === "Function": which custom function to invoke
   functionId?: string
   functionName?: string
+  // For type === "Function": per-argument value mapping
+  argumentMappings?: ArgumentMapping[]
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
@@ -69,10 +81,16 @@ function normalizeActions(raw: unknown): InstantAction[] {
     .map((entry: any): InstantAction | null => {
       if (typeof entry === "string") return { type: entry }
       if (entry && typeof entry === "object" && typeof entry.type === "string") {
+        const mappings: ArgumentMapping[] | undefined = Array.isArray(entry.argumentMappings)
+          ? entry.argumentMappings
+            .filter((m: any) => m && typeof m.name === "string")
+            .map((m: any) => ({ name: m.name, value: typeof m.value === "string" ? m.value : "" }))
+          : undefined
         return {
           type: entry.type,
           functionId: typeof entry.functionId === "string" ? entry.functionId : undefined,
           functionName: typeof entry.functionName === "string" ? entry.functionName : undefined,
+          argumentMappings: mappings,
         }
       }
       return null
@@ -195,6 +213,10 @@ export default function CreateWorkflowRulePage() {
   const [newFnLanguage, setNewFnLanguage] = useState("JavaScript")
   const [createFnError, setCreateFnError] = useState("")
 
+  // View Function dialog (argument mapping)
+  const [viewFnDialogOpen, setViewFnDialogOpen] = useState(false)
+  const [fnArgMappings, setFnArgMappings] = useState<Array<{ id: string; name: string; value: string }>>([])
+
   const filteredFunctions = useMemo(() => {
     const q = fnSearchQuery.trim().toLowerCase()
     if (!q) return availableFunctions
@@ -242,6 +264,42 @@ export default function CreateWorkflowRulePage() {
     const nextActions = selectedInstantActions.filter((a) => a.type !== "Function")
     setSelectedInstantActions(nextActions)
     closeFnDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  const openViewFunctionDialog = () => {
+    const existing = functionAction?.argumentMappings || []
+    setFnArgMappings(
+      existing.length > 0
+        ? existing.map((m, i) => ({ id: String(i), name: m.name, value: m.value }))
+        : [{ id: "0", name: "", value: "" }]
+    )
+    setViewFnDialogOpen(true)
+  }
+
+  const updateArgMapping = (id: string, key: "name" | "value", v: string) => {
+    setFnArgMappings((prev) => prev.map((m) => (m.id === id ? { ...m, [key]: v } : m)))
+  }
+
+  const addArgMapping = () => {
+    setFnArgMappings((prev) => [...prev, { id: Date.now().toString(), name: "", value: "" }])
+  }
+
+  const removeArgMapping = (id: string) => {
+    setFnArgMappings((prev) => (prev.length <= 1 ? prev : prev.filter((m) => m.id !== id)))
+  }
+
+  const saveArgMappings = async () => {
+    const mappings = fnArgMappings
+      .filter((m) => m.name.trim())
+      .map(({ name, value }) => ({ name: name.trim(), value }))
+    const nextActions = selectedInstantActions.map((a) =>
+      a.type === "Function" ? { ...a, argumentMappings: mappings } : a
+    )
+    setSelectedInstantActions(nextActions)
+    setViewFnDialogOpen(false)
     if (isEditing && canSaveRule) {
       await persistRule({ instantActions: nextActions }, true)
     }
@@ -297,17 +355,20 @@ export default function CreateWorkflowRulePage() {
       setSelectedInstantActions(nextActions)
       setInstantDone(true)
 
-      // Reset form & close
-      setNewFnDisplayName("")
-      setNewFnName("")
-      setNewFnDescription("")
-      setNewFnLanguage("JavaScript")
-      closeFnDialog()
-
-      // Auto-persist when editing an already-saved rule.
-      if (isEditing && canSaveRule) {
+      // Persist the rule's new attachment before navigating away so it
+      // isn't lost when the user edits the function code. The dialog stays
+      // open during this so the user doesn't see a flash of the rule page.
+      if (canSaveRule) {
         await persistRule({ instantActions: nextActions }, true)
       }
+
+      // Redirect directly to the function editor — skip the intermediate
+      // dialog-close / form-reset since the component unmounts on navigate.
+      const params = new URLSearchParams({
+        id: created.id,
+        name: created.displayName || created.name || "",
+      })
+      router.push(`/settings/functions/editor?${params.toString()}`)
     } catch (err: any) {
       setCreateFnError(err?.data?.error || err?.message || "Failed to create function")
     }
@@ -383,7 +444,10 @@ export default function CreateWorkflowRulePage() {
         conditionType === "matching"
           ? conditions.filter((c) => c.field && c.operator).map(({ field, operator, value }) => ({ field, operator, value }))
           : undefined,
-      instantActions: effectiveActions.length > 0 ? effectiveActions : undefined,
+      // Always send the array (even empty) so the backend clears the field
+      // instead of treating `undefined` as "skip update" — otherwise removing
+      // the last action would leave the stale value on the server.
+      instantActions: effectiveActions,
       scheduledExecute: scheduledExecute || undefined,
       scheduledUnit: scheduledExecute ? scheduledUnit : undefined,
     }
@@ -417,9 +481,9 @@ export default function CreateWorkflowRulePage() {
   //   name + module + (recordAction OR dateField). Wizard step doesn't gate it.
   const canSaveRule = Boolean(
     ruleName?.trim() &&
-      moduleName &&
-      executeBasedOn &&
-      (recordAction || dateField)
+    moduleName &&
+    executeBasedOn &&
+    (recordAction || dateField)
   )
 
   // Condition helpers
@@ -492,7 +556,7 @@ export default function CreateWorkflowRulePage() {
   const operators = ["is", "is not", "contains", "does not contain", "starts with", "ends with", "is empty", "is not empty"]
 
   return (
-    <div className="min-h-screen bg-[#e6eaed] pb-14">
+    <div className="min-h-screen bg-[#e6eaed] flex flex-col">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="border-b bg-background sticky top-0 z-20">
         <div className="px-4 sm:px-6 py-3 flex items-start justify-between gap-4">
@@ -519,7 +583,7 @@ export default function CreateWorkflowRulePage() {
             )}
           </div>
 
-          {/* Sticky save controls — always reachable */}
+          {/* Save status indicator — actual Save/Cancel live in the bottom footer */}
           <div className="flex items-center gap-2 shrink-0">
             {saveStatus === "saved" && (
               <span className="text-xs text-emerald-600">✓ Saved</span>
@@ -532,29 +596,12 @@ export default function CreateWorkflowRulePage() {
                 {saveError || "Save failed"}
               </span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs px-3"
-              onClick={() => router.push("/settings/workflow-rules")}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="h-8 text-xs px-4 font-medium"
-              disabled={!canSaveRule || isSaving || saveStatus === "saving"}
-              onClick={handleSave}
-              title={!canSaveRule ? "Pick a When trigger before saving" : "Save rule"}
-            >
-              {isSaving || saveStatus === "saving" ? "Saving…" : "Save"}
-            </Button>
           </div>
         </div>
       </div>
 
       {/* ── Visual Flow Editor ──────────────────────────────────────────── */}
-      <div className="py-8 px-4 sm:px-8">
+      <div className="flex-1 py-8 px-4 sm:px-8">
         {/* Each step is a row: circle on left, horizontal line, card on right */}
 
         {/* ── Step 1: WHEN ─────────────────────────────────────────────── */}
@@ -819,31 +866,34 @@ export default function CreateWorkflowRulePage() {
               {/* Two action card buttons side-by-side */}
               <div className="flex items-start">
                 <div className="flex-1 rounded-md border border-dashed border-indigo-800 bg-background shadow-sm transition-all">
-                  {/* Header / toggle */}
-                  <button
-                    onClick={() => {
-                      if (instantDone) {
-                        setInstantDone(false)
+                  {/* Header / toggle — anchors the picker Popover */}
+                  <Popover
+                    open={activeAction === "instant" && !instantDone}
+                    onOpenChange={(open) => {
+                      if (open) {
                         setActiveAction("instant")
+                        setInstantDone(false)
                       } else {
-                        setActiveAction(activeAction === "instant" ? "" : "instant")
+                        setActiveAction("")
+                        if (selectedInstantActions.length === 0) setInstantDone(false)
                       }
                     }}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-xs font-medium text-foreground"
                   >
-                    <Zap className="h-4 w-4 text-foreground" />
-                    Instant Actions
-                    {instantDone && selectedInstantActions.length > 0 && (
-                      <span className="ml-auto text-[10px] text-muted-foreground">
-                        {selectedInstantActions.length} configured
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Picker (expanded) */}
-                  {activeAction === "instant" && !instantDone && (
-                    <>
-                      <div className="border-t max-h-72 overflow-y-auto">
+                    <PopoverTrigger asChild>
+                      <button
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-xs font-medium text-foreground"
+                      >
+                        <Zap className="h-4 w-4 text-foreground" />
+                        Instant Actions
+                        {selectedInstantActions.length > 0 && (
+                          <span className="ml-auto text-[10px] text-muted-foreground">
+                            {selectedInstantActions.length} configured
+                          </span>
+                        )}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" sideOffset={6} className="p-0 w-64">
+                      <div className="max-h-72 overflow-y-auto">
                         {ALL_INSTANT_ACTION_TYPES.map((action) => {
                           const isSelected = selectedInstantActions.some((a) => a.type === action)
                           const isFn = action === "Function"
@@ -878,8 +928,6 @@ export default function CreateWorkflowRulePage() {
                           className="h-7 text-xs px-3"
                           onClick={() => {
                             setActiveAction("")
-                            // If they backed out without picking anything, clear selection
-                            // so the saved-summary doesn't appear empty.
                             if (selectedInstantActions.length === 0) setInstantDone(false)
                           }}
                         >
@@ -900,41 +948,89 @@ export default function CreateWorkflowRulePage() {
                           Save
                         </Button>
                       </div>
-                    </>
-                  )}
+                    </PopoverContent>
+                  </Popover>
 
-                  {/* Saved summary */}
-                  {instantDone && selectedInstantActions.length > 0 && (
-                    <div className="border-t px-4 py-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
-                          {selectedInstantActions.map((a) => {
-                            const label =
-                              a.type === "Function" && a.functionName
-                                ? `${a.type}: ${a.functionName}`
-                                : a.type
+                  {/* Saved summary — visible whenever any action is picked,
+                      so the user can see current selections even while the
+                      picker popover is open. */}
+                  {selectedInstantActions.length > 0 && (
+                    <div className="border-t">
+                      <div className="px-4 py-3 space-y-3">
+                        {selectedInstantActions.map((a) => {
+                          if (a.type === "Function") {
+                            const fnName = a.functionName || "—"
+                            const fnExists =
+                              !a.functionId ||
+                              availableFunctions.some((f) => f.id === a.functionId)
                             return (
-                              <span
+                              <div
                                 key={a.type}
-                                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${a.type === "Function" ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted border-border text-foreground"}`}
-                                title={label}
+                                className="group flex items-start justify-between gap-2"
                               >
-                                {label}
-                              </span>
+                                <button
+                                  type="button"
+                                  onClick={openViewFunctionDialog}
+                                  className="flex-1 min-w-0 text-left -mx-2 px-2 py-0.5 rounded hover:bg-muted/40 transition-colors"
+                                  title={fnExists ? "View function" : "This function no longer exists — remove it"}
+                                >
+                                  <p className="text-xs font-medium text-foreground">Function</p>
+                                  <p
+                                    className={`text-xs mt-0.5 truncate ${fnExists ? "text-muted-foreground" : "text-destructive line-through"}`}
+                                    title={fnName}
+                                  >
+                                    {fnName}
+                                    {!fnExists && (
+                                      <span className="ml-1.5 no-underline text-[10px] uppercase tracking-wider text-destructive">
+                                        deleted
+                                      </span>
+                                    )}
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={removeFunctionAction}
+                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
+                                  title="Remove function"
+                                >
+                                  <MinusCircle className="h-4 w-4" />
+                                </button>
+                              </div>
                             )
-                          })}
-                        </div>
-                        <button
-                          onClick={() => {
-                            setInstantDone(false)
-                            setActiveAction("instant")
-                          }}
-                          className="shrink-0 text-muted-foreground hover:text-foreground"
-                          title="Edit instant actions"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                          }
+                          return (
+                            <div
+                              key={a.type}
+                              className="group flex items-start justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-foreground">{a.type}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInstantDone(false)
+                                  setActiveAction("instant")
+                                }}
+                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                                title="Edit instant actions"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )
+                        })}
                       </div>
+                      <button
+                        onClick={() => {
+                          setInstantDone(false)
+                          setActiveAction("instant")
+                        }}
+                        className="w-full border-t bg-primary/5 hover:bg-primary/10 transition-colors text-xs font-medium text-primary px-4 py-2.5 text-left flex items-center gap-1.5"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Action
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1022,7 +1118,7 @@ export default function CreateWorkflowRulePage() {
       </div>
 
       {/* ── Bottom Footer Bar ──────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-12 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex items-center justify-start gap-3 z-30 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
+      <div className="sticky bottom-0 left-0 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex items-center justify-start gap-3 z-30 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
         <Button
           size="sm"
           className="h-8 text-xs px-5 font-medium"
@@ -1301,15 +1397,9 @@ export default function CreateWorkflowRulePage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="JavaScript" className="text-xs">JavaScript (executable)</SelectItem>
-                      <SelectItem value="Deluge" className="text-xs">Deluge (editor only)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {newFnLanguage !== "JavaScript" && (
-                  <p className="text-[11px] text-amber-600 ml-[122px]">
-                    Note: only JavaScript functions can be executed by workflow rules.
-                  </p>
-                )}
                 {createFnError && (
                   <p className="text-[11px] text-destructive ml-[122px]">{createFnError}</p>
                 )}
@@ -1338,6 +1428,135 @@ export default function CreateWorkflowRulePage() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── View Function Dialog (argument mapping) ───────────────────── */}
+      <Dialog open={viewFnDialogOpen} onOpenChange={setViewFnDialogOpen}>
+        <DialogContent className="max-w-2xl p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <DialogTitle className="text-lg">View Function</DialogTitle>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!functionAction?.functionId) return
+                    setViewFnDialogOpen(false)
+                    const params = new URLSearchParams({
+                      id: functionAction.functionId,
+                      name: functionAction.functionName || "",
+                    })
+                    router.push(`/settings/functions/editor?${params.toString()}`)
+                  }}
+                  disabled={!functionAction?.functionId}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  title="Edit function code"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                title="Help"
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+                Help
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="px-6 pb-4 space-y-2">
+            <div className="grid grid-cols-[160px_1fr] items-center gap-2">
+              <span className="text-xs text-muted-foreground">Function Name</span>
+              <span className="text-xs text-foreground">{functionAction?.functionName || "—"}</span>
+            </div>
+            <div className="grid grid-cols-[160px_1fr] items-center gap-2">
+              <span className="text-xs text-muted-foreground">Module associated</span>
+              <span className="text-xs text-foreground">{moduleName || "—"}</span>
+            </div>
+          </div>
+
+          <div className="px-6 pb-2">
+            <h3 className="text-sm font-semibold text-foreground">Argument Mapping</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              Map the arguments of this function with the appropriate fields. You can also apply custom values to these arguments.
+            </p>
+          </div>
+
+          <div className="px-6 pb-4">
+            <div className="border rounded-md overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40">
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-3 py-2 font-medium w-1/3">Name</th>
+                    <th className="px-3 py-2 font-medium">Value</th>
+                    <th className="px-3 py-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fnArgMappings.map((m) => (
+                    <tr key={m.id} className="border-t">
+                      <td className="px-3 py-2 align-middle">
+                        <Input
+                          value={m.name}
+                          onChange={(e) => updateArgMapping(m.id, "name", e.target.value)}
+                          placeholder="arg_name"
+                          className="h-7 text-xs font-mono"
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <Input
+                          value={m.value}
+                          onChange={(e) => updateArgMapping(m.id, "value", e.target.value)}
+                          placeholder="Field or custom value"
+                          className="h-7 text-xs"
+                        />
+                      </td>
+                      <td className="px-1 py-2 align-middle text-right">
+                        {fnArgMappings.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeArgMapping(m.id)}
+                            className="text-muted-foreground hover:text-destructive"
+                            title="Remove argument"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-[11px] text-muted-foreground">Type # to choose argument value</p>
+              <button
+                type="button"
+                onClick={addArgMapping}
+                className="text-[11px] text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <Plus className="h-3 w-3" />
+                Add argument
+              </button>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t px-6 py-3 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setViewFnDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={saveArgMappings}>
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
