@@ -412,6 +412,7 @@ function FieldsTable(props: {
       label: string
       type: string
       group: string
+      apiName: string
       formId: string
       formName: string
       bindingCount: number
@@ -433,6 +434,7 @@ function FieldsTable(props: {
           label: fld.label,
           type: fld.type,
           group: fld.group,
+          apiName: fld.apiName,
           formId: f.id,
           formName: f.name,
           bindingCount: fieldBindingCounts.get(fld.id) || 0,
@@ -448,7 +450,7 @@ function FieldsTable(props: {
     return fieldRows.filter(
       (r) =>
         r.label.toLowerCase().includes(q) ||
-        r.id.toLowerCase().includes(q) ||
+        r.apiName.toLowerCase().includes(q) ||
         r.type.toLowerCase().includes(q)
     )
   }, [fieldRows, search])
@@ -486,7 +488,7 @@ function FieldsTable(props: {
                     </span>
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{r.id}</TableCell>
+                <TableCell className="font-mono text-xs">{r.apiName}</TableCell>
                 <TableCell className="capitalize">{r.type}</TableCell>
                 <TableCell className="text-center">
                   {r.bindingCount > 0 ? (
@@ -555,7 +557,14 @@ function FieldBindingsSheet(props: {
           <SheetDescription className="text-xs">
             {ctx ? (
               <>
-                <span className="font-mono">{ctx.field.id}</span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    API Name
+                  </span>
+                  <Badge variant="secondary" className="font-mono text-[11px]">
+                    {ctx.field.apiName}
+                  </Badge>
+                </span>
                 <br />
                 <span>
                   {ctx.module.name} · {ctx.form.name} · {ctx.field.type}

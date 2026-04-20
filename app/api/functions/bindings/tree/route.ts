@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { attachApiNames } from "@/lib/functions/apiName"
 
 const ALL_EVENTS = [
   "onFieldChange",
@@ -108,22 +109,32 @@ export async function GET(request: NextRequest) {
     }
 
     // Flatten each form's fields into a single ordered list the UI can drop
-    // straight into a picker. We tag each field with its parent
-    // section/subform title so the dropdown labels stay disambiguated when
-    // two sections share field labels.
+    // straight into a picker. Each field carries a stable `apiName` slug
+    // computed by lib/functions/apiName so the tree, executor, and binding
+    // picker all agree on the same string.
     const flattenFields = (form: typeof modules[number]["forms"][number]) => {
-      const out: Array<{ id: string; label: string; type: string; group: string }> = []
+      const collected: Array<{
+        id: string
+        label: string
+        type: string
+        group: string
+      }> = []
       for (const s of form.sections) {
         for (const f of s.fields) {
-          out.push({ id: f.id, label: f.label, type: f.type, group: s.title })
+          collected.push({ id: f.id, label: f.label, type: f.type, group: s.title })
         }
       }
       for (const sf of form.subforms) {
         for (const f of sf.fields) {
-          out.push({ id: f.id, label: f.label, type: f.type, group: `${sf.name} (subform)` })
+          collected.push({
+            id: f.id,
+            label: f.label,
+            type: f.type,
+            group: `${sf.name} (subform)`,
+          })
         }
       }
-      return out
+      return attachApiNames(collected)
     }
 
     const allBindings = await (prisma as any).functionBinding.findMany({

@@ -144,8 +144,15 @@ export const functionsApi = baseApi.injectEndpoints({
           name: string
           isPublished: boolean
           /** Flat list of fields in the form (sections + subforms),
-           *  ordered, with `group` set to the section title or "Subform name (subform)". */
-          fields: Array<{ id: string; label: string; type: string; group: string }>
+           *  ordered, with `group` set to the section title or "Subform name (subform)".
+           *  `apiName` is a stable PascalCase slug of the label, deduped within the form. */
+          fields: Array<{
+            id: string
+            label: string
+            type: string
+            group: string
+            apiName: string
+          }>
           events: Array<{ event: BindingEvent; bindings: any[] }>
         }>
       }>>,

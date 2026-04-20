@@ -50,8 +50,11 @@ export async function POST(
     }
 
     // The binding must be scoped to THIS form (or to one of its fields).
-    // We pass formId as the scope filter — the runner won't load a binding
-    // attached to a different form even if the id is right.
+    // We pass `formId` as a scope hint so the runner can load the form's
+    // fields → apiNames map for auto-input / auto-output resolution.
+    // (We don't add it to the binding lookup `where` clause: a binding may
+    // live on a FormField with formId=null, and the field-belongs-to-form
+    // check is enforced by the client's dispatch map.)
     const result = await runBindingById(
       bindingId,
       {
@@ -60,13 +63,7 @@ export async function POST(
         formData: formData && typeof formData === "object" ? formData : {},
         triggerFieldId: typeof triggerFieldId === "string" ? triggerFieldId : undefined,
       },
-      // We don't enforce { formId } strictly because a binding may live on a
-      // FormField (fieldId set, formId null). The fields belong to this form
-      // — that's checked when the client builds its dispatch map from the
-      // form-detail response (which only emits bindings for this form's
-      // fields). For belt-and-suspenders, callers can also pass the formId
-      // through scope.formId here.
-      {}
+      { formId: params.formId }
     )
 
     if (!result) {

@@ -59,6 +59,8 @@ export interface FieldOption {
   type: string
   /** Section title or "<Subform> (subform)". Used to group the dropdown. */
   group: string
+  /** Stable PascalCase API Name (e.g. "Ad_Adcopy_ID"). Display identifier. */
+  apiName: string
 }
 
 export interface BindingFormDialogProps {
@@ -120,14 +122,23 @@ function rowsToObject(rows: MappingRow[]): Record<string, string> {
   return out
 }
 
+/** Build a fresh row per field, key=apiName, value=fieldId. Used to seed
+ *  new bindings so the user can save without configuring anything. */
+function rowsForFields(fields: FieldOption[]): MappingRow[] {
+  return fields.map((f) => ({ rid: newRid(), key: f.apiName, value: f.id }))
+}
+
 function makeDraft(args: {
   binding?: BindingFormDialogProps["binding"]
   initialScope?: BindingFormDialogProps["initialScope"]
   initialEvent?: BindingFormDialogProps["initialEvent"]
   initialFunctionId?: string
+  availableFields?: FieldOption[]
 }): DraftState {
-  const { binding, initialScope, initialEvent, initialFunctionId } = args
+  const { binding, initialScope, initialEvent, initialFunctionId, availableFields } = args
+
   if (binding) {
+    // EDIT — load whatever was saved. Don't auto-mutate existing bindings.
     const scopeKind: ScopeKind = binding.fieldId ? "field" : binding.formId ? "form" : "module"
     const inputObj = (binding.inputMapping ?? {}) as Record<string, string>
     const outputObj = (binding.outputMapping ?? {}) as Record<string, string>
@@ -146,19 +157,26 @@ function makeDraft(args: {
       rawOutputText: JSON.stringify(outputObj, null, 2),
     }
   }
+
+  // NEW — pre-populate one row per available field so the binding is
+  // "configured" the moment the dialog opens. The user just picks a
+  // function and clicks Create. They can still trim, rename, or wipe rows
+  // (the runtime auto-mode covers an empty mapping as a safety net).
+  const seededInput = rowsForFields(availableFields || [])
+  const seededOutput = rowsForFields(availableFields || [])
   return {
     functionId: initialFunctionId || "",
     event: initialEvent?.value || "onFieldChange",
     scopeKind: initialScope?.kind || "form",
     scopeId: initialScope?.id || "",
-    inputRows: [],
-    outputRows: [],
+    inputRows: seededInput,
+    outputRows: seededOutput,
     conditionText: "",
     active: true,
     order: 0,
     rawMode: false,
-    rawInputText: "{}",
-    rawOutputText: "{}",
+    rawInputText: JSON.stringify(rowsToObject(seededInput), null, 2),
+    rawOutputText: JSON.stringify(rowsToObject(seededOutput), null, 2),
   }
 }
 
@@ -175,16 +193,18 @@ export function BindingFormDialog(props: BindingFormDialogProps) {
   } = props
 
   const [draft, setDraft] = useState<DraftState>(() =>
-    makeDraft({ binding, initialScope, initialEvent, initialFunctionId })
+    makeDraft({ binding, initialScope, initialEvent, initialFunctionId, availableFields })
   )
   const [error, setError] = useState<string | null>(null)
 
-  // Reset whenever the dialog opens with new inputs.
+  // Reset whenever the dialog opens (or its inputs change). availableFields
+  // is in the dep list so a new dialog opening on a different form gets the
+  // right field list seeded into the rows.
   useEffect(() => {
     if (!open) return
-    setDraft(makeDraft({ binding, initialScope, initialEvent, initialFunctionId }))
+    setDraft(makeDraft({ binding, initialScope, initialEvent, initialFunctionId, availableFields }))
     setError(null)
-  }, [open, binding, initialScope, initialEvent, initialFunctionId])
+  }, [open, binding, initialScope, initialEvent, initialFunctionId, availableFields])
 
   const { data: functionsData } = useGetFunctionsQuery(undefined, { skip: !open })
   const functions = functionsData?.data || []
@@ -496,22 +516,34 @@ export function BindingFormDialog(props: BindingFormDialogProps) {
             <div className="space-y-4">
               <MappingTable
                 title="Inputs"
-                helper="Each row sends ctx.input[key] = the chosen field's value (or special token) when the function runs."
+                helper="Pre-filled with every form field by API Name. Trim what you don't want, or rename keys for shorter syntax."
                 rows={draft.inputRows}
                 onChange={(rows) => setDraft({ ...draft, inputRows: rows })}
                 fieldGroups={fieldGroups}
                 fieldLabelById={fieldLabelById}
+                availableFields={availableFields}
                 allowSpecialTokens
-                emptyHint="No inputs yet. Click Add to send a field value into the script."
+                emptyHint="No inputs yet."
+                autoHint={
+                  hasFields
+                    ? "Every form field is still exposed as ctx.input.<API_Name> (runtime fallback). Click Reset to bring rows back."
+                    : "ctx.input will be empty. Pick fields above or use Raw JSON to wire it manually."
+                }
               />
               <MappingTable
                 title="Outputs"
-                helper="Each row maps a key from the function's return value to a field that will be auto-filled."
+                helper="Pre-filled so the script can return { API_Name: value } for any field. Remove rows to restrict which fields the script may write."
                 rows={draft.outputRows}
                 onChange={(rows) => setDraft({ ...draft, outputRows: rows })}
                 fieldGroups={fieldGroups}
                 fieldLabelById={fieldLabelById}
-                emptyHint="No outputs yet. Click Add if the script returns values that should populate fields."
+                availableFields={availableFields}
+                emptyHint="No outputs yet."
+                autoHint={
+                  hasFields
+                    ? "Any { API_Name: value } in the script's return still populates the matching field (runtime fallback). Click Reset to bring rows back."
+                    : "Returned values are ignored. Pick fields above to wire output."
+                }
               />
             </div>
           )}
@@ -586,8 +618,12 @@ function MappingTable(props: {
   onChange: (rows: MappingRow[]) => void
   fieldGroups: Array<[string, FieldOption[]]>
   fieldLabelById: Map<string, FieldOption>
+  /** All fields available in this scope. Used by "Reset" to re-seed the
+   *  rows back to one-per-field. Empty/undefined hides the Reset button. */
+  availableFields?: FieldOption[]
   allowSpecialTokens?: boolean
   emptyHint: string
+  autoHint?: string
 }) {
   const addRow = () =>
     props.onChange([...props.rows, { rid: newRid(), key: "", value: "" }])
@@ -596,6 +632,24 @@ function MappingTable(props: {
   const removeRow = (rid: string) =>
     props.onChange(props.rows.filter((r) => r.rid !== rid))
 
+  // Re-seed rows back to one row per field (key=apiName, value=fieldId).
+  // Useful after the user trims too aggressively.
+  const resetToAllFields = () => {
+    if (!props.availableFields || props.availableFields.length === 0) return
+    props.onChange(
+      props.availableFields.map((f) => ({ rid: newRid(), key: f.apiName, value: f.id }))
+    )
+  }
+
+  // "Fully populated" = the row count matches the field count AND every
+  // field is referenced exactly once. We hide Reset in that state because
+  // it would be a no-op.
+  const fullyPopulated =
+    props.availableFields &&
+    props.availableFields.length > 0 &&
+    props.rows.length === props.availableFields.length &&
+    props.availableFields.every((f) => props.rows.some((r) => r.value === f.id))
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -603,14 +657,28 @@ function MappingTable(props: {
           <p className="text-xs font-medium">{props.title}</p>
           <p className="text-[10px] text-muted-foreground">{props.helper}</p>
         </div>
-        <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={addRow}>
-          <Plus className="h-3 w-3 mr-1" /> Add
-        </Button>
+        <div className="flex items-center gap-1">
+          {!fullyPopulated && props.availableFields && props.availableFields.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-[11px] text-muted-foreground"
+              onClick={resetToAllFields}
+              title="Re-seed rows with every form field"
+            >
+              Reset to all fields
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={addRow}>
+            <Plus className="h-3 w-3 mr-1" /> Add
+          </Button>
+        </div>
       </div>
 
       {props.rows.length === 0 ? (
-        <div className="text-[11px] text-muted-foreground italic border border-dashed rounded px-2 py-2">
-          {props.emptyHint}
+        <div className="text-[11px] border border-dashed rounded px-2.5 py-2 bg-emerald-500/5 border-emerald-500/30 text-foreground">
+          <span className="font-medium text-emerald-700">Auto-mapped.</span>{" "}
+          <span className="text-muted-foreground">{props.autoHint || props.emptyHint}</span>
         </div>
       ) : (
         <div className="space-y-1">
@@ -628,12 +696,21 @@ function MappingTable(props: {
                 <span className="text-muted-foreground text-xs">→</span>
                 <Select
                   value={row.value}
-                  onValueChange={(v) => updateRow(row.rid, { value: v })}
+                  onValueChange={(v) => {
+                    // Convenience: when the user picks a field and hasn't
+                    // typed a key yet, default the key to the field's
+                    // apiName. They can override it freely; we never
+                    // overwrite a key the user already typed.
+                    const picked = props.fieldLabelById.get(v)
+                    const nextKey =
+                      row.key.trim() || (picked && !v.startsWith("$") ? picked.apiName : row.key)
+                    updateRow(row.rid, { value: v, key: nextKey })
+                  }}
                 >
                   <SelectTrigger className="h-8 text-xs flex-1">
                     <SelectValue placeholder="Pick a field…">
                       {row.value && (
-                        <span className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1.5 min-w-0">
                           {isToken ? (
                             <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
                               {row.value}
@@ -641,9 +718,12 @@ function MappingTable(props: {
                           ) : fieldMeta ? (
                             <>
                               <span className="truncate">{fieldMeta.label}</span>
-                              <span className="text-[9px] text-muted-foreground">
-                                ({fieldMeta.type})
-                              </span>
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] px-1 py-0 font-mono shrink-0"
+                              >
+                                {fieldMeta.apiName}
+                              </Badge>
                             </>
                           ) : (
                             <span className="font-mono text-[10px] text-amber-600">
@@ -682,10 +762,12 @@ function MappingTable(props: {
                           </SelectLabel>
                           {items.map((f) => (
                             <SelectItem key={f.id} value={f.id} className="text-xs">
-                              <span className="truncate">{f.label}</span>
-                              <span className="text-[10px] text-muted-foreground ml-1.5">
-                                {f.type}
-                              </span>
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <span className="truncate">{f.label}</span>
+                                <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                                  {f.apiName}
+                                </span>
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectGroup>

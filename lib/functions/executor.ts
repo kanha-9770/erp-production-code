@@ -14,6 +14,7 @@ import vm from "vm"
 import { prisma } from "@/lib/prisma"
 import { DatabaseService } from "@/lib/database/database-service"
 import { DatabaseTransforms } from "@/lib/database/DatabaseTransforms"
+import { attachApiNames } from "@/lib/functions/apiName"
 
 export interface ExecuteOptions {
   script: string
@@ -25,6 +26,15 @@ export interface ExecuteOptions {
   timeoutMs?: number
   /** Bound on total async I/O calls a script can make. */
   maxOps?: number
+  /** For after-create / after-update bindings: id of the record that fired
+   *  the event. Surfaced as `ctx.recordId`. */
+  recordId?: string
+  /** For after* bindings: the structured record data. Surfaced as
+   *  `ctx.recordData` (read-only snapshot). */
+  recordData?: any
+  /** For field-level events: the apiName (or label / id, fallback) of the
+   *  field that fired. Surfaced as `ctx.triggerField`. */
+  triggerField?: string
 }
 
 export interface ExecuteResult {
@@ -71,8 +81,14 @@ async function getShardModelForForm(formId: string): Promise<string> {
 
 /**
  * Load the form's field metadata once so we can flatten records on read and
- * structure flat input on write. Returns lookup tables keyed by both fieldId
- * and label (lowercased) — scripts often refer to fields by label.
+ * structure flat input on write. Returns lookup tables keyed by:
+ *   - fieldId            — the cuid (most stable; what bindings store)
+ *   - label (lowercased) — what scripts wrote against in the original API
+ *   - apiName            — the PascalCase slug shown in Settings → APIs and SDKs
+ *
+ * apiNames are computed by the shared `attachApiNames` helper so the same
+ * string the user reads in the API Names table is the one their script can
+ * use as a key.
  */
 async function loadFieldMaps(formId: string) {
   const sections = await prisma.formSection.findMany({
@@ -80,34 +96,55 @@ async function loadFieldMaps(formId: string) {
     include: { fields: { select: { id: true, label: true, type: true } } },
     orderBy: { order: "asc" },
   })
-  const byId: Record<string, { id: string; label: string; type: string; sectionId: string }> = {}
-  const byLabel: Record<string, { id: string; label: string; type: string; sectionId: string }> = {}
+
+  // Collect every field across sections (with sectionId) and stamp apiNames
+  // in one pass, so duplicate labels get `_2`, `_3` consistently.
+  type Meta = { id: string; label: string; type: string; sectionId: string; apiName: string }
+  const flat: Array<{ id: string; label: string; type: string; sectionId: string }> = []
   for (const sec of sections) {
     for (const f of sec.fields) {
-      const meta = { id: f.id, label: f.label, type: f.type, sectionId: sec.id }
-      byId[f.id] = meta
-      const key = f.label.trim().toLowerCase()
-      if (key && !byLabel[key]) byLabel[key] = meta
+      flat.push({ id: f.id, label: f.label, type: f.type, sectionId: sec.id })
     }
   }
-  return { sections, byId, byLabel }
+  const stamped: Meta[] = attachApiNames(flat) as Meta[]
+
+  const byId: Record<string, Meta> = {}
+  const byLabel: Record<string, Meta> = {}
+  const byApiName: Record<string, Meta> = {}
+  for (const m of stamped) {
+    byId[m.id] = m
+    const labelKey = m.label.trim().toLowerCase()
+    if (labelKey && !byLabel[labelKey]) byLabel[labelKey] = m
+    if (m.apiName && !byApiName[m.apiName]) byApiName[m.apiName] = m
+  }
+  return { sections, byId, byLabel, byApiName }
 }
 
 /**
  * Flatten a record's stored shape (which can be the structured
  * `{ sections: { id: { fields: { fieldId: value | { value } } } }, subforms }`
- * or a legacy flat blob) into a friendly `{ [label]: value }` map.
+ * or a legacy flat blob) into a friendly object exposing each field under
+ * BOTH its label AND its apiName, so scripts can read either way:
+ *
+ *   const lead = await ctx.records.get("Leads", id)
+ *   lead.data["Email Address"]  // label
+ *   lead.data.Email_Address     // apiName
+ *
+ * If both keys collide (e.g. a label happens to equal another field's
+ * apiName) the label wins — labels are the older, more-stable contract.
  */
 function flattenRecordData(
   recordData: any,
-  fieldsById: Record<string, { label: string }>
+  fieldsById: Record<string, { label: string; apiName?: string }>
 ): Record<string, any> {
   if (!recordData || typeof recordData !== "object") return {}
   const out: Record<string, any> = {}
 
-  const setByLabel = (fieldId: string, value: any) => {
-    const label = fieldsById[fieldId]?.label
-    if (label) out[label] = value
+  const setKeys = (fieldId: string, value: any) => {
+    const meta = fieldsById[fieldId]
+    if (!meta) return
+    if (meta.apiName && !(meta.apiName in out)) out[meta.apiName] = value
+    if (meta.label) out[meta.label] = value // label wins if there's a collision
   }
 
   if (recordData.sections && typeof recordData.sections === "object") {
@@ -119,7 +156,7 @@ function flattenRecordData(
           entry && typeof entry === "object" && "value" in (entry as any)
             ? (entry as any).value
             : entry
-        setByLabel(fieldId, value)
+        setKeys(fieldId, value)
       }
     }
     return out
@@ -132,22 +169,27 @@ function flattenRecordData(
       entry && typeof entry === "object" && "value" in (entry as any)
         ? (entry as any).value
         : entry
-    if (fieldsById[key]) setByLabel(key, value)
+    if (fieldsById[key]) setKeys(key, value)
     else out[key] = value
   }
   return out
 }
 
 /**
- * Convert a flat `{ label-or-fieldId: value }` input into the structured
- * `{ sections: { sectionId: { fields: { fieldId: value } } } }` shape that
- * existing form-record code understands. Unknown keys are kept verbatim under
- * a special `__custom` section so nothing is silently dropped.
+ * Convert a flat `{ label | apiName | fieldId: value }` input into the
+ * structured `{ sections: { sectionId: { fields: { fieldId: value } } } }`
+ * shape that existing form-record code understands. Resolution order:
+ *
+ *   1. fieldId (cuid)   — exact match in `fieldsById`
+ *   2. apiName          — exact match in `fieldsByApiName`
+ *   3. label            — case-insensitive match in `fieldsByLabel`
+ *   4. unknown          — kept under a `__custom` section so nothing is dropped
  */
 function structureRecordInput(
   input: Record<string, any>,
   fieldsById: Record<string, { label: string; sectionId: string }>,
-  fieldsByLabel: Record<string, { id: string; sectionId: string }>
+  fieldsByLabel: Record<string, { id: string; sectionId: string }>,
+  fieldsByApiName: Record<string, { id: string; sectionId: string }>
 ): { sections: Record<string, { fields: Record<string, any> }> } {
   const sections: Record<string, { fields: Record<string, any> }> = {}
   const ensure = (sectionId: string) => {
@@ -159,6 +201,11 @@ function structureRecordInput(
     const byId = fieldsById[key]
     if (byId) {
       ensure(byId.sectionId).fields[key] = value
+      continue
+    }
+    const byApiName = fieldsByApiName[key]
+    if (byApiName) {
+      ensure(byApiName.sectionId).fields[byApiName.id] = value
       continue
     }
     const byLabel = fieldsByLabel[key.trim().toLowerCase()]
@@ -175,7 +222,7 @@ function structureRecordInput(
 // ── Build the ctx surface exposed to user scripts ─────────────────────────
 
 function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: { count: number; max: number }) {
-  const { organizationId, userId, input } = opts
+  const { organizationId, userId, input, recordId, recordData, triggerField } = opts
 
   const guardOp = () => {
     if (++opCounter.count > opCounter.max) {
@@ -292,7 +339,12 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
       const isStructured = data && typeof data === "object" && data.sections && typeof data.sections === "object"
       const finalData = isStructured
         ? data
-        : structureRecordInput(data, fieldMaps.byId as any, fieldMaps.byLabel as any)
+        : structureRecordInput(
+            data,
+            fieldMaps.byId as any,
+            fieldMaps.byLabel as any,
+            fieldMaps.byApiName as any
+          )
       const created = await DatabaseService.createFormRecord(
         form.id,
         finalData,
@@ -340,7 +392,12 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
         nextData = { ...existingData, sections: merged }
       } else {
         // Flat patch — convert to structured first, then merge.
-        const structured = structureRecordInput(patch, fieldMaps.byId as any, fieldMaps.byLabel as any)
+        const structured = structureRecordInput(
+          patch,
+          fieldMaps.byId as any,
+          fieldMaps.byLabel as any,
+          fieldMaps.byApiName as any
+        )
         const merged = { ...(existingData.sections || {}) }
         for (const [secId, sec] of Object.entries(structured.sections)) {
           merged[secId] = {
@@ -390,7 +447,10 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
       })
     }),
 
-    /** List the field labels + types for a module (useful for discovery). */
+    /** List the field schema for a module — id, label, type, AND the
+     *  PascalCase API Name shown in Settings → APIs and SDKs.
+     *  Use the apiName as the key when reading from `record.data` or
+     *  passing values to `ctx.records.create / update`. */
     fields: wrap("ctx.records.fields", async (moduleName: string) => {
       guardOp()
       const { form } = await resolveFormByModuleName(organizationId, moduleName)
@@ -399,6 +459,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
         id: f.id,
         label: f.label,
         type: f.type,
+        apiName: (f as any).apiName,
       }))
     }),
   }
@@ -407,6 +468,11 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
     organizationId,
     userId,
     input: input ?? null,
+    // Record context — undefined for events that don't have one (e.g. before
+    // a record exists). Frozen so the script can't mutate the snapshot.
+    recordId: recordId ?? null,
+    recordData: recordData ? Object.freeze(JSON.parse(JSON.stringify(recordData))) : null,
+    triggerField: triggerField ?? null,
     modules: Object.freeze(modules),
     records: Object.freeze(records),
     log: (...args: any[]) => log("log", ...args),
