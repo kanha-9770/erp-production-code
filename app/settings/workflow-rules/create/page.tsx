@@ -31,7 +31,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { ArrowLeft, ArrowRight, Clock, Code2, FileText, HelpCircle, MinusCircle, Pencil, Plus, Search, Sparkles, X, Zap } from "lucide-react"
+import { ArrowLeft, ArrowRight, Clock, Code2, Copy, FileText, HelpCircle, MinusCircle, MoreHorizontal, Pencil, Plus, Search, Sparkles, Trash2, X, Zap } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { format } from "date-fns"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -135,6 +142,10 @@ export default function CreateWorkflowRulePage() {
   const [scheduledUnit, setScheduledUnit] = useState("Hours")
   const [scheduledDone, setScheduledDone] = useState(false)
 
+  // Active / inactive toggle (existing rules only)
+  const [isActive, setIsActive] = useState(true)
+  const [togglingActive, setTogglingActive] = useState(false)
+
   const [createWorkflowRule, { isLoading: isCreating }] = useCreateWorkflowRuleMutation()
   const [updateWorkflowRule, { isLoading: isUpdating }] = useUpdateWorkflowRuleMutation()
   const isSaving = isCreating || isUpdating
@@ -174,6 +185,7 @@ export default function CreateWorkflowRulePage() {
     setScheduledUnit(existingRule.scheduledUnit || "Hours")
     if (existingRule.scheduledExecute) setScheduledDone(true)
     setShowDescription(!!existingRule.description)
+    setIsActive(existingRule.active !== false)
     // Move to completed state
     setStep(2)
     setConditionDone(true)
@@ -477,6 +489,20 @@ export default function CreateWorkflowRulePage() {
 
   const handleSave = () => persistRule()
 
+  const toggleActive = async () => {
+    if (!isEditing || togglingActive) return
+    const next = !isActive
+    try {
+      setTogglingActive(true)
+      await updateWorkflowRule({ id: ruleId, active: next }).unwrap()
+      setIsActive(next)
+    } catch (err) {
+      console.error("Failed to toggle rule active state:", err)
+    } finally {
+      setTogglingActive(false)
+    }
+  }
+
   // Minimum required to persist a rule:
   //   name + module + (recordAction OR dateField). Wizard step doesn't gate it.
   const canSaveRule = Boolean(
@@ -556,7 +582,16 @@ export default function CreateWorkflowRulePage() {
   const operators = ["is", "is not", "contains", "does not contain", "starts with", "ends with", "is empty", "is not empty"]
 
   return (
-    <div className="min-h-screen bg-[#e6eaed] flex flex-col">
+    <div
+      className="min-h-screen flex flex-col"
+      style={{
+        backgroundColor: "#e6eaed",
+        backgroundImage:
+          "radial-gradient(circle, rgba(71, 85, 105, 0.18) 1px, transparent 1px)",
+        backgroundSize: "22px 22px",
+        backgroundPosition: "0 0",
+      }}
+    >
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="border-b bg-background sticky top-0 z-20">
         <div className="px-4 sm:px-6 py-3 flex items-start justify-between gap-4">
@@ -583,7 +618,7 @@ export default function CreateWorkflowRulePage() {
             )}
           </div>
 
-          {/* Save status indicator — actual Save/Cancel live in the bottom footer */}
+          {/* Header controls — rule status, activate/deactivate, view usage, overflow menu */}
           <div className="flex items-center gap-2 shrink-0">
             {saveStatus === "saved" && (
               <span className="text-xs text-emerald-600">✓ Saved</span>
@@ -595,6 +630,66 @@ export default function CreateWorkflowRulePage() {
               <span className="text-xs text-destructive truncate max-w-xs" title={saveError}>
                 {saveError || "Save failed"}
               </span>
+            )}
+
+            {isEditing && (
+              <>
+                <span className="text-xs text-foreground">
+                  This rule is{" "}
+                  <strong className={isActive ? "text-emerald-600" : "text-muted-foreground"}>
+                    {isActive ? "active" : "inactive"}
+                  </strong>
+                  .
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`h-8 text-xs px-3 ${isActive ? "text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive" : "text-emerald-600 border-emerald-600/40 hover:bg-emerald-600/10 hover:text-emerald-600"}`}
+                  disabled={togglingActive}
+                  onClick={toggleActive}
+                  title={isActive ? "Deactivate this rule" : "Activate this rule"}
+                >
+                  {togglingActive ? "…" : isActive ? "Deactivate" : "Activate"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs px-3"
+                  onClick={() => {
+                    // TODO: open usage drawer / page
+                  }}
+                >
+                  View Usage
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 w-8 p-0" title="More">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        navigator.clipboard?.writeText(ruleId).catch(() => { })
+                      }}
+                      className="text-xs"
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-2" />
+                      Copy rule ID
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        // TODO: wire up rule delete via useDeleteWorkflowRuleMutation
+                      }}
+                      className="text-xs text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-2" />
+                      Delete rule
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
             )}
           </div>
         </div>
