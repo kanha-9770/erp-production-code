@@ -21,13 +21,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet"
-import {
   Search,
   ArrowLeft,
   HelpCircle,
@@ -38,6 +31,7 @@ import {
   Power,
   PowerOff,
   Check,
+  Zap,
 } from "lucide-react"
 import {
   useGetBindingsTreeQuery,
@@ -46,12 +40,13 @@ import {
   type BindingEvent,
   type FunctionBinding,
 } from "@/lib/api/functions"
-import { BindingFormDialog, type FieldOption } from "@/components/functions/BindingFormDialog"
+import { AssociateFunctionDialog } from "@/components/functions/AssociateFunctionDialog"
 
 // Top tabs
 type TopTab = "crmApi" | "sdks"
-// Sub-tabs under CRM API
-type SubTab = "dashboard" | "credits" | "apiNames"
+// Sub-tabs under CRM API. "Function Bindings" is the default — the simple
+// per-module association list. "API Names" is the read-only field reference.
+type SubTab = "bindings" | "apiNames" | "dashboard" | "credits"
 
 const EVENT_BADGE: Record<string, string> = {
   onFieldChange: "bg-blue-500/15 text-blue-700 border-blue-500/30",
@@ -62,8 +57,15 @@ const EVENT_BADGE: Record<string, string> = {
   manual: "bg-slate-500/15 text-slate-700 border-slate-500/30",
 }
 
-// API-name slug for a module/field — mirrors Zoho's PascalCase + underscore
-// convention so the column reads the way an integrator expects.
+const EVENT_LABEL: Record<string, string> = {
+  onFieldChange: "On field change",
+  onFieldBlur: "On field blur",
+  beforeSubmit: "Before submit",
+  afterCreate: "After create",
+  afterUpdate: "After update",
+  manual: "Manual",
+}
+
 function apiSlug(s: string): string {
   return (s || "")
     .trim()
@@ -74,12 +76,11 @@ function apiSlug(s: string): string {
     .join("_")
 }
 
-interface DialogState {
+interface AssocDialogState {
   open: boolean
+  moduleId: string
+  moduleName: string
   binding?: FunctionBinding & { functionId: string }
-  scope?: { kind: "form" | "field" | "module"; id: string; label: string }
-  event?: BindingEvent
-  fields?: FieldOption[]
 }
 
 export default function ApisAndSdksPage() {
@@ -90,13 +91,15 @@ export default function ApisAndSdksPage() {
   const [deleteBinding, deleteState] = useDeleteBindingMutation()
 
   const [topTab, setTopTab] = useState<TopTab>("crmApi")
-  const [subTab, setSubTab] = useState<SubTab>("apiNames")
+  const [subTab, setSubTab] = useState<SubTab>("bindings")
   const [search, setSearch] = useState("")
-  const [formFilter, setFormFilter] = useState<string>("all")
-  const [openFieldId, setOpenFieldId] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<DialogState>({ open: false })
+  const [assoc, setAssoc] = useState<AssocDialogState>({
+    open: false,
+    moduleId: "",
+    moduleName: "",
+  })
 
-  // Drill state lives in the URL so the browser back button works naturally.
+  // Drill state for the API Names reference tab.
   const moduleIdInUrl = searchParams.get("moduleId") || ""
   const tree = treeData?.data || []
   const selectedModule = useMemo(
@@ -104,20 +107,66 @@ export default function ApisAndSdksPage() {
     [tree, moduleIdInUrl]
   )
 
-  const goToModule = (id: string) => {
+  const goToModuleRef = (id: string) => {
     const params = new URLSearchParams(Array.from(searchParams.entries()))
     params.set("moduleId", id)
     router.push(`/settings/apis?${params.toString()}`)
-    setSearch("")
-    setFormFilter("all")
   }
-  const goBack = () => {
+  const goBackRef = () => {
     const params = new URLSearchParams(Array.from(searchParams.entries()))
     params.delete("moduleId")
     const qs = params.toString()
     router.push(`/settings/apis${qs ? `?${qs}` : ""}`)
-    setSearch("")
   }
+
+  // Per-module: every binding scoped to it. Module-level (moduleId set), plus
+  // form/field-scoped bindings on its forms/fields. Shown together so the
+  // page is one-stop for "what's wired into Leads".
+  const moduleBindings = (mod: any) => {
+    const out: any[] = []
+    for (const ev of mod.events) for (const b of ev.bindings) out.push({ ...b, _scope: "module" })
+    for (const f of mod.forms) {
+      for (const ev of f.events) {
+        for (const b of ev.bindings) {
+          const scopeKind = b.fieldId ? "field" : "form"
+          out.push({ ...b, _scope: scopeKind, _formName: f.name, _fieldLabel: b.fieldLabel })
+        }
+      }
+    }
+    return out
+  }
+
+  const handleDelete = async (b: any) => {
+    if (!confirm(`Remove "${b.function?.displayName || b.function?.name}" from this module?`)) return
+    try {
+      await deleteBinding({ functionId: b.functionId, bindingId: b.id }).unwrap()
+    } catch (e: any) {
+      alert(e?.data?.error || e?.message || "Failed")
+    }
+  }
+  const handleToggle = async (b: any) => {
+    try {
+      await updateBinding({
+        functionId: b.functionId,
+        bindingId: b.id,
+        body: { active: !b.active },
+      }).unwrap()
+    } catch (e: any) {
+      alert(e?.data?.error || e?.message || "Failed")
+    }
+  }
+
+  const filteredTree = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return tree
+    return tree.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        moduleBindings(m).some((b) =>
+          (b.function?.displayName || b.function?.name || "").toLowerCase().includes(q)
+        )
+    )
+  }, [tree, search])
 
   return (
     <div className="container mx-auto py-4 max-w-6xl">
@@ -156,9 +205,10 @@ export default function ApisAndSdksPage() {
             <div className="inline-flex items-center gap-1 rounded-md border bg-muted/40 p-0.5">
               {(
                 [
+                  { value: "bindings", label: "Function Bindings" },
+                  { value: "apiNames", label: "API names" },
                   { value: "dashboard", label: "Dashboard" },
                   { value: "credits", label: "Credits" },
-                  { value: "apiNames", label: "API names" },
                 ] as { value: SubTab; label: string }[]
               ).map((t) => (
                 <button
@@ -179,16 +229,192 @@ export default function ApisAndSdksPage() {
             </button>
           </div>
 
-          {subTab === "dashboard" && <DashboardStub tree={tree} />}
-          {subTab === "credits" && <CreditsStub />}
+          {/* ── Function Bindings: the simple flow ────────────────────── */}
+          {subTab === "bindings" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Associate a function with a module. The runtime auto-exposes every form field to
+                the script — no field mapping required.
+              </p>
 
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search modules or functions"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-8 h-9"
+                  />
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
+              ) : filteredTree.length === 0 ? (
+                <div className="border rounded-md py-12 text-center text-sm text-muted-foreground">
+                  {search ? "Nothing matches your search." : "No modules in this organization."}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredTree.map((mod) => {
+                    const bindings = moduleBindings(mod)
+                    return (
+                      <div key={mod.id} className="border rounded-md overflow-hidden bg-background">
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b">
+                          <div className="flex items-center gap-2">
+                            <Layers className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">{mod.name}</span>
+                            <Badge variant="secondary" className="text-[10px]">
+                              {bindings.length} function{bindings.length === 1 ? "" : "s"}
+                            </Badge>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              setAssoc({
+                                open: true,
+                                moduleId: mod.id,
+                                moduleName: mod.name,
+                              })
+                            }
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1" /> Associate Function
+                          </Button>
+                        </div>
+
+                        {bindings.length === 0 ? (
+                          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+                            No functions associated. Click <strong>Associate Function</strong> to wire one.
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-transparent hover:bg-transparent">
+                                <TableHead className="w-[40%]">Function</TableHead>
+                                <TableHead>When</TableHead>
+                                <TableHead>Scope</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead className="w-[80px] text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {bindings.map((b) => (
+                                <TableRow key={b.id}>
+                                  <TableCell>
+                                    <div className="font-medium">
+                                      {b.function?.displayName || b.function?.name}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground font-mono">
+                                      {b.function?.name}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant="outline"
+                                      className={`${EVENT_BADGE[b.event] || ""} font-normal text-[10px]`}
+                                    >
+                                      {EVENT_LABEL[b.event] || b.event}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {b._scope === "module" ? (
+                                      <span className="text-xs text-muted-foreground">Module</span>
+                                    ) : b._scope === "form" ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        Form: {b._formName}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">
+                                        Field: {b._fieldLabel || "—"}
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {b.active ? (
+                                      <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 border-emerald-500/30">
+                                        Active
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-muted-foreground">
+                                        Disabled
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-0.5">
+                                      {b._scope === "module" && (
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-7 w-7"
+                                          title="Edit"
+                                          onClick={() =>
+                                            setAssoc({
+                                              open: true,
+                                              moduleId: mod.id,
+                                              moduleName: mod.name,
+                                              binding: b as FunctionBinding & { functionId: string },
+                                            })
+                                          }
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                      )}
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7"
+                                        title={b.active ? "Disable" : "Enable"}
+                                        onClick={() => handleToggle(b)}
+                                      >
+                                        {b.active ? (
+                                          <PowerOff className="h-3.5 w-3.5" />
+                                        ) : (
+                                          <Power className="h-3.5 w-3.5" />
+                                        )}
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 text-red-500 hover:text-red-600"
+                                        title="Delete"
+                                        onClick={() => handleDelete(b)}
+                                        disabled={deleteState.isLoading}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground border-t pt-3">
+                <strong>How it runs.</strong> Inside the script, every field is at{" "}
+                <code className="font-mono">ctx.input.&lt;API_Name&gt;</code>. Return{" "}
+                <code className="font-mono">{`{ API_Name: value }`}</code> to populate fields. For{" "}
+                <code className="font-mono">beforeSubmit</code>, return{" "}
+                <code className="font-mono">{`{ ok: false, error: "…" }`}</code> to block. See{" "}
+                <code className="font-mono">docs/FUNCTION_API_GUIDE.md</code> for full reference.
+              </p>
+            </>
+          )}
+
+          {/* ── API Names: read-only reference ────────────────────────── */}
           {subTab === "apiNames" && (
             <>
-              {/* Helper text — back arrow when drilled in */}
               <div className="flex items-center gap-2">
                 {selectedModule && (
                   <button
-                    onClick={goBack}
+                    onClick={goBackRef}
                     className="text-muted-foreground hover:text-foreground"
                     title="Back to modules"
                   >
@@ -196,11 +422,10 @@ export default function ApisAndSdksPage() {
                   </button>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  You can access the necessary API names here to support your integration needs.
+                  Reference of every module + field's API Name. Use these in your function scripts.
                 </p>
               </div>
 
-              {/* Filters row */}
               <div className="flex items-center gap-3">
                 <div className="relative flex-1 max-w-sm">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -213,36 +438,21 @@ export default function ApisAndSdksPage() {
                 </div>
                 <span className="text-sm text-muted-foreground">Filter By:</span>
                 {selectedModule ? (
-                  <>
-                    <Select
-                      value={selectedModule.id}
-                      onValueChange={(v) => goToModule(v)}
-                    >
-                      <SelectTrigger className="h-9 w-[150px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tree.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select value={formFilter} onValueChange={setFormFilter}>
-                      <SelectTrigger className="h-9 w-[160px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Forms</SelectItem>
-                        {selectedModule.forms.map((f) => (
-                          <SelectItem key={f.id} value={f.id}>
-                            {f.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </>
+                  <Select
+                    value={selectedModule.id}
+                    onValueChange={(v) => goToModuleRef(v)}
+                  >
+                    <SelectTrigger className="h-9 w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tree.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : (
                   <Select value="modules" onValueChange={() => {}}>
                     <SelectTrigger className="h-9 w-[150px]">
@@ -255,93 +465,38 @@ export default function ApisAndSdksPage() {
                 )}
               </div>
 
-              {/* Body */}
               {isLoading ? (
-                <div className="text-sm text-muted-foreground py-12 text-center">
-                  Loading…
-                </div>
+                <div className="text-sm text-muted-foreground py-12 text-center">Loading…</div>
               ) : selectedModule ? (
-                <FieldsTable
-                  module={selectedModule}
-                  formFilter={formFilter}
-                  search={search}
-                  onOpenField={(fieldId) => setOpenFieldId(fieldId)}
-                />
+                <FieldsRefTable module={selectedModule} search={search} />
               ) : (
-                <ModulesTable tree={tree} search={search} onPick={goToModule} />
+                <ModulesRefTable tree={tree} search={search} onPick={goToModuleRef} />
               )}
             </>
           )}
+
+          {subTab === "dashboard" && <DashboardStub tree={tree} />}
+          {subTab === "credits" && <CreditsStub />}
         </div>
       )}
 
-      {/* ── Field bindings drawer ────────────────────────────────────── */}
-      <FieldBindingsSheet
-        openFieldId={openFieldId}
-        onClose={() => setOpenFieldId(null)}
-        tree={tree}
-        onAdd={(scope, fields) =>
-          setDialog({
-            open: true,
-            scope,
-            fields,
-            event: "onFieldChange",
-          })
+      <AssociateFunctionDialog
+        open={assoc.open}
+        onOpenChange={(open) =>
+          setAssoc((a) => ({ ...a, open, binding: open ? a.binding : undefined }))
         }
-        onEdit={(b, fields) =>
-          setDialog({
-            open: true,
-            binding: b as FunctionBinding & { functionId: string },
-            fields,
-          })
-        }
-        onToggle={async (b) => {
-          try {
-            await updateBinding({
-              functionId: b.functionId,
-              bindingId: b.id,
-              body: { active: !b.active },
-            }).unwrap()
-          } catch (e: any) {
-            alert(e?.data?.error || e?.message || "Failed")
-          }
-        }}
-        onDelete={async (b) => {
-          if (!confirm("Delete this binding?")) return
-          try {
-            await deleteBinding({ functionId: b.functionId, bindingId: b.id }).unwrap()
-          } catch (e: any) {
-            alert(e?.data?.error || e?.message || "Failed")
-          }
-        }}
-        deleting={deleteState.isLoading}
-      />
-
-      {/* ── Binding editor dialog ────────────────────────────────────── */}
-      <BindingFormDialog
-        open={dialog.open}
-        onOpenChange={(open) => setDialog({ open })}
-        binding={dialog.binding}
-        availableFields={dialog.fields}
-        initialScope={
-          dialog.scope
-            ? { kind: dialog.scope.kind, id: dialog.scope.id, label: dialog.scope.label, lock: true }
-            : undefined
-        }
-        initialEvent={dialog.event ? { value: dialog.event } : undefined}
+        moduleId={assoc.moduleId}
+        moduleName={assoc.moduleName}
+        binding={assoc.binding}
       />
     </div>
   )
 }
 
-// ─── Modules table (default API names view) ────────────────────────────────
+// ─── Subcomponents ─────────────────────────────────────────────────────────
 
-function ModulesTable(props: {
-  tree: ReturnType<typeof useGetBindingsTreeQuery>["data"] extends infer T
-    ? T extends { data: infer D }
-      ? D
-      : any
-    : any
+function ModulesRefTable(props: {
+  tree: any[]
   search: string
   onPick: (id: string) => void
 }) {
@@ -349,7 +504,7 @@ function ModulesTable(props: {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return tree
-    return (tree as any[]).filter(
+    return tree.filter(
       (m) => m.name.toLowerCase().includes(q) || apiSlug(m.name).toLowerCase().includes(q)
     )
   }, [tree, search])
@@ -367,16 +522,12 @@ function ModulesTable(props: {
           {filtered.length === 0 ? (
             <TableRow>
               <TableCell colSpan={2} className="text-center text-muted-foreground py-8">
-                {search ? "No modules match your search." : "No modules in this organization."}
+                {search ? "No modules match your search." : "No modules."}
               </TableCell>
             </TableRow>
           ) : (
-            (filtered as any[]).map((m) => (
-              <TableRow
-                key={m.id}
-                className="cursor-pointer"
-                onClick={() => onPick(m.id)}
-              >
+            filtered.map((m) => (
+              <TableRow key={m.id} className="cursor-pointer" onClick={() => onPick(m.id)}>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Layers className="h-4 w-4 text-muted-foreground" />
@@ -393,19 +544,8 @@ function ModulesTable(props: {
   )
 }
 
-// ─── Fields table (drill-in) ───────────────────────────────────────────────
-
-function FieldsTable(props: {
-  module: any
-  formFilter: string
-  search: string
-  onOpenField: (fieldId: string) => void
-}) {
-  const { module: mod, formFilter, search, onOpenField } = props
-
-  // Flatten all fields across the module's forms into a single ordered list.
-  // Each row carries a per-field binding count (count of bindings whose scope
-  // is this exact field) for the rightmost column.
+function FieldsRefTable(props: { module: any; search: string }) {
+  const { module: mod, search } = props
   const fieldRows = useMemo(() => {
     const rows: Array<{
       id: string
@@ -413,21 +553,9 @@ function FieldsTable(props: {
       type: string
       group: string
       apiName: string
-      formId: string
       formName: string
-      bindingCount: number
     }> = []
     for (const f of mod.forms) {
-      if (formFilter !== "all" && f.id !== formFilter) continue
-      // Count field-level bindings per fieldId by scanning all events.
-      const fieldBindingCounts = new Map<string, number>()
-      for (const ev of f.events) {
-        for (const b of ev.bindings) {
-          if (b.fieldId) {
-            fieldBindingCounts.set(b.fieldId, (fieldBindingCounts.get(b.fieldId) || 0) + 1)
-          }
-        }
-      }
       for (const fld of f.fields) {
         rows.push({
           id: fld.id,
@@ -435,14 +563,12 @@ function FieldsTable(props: {
           type: fld.type,
           group: fld.group,
           apiName: fld.apiName,
-          formId: f.id,
           formName: f.name,
-          bindingCount: fieldBindingCounts.get(fld.id) || 0,
         })
       }
     }
     return rows
-  }, [mod, formFilter])
+  }, [mod])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -463,40 +589,26 @@ function FieldsTable(props: {
             <TableHead className="font-medium">Field Label</TableHead>
             <TableHead className="font-medium">API Name</TableHead>
             <TableHead className="font-medium">Data Type</TableHead>
-            <TableHead className="font-medium text-center">Bindings</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filtered.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
                 {search ? "No fields match." : "No fields in this module."}
               </TableCell>
             </TableRow>
           ) : (
             filtered.map((r) => (
-              <TableRow
-                key={r.id}
-                className="cursor-pointer"
-                onClick={() => onOpenField(r.id)}
-              >
+              <TableRow key={r.id}>
                 <TableCell>
-                  <div className="flex flex-col">
-                    <span>{r.label}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {r.formName} · {r.group}
-                    </span>
+                  <div>{r.label}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {r.formName} · {r.group}
                   </div>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{r.apiName}</TableCell>
                 <TableCell className="capitalize">{r.type}</TableCell>
-                <TableCell className="text-center">
-                  {r.bindingCount > 0 ? (
-                    <Badge variant="secondary">{r.bindingCount}</Badge>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  )}
-                </TableCell>
               </TableRow>
             ))
           )}
@@ -505,175 +617,6 @@ function FieldsTable(props: {
     </div>
   )
 }
-
-// ─── Field bindings drawer ────────────────────────────────────────────────
-
-function FieldBindingsSheet(props: {
-  openFieldId: string | null
-  onClose: () => void
-  tree: any[]
-  onAdd: (
-    scope: { kind: "form" | "field" | "module"; id: string; label: string },
-    fields: FieldOption[]
-  ) => void
-  onEdit: (b: any, fields: FieldOption[]) => void
-  onToggle: (b: any) => void | Promise<void>
-  onDelete: (b: any) => void | Promise<void>
-  deleting: boolean
-}) {
-  const { openFieldId, onClose, tree } = props
-
-  const ctx = useMemo(() => {
-    if (!openFieldId) return null
-    for (const m of tree) {
-      for (const f of m.forms) {
-        const fld = f.fields.find((x: any) => x.id === openFieldId)
-        if (fld) {
-          // Bindings on this field = scan every event's bindings for ones
-          // whose fieldId matches.
-          const bindings: any[] = []
-          for (const ev of f.events) {
-            for (const b of ev.bindings) {
-              if (b.fieldId === openFieldId) bindings.push(b)
-            }
-          }
-          return { module: m, form: f, field: fld, bindings, fields: f.fields as FieldOption[] }
-        }
-      }
-    }
-    return null
-  }, [openFieldId, tree])
-
-  return (
-    <Sheet
-      open={!!openFieldId}
-      onOpenChange={(open) => {
-        if (!open) onClose()
-      }}
-    >
-      <SheetContent className="sm:max-w-md w-full overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>{ctx?.field.label || "Field"}</SheetTitle>
-          <SheetDescription className="text-xs">
-            {ctx ? (
-              <>
-                <span className="inline-flex items-center gap-1">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    API Name
-                  </span>
-                  <Badge variant="secondary" className="font-mono text-[11px]">
-                    {ctx.field.apiName}
-                  </Badge>
-                </span>
-                <br />
-                <span>
-                  {ctx.module.name} · {ctx.form.name} · {ctx.field.type}
-                </span>
-              </>
-            ) : (
-              "—"
-            )}
-          </SheetDescription>
-        </SheetHeader>
-
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">
-              Bindings ({ctx?.bindings.length ?? 0})
-            </p>
-            <Button
-              size="sm"
-              onClick={() => {
-                if (!ctx) return
-                props.onAdd(
-                  { kind: "field", id: ctx.field.id, label: ctx.field.label },
-                  ctx.fields
-                )
-              }}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add
-            </Button>
-          </div>
-
-          {ctx && ctx.bindings.length === 0 ? (
-            <div className="border border-dashed rounded p-4 text-center text-xs text-muted-foreground">
-              No bindings on this field. Click <strong>Add</strong> to attach a function that runs
-              when this field changes, blurs, or on submit.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {(ctx?.bindings || []).map((b: any) => (
-                <div
-                  key={b.id}
-                  className="border rounded p-2 space-y-1.5 text-xs bg-muted/20"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Badge
-                        variant="outline"
-                        className={`${EVENT_BADGE[b.event] || ""} text-[10px] font-normal`}
-                      >
-                        {b.event}
-                      </Badge>
-                      <span className="font-medium truncate">
-                        {b.function?.displayName || b.function?.name}
-                      </span>
-                      {!b.active && (
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                          disabled
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => ctx && props.onEdit(b, ctx.fields)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => props.onToggle(b)}
-                        title={b.active ? "Disable" : "Enable"}
-                      >
-                        {b.active ? (
-                          <PowerOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Power className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-red-500 hover:text-red-600"
-                        onClick={() => props.onDelete(b)}
-                        disabled={props.deleting}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    in: {Object.keys(b.inputMapping || {}).length} · out:{" "}
-                    {Object.keys(b.outputMapping || {}).length}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-// ─── Stubs for the other two sub-tabs ─────────────────────────────────────
 
 function DashboardStub(props: { tree: any[] }) {
   const totals = useMemo(() => {
