@@ -106,7 +106,11 @@ export default function WorkflowRulesPage() {
       module: r.moduleName,
       executeOn: r.recordAction || r.dateField || r.executeBasedOn,
       actions: [
-        ...(r.instantActions || []),
+        ...((r.instantActions || []) as any[]).map((a: any) => {
+          if (typeof a === "string") return a
+          if (a?.type === "Function" && a.functionName) return `Function: ${a.functionName}`
+          return a?.type || "Action"
+        }),
         ...(r.scheduledExecute ? [`Scheduled (${r.scheduledExecute} ${r.scheduledUnit})`] : []),
       ],
       active: r.active,

@@ -435,6 +435,8 @@ export default function FunctionsPage() {
                   <SelectItem value="Standalone">Standalone</SelectItem>
                   <SelectItem value="Button">Button</SelectItem>
                   <SelectItem value="Related List">Related List</SelectItem>
+                  <SelectItem value="Signals">Signals</SelectItem>
+                  <SelectItem value="Validation Rule">Validation Rule</SelectItem>
                 </SelectContent>
               </Select>
             </div>

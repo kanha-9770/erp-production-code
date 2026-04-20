@@ -63,6 +63,23 @@ export const functionsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["Functions"],
     }),
+
+    executeFunction: builder.mutation<
+      ApiResponse<{
+        success: boolean
+        result?: any
+        logs: Array<{ level: string; args: any[]; ts: number }>
+        error?: string
+        durationMs: number
+      }>,
+      { id?: string; script?: string; input?: any; timeoutMs?: number }
+    >({
+      query: (body) => ({
+        url: "/functions/execute",
+        method: "POST",
+        body,
+      }),
+    }),
   }),
 })
 
@@ -71,4 +88,5 @@ export const {
   useCreateFunctionMutation,
   useUpdateFunctionMutation,
   useDeleteFunctionMutation,
+  useExecuteFunctionMutation,
 } = functionsApi

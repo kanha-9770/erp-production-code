@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery } from "@/lib/api/forms"
 import { useCreateWorkflowRuleMutation, useUpdateWorkflowRuleMutation, useGetWorkflowRulesQuery } from "@/lib/api/workflow-rules"
+import { useGetFunctionsQuery, useCreateFunctionMutation } from "@/lib/api/functions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import {
@@ -16,7 +18,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowLeft, Clock, Pencil, Plus, X, Zap } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { ArrowLeft, ArrowRight, Clock, Code2, FileText, Pencil, Plus, Search, Sparkles, X, Zap } from "lucide-react"
+import { format } from "date-fns"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +40,44 @@ interface ConditionRow {
   field: string
   operator: string
   value: string
+}
+
+interface InstantAction {
+  type: string
+  // For type === "Function": which custom function to invoke
+  functionId?: string
+  functionName?: string
+}
+
+const ALL_INSTANT_ACTION_TYPES = [
+  "Email Notification",
+  "Task",
+  "Field Update",
+  "Create Record",
+  "Webhook",
+  "Function",
+  "Custom Action",
+  "Slack",
+  "Cliq",
+] as const
+
+// Back-compat: existing rules may have stored a string[] of action names.
+// Normalize to InstantAction[] on load.
+function normalizeActions(raw: unknown): InstantAction[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry: any): InstantAction | null => {
+      if (typeof entry === "string") return { type: entry }
+      if (entry && typeof entry === "object" && typeof entry.type === "string") {
+        return {
+          type: entry.type,
+          functionId: typeof entry.functionId === "string" ? entry.functionId : undefined,
+          functionName: typeof entry.functionName === "string" ? entry.functionName : undefined,
+        }
+      }
+      return null
+    })
+    .filter((a): a is InstantAction => a !== null)
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -60,7 +109,10 @@ export default function CreateWorkflowRulePage() {
 
   // Step 3: ACTIONS
   const [activeAction, setActiveAction] = useState<"" | "instant" | "scheduled">("")
-  const [selectedInstantActions, setSelectedInstantActions] = useState<string[]>([])
+  const [selectedInstantActions, setSelectedInstantActions] = useState<InstantAction[]>([])
+  const [instantDone, setInstantDone] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">("")
+  const [saveError, setSaveError] = useState("")
   const [scheduledExecute, setScheduledExecute] = useState("")
   const [scheduledUnit, setScheduledUnit] = useState("Hours")
   const [scheduledDone, setScheduledDone] = useState(false)
@@ -95,8 +147,10 @@ export default function CreateWorkflowRulePage() {
         }))
       )
     }
-    if (existingRule.instantActions && Array.isArray(existingRule.instantActions)) {
-      setSelectedInstantActions(existingRule.instantActions as string[])
+    if (existingRule.instantActions) {
+      const normalized = normalizeActions(existingRule.instantActions)
+      setSelectedInstantActions(normalized)
+      if (normalized.length > 0) setInstantDone(true)
     }
     setScheduledExecute(existingRule.scheduledExecute || "")
     setScheduledUnit(existingRule.scheduledUnit || "Hours")
@@ -110,6 +164,167 @@ export default function CreateWorkflowRulePage() {
 
   // Fetch module form fields dynamically
   const { data: modulesData } = useGetPermittedModulesQuery()
+  // Functions list for the "Function" instant action picker
+  const { data: functionsData, refetch: refetchFunctions } = useGetFunctionsQuery()
+  const [createFunction, { isLoading: isCreatingFn }] = useCreateFunctionMutation()
+  const availableFunctions = useMemo(() => {
+    return (functionsData?.data || []) as Array<{
+      id: string
+      displayName: string
+      name: string
+      description: string | null
+      language: string
+      updatedAt: string
+    }>
+  }, [functionsData])
+  const functionAction = useMemo(
+    () => selectedInstantActions.find((a) => a.type === "Function"),
+    [selectedInstantActions]
+  )
+
+  // ── Configure Function dialog state ─────────────────────────────────────
+  type FnDialogStep = null | "chooser" | "associate" | "create"
+  const [fnDialogStep, setFnDialogStep] = useState<FnDialogStep>(null)
+  const [fnSearchQuery, setFnSearchQuery] = useState("")
+  const [pendingFunctionId, setPendingFunctionId] = useState<string>("")
+
+  // Inline create-form state
+  const [newFnDisplayName, setNewFnDisplayName] = useState("")
+  const [newFnName, setNewFnName] = useState("")
+  const [newFnDescription, setNewFnDescription] = useState("")
+  const [newFnLanguage, setNewFnLanguage] = useState("JavaScript")
+  const [createFnError, setCreateFnError] = useState("")
+
+  const filteredFunctions = useMemo(() => {
+    const q = fnSearchQuery.trim().toLowerCase()
+    if (!q) return availableFunctions
+    return availableFunctions.filter((f) => {
+      const hay = `${f.displayName || ""} ${f.name || ""} ${f.description || ""}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [fnSearchQuery, availableFunctions])
+
+  const openConfigureFunction = () => {
+    setPendingFunctionId(functionAction?.functionId || "")
+    setFnSearchQuery("")
+    setCreateFnError("")
+    // If they already picked one, jump straight to the associate list with it preselected.
+    setFnDialogStep(functionAction?.functionId ? "associate" : "chooser")
+  }
+
+  const closeFnDialog = () => {
+    setFnDialogStep(null)
+    setCreateFnError("")
+  }
+
+  const associateFunction = async (id: string) => {
+    const fn = availableFunctions.find((f) => f.id === id)
+    if (!fn) return
+    const nextActions = (() => {
+      const filtered = selectedInstantActions.filter((a) => a.type !== "Function")
+      filtered.push({
+        type: "Function",
+        functionId: fn.id,
+        functionName: fn.displayName || fn.name,
+      })
+      return filtered
+    })()
+    setSelectedInstantActions(nextActions)
+    setInstantDone(true)
+    closeFnDialog()
+    // Auto-persist when editing an already-saved rule so the attachment is durable.
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  const removeFunctionAction = async () => {
+    const nextActions = selectedInstantActions.filter((a) => a.type !== "Function")
+    setSelectedInstantActions(nextActions)
+    closeFnDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  // Auto-derive Function Name from Display Name (snake-case, ASCII)
+  useEffect(() => {
+    if (fnDialogStep !== "create") return
+    if (!newFnDisplayName) return
+    const derived = newFnDisplayName
+      .trim()
+      .replace(/[^a-zA-Z0-9_\s]/g, "")
+      .replace(/\s+/g, "_")
+    setNewFnName((prev) => (prev ? prev : derived))
+  }, [newFnDisplayName, fnDialogStep])
+
+  const handleCreateFn = async () => {
+    setCreateFnError("")
+    const displayName = newFnDisplayName.trim()
+    const name = newFnName.trim()
+    if (!displayName) {
+      setCreateFnError("Display Name is required")
+      return
+    }
+    if (!name) {
+      setCreateFnError("Function Name is required")
+      return
+    }
+    try {
+      const res = await createFunction({
+        name,
+        displayName,
+        category: "Automation",
+        language: newFnLanguage,
+        description: newFnDescription.trim() || undefined,
+      }).unwrap()
+      const created = (res as any).data
+      if (!created?.id) throw new Error("Create did not return an id")
+
+      // Refresh list so new function appears immediately
+      await refetchFunctions()
+
+      // Auto-associate it with this rule
+      const nextActions = (() => {
+        const filtered = selectedInstantActions.filter((a) => a.type !== "Function")
+        filtered.push({
+          type: "Function",
+          functionId: created.id,
+          functionName: created.displayName || created.name,
+        })
+        return filtered
+      })()
+      setSelectedInstantActions(nextActions)
+      setInstantDone(true)
+
+      // Reset form & close
+      setNewFnDisplayName("")
+      setNewFnName("")
+      setNewFnDescription("")
+      setNewFnLanguage("JavaScript")
+      closeFnDialog()
+
+      // Auto-persist when editing an already-saved rule.
+      if (isEditing && canSaveRule) {
+        await persistRule({ instantActions: nextActions }, true)
+      }
+    } catch (err: any) {
+      setCreateFnError(err?.data?.error || err?.message || "Failed to create function")
+    }
+  }
+
+  const toggleInstantAction = (type: string) => {
+    if (type === "Function") {
+      // Function uses the multi-step Configure dialog instead of a checkbox toggle.
+      openConfigureFunction()
+      return
+    }
+    setSelectedInstantActions((prev) => {
+      const exists = prev.some((a) => a.type === type)
+      if (exists) return prev.filter((a) => a.type !== type)
+      return [...prev, { type }]
+    })
+  }
 
   const selectedModule = useMemo(() => {
     const mods = modulesData?.modules || []
@@ -148,7 +363,14 @@ export default function CreateWorkflowRulePage() {
     if (step === 1 && canGoNext) setStep(2)
   }
 
-  const handleSave = async () => {
+  // Returns true on success. `overrides` lets callers (e.g. the function
+  // dialog) auto-save with a freshly-chosen action without waiting for state.
+  // `silent` skips the post-save redirect and is used by inline auto-saves.
+  const persistRule = async (
+    overrides: { instantActions?: InstantAction[] } = {},
+    silent = false
+  ): Promise<boolean> => {
+    const effectiveActions = overrides.instantActions ?? selectedInstantActions
     const payload = {
       name: ruleName,
       description: ruleDescription || undefined,
@@ -161,21 +383,44 @@ export default function CreateWorkflowRulePage() {
         conditionType === "matching"
           ? conditions.filter((c) => c.field && c.operator).map(({ field, operator, value }) => ({ field, operator, value }))
           : undefined,
-      instantActions: selectedInstantActions.length > 0 ? selectedInstantActions : undefined,
+      instantActions: effectiveActions.length > 0 ? effectiveActions : undefined,
       scheduledExecute: scheduledExecute || undefined,
       scheduledUnit: scheduledExecute ? scheduledUnit : undefined,
     }
     try {
+      setSaveStatus("saving")
+      setSaveError("")
       if (isEditing) {
         await updateWorkflowRule({ id: ruleId, ...payload }).unwrap()
       } else {
         await createWorkflowRule(payload).unwrap()
       }
-      router.push("/settings/workflow-rules")
-    } catch (err) {
+      setSaveStatus("saved")
+      if (!silent) {
+        router.push("/settings/workflow-rules")
+      } else {
+        // Brief "Saved" indicator
+        setTimeout(() => setSaveStatus(""), 1500)
+      }
+      return true
+    } catch (err: any) {
       console.error("Failed to save workflow rule:", err)
+      setSaveStatus("error")
+      setSaveError(err?.data?.error || err?.message || "Failed to save rule")
+      return false
     }
   }
+
+  const handleSave = () => persistRule()
+
+  // Minimum required to persist a rule:
+  //   name + module + (recordAction OR dateField). Wizard step doesn't gate it.
+  const canSaveRule = Boolean(
+    ruleName?.trim() &&
+      moduleName &&
+      executeBasedOn &&
+      (recordAction || dateField)
+  )
 
   // Condition helpers
   const addCondition = () => {
@@ -249,28 +494,62 @@ export default function CreateWorkflowRulePage() {
   return (
     <div className="min-h-screen bg-[#e6eaed] pb-14">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="border-b bg-background">
-        <div className="px-4 sm:px-6 py-3">
-          <button
-            onClick={() => router.push("/settings/workflow-rules")}
-            className="flex items-center gap-1.5 text-md text-foreground hover:text-foreground transition-colors mb-2"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            {ruleName}
-          </button>
-
-          <p className="text-[12px] text-foreground">@  {moduleName}</p>
-
-          {showDescription ? (
-            <p className="text-xs text-foreground mt-0.5">{ruleDescription}</p>
-          ) : (
+      <div className="border-b bg-background sticky top-0 z-20">
+        <div className="px-4 sm:px-6 py-3 flex items-start justify-between gap-4">
+          <div className="min-w-0">
             <button
-              onClick={() => setShowDescription(true)}
-              className="text-[11px] text-primary hover:underline mt-0.5"
+              onClick={() => router.push("/settings/workflow-rules")}
+              className="flex items-center gap-1.5 text-md text-foreground hover:text-foreground transition-colors mb-2"
             >
-              Add Description
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {ruleName}
             </button>
-          )}
+
+            <p className="text-[12px] text-foreground">@  {moduleName}</p>
+
+            {showDescription ? (
+              <p className="text-xs text-foreground mt-0.5">{ruleDescription}</p>
+            ) : (
+              <button
+                onClick={() => setShowDescription(true)}
+                className="text-[11px] text-primary hover:underline mt-0.5"
+              >
+                Add Description
+              </button>
+            )}
+          </div>
+
+          {/* Sticky save controls — always reachable */}
+          <div className="flex items-center gap-2 shrink-0">
+            {saveStatus === "saved" && (
+              <span className="text-xs text-emerald-600">✓ Saved</span>
+            )}
+            {saveStatus === "saving" && (
+              <span className="text-xs text-muted-foreground">Saving…</span>
+            )}
+            {saveStatus === "error" && (
+              <span className="text-xs text-destructive truncate max-w-xs" title={saveError}>
+                {saveError || "Save failed"}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs px-3"
+              onClick={() => router.push("/settings/workflow-rules")}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs px-4 font-medium"
+              disabled={!canSaveRule || isSaving || saveStatus === "saving"}
+              onClick={handleSave}
+              title={!canSaveRule ? "Pick a When trigger before saving" : "Save rule"}
+            >
+              {isSaving || saveStatus === "saving" ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -539,42 +818,123 @@ export default function CreateWorkflowRulePage() {
             <div className="flex-1 max-w-3xl space-y-3">
               {/* Two action card buttons side-by-side */}
               <div className="flex items-start">
-                <div className="flex-1 relative">
+                <div className="flex-1 rounded-md border border-dashed border-indigo-800 bg-background shadow-sm transition-all">
+                  {/* Header / toggle */}
                   <button
-                    onClick={() => setActiveAction(activeAction === "instant" ? "" : "instant")}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 rounded-md border border-dashed border-indigo-800 bg-background shadow-sm text-xs font-medium text-foreground hover:border-solid transition-all"
+                    onClick={() => {
+                      if (instantDone) {
+                        setInstantDone(false)
+                        setActiveAction("instant")
+                      } else {
+                        setActiveAction(activeAction === "instant" ? "" : "instant")
+                      }
+                    }}
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-xs font-medium text-foreground"
                   >
                     <Zap className="h-4 w-4 text-foreground" />
                     Instant Actions
+                    {instantDone && selectedInstantActions.length > 0 && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        {selectedInstantActions.length} configured
+                      </span>
+                    )}
                   </button>
 
-                  {activeAction === "instant" && (
-                    <div className="absolute top-full left-0 mt-1 w-48 bg-background border rounded-md shadow-lg z-20">
-                      {[
-                        "Email Notification",
-                        "Task",
-                        "Field Update",
-                        "Create Record",
-                        "Webhook",
-                        "Function",
-                        "Custom Action",
-                        "Slack",
-                        "Cliq",
-                      ].map((action) => (
-                        <button
-                          key={action}
-                          className={`w-full text-left text-xs py-2 px-3 hover:bg-muted transition-colors first:rounded-t-md last:rounded-b-md ${selectedInstantActions.includes(action) ? "bg-muted font-medium text-primary" : "text-foreground"}`}
+                  {/* Picker (expanded) */}
+                  {activeAction === "instant" && !instantDone && (
+                    <>
+                      <div className="border-t max-h-72 overflow-y-auto">
+                        {ALL_INSTANT_ACTION_TYPES.map((action) => {
+                          const isSelected = selectedInstantActions.some((a) => a.type === action)
+                          const isFn = action === "Function"
+                          const fnLabel =
+                            isFn && functionAction?.functionName
+                              ? `Function: ${functionAction.functionName}`
+                              : action
+                          return (
+                            <button
+                              key={action}
+                              className={`w-full text-left text-xs py-2 px-3 hover:bg-muted transition-colors flex items-center justify-between gap-2 ${isSelected ? "bg-muted font-medium text-primary" : "text-foreground"}`}
+                              onClick={() => toggleInstantAction(action)}
+                            >
+                              <span className="truncate">{fnLabel}</span>
+                              {isFn ? (
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {functionAction?.functionId ? "configured" : "configure ›"}
+                                </span>
+                              ) : (
+                                isSelected && (
+                                  <span className="text-[10px] text-emerald-600 shrink-0">selected</span>
+                                )
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="px-3 py-2 border-t flex justify-end gap-2 bg-muted/30">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs px-3"
                           onClick={() => {
-                            setSelectedInstantActions((prev) =>
-                              prev.includes(action)
-                                ? prev.filter((a) => a !== action)
-                                : [...prev, action]
-                            )
+                            setActiveAction("")
+                            // If they backed out without picking anything, clear selection
+                            // so the saved-summary doesn't appear empty.
+                            if (selectedInstantActions.length === 0) setInstantDone(false)
                           }}
                         >
-                          {action}
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs px-3"
+                          disabled={selectedInstantActions.length === 0}
+                          onClick={async () => {
+                            setInstantDone(true)
+                            setActiveAction("")
+                            if (isEditing && canSaveRule) {
+                              await persistRule({}, true)
+                            }
+                          }}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Saved summary */}
+                  {instantDone && selectedInstantActions.length > 0 && (
+                    <div className="border-t px-4 py-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
+                          {selectedInstantActions.map((a) => {
+                            const label =
+                              a.type === "Function" && a.functionName
+                                ? `${a.type}: ${a.functionName}`
+                                : a.type
+                            return (
+                              <span
+                                key={a.type}
+                                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${a.type === "Function" ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted border-border text-foreground"}`}
+                                title={label}
+                              >
+                                {label}
+                              </span>
+                            )
+                          })}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setInstantDone(false)
+                            setActiveAction("instant")
+                          }}
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          title="Edit instant actions"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
                         </button>
-                      ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -662,19 +1022,324 @@ export default function CreateWorkflowRulePage() {
       </div>
 
       {/* ── Bottom Footer Bar ──────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-12 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex items-center justify-start gap-3 z-10">
-        <Button size="sm" className="h-7 text-xs px-4" disabled={step < 2 || isSaving} onClick={handleSave}>
-          {isSaving ? "Saving..." : "Save"}
+      <div className="fixed bottom-0 left-12 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex items-center justify-start gap-3 z-30 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
+        <Button
+          size="sm"
+          className="h-8 text-xs px-5 font-medium"
+          disabled={!canSaveRule || isSaving || saveStatus === "saving"}
+          onClick={handleSave}
+          title={!canSaveRule ? "Pick a When trigger before saving" : "Save rule"}
+        >
+          {isSaving || saveStatus === "saving" ? "Saving..." : "Save"}
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="h-7 text-xs px-4"
+          className="h-8 text-xs px-4"
           onClick={() => router.push("/settings/workflow-rules")}
         >
           Cancel
         </Button>
+        {saveStatus === "saved" && (
+          <span className="text-xs text-emerald-600 ml-2">✓ Saved</span>
+        )}
+        {saveStatus === "error" && (
+          <span className="text-xs text-destructive ml-2 truncate max-w-md" title={saveError}>
+            ✗ {saveError || "Save failed"}
+          </span>
+        )}
+        {!canSaveRule && (
+          <span className="text-[11px] text-muted-foreground ml-auto mr-4">
+            Pick a When trigger to enable Save
+          </span>
+        )}
       </div>
+
+      {/* ── Configure Function Dialog (Zoho-style multi-step) ─────────── */}
+      <Dialog open={fnDialogStep !== null} onOpenChange={(open) => !open && closeFnDialog()}>
+        <DialogContent className="max-w-2xl p-0 gap-0">
+          {/* ── Step: Chooser ─────────────────────────────────────────── */}
+          {fnDialogStep === "chooser" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-2">
+                <DialogTitle className="text-lg">Configure Function</DialogTitle>
+                <DialogDescription className="text-xs">
+                  Configure functions through one of the following methods.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="px-6 py-4 space-y-3">
+                <button
+                  className="w-full flex items-start gap-4 p-4 rounded-md border hover:border-primary hover:bg-muted/40 transition-colors text-left opacity-60 cursor-not-allowed"
+                  disabled
+                  title="Gallery is coming soon"
+                >
+                  <div className="h-10 w-10 rounded-md border flex items-center justify-center shrink-0 bg-muted/40">
+                    <Sparkles className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Gallery</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      View pre-made functions to learn how they're made or apply them to your own workflow rules.
+                    </p>
+                    <p className="text-[10px] uppercase tracking-wider text-amber-600 mt-1">Coming soon</p>
+                  </div>
+                </button>
+
+                <button
+                  className="w-full flex items-start gap-4 p-4 rounded-md border hover:border-primary hover:bg-muted/40 transition-colors text-left"
+                  onClick={() => {
+                    setFnSearchQuery("")
+                    setPendingFunctionId(functionAction?.functionId || "")
+                    setFnDialogStep("associate")
+                  }}
+                >
+                  <div className="h-10 w-10 rounded-md border flex items-center justify-center shrink-0 bg-muted/40">
+                    <FileText className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Functions</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Functions created by users in your organization.
+                    </p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
+                </button>
+
+                <button
+                  className="w-full flex items-start gap-4 p-4 rounded-md border hover:border-primary hover:bg-muted/40 transition-colors text-left"
+                  onClick={() => {
+                    setNewFnDisplayName("")
+                    setNewFnName("")
+                    setNewFnDescription("")
+                    setNewFnLanguage("JavaScript")
+                    setCreateFnError("")
+                    setFnDialogStep("create")
+                  }}
+                >
+                  <div className="h-10 w-10 rounded-md border flex items-center justify-center shrink-0 bg-muted/40">
+                    <Code2 className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Write your own</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Create your own functions.
+                    </p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
+                </button>
+              </div>
+              <DialogFooter className="border-t px-6 py-3">
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeFnDialog}>
+                  Cancel
+                </Button>
+                {functionAction?.functionId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={removeFunctionAction}
+                  >
+                    Remove function
+                  </Button>
+                )}
+              </DialogFooter>
+            </>
+          )}
+
+          {/* ── Step: Associate existing function ─────────────────────── */}
+          {fnDialogStep === "associate" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base">
+                      Functions{moduleName ? ` — ${moduleName}` : ""}
+                    </DialogTitle>
+                    <DialogDescription className="text-xs">
+                      Select an existing function to attach to this rule.
+                    </DialogDescription>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => setFnDialogStep("chooser")}
+                  >
+                    Configure Function
+                  </Button>
+                </div>
+              </DialogHeader>
+
+              <div className="px-6 pb-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={fnSearchQuery}
+                    onChange={(e) => setFnSearchQuery(e.target.value)}
+                    placeholder="Search"
+                    className="h-8 text-xs pl-8"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-b max-h-80 overflow-y-auto">
+                {filteredFunctions.length === 0 ? (
+                  <div className="px-6 py-12 text-center text-xs text-muted-foreground">
+                    {availableFunctions.length === 0
+                      ? 'No functions yet. Click "Configure Function" → "Write your own" to create one.'
+                      : "No functions match your search."}
+                  </div>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-6 py-2 font-medium w-6"></th>
+                        <th className="px-2 py-2 font-medium">Name</th>
+                        <th className="px-2 py-2 font-medium">Description</th>
+                        <th className="px-2 py-2 font-medium">Language</th>
+                        <th className="px-2 py-2 font-medium">Modified On</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredFunctions.map((fn) => {
+                        const checked = pendingFunctionId === fn.id
+                        return (
+                          <tr
+                            key={fn.id}
+                            onClick={() => setPendingFunctionId(fn.id)}
+                            className={`cursor-pointer hover:bg-muted/40 transition-colors ${checked ? "bg-primary/5" : ""}`}
+                          >
+                            <td className="px-6 py-2.5">
+                              <input
+                                type="radio"
+                                name="fn-pick"
+                                checked={checked}
+                                onChange={() => setPendingFunctionId(fn.id)}
+                                className="h-3.5 w-3.5 cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-2 py-2.5 font-medium text-foreground truncate max-w-[180px]">
+                              {fn.displayName || fn.name}
+                            </td>
+                            <td className="px-2 py-2.5 text-muted-foreground truncate max-w-[220px]">
+                              {fn.description || "—"}
+                            </td>
+                            <td className="px-2 py-2.5 text-muted-foreground">{fn.language}</td>
+                            <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
+                              {fn.updatedAt ? format(new Date(fn.updatedAt), "dd/MM/yyyy") : "—"}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <DialogFooter className="px-6 py-3 gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeFnDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!pendingFunctionId}
+                  onClick={() => associateFunction(pendingFunctionId)}
+                >
+                  Associate
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {/* ── Step: Create (Write your own) ─────────────────────────── */}
+          {fnDialogStep === "create" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-2">
+                <DialogTitle className="text-lg">Create Function</DialogTitle>
+                <DialogDescription className="text-xs">
+                  Defines a new automation function. You can edit its script later in Settings → Functions.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="px-6 py-4 space-y-4">
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="fn-display-name" className="text-xs text-right">Display Name</Label>
+                  <Input
+                    id="fn-display-name"
+                    value={newFnDisplayName}
+                    onChange={(e) => setNewFnDisplayName(e.target.value)}
+                    placeholder="e.g. Send Welcome Email"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="fn-name" className="text-xs text-right">Function Name</Label>
+                  <Input
+                    id="fn-name"
+                    value={newFnName}
+                    onChange={(e) => setNewFnName(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
+                    placeholder="e.g. send_welcome_email"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label htmlFor="fn-desc" className="text-xs text-right pt-2">Description</Label>
+                  <Textarea
+                    id="fn-desc"
+                    value={newFnDescription}
+                    onChange={(e) => setNewFnDescription(e.target.value)}
+                    placeholder="Optional"
+                    rows={3}
+                    className="text-xs resize-none"
+                  />
+                </div>
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="fn-lang" className="text-xs text-right">Language</Label>
+                  <Select value={newFnLanguage} onValueChange={setNewFnLanguage}>
+                    <SelectTrigger id="fn-lang" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="JavaScript" className="text-xs">JavaScript (executable)</SelectItem>
+                      <SelectItem value="Deluge" className="text-xs">Deluge (editor only)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {newFnLanguage !== "JavaScript" && (
+                  <p className="text-[11px] text-amber-600 ml-[122px]">
+                    Note: only JavaScript functions can be executed by workflow rules.
+                  </p>
+                )}
+                {createFnError && (
+                  <p className="text-[11px] text-destructive ml-[122px]">{createFnError}</p>
+                )}
+              </div>
+
+              <DialogFooter className="border-t px-6 py-3 gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs mr-auto"
+                  onClick={() => setFnDialogStep("chooser")}
+                >
+                  ← Back
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeFnDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={isCreatingFn || !newFnDisplayName.trim() || !newFnName.trim()}
+                  onClick={handleCreateFn}
+                >
+                  {isCreatingFn ? "Creating..." : "Create"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

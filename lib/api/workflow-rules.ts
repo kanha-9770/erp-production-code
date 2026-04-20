@@ -20,7 +20,7 @@ export interface WorkflowRuleData {
     operator: string
     value: string
   }> | null
-  instantActions: string[] | null
+  instantActions: WorkflowInstantAction[] | null
   scheduledExecute: string | null
   scheduledUnit: string | null
   active: boolean
@@ -32,6 +32,12 @@ export interface WorkflowRuleData {
     last_name: string | null
     email: string
   }
+}
+
+export interface WorkflowInstantAction {
+  type: string
+  functionId?: string
+  functionName?: string
 }
 
 export interface CreateWorkflowRuleBody {
@@ -47,7 +53,7 @@ export interface CreateWorkflowRuleBody {
     operator: string
     value: string
   }>
-  instantActions?: string[]
+  instantActions?: WorkflowInstantAction[]
   scheduledExecute?: string
   scheduledUnit?: string
 }

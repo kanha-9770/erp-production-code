@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { DatabaseTransforms } from "@/lib/database/DatabaseTransforms";
 import { DatabaseService } from "@/lib/database/database-service";
+import { triggerWorkflowsForRecord } from "@/lib/workflow/trigger";
 
 // ──────────────────────────────────────────────
 // Type definitions
@@ -202,6 +203,24 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
         updatedAt: new Date(),
       });
 
+      // Fire workflow rules attached to "Edit" / "Create or Edit" — never await.
+      if (organizationId && currentUserId) {
+        prisma.formModule
+          .findFirst({ where: { id: form.moduleId }, select: { name: true } })
+          .then((mod) => {
+            if (!mod?.name) return
+            return triggerWorkflowsForRecord({
+              moduleName: mod.name,
+              action: "Edit",
+              organizationId: organizationId!,
+              userId: currentUserId!,
+              recordId: updatedRecord.id,
+              recordData: structuredRecordData as any,
+            })
+          })
+          .catch((err) => console.error("[workflow] edit trigger failed", err))
+      }
+
       return NextResponse.json({
         success: true,
         message: "Record updated successfully!",
@@ -224,6 +243,24 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       organizationId || undefined,
       currentUserId
     );
+
+    // Fire workflow rules attached to "Create" / "Create or Edit" — never await.
+    if (organizationId && currentUserId) {
+      prisma.formModule
+        .findFirst({ where: { id: form.moduleId }, select: { name: true } })
+        .then((mod) => {
+          if (!mod?.name) return
+          return triggerWorkflowsForRecord({
+            moduleName: mod.name,
+            action: "Create",
+            organizationId: organizationId!,
+            userId: currentUserId!,
+            recordId: record.id,
+            recordData: structuredRecordData as any,
+          })
+        })
+        .catch((err) => console.error("[workflow] create trigger failed", err))
+    }
 
     return NextResponse.json({
       success: true,
