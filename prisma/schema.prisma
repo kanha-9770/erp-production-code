@@ -1860,7 +1860,7 @@ model CrmFunction {
   name           String
   displayName    String            @map("display_name")
   category       String            @default("Automation")
-  language       String            @default("Deluge")
+  language       String            @default("JavaScript")
   description    String?
   associated     Boolean           @default(false)
   restApi        Boolean           @default(false) @map("rest_api")

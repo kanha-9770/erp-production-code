@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery } from "@/lib/api/forms"
 import { useCreateWorkflowRuleMutation, useUpdateWorkflowRuleMutation, useGetWorkflowRulesQuery } from "@/lib/api/workflow-rules"
-import { useGetFunctionsQuery, useCreateFunctionMutation } from "@/lib/api/functions"
+import { useGetFunctionsQuery, useCreateFunctionMutation, useGetBindingsTreeQuery } from "@/lib/api/functions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -66,6 +66,9 @@ interface InstantAction {
   functionName?: string
   // For type === "Function": per-argument value mapping
   argumentMappings?: ArgumentMapping[]
+  // For type === "Field Update": which field to write and the literal value
+  targetFieldId?: string
+  targetValue?: string
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
@@ -98,6 +101,8 @@ function normalizeActions(raw: unknown): InstantAction[] {
           functionId: typeof entry.functionId === "string" ? entry.functionId : undefined,
           functionName: typeof entry.functionName === "string" ? entry.functionName : undefined,
           argumentMappings: mappings,
+          targetFieldId: typeof entry.targetFieldId === "string" ? entry.targetFieldId : undefined,
+          targetValue: typeof entry.targetValue === "string" ? entry.targetValue : undefined,
         }
       }
       return null
@@ -112,16 +117,26 @@ export default function CreateWorkflowRulePage() {
   const searchParams = useSearchParams()
 
   const ruleId = searchParams.get("id") || ""
-  const moduleName = searchParams.get("module") || ""
-  const ruleName = searchParams.get("name") || ""
-  const ruleDescription = searchParams.get("description") || ""
+  // Module is passed via ?module= but can also be picked inline (when users
+  // land on /create without a module param). Keep it in state so the inline
+  // picker can update it; initial value still comes from the URL.
+  const [moduleName, setModuleName] = useState(searchParams.get("module") || "")
+  // Name + description come from the URL (passed by the "New Workflow" dialog)
+  // but we keep them in state so users who land on /create directly can still
+  // edit them inline — no need to bounce back through the dialog.
+  const [ruleName, setRuleName] = useState(searchParams.get("name") || "")
+  const [ruleDescription, setRuleDescription] = useState(searchParams.get("description") || "")
   const isEditing = !!ruleId
 
   // Step 1: WHEN
   const [step, setStep] = useState(1)
   const [editingWhen, setEditingWhen] = useState(false)
-  const [executeBasedOn, setExecuteBasedOn] = useState<ExecuteBasedOn>("")
-  const [recordAction, setRecordAction] = useState<RecordAction>("")
+  // Sensible defaults so Save is reachable as soon as the user has a name +
+  // module — the two almost-always-intended values for a new rule. If they
+  // want something else, Step 1's dropdowns still work. Editing an existing
+  // rule overwrites these from the loaded record.
+  const [executeBasedOn, setExecuteBasedOn] = useState<ExecuteBasedOn>("record-action")
+  const [recordAction, setRecordAction] = useState<RecordAction>("Create or Edit")
   const [dateField, setDateField] = useState<DateField>("")
   const [showDescription, setShowDescription] = useState(!!ruleDescription)
 
@@ -425,6 +440,30 @@ export default function CreateWorkflowRulePage() {
     return fields
   }, [formDetail])
 
+  // ── Module-wide field list for the Field Update action picker ──
+  // Uses the bindings tree endpoint which already flattens sections + subforms
+  // from every form in the module and attaches stable API Names. This is
+  // resilient: it works even if no form is published yet, if the module was
+  // renamed, or if fields live in subforms only — all scenarios where the
+  // original `formFields` (tied to first published form detail) returns [].
+  const { data: treeData } = useGetBindingsTreeQuery()
+  const moduleFields = useMemo(() => {
+    const mods = treeData?.data || []
+    // Match by name first (our URL carries moduleName), fall back to any
+    // module whose name matches case-insensitively.
+    const mod =
+      mods.find((m: any) => m.name === moduleName) ||
+      mods.find((m: any) => (m.name || "").toLowerCase() === moduleName.toLowerCase())
+    if (!mod) return [] as Array<{ id: string; label: string; formName: string; apiName: string }>
+    const out: Array<{ id: string; label: string; formName: string; apiName: string }> = []
+    for (const f of mod.forms || []) {
+      for (const fld of f.fields || []) {
+        out.push({ id: fld.id, label: fld.label, formName: f.name, apiName: fld.apiName })
+      }
+    }
+    return out
+  }, [treeData, moduleName])
+
   const canGoNext =
     executeBasedOn === "record-action"
       ? !!recordAction
@@ -595,27 +634,62 @@ export default function CreateWorkflowRulePage() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="border-b bg-background sticky top-0 z-20">
         <div className="px-4 sm:px-6 py-3 flex items-start justify-between gap-4">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <button
               onClick={() => router.push("/settings/workflow-rules")}
-              className="flex items-center gap-1.5 text-md text-foreground hover:text-foreground transition-colors mb-2"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              {ruleName}
+              Back to workflow rules
             </button>
 
-            <p className="text-[12px] text-foreground">@  {moduleName}</p>
-
-            {showDescription ? (
-              <p className="text-xs text-foreground mt-0.5">{ruleDescription}</p>
-            ) : (
-              <button
-                onClick={() => setShowDescription(true)}
-                className="text-[11px] text-primary hover:underline mt-0.5"
-              >
-                Add Description
-              </button>
-            )}
+            {/* Inline editable basics. The Save button is only enabled when
+                name + module + trigger are set — we surface those as plain
+                inputs here so users can fix gaps without navigating away. */}
+            <div className="space-y-1.5">
+              <Input
+                value={ruleName}
+                onChange={(e) => setRuleName(e.target.value)}
+                placeholder="Rule name (required)"
+                className="h-8 text-sm font-medium border-transparent hover:border-border focus:border-border bg-transparent px-2"
+              />
+              <div className="flex items-center gap-1.5 px-2">
+                <span className="text-[11px] text-muted-foreground shrink-0">@</span>
+                <Select value={moduleName} onValueChange={(v) => setModuleName(v)}>
+                  <SelectTrigger className="h-7 text-xs w-auto min-w-[160px] border-transparent hover:border-border bg-transparent">
+                    <SelectValue placeholder="Pick a module…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(treeData?.data || []).length === 0 ? (
+                      <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                        No modules yet. Create one in Settings → Modules.
+                      </div>
+                    ) : (
+                      (treeData?.data || []).map((m: any) => (
+                        <SelectItem key={m.id} value={m.name} className="text-xs">
+                          {m.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {showDescription ? (
+                <Input
+                  value={ruleDescription}
+                  onChange={(e) => setRuleDescription(e.target.value)}
+                  placeholder="Description (optional)"
+                  className="h-7 text-xs border-transparent hover:border-border focus:border-border bg-transparent px-2"
+                />
+              ) : (
+                <button
+                  onClick={() => setShowDescription(true)}
+                  className="text-[11px] text-primary hover:underline px-2"
+                >
+                  Add Description
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Header controls — rule status, activate/deactivate, view usage, overflow menu */}
@@ -1093,6 +1167,117 @@ export default function CreateWorkflowRulePage() {
                               </div>
                             )
                           }
+                          if (a.type === "Field Update") {
+                            return (
+                              <div key={a.type} className="group space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-xs font-medium text-foreground">Field Update</p>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSelectedInstantActions((prev) =>
+                                        prev.filter((x) => x.type !== "Field Update")
+                                      )
+                                    }
+                                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive"
+                                    title="Remove Field Update"
+                                  >
+                                    <MinusCircle className="h-4 w-4" />
+                                  </button>
+                                </div>
+                                {!moduleName && (
+                                  <div className="space-y-1 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5">
+                                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                                      Pick a module first
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      Workflows are module-scoped. Choose which module this rule runs against.
+                                    </p>
+                                    <Select
+                                      value={moduleName}
+                                      onValueChange={(v) => setModuleName(v)}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs mt-1">
+                                        <SelectValue placeholder="Select a module…" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {(treeData?.data || []).length === 0 ? (
+                                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                                            No modules yet. Create one in Settings → Modules.
+                                          </div>
+                                        ) : (
+                                          (treeData?.data || []).map((m: any) => (
+                                            <SelectItem key={m.id} value={m.name} className="text-xs">
+                                              {m.name}
+                                            </SelectItem>
+                                          ))
+                                        )}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Select
+                                    value={a.targetFieldId || ""}
+                                    onValueChange={(v) =>
+                                      setSelectedInstantActions((prev) =>
+                                        prev.map((x) =>
+                                          x.type === "Field Update" ? { ...x, targetFieldId: v } : x
+                                        )
+                                      )
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue placeholder="Pick field…" />
+                                    </SelectTrigger>
+                                    <SelectContent className="max-h-[300px]">
+                                      {moduleFields.length === 0 ? (
+                                        <div className="px-2 py-2 text-[11px] text-muted-foreground space-y-1">
+                                          <p className="font-medium text-foreground">
+                                            No fields available
+                                          </p>
+                                          <p>
+                                            Module <span className="font-mono">{moduleName || "?"}</span>{" "}
+                                            has no forms with fields. Create a form, add a field, then come back.
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        moduleFields.map((f) => (
+                                          <SelectItem key={f.id} value={f.id} className="text-xs">
+                                            <div className="flex items-center justify-between gap-2 w-full">
+                                              <span className="truncate">{f.label}</span>
+                                              <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+                                                {f.apiName} · {f.formName}
+                                              </span>
+                                            </div>
+                                          </SelectItem>
+                                        ))
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                  <Input
+                                    value={a.targetValue || ""}
+                                    onChange={(e) =>
+                                      setSelectedInstantActions((prev) =>
+                                        prev.map((x) =>
+                                          x.type === "Field Update"
+                                            ? { ...x, targetValue: e.target.value }
+                                            : x
+                                        )
+                                      )
+                                    }
+                                    placeholder="Value to write"
+                                    className="h-8 text-xs"
+                                  />
+                                </div>
+                                <p className="text-[10px] text-muted-foreground">
+                                  Fires on record {recordAction || "Create/Edit"}. Overwrites the
+                                  field with this value.
+                                </p>
+                              </div>
+                            )
+                          }
+
                           return (
                             <div
                               key={a.type}
@@ -1241,7 +1426,15 @@ export default function CreateWorkflowRulePage() {
         )}
         {!canSaveRule && (
           <span className="text-[11px] text-muted-foreground ml-auto mr-4">
-            Pick a When trigger to enable Save
+            {!ruleName.trim()
+              ? "Name the rule to enable Save"
+              : !moduleName
+              ? "Pick a module to enable Save"
+              : !executeBasedOn
+              ? "Pick a When trigger to enable Save"
+              : !(recordAction || dateField)
+              ? "Pick a record action or date field to enable Save"
+              : "Fill required fields to enable Save"}
           </span>
         )}
       </div>

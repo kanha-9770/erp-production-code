@@ -374,19 +374,6 @@ async function runOne(
       durationMs: 0,
     }
   }
-  if (fn.language && fn.language.toLowerCase() !== "javascript") {
-    return {
-      bindingId: binding.id,
-      functionId: binding.functionId,
-      functionName: fn.displayName ?? fn.name,
-      ok: false,
-      fieldUpdates: {},
-      error: `Cannot execute ${fn.language} functions on the server.`,
-      logs: [],
-      durationMs: 0,
-    }
-  }
-
   const inputMapping = (binding.inputMapping || {}) as Record<string, string>
   const outputMapping = (binding.outputMapping || {}) as Record<string, string>
 

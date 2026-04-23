@@ -76,7 +76,7 @@ export default function FunctionsPage() {
       name: f.name,
       displayName: f.displayName || f.name,
       category: f.category || "Automation",
-      language: f.language || "Deluge",
+      language: "JavaScript",
       description: f.description || "",
       associated: f.associated || false,
       restApi: f.restApi || false,
@@ -87,7 +87,6 @@ export default function FunctionsPage() {
 
   const [searchQuery, setSearchQuery] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("All")
-  const [languageFilter, setLanguageFilter] = useState("All")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [functionToDelete, setFunctionToDelete] = useState<FunctionItem | null>(null)
@@ -95,7 +94,7 @@ export default function FunctionsPage() {
     name: "",
     displayName: "",
     category: "Automation",
-    language: "Deluge",
+    language: "JavaScript",
     description: "",
   })
 
@@ -116,12 +115,8 @@ export default function FunctionsPage() {
       filtered = filtered.filter((f) => f.category === categoryFilter)
     }
 
-    if (languageFilter !== "All") {
-      filtered = filtered.filter((f) => f.language === languageFilter)
-    }
-
     return filtered
-  }, [functions, searchQuery, categoryFilter, languageFilter])
+  }, [functions, searchQuery, categoryFilter])
 
   const categories = useMemo(() => {
     const cats = new Set(functions.map((f) => f.category))
@@ -155,7 +150,7 @@ export default function FunctionsPage() {
         category: newFunction.category,
         language: newFunction.language,
       })
-      setNewFunction({ name: "", displayName: "", category: "Automation", language: "Deluge", description: "" })
+      setNewFunction({ name: "", displayName: "", category: "Automation", language: "JavaScript", description: "" })
       router.push(`/settings/functions/editor?${params.toString()}`)
     } catch (err) {
       console.error("Failed to create function:", err)
@@ -244,18 +239,6 @@ export default function FunctionsPage() {
                     {categories.map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={languageFilter} onValueChange={setLanguageFilter}>
-                  <SelectTrigger className="w-full sm:w-32 h-9 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All">All</SelectItem>
-                    <SelectItem value="Deluge">Deluge</SelectItem>
-                    <SelectItem value="JavaScript">JavaScript</SelectItem>
-                    <SelectItem value="Python">Python</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -441,23 +424,6 @@ export default function FunctionsPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-[100px_1fr] items-center gap-3">
-              <Label className="text-sm text-right text-muted-foreground">Language</Label>
-              <Select
-                value={newFunction.language}
-                onValueChange={(v) => setNewFunction((prev) => ({ ...prev, language: v }))}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Deluge">Deluge</SelectItem>
-                  <SelectItem value="JavaScript">JavaScript</SelectItem>
-                  <SelectItem value="Python">Python</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="grid grid-cols-[100px_1fr] items-start gap-3">
               <Label className="text-sm text-right text-muted-foreground pt-2">Description</Label>
               <Textarea
@@ -474,7 +440,7 @@ export default function FunctionsPage() {
               variant="outline"
               onClick={() => {
                 setCreateDialogOpen(false)
-                setNewFunction({ name: "", displayName: "", category: "Automation", language: "Deluge", description: "" })
+                setNewFunction({ name: "", displayName: "", category: "Automation", language: "JavaScript", description: "" })
               }}
             >
               Cancel

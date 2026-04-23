@@ -3,6 +3,23 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Form, ClientFunctionBinding } from "@/types/form-builder";
 
+// Identifiers only present in legacy non-JS scripts (Deluge-era bodies that
+// weren't rewritten). If any of them surface as "X is not defined", the
+// function will keep failing on every run until its script is rewritten.
+const LEGACY_SCRIPT_IDENTS = new Set([
+  "automation",
+  "info",
+  "sendmail",
+  "invokeUrl",
+  "openUrl",
+]);
+
+function isLegacyScriptError(msg: string): boolean {
+  if (!msg) return false;
+  const m = /([A-Za-z_$][\w$]*)\s+is not defined/.exec(msg);
+  return !!m && LEGACY_SCRIPT_IDENTS.has(m[1]);
+}
+
 interface FunctionBindingRunnerProps {
   form: Form | null;
   formData: Record<string, any>;
@@ -44,16 +61,24 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
 
   // Track the last formData snapshot so we can diff "what just changed".
   const lastSnapshotRef = useRef<Record<string, any>>({});
+  // Flip after the first effect run so the initial snapshot (whether empty or
+  // pre-filled from an edit) is always baseline — never fires bindings.
+  const initializedRef = useRef(false);
   // Debounce timers per-binding so a fast typist's keystrokes coalesce.
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Latch in-flight bindings so we don't double-fire while a request is open.
   const inFlightRef = useRef<Set<string>>(new Set());
+  // Bindings whose function contains legacy non-JS script. We warn the
+  // developer console once and then stop firing — otherwise every keystroke
+  // produces a toast + failed request for a script that can never succeed.
+  const legacyDisabledRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    // First mount: capture the snapshot, don't fire (initial values aren't
-    // user changes). Subsequent runs diff against this baseline.
-    if (Object.keys(lastSnapshotRef.current).length === 0 && Object.keys(formData).length > 0) {
+    // First effect run: baseline the snapshot regardless of its shape (empty
+    // new form, or pre-filled edit record). Never fires on the first run.
+    if (!initializedRef.current) {
       lastSnapshotRef.current = { ...formData };
+      initializedRef.current = true;
       return;
     }
 
@@ -73,12 +98,31 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
     if (changedFieldIds.size === 0) return;
 
     for (const binding of changeBindings) {
-      const watched = Object.values(binding.inputMapping || {}).filter(
-        (v): v is string => typeof v === "string" && !v.startsWith("$")
-      );
-      if (watched.length === 0) continue;
-      const triggered = watched.find((fid) => changedFieldIds.has(fid));
+      const mapping = binding.inputMapping || {};
+      const hasExplicitMapping = Object.keys(mapping).length > 0;
+
+      // Figure out the trigger field. Three modes:
+      //   1. Explicit mapping — fire if any watched fieldId changed.
+      //   2. Auto-mode, field-scoped — fire only when the binding's own field changed.
+      //   3. Auto-mode, form-scoped — fire on any field change in the form.
+      let triggered: string | undefined;
+      if (hasExplicitMapping) {
+        const watched = Object.values(mapping).filter(
+          (v): v is string => typeof v === "string" && !v.startsWith("$")
+        );
+        triggered = watched.find((fid) => changedFieldIds.has(fid));
+      } else if (binding.fieldId) {
+        if (changedFieldIds.has(binding.fieldId)) triggered = binding.fieldId;
+      } else {
+        // Form-scoped auto binding — use the first changed field as the trigger.
+        const first = changedFieldIds.values().next();
+        triggered = first.done ? undefined : first.value;
+      }
       if (!triggered) continue;
+
+      // Skip bindings whose function was already flagged as legacy (non-JS).
+      // Avoids spamming toasts and wasteful requests on every keystroke.
+      if (legacyDisabledRef.current.has(binding.id)) continue;
 
       // Debounce per binding (300ms — matches what feels right for typing).
       if (timersRef.current[binding.id]) clearTimeout(timersRef.current[binding.id]);
@@ -98,9 +142,26 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
           }),
         })
           .then(async (r) => {
+            // 401 = unauthenticated (anonymous public form). Server skips
+            // bindings for unauth users too — swallow silently so anon
+            // visitors don't see a "Not authenticated" toast on every keystroke.
+            if (r.status === 401) return;
             const json = await r.json().catch(() => ({}));
             if (!r.ok || !json?.ok) {
               const msg = json?.error || `Function "${binding.function?.displayName ?? binding.function?.name ?? "binding"}" failed`;
+              // Legacy non-JS script (e.g. `void automation.X()` bodies from
+              // the old Deluge era). Runtime fails with "automation is not
+              // defined" / similar. Disable this binding for the session and
+              // log a single actionable warning to the console — no toast.
+              if (isLegacyScriptError(msg)) {
+                legacyDisabledRef.current.add(binding.id);
+                console.warn(
+                  `[FunctionBinding] Disabled binding for function "${
+                    binding.function?.displayName ?? binding.function?.name ?? binding.functionId
+                  }" — its script is legacy (non-JavaScript). Open Settings → Functions, rewrite the script as JavaScript using ctx.* helpers, then re-enable.`
+                );
+                return;
+              }
               if (onError) onError(msg);
               else console.warn("[FunctionBinding]", msg);
               return;
@@ -167,11 +228,16 @@ export async function fireBlurBindings(
   onError?: (msg: string) => void
 ): Promise<void> {
   if (!form?.id || !form.functionBindings) return;
-  const bindings = form.functionBindings.filter(
-    (b) =>
-      b.event === "onFieldBlur" &&
-      Object.values(b.inputMapping || {}).includes(fieldId)
-  );
+  const bindings = form.functionBindings.filter((b) => {
+    if (b.event !== "onFieldBlur") return false;
+    const mapping = b.inputMapping || {};
+    if (Object.keys(mapping).length > 0) {
+      return Object.values(mapping).includes(fieldId);
+    }
+    // Auto-mode: field-scoped binding fires only for its own field;
+    // form-scoped binding fires on any blur.
+    return b.fieldId ? b.fieldId === fieldId : true;
+  });
   if (bindings.length === 0) return;
 
   for (const binding of bindings) {
@@ -186,6 +252,7 @@ export async function fireBlurBindings(
           triggerFieldId: fieldId,
         }),
       });
+      if (r.status === 401) continue; // anon user — skip silently
       const json = await r.json().catch(() => ({}));
       if (!r.ok || !json?.ok) {
         const msg = json?.error || "Function binding failed";

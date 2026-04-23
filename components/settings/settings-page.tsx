@@ -120,6 +120,22 @@ const settingsData: SettingCategory[] = [
       { name: "AI Providers", href: "/admin/ai" },
     ],
   },
+  {
+    title: "Documentation",
+    items: [
+      { name: "All Guides", href: "/settings/docs" },
+      { name: "Start — Create a Module", href: "/settings/docs/create-your-first-module" },
+      { name: "Start — Add a Form", href: "/settings/docs/create-your-first-form" },
+      { name: "Start — Design Fields", href: "/settings/docs/design-form-with-fields" },
+      { name: "Start — Find apiNames", href: "/settings/docs/discover-api-names" },
+      { name: "Start — Hello World Function", href: "/settings/docs/hello-world-function" },
+      { name: "Start — First Workflow Rule", href: "/settings/docs/first-workflow-rule" },
+      { name: "Example — Duplicate Leads", href: "/settings/docs/duplicate-leads" },
+      { name: "Example — Lead Scoring", href: "/settings/docs/lead-scoring" },
+      { name: "Example — Round-robin", href: "/settings/docs/round-robin-assignment" },
+      { name: "Example — Convert to Contact", href: "/settings/docs/convert-lead-to-contact" },
+    ],
+  },
 ]
 
 export function SettingsPage() {

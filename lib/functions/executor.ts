@@ -548,29 +548,7 @@ export async function executeFunction(opts: ExecuteOptions): Promise<ExecuteResu
       durationMs: Date.now() - start,
     }
   } catch (err: any) {
-    let message = err?.message || "Execution failed"
-    // Common footgun: user pasted Deluge into a JavaScript function. The
-    // runtime sees `automation`, `info`, `sendmail`, etc. as undefined.
-    // Surface a clearer hint instead of the raw ReferenceError.
-    const m = /^([A-Za-z_$][\w$]*)\s+is not defined/.exec(message)
-    if (m) {
-      const ident = m[1]
-      const delugeIdents = new Set([
-        "automation",
-        "info",
-        "sendmail",
-        "invokeUrl",
-        "openUrl",
-        "List",
-        "Map",
-      ])
-      if (delugeIdents.has(ident)) {
-        message =
-          `${message} — this looks like Deluge syntax. The runtime executes ` +
-          `JavaScript only. Use ctx.records.* / ctx.modules.* helpers, e.g. ` +
-          `\`const rows = await ctx.records.list("Leads", { limit: 5 });\`.`
-      }
-    }
+    const message = err?.message || "Execution failed"
     return {
       success: false,
       error: message,

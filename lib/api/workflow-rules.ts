@@ -38,6 +38,9 @@ export interface WorkflowInstantAction {
   type: string
   functionId?: string
   functionName?: string
+  // For type === "Field Update"
+  targetFieldId?: string
+  targetValue?: string
 }
 
 export interface CreateWorkflowRuleBody {

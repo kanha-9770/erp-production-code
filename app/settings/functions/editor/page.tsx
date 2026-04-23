@@ -250,49 +250,26 @@ function stripCodeFences(text: string): string {
   return fence ? fence[1] : trimmed
 }
 
-/**
- * Default starter script per language. JavaScript scripts get a runnable
- * sample using the `ctx` API; Deluge scripts get the legacy template (which
- * is editor-only — Deluge cannot be executed by the runtime).
- */
-function getDefaultTemplate(name: string, language: string): string {
-  const lang = (language || "").toLowerCase()
-  if (lang === "javascript" || lang === "js") {
-    return [
-      `// ${name} — runs server-side with access to ctx.* helpers.`,
-      `// Globals: ctx.modules, ctx.records, ctx.input, ctx.log, ...`,
-      ``,
-      `// Discover what's available:`,
-      `// const modules = await ctx.modules.list();`,
-      `// const fields  = await ctx.records.fields("Leads");`,
-      ``,
-      `// Read records — \`data\` is a flat { [Label]: value } map:`,
-      `// const rows = await ctx.records.list("Leads", { limit: 5 });`,
-      `// ctx.log("Found", rows.length, "records:", rows.map(r => r.data));`,
-      ``,
-      `// Write a record using label keys:`,
-      `// await ctx.records.create("Leads", { "Name": "Alice", "Email": "a@b.com" });`,
-      ``,
-      `return { ok: true };`,
-      ``,
-    ].join("\n")
-  }
-  // Deluge / anything else — editor metadata only.
-  return `void automation.${name}()\n{\n\t// Write your function logic here\n\t\n}\n`
-}
-
-/**
- * Heuristic: does this script look like Deluge? We catch a couple of obvious
- * cases so we can warn before sending it to the JS runtime.
- */
-function looksLikeDeluge(script: string): boolean {
-  const s = script.trim()
-  if (!s) return false
-  if (/^void\s+\w+(\.\w+)?\s*\(/m.test(s)) return true
-  if (/^\s*info\s+["']/m.test(s)) return true
-  if (/^\s*sendmail\s*\[/m.test(s)) return true
-  if (/^\s*invokeUrl\s*\[/m.test(s)) return true
-  return false
+/** Default starter script for a new JavaScript function. */
+function getDefaultTemplate(name: string): string {
+  return [
+    `// ${name} — runs server-side with access to ctx.* helpers.`,
+    `// Globals: ctx.modules, ctx.records, ctx.input, ctx.log, ...`,
+    ``,
+    `// Discover what's available:`,
+    `// const modules = await ctx.modules.list();`,
+    `// const fields  = await ctx.records.fields("Leads");`,
+    ``,
+    `// Read records — \`data\` is a flat { [Label]: value } map:`,
+    `// const rows = await ctx.records.list("Leads", { limit: 5 });`,
+    `// ctx.log("Found", rows.length, "records:", rows.map(r => r.data));`,
+    ``,
+    `// Write a record using label keys:`,
+    `// await ctx.records.create("Leads", { "Name": "Alice", "Email": "a@b.com" });`,
+    ``,
+    `return { ok: true };`,
+    ``,
+  ].join("\n")
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -304,7 +281,7 @@ export default function FunctionEditorPage() {
   const functionId = searchParams.get("id") || ""
   const functionName = searchParams.get("name") || "Untitled_Function"
   const functionCategory = searchParams.get("category") || "Automation"
-  const initialLanguage = searchParams.get("language") || "Deluge"
+  const initialLanguage = searchParams.get("language") || "JavaScript"
   const isEditing = !!functionId
 
   // The language is mutable from the editor (right-sidebar picker). Defaults
@@ -312,9 +289,7 @@ export default function FunctionEditorPage() {
   const [functionLanguage, setFunctionLanguage] = useState<string>(initialLanguage)
 
   // Editor state
-  const [script, setScript] = useState(() =>
-    getDefaultTemplate(functionName, initialLanguage)
-  )
+  const [script, setScript] = useState(() => getDefaultTemplate(functionName))
   const [commitMessage, setCommitMessage] = useState("")
   const [consoleOutput, setConsoleOutput] = useState("")
   const [showConsole, setShowConsole] = useState(false)
@@ -373,12 +348,7 @@ export default function FunctionEditorPage() {
     if (existingFunction.script) {
       setScript(existingFunction.script)
     } else {
-      setScript(
-        getDefaultTemplate(
-          existingFunction.name,
-          existingFunction.language || functionLanguage
-        )
-      )
+      setScript(getDefaultTemplate(existingFunction.name))
     }
     setInitialized(true)
   }, [existingFunction, initialized, functionLanguage])
@@ -711,26 +681,6 @@ export default function FunctionEditorPage() {
   const handleRunConsole = useCallback(async () => {
     setShowConsole(true)
 
-    // Pre-flight: catch obvious Deluge syntax before round-tripping to the
-    // server. The runtime only executes JavaScript; running Deluge would just
-    // produce a confusing "X is not defined" error.
-    if (looksLikeDeluge(script)) {
-      setConsoleOutput(
-        [
-          ">> Cannot run: this script looks like Deluge.",
-          ">> The function runtime executes JavaScript only.",
-          ">>",
-          ">> Rewrite using JavaScript + the ctx API. Example:",
-          ">>   const rows = await ctx.records.list(\"Leads\", { limit: 5 });",
-          ">>   ctx.log(rows);",
-          ">>   return rows;",
-          ">>",
-          ">> Tip: open the AI panel (top toolbar) and ask it to convert your script.",
-        ].join("\n")
-      )
-      return
-    }
-
     // Auto-save when editing so the persisted script + language match what
     // you're about to run. Workflow rules also pick up the latest version.
     if (isEditing) {
@@ -747,6 +697,8 @@ export default function FunctionEditorPage() {
       const res = await executeFunctionApi({
         id: isEditing ? functionId : undefined,
         script,
+        timeoutMs: 30_000,
+        maxOps: 5000,
       }).unwrap()
       const data: any = (res as any).data ?? res
       const lines: string[] = []
@@ -776,16 +728,12 @@ export default function FunctionEditorPage() {
       } else {
         lines.push("")
         lines.push(`!! ${data.error || "Execution failed"}`)
-        // Most failures we surface are async/await or ctx.* misuse — show a
-        // pointer at the docs so the user knows where to look.
-        if (data.error && !data.error.includes("looks like Deluge")) {
-          lines.push(">>")
-          lines.push(">> Available helpers:")
-          lines.push(">>   ctx.modules.list() / .get(name)")
-          lines.push(">>   ctx.records.list(module, { limit?, where? })")
-          lines.push(">>   ctx.records.get / .create / .update / .delete / .count")
-          lines.push(">>   ctx.log(...args)  ctx.input")
-        }
+        lines.push(">>")
+        lines.push(">> Available helpers:")
+        lines.push(">>   ctx.modules.list() / .get(name)")
+        lines.push(">>   ctx.records.list(module, { limit?, where? })")
+        lines.push(">>   ctx.records.get / .create / .update / .delete / .count")
+        lines.push(">>   ctx.log(...args)  ctx.input")
       }
       setConsoleOutput(lines.join("\n"))
     } catch (err: any) {
@@ -818,9 +766,7 @@ export default function FunctionEditorPage() {
     const selection = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : ""
 
     const systemMsg = `You are an expert JavaScript developer assisting inside an in-app function editor for an ERP/CRM platform.
-The script will be EXECUTED server-side as JavaScript regardless of the editor's "language" label — never produce Deluge, Python, or any other language.
 Generate ONLY the requested JavaScript code. No explanations, no markdown fences, no commentary — return raw source.
-Do NOT use Deluge constructs like \`void automation.X()\`, \`info "..."\`, \`sendmail [...]\`, \`invokeUrl [...]\`, etc.
 Match the user's existing style and indentation. Keep responses focused and minimal.
 
 The script runs server-side inside an async sandbox with these helpers available as globals:
@@ -941,7 +887,7 @@ Task: ${prompt}`
   // Quick-action prompts. These bypass the prompt textarea and just ask for
   // a specific transformation against the current script + selection.
   const aiQuickAction = useCallback(
-    (action: "explain" | "fix" | "comment" | "optimize" | "convert") => {
+    (action: "explain" | "fix" | "comment" | "optimize") => {
       const ta = textareaRef.current
       const hasSelection = ta && ta.selectionEnd > ta.selectionStart
       const target = hasSelection ? "the selected portion" : "the script"
@@ -950,7 +896,6 @@ Task: ${prompt}`
         fix: `Find and fix any bugs, syntax errors, or logic issues in ${target}. Pay special attention to async/await usage, missing returns, and incorrect ctx.* API calls. Return the corrected JavaScript only.`,
         comment: `Add clear, concise JSDoc-style comments to functions and inline // comments at non-obvious lines in ${target}. Do not change any logic. Return the commented JavaScript.`,
         optimize: `Optimize ${target} for clarity, correctness and performance. Avoid premature abstractions. Replace expensive patterns (e.g. N+1 ctx.records.* calls inside loops) with batched alternatives where possible. Return the optimized JavaScript.`,
-        convert: `Convert ${target} from Deluge to JavaScript using the ctx.* API. Preserve the intent. Use ctx.records.list/get/create/update/delete and ctx.modules.* helpers. Return only the JavaScript.`,
       }
       runAiWithPrompt(prompts[action])
     },
@@ -1369,26 +1314,7 @@ Task: ${prompt}`
                     </div>
                     <div>
                       <p className="text-[10px] text-[var(--ed-fg-3)] uppercase tracking-wider mb-1">Language</p>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {["JavaScript", "Deluge"].map((lang) => (
-                          <button
-                            key={lang}
-                            onClick={() => setFunctionLanguage(lang)}
-                            className={`px-2 py-0.5 text-[11px] rounded ${
-                              functionLanguage === lang
-                                ? "bg-[var(--ed-blue)] text-[var(--ed-bg)]"
-                                : "bg-[var(--ed-bg)] text-[var(--ed-fg-2)] hover:bg-[var(--ed-border)]"
-                            }`}
-                          >
-                            {lang}
-                          </button>
-                        ))}
-                      </div>
-                      {functionLanguage !== "JavaScript" && (
-                        <p className="text-[10px] text-[var(--ed-yellow)] mt-1.5">
-                          Only JavaScript runs server-side. Deluge is editor-only metadata.
-                        </p>
-                      )}
+                      <p className="text-xs text-[var(--ed-fg-2)] font-mono">JavaScript</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-[var(--ed-fg-3)] uppercase tracking-wider mb-1">Tab Size</p>
@@ -1522,15 +1448,6 @@ Task: ${prompt}`
                         >
                           <Zap className="h-3 w-3 text-[var(--ed-yellow)]" />
                           Optimize
-                        </button>
-                        <button
-                          onClick={() => aiQuickAction("convert")}
-                          disabled={aiLoading}
-                          className="col-span-2 flex items-center justify-center gap-1.5 text-[11px] px-2 py-1.5 rounded bg-[var(--ed-bg)] border border-[var(--ed-border)] text-[var(--ed-fg-2)] hover:text-[var(--ed-fg)] hover:border-[var(--ed-border-2)] disabled:opacity-50 transition-colors"
-                          title="Convert Deluge to JavaScript using ctx.* API"
-                        >
-                          <Sparkles className="h-3 w-3 text-[var(--ed-green)]" />
-                          Convert Deluge → JavaScript
                         </button>
                       </div>
                     </div>

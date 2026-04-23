@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { usePublicForm } from "@/hooks/use-public-form";
 import { FormBody } from "@/components/public-form/FormBody";
+import { FunctionBindingRunner } from "@/components/forms/FunctionBindingRunner";
+import { useToast } from "@/hooks/use-toast";
 
 interface PublicFormDialogProps {
   formId: string | null;
@@ -89,7 +91,10 @@ export function PublicFormDialog({
     // misc
     hasErrorsOrMissingRequired,
     setErrors,
+    setFormData,
   } = hook;
+
+  const { toast } = useToast();
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -270,6 +275,20 @@ export function PublicFormDialog({
             {/* Body */}
             <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
               <div className="max-w-5xl mx-auto">
+                <FunctionBindingRunner
+                  form={form}
+                  formData={formData}
+                  setFieldValues={(updates) =>
+                    setFormData((prev) => ({ ...prev, ...updates }))
+                  }
+                  onError={(msg) =>
+                    toast({
+                      title: "Function binding error",
+                      description: msg,
+                      variant: "destructive",
+                    })
+                  }
+                />
                 <FormBody
                   form={form}
                   formData={formData}

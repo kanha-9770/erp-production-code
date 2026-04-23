@@ -23,18 +23,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({} as any))
-    const { id, script: rawScript, input, timeoutMs } = body || {}
+    const { id, script: rawScript, input, timeoutMs, maxOps } = body || {}
 
     let script = typeof rawScript === "string" ? rawScript : ""
-    // True when we're falling back to the function's saved script (no inline
-    // override from the editor). Only then do we honor the saved language —
-    // when the caller sends a script body, trust it as JavaScript.
-    let usingSavedScript = false
 
     if (id) {
       const fn = await prisma.crmFunction.findFirst({
         where: { id, organizationId: authUser.organizationId },
-        select: { script: true, language: true },
+        select: { script: true },
       })
       if (!fn) {
         return NextResponse.json(
@@ -43,24 +39,7 @@ export async function POST(request: NextRequest) {
         )
       }
       if (!script) {
-        usingSavedScript = true
         script = fn.script || ""
-      }
-      // Reject ONLY when running the saved script with a non-JS language
-      // metadata. The editor's Run path always sends a script body, so it
-      // is never blocked here even if the saved language is still "Deluge".
-      if (
-        usingSavedScript &&
-        fn.language &&
-        fn.language.toLowerCase() !== "javascript"
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Cannot execute ${fn.language} functions on the server. Open the function and set its language to JavaScript.`,
-          },
-          { status: 400 }
-        )
       }
     }
 
@@ -77,6 +56,7 @@ export async function POST(request: NextRequest) {
       userId: authUser.id,
       input,
       timeoutMs: typeof timeoutMs === "number" ? Math.min(30_000, timeoutMs) : undefined,
+      maxOps: typeof maxOps === "number" ? Math.min(10_000, Math.max(1, maxOps)) : undefined,
     })
 
     return NextResponse.json({ ...result })

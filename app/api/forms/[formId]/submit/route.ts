@@ -230,25 +230,29 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
         updatedAt: new Date(),
       });
 
-      // Fire workflow rules attached to "Edit" / "Create or Edit" — never await.
+      // Fire workflow rules attached to "Edit" / "Create or Edit".
+      // Awaited so any Field Update / Function-return writes hit the DB
+      // BEFORE we return to the client — otherwise the records table (which
+      // refetches on the submit response) shows pre-workflow state. Errors
+      // are already swallowed inside triggerWorkflowsForRecord, so awaiting
+      // it can never break the save.
       if (organizationId && currentUserId) {
-        prisma.formModule
+        const mod = await prisma.formModule
           .findFirst({ where: { id: form.moduleId }, select: { name: true } })
-          .then((mod) => {
-            if (!mod?.name) return
-            return triggerWorkflowsForRecord({
-              moduleName: mod.name,
-              action: "Edit",
-              organizationId: organizationId!,
-              userId: currentUserId!,
-              recordId: updatedRecord.id,
-              recordData: structuredRecordData as any,
-            })
+          .catch(() => null)
+        if (mod?.name) {
+          await triggerWorkflowsForRecord({
+            moduleName: mod.name,
+            action: "Edit",
+            organizationId: organizationId!,
+            userId: currentUserId!,
+            recordId: updatedRecord.id,
+            recordData: structuredRecordData as any,
           })
-          .catch((err) => console.error("[workflow] edit trigger failed", err))
+        }
 
-        // afterUpdate FunctionBindings — additive to workflow rules, also
-        // fire-and-forget so submit response isn't blocked.
+        // afterUpdate FunctionBindings — still fire-and-forget; they don't
+        // persist anything to the record by design (side-effects only).
         runBindings(
           "afterUpdate",
           { formId: form.id, moduleId: form.moduleId },
@@ -285,25 +289,25 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       currentUserId
     );
 
-    // Fire workflow rules attached to "Create" / "Create or Edit" — never await.
+    // Fire workflow rules attached to "Create" / "Create or Edit".
+    // See note above on the Edit path — awaited so the submit response
+    // reflects any Field Update / Function writes the workflow makes.
     if (organizationId && currentUserId) {
-      prisma.formModule
+      const mod = await prisma.formModule
         .findFirst({ where: { id: form.moduleId }, select: { name: true } })
-        .then((mod) => {
-          if (!mod?.name) return
-          return triggerWorkflowsForRecord({
-            moduleName: mod.name,
-            action: "Create",
-            organizationId: organizationId!,
-            userId: currentUserId!,
-            recordId: record.id,
-            recordData: structuredRecordData as any,
-          })
+        .catch(() => null)
+      if (mod?.name) {
+        await triggerWorkflowsForRecord({
+          moduleName: mod.name,
+          action: "Create",
+          organizationId: organizationId!,
+          userId: currentUserId!,
+          recordId: record.id,
+          recordData: structuredRecordData as any,
         })
-        .catch((err) => console.error("[workflow] create trigger failed", err))
+      }
 
-      // afterCreate FunctionBindings — additive to workflow rules, fire-and-
-      // forget so the response isn't blocked.
+      // afterCreate FunctionBindings — still fire-and-forget; side-effects only.
       runBindings(
         "afterCreate",
         { formId: form.id, moduleId: form.moduleId },

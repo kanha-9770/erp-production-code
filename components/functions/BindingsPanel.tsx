@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Pencil, Power, PowerOff } from "lucide-react";
+import { Trash2, Pencil, Power, PowerOff } from "lucide-react";
 import {
   useListBindingsQuery,
   useGetBindingsTreeQuery,
@@ -11,6 +11,7 @@ import {
   type FunctionBinding,
 } from "@/lib/api/functions";
 import { BindingFormDialog, type FieldOption } from "@/components/functions/BindingFormDialog";
+import { QuickBindPopover } from "@/components/functions/QuickBindPopover";
 
 interface BindingsPanelProps {
   functionId: string;
@@ -107,20 +108,7 @@ export function BindingsPanel({ functionId }: BindingsPanelProps) {
         <p className="text-xs text-[var(--ed-fg-2)] font-medium">
           {bindings.length} binding{bindings.length === 1 ? "" : "s"}
         </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          onClick={() =>
-            setDialog({
-              open: true,
-              binding: undefined,
-              fields: [],
-            })
-          }
-        >
-          <Plus className="h-3 w-3 mr-1" /> Add Binding
-        </Button>
+        <QuickBindPopover functionId={functionId} />
       </div>
 
       {error && (

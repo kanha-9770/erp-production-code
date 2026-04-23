@@ -253,6 +253,9 @@ export function usePublicForm({
   // accidentally locked during loading or on API failure.
   const [formLevelPermission, setFormLevelPermission] = useState<"NONE" | "VIEW" | "CREATE" | "EDIT" | "DELETE" | null>("CREATE");
   const [formPermissionLoading, setFormPermissionLoading] = useState(false);
+  // Admin flag from /api/admin/permissions — when true, bypass every
+  // section/field-level permission gate so admins are never blocked.
+  const [isAdminUser, setIsAdminUser] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     name: string;
@@ -362,7 +365,9 @@ export function usePublicForm({
           }
         }
 
-        // Admins always get full access
+        // Admins always get full access — also persist the flag so
+        // section-/field-level read-only checks (below) can short-circuit.
+        setIsAdminUser(!!isAdmin);
         if (isAdmin) {
           console.log("[usePublicForm] User is admin → full access");
           setFormLevelPermission("CREATE");
@@ -527,6 +532,9 @@ export function usePublicForm({
    */
   const isSectionReadOnly = useCallback(
     (id: string): boolean | null => {
+      // Admins bypass every section-level gate.
+      if (isAdminUser) return false;
+
       const perms = sectionPermissions[id];
       if (!perms || perms.length === 0) return null;
       const meaningful = perms.filter((p) => p !== "NONE");
@@ -536,7 +544,7 @@ export function usePublicForm({
       if (meaningful.includes(requiredPerm)) return false;
       return true;
     },
-    [sectionPermissions, editingRecordId],
+    [sectionPermissions, editingRecordId, isAdminUser],
   );
 
   /**
@@ -548,13 +556,16 @@ export function usePublicForm({
    */
   const canDeleteInSection = useCallback(
     (id: string): boolean | null => {
+      // Admins can delete anywhere.
+      if (isAdminUser) return true;
+
       const perms = sectionPermissions[id];
       if (!perms || perms.length === 0) return null;
       const meaningful = perms.filter((p) => p !== "NONE");
       if (meaningful.length === 0) return null;
       return meaningful.includes("DELETE");
     },
-    [sectionPermissions],
+    [sectionPermissions, isAdminUser],
   );
 
   const getParentValueMemo = useCallback(
@@ -611,6 +622,9 @@ export function usePublicForm({
    */
   const isFieldReadOnly = useCallback(
     (fieldId: string): boolean | null => {
+      // Admins bypass every field-level gate.
+      if (isAdminUser) return false;
+
       const perms = fieldPermissions[fieldId];
       if (!perms) return null; // No field-level override → inherit
       if (perms.length === 0) return true; // all denied (also hidden by isFieldVisible)
@@ -618,35 +632,41 @@ export function usePublicForm({
       if (perms.includes(requiredPerm)) return false;
       return true;
     },
-    [fieldPermissions, editingRecordId],
+    [fieldPermissions, editingRecordId, isAdminUser],
   );
 
   const isFieldVisible = (field: FormField, sectionId: string): boolean => {
-    const fieldPerm = fieldPermissions[field.id];
-    // Empty array means every field-level permission is explicitly denied
-    // for the current user — hide the field.
-    if (fieldPerm && fieldPerm.length === 0) {
-      console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perms denied)");
-      return false;
-    }
-    const sectionPerms = sectionPermissions[sectionId];
-    // Allow-list mode: when the admin configured field-level grants for
-    // this section but did NOT explicitly configure the section-level
-    // matrix, only fields with an explicit grant are visible. Siblings
-    // that weren't granted are hidden because the admin chose the
-    // field-level route to carve out access. When the section itself has
-    // explicit section-level grants, field rows are overrides and the
-    // rest of the fields inherit section-level.
-    if (
-      !fieldPerm &&
-      !sectionsWithExplicitSectionGrants.has(sectionId) &&
-      sectionsWithFieldGrants.has(sectionId)
-    ) {
-      return false;
-    }
-    // If no field-level perm, check section-level
-    if (!fieldPerm) {
-      if (sectionPerms && sectionPerms.length === 1 && sectionPerms[0] === "NONE") return false;
+    // Admins see every field that isn't hidden by conditional/dependency logic.
+    // Skip the permission-matrix gate entirely for them.
+    if (isAdminUser) {
+      // fall through to type-specific visibility rules below (formula etc.)
+    } else {
+      const fieldPerm = fieldPermissions[field.id];
+      // Empty array means every field-level permission is explicitly denied
+      // for the current user — hide the field.
+      if (fieldPerm && fieldPerm.length === 0) {
+        console.log("[isFieldVisible]", field.id, field.label, "→ HIDDEN (field perms denied)");
+        return false;
+      }
+      const sectionPerms = sectionPermissions[sectionId];
+      // Allow-list mode: when the admin configured field-level grants for
+      // this section but did NOT explicitly configure the section-level
+      // matrix, only fields with an explicit grant are visible. Siblings
+      // that weren't granted are hidden because the admin chose the
+      // field-level route to carve out access. When the section itself has
+      // explicit section-level grants, field rows are overrides and the
+      // rest of the fields inherit section-level.
+      if (
+        !fieldPerm &&
+        !sectionsWithExplicitSectionGrants.has(sectionId) &&
+        sectionsWithFieldGrants.has(sectionId)
+      ) {
+        return false;
+      }
+      // If no field-level perm, check section-level
+      if (!fieldPerm) {
+        if (sectionPerms && sectionPerms.length === 1 && sectionPerms[0] === "NONE") return false;
+      }
     }
     if (field.type === "formula") {
       const config = field.properties?.formulaConfig as

@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         displayName: (displayName || name).trim(),
         category: category || "Automation",
-        language: language || "Deluge",
+        language: "JavaScript",
         description: description?.trim() || null,
         organizationId: authUser.organizationId,
         createdById: authUser.id,

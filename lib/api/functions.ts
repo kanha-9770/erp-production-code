@@ -111,7 +111,7 @@ export const functionsApi = baseApi.injectEndpoints({
         error?: string
         durationMs: number
       }>,
-      { id?: string; script?: string; input?: any; timeoutMs?: number }
+      { id?: string; script?: string; input?: any; timeoutMs?: number; maxOps?: number }
     >({
       query: (body) => ({
         url: "/functions/execute",
