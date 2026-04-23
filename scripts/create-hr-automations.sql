@@ -518,45 +518,93 @@ $js$,
      'Looks up Employee Master by Employee ID and returns First Name, Last Name, Department (auto-fills any HR form that has those field labels).',
      TRUE, FALSE,
      $js$
-// Read the current form's Employee ID from either:
-//   1. ctx.input["Employee ID"] (binding auto-input mode - common case)
-//   2. ctx.input.recordData.sections[*].fields[<fld_*_employee_id>] (workflow rule path)
+// ============================================================
+// HR: Lookup Employee by ID (fuzzy + fast)
+//
+// Works from either context:
+//   1. FunctionBinding (onFieldChange) - ctx.input is formData flat-keyed
+//      by apiName and label: ctx.input["Employee ID"] == typed value.
+//   2. WorkflowRule (Create/Edit) - ctx.input is {recordData, moduleName, ...}
+//      and the Employee ID lives in ctx.input.recordData.sections[*].fields.
+//
+// Match is forgiving to reduce user friction:
+//   - Trim + uppercase
+//   - Collapse internal whitespace
+//   - Zero-pad-neutral: "EMP-001" matches "EMP-0001" (every digit run is
+//     reduced to its integer value).
+// ============================================================
+
+function norm(s) {
+  s = String(s == null ? '' : s).trim().toUpperCase().replace(/\s+/g, '');
+  // Strip leading zeros in every digit run: "EMP-0001" -> "EMP-1"
+  return s.replace(/(\d+)/g, function (n) { return String(Number(n)); });
+}
+
 function fromSections(rd, test) {
-  const secs = (rd && rd.sections) || {};
-  for (const s of Object.values(secs)) {
-    const fields = (s && s.fields) || {};
-    for (const [fid, v] of Object.entries(fields)) {
+  var secs = (rd && rd.sections) || {};
+  var keys = Object.keys(secs);
+  for (var i = 0; i < keys.length; i++) {
+    var s = secs[keys[i]];
+    var fields = (s && s.fields) || {};
+    var fkeys = Object.keys(fields);
+    for (var j = 0; j < fkeys.length; j++) {
+      var fid = fkeys[j];
       if (test(fid)) {
-        const val = v && typeof v === 'object' && 'value' in v ? v.value : v;
-        if (val !== undefined && val !== '') return val;
+        var v = fields[fid];
+        var val = v && typeof v === 'object' && 'value' in v ? v.value : v;
+        if (val !== undefined && val !== null && val !== '') return val;
       }
     }
   }
   return undefined;
 }
 
-let empId = (ctx.input && (ctx.input['Employee ID'] || ctx.input.Employee_ID)) || null;
+// Pull the typed Employee ID. Four fallbacks keep this robust.
+var empId =
+  (ctx.input && (ctx.input['Employee ID'] || ctx.input.Employee_ID)) || null;
+
 if (!empId) {
-  const rd = (ctx.input && ctx.input.recordData) || ctx.recordData || null;
-  empId = fromSections(rd, function (fid) { return /employee_id$/i.test(fid); });
+  // workflow-rule shape: recordData is nested under ctx.input
+  var rd1 = ctx.input && ctx.input.recordData;
+  if (rd1) empId = fromSections(rd1, function (fid) { return /employee_id$/i.test(fid); });
+}
+if (!empId && ctx.recordData) {
+  // binding shape: recordData sits at top level of ctx for saved records
+  empId = fromSections(ctx.recordData, function (fid) { return /employee_id$/i.test(fid); });
 }
 if (!empId) return { ok: false, error: 'no employee id' };
 
-// List Employee Master records and find the match in JS (simpler than a
-// Prisma JSON-path where filter and avoids data-shape assumptions).
-const emps = await ctx.records.list('Employee Master', { limit: 500 });
-const needle = String(empId).trim();
-const match = emps.find(function (e) {
-  const id = e.data && (e.data['Employee ID'] || e.data.Employee_ID);
-  return id != null && String(id).trim() === needle;
-});
+var needle = norm(empId);
+if (!needle) return { ok: false, error: 'employee id is blank' };
+
+// Fast path: small first page (50 rows), grow to 500 only if needed.
+// In steady state almost every lookup hits a match in the first 50 rows.
+var pageSize = 50;
+var emps = await ctx.records.list('Employee Master', { limit: pageSize });
+
+function findMatch(list) {
+  for (var k = 0; k < list.length; k++) {
+    var row = list[k];
+    var id = row && row.data && (row.data['Employee ID'] || row.data.Employee_ID);
+    if (id != null && norm(id) === needle) return row;
+  }
+  return null;
+}
+
+var match = findMatch(emps);
+if (!match && emps.length === pageSize) {
+  // Fallback: scan the rest in one bigger page.
+  var more = await ctx.records.list('Employee Master', { limit: 500, skip: pageSize });
+  match = findMatch(more);
+}
 if (!match) return { ok: false, error: 'employee not found: ' + empId };
 
-// Auto-output-mode: the runner will match these keys against the current
-// forms field labels. Any forms that don't have "Middle Name" silently skip it.
-const d = match.data || {};
-const out = {};
+// Auto-output mode: these label keys are matched against the CURRENT form's
+// fields. Forms without "Middle Name" (etc.) silently skip.
+var d = match.data || {};
+var out = {};
 if (d['First Name'])  out['First Name']  = d['First Name'];
+if (d['Middle Name']) out['Middle Name'] = d['Middle Name'];
 if (d['Last Name'])   out['Last Name']   = d['Last Name'];
 if (d['Department'])  out['Department']  = d['Department'];
 return out;
@@ -796,6 +844,84 @@ $js$,
      'SIM Management', 'record-action', 'Edit', 'matching',
      '[{"field":"fld_sim_status","operator":"is","value":"LOST"}]'::jsonb,
      '[{"type":"Field Update","targetFieldId":"fld_sim_status","targetValue":"BLOCKED"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    -- =========================================================================
+    -- EMPLOYEE LOOKUP SAFETY-NET RULES
+    -- Server-side backstop for the onFieldChange bindings. Fire on every
+    -- Create OR Edit in each auto-fill module. The server reads the saved
+    -- record, looks up Employee Master by Employee ID (fuzzy match), and
+    -- writes First Name / Last Name / Department into the record - so even
+    -- when the live debounced auto-fill misses, saving ALWAYS populates.
+    -- =========================================================================
+    ('wfr_hr_autofill_attendance',
+     'Attendance - Auto-Fill Employee Info',
+     'On Check In / Check Out save, populate First/Last Name & Department from Employee Master.',
+     'Attendance', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_leave',
+     'Leave - Auto-Fill Employee Info',
+     'On Leave Application save, populate First/Last Name & Department from Employee Master.',
+     'Leave Management', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_ref',
+     'Referral - Auto-Fill Referrer Info',
+     'On Employee Referral save, populate referrer First Name & Department from Employee Master.',
+     'Employee Referral', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_tgt',
+     'Self Target - Auto-Fill Employee Info',
+     'On Self Target save, populate First/Last Name & Department from Employee Master.',
+     'Self Target', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_init',
+     'Self Initiative - Auto-Fill Employee Info',
+     'On Self Initiative save, populate First/Last Name & Department from Employee Master.',
+     'Self Initiative', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_prob',
+     'Problem Registration - Auto-Fill Employee Info',
+     'On Problem Registration save, populate First/Last Name & Department from Employee Master.',
+     'Problem Registration', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_kz',
+     'Kaizen - Auto-Fill Employee Info',
+     'On Kaizen save, populate First/Middle/Last Name & Department from Employee Master.',
+     'Kaizen', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_sug',
+     'Employee Suggestion - Auto-Fill Employee Info',
+     'On Suggestion save, populate First/Middle/Last Name & Department from Employee Master.',
+     'Employee Suggestion', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_asset',
+     'Asset Management - Auto-Fill Employee Info',
+     'On Asset Management save, populate assignees First/Last Name & Department from Employee Master.',
+     'Asset Management', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_autofill_sim',
+     'SIM Management - Auto-Fill Employee Info',
+     'On SIM Management save, populate assignees First/Last Name & Department from Employee Master.',
+     'SIM Management', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_lookup_employee","functionName":"HR: Lookup Employee by ID"}]'::jsonb,
      TRUE, v_org_id, v_user_id, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name, description = EXCLUDED.description,
@@ -810,7 +936,7 @@ $js$,
         created_by_id = EXCLUDED.created_by_id,
         updated_at = NOW();
 
-    RAISE NOTICE 'Seeded 26 HR workflow rules';
+    RAISE NOTICE 'Seeded 36 HR workflow rules (26 module + 10 autofill safety-net)';
 
     -- =========================================================================
     -- STEP 4 - FUNCTION BINDINGS
@@ -1000,7 +1126,7 @@ $js$,
     RAISE NOTICE '==========================================';
     RAISE NOTICE 'HR automations ready.';
     RAISE NOTICE '  Functions:         16 (15 automation + 1 employee lookup)';
-    RAISE NOTICE '  Workflow Rules:    26 (covers all 19 sub-modules)';
+    RAISE NOTICE '  Workflow Rules:    36 (26 module + 10 autofill safety-net)';
     RAISE NOTICE '  Function Bindings: 22 (12 calc + 10 employee auto-fill)';
     RAISE NOTICE '==========================================';
 END $$;

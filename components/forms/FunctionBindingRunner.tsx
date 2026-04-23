@@ -68,6 +68,11 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Latch in-flight bindings so we don't double-fire while a request is open.
   const inFlightRef = useRef<Set<string>>(new Set());
+  // "Re-run when in-flight completes" flag. If a new change arrives while a
+  // request is still open, we set this so the runner fires ONE more time with
+  // the latest snapshot once the open request resolves — otherwise the final
+  // keystroke's binding call gets silently dropped.
+  const pendingRetryRef = useRef<Record<string, { triggered: string }>>({});
   // Bindings whose function contains legacy non-JS script. We warn the
   // developer console once and then stop firing — otherwise every keystroke
   // produces a toast + failed request for a script that can never succeed.
@@ -124,10 +129,23 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
       // Avoids spamming toasts and wasteful requests on every keystroke.
       if (legacyDisabledRef.current.has(binding.id)) continue;
 
-      // Debounce per binding (300ms — matches what feels right for typing).
+      // Debounce per binding. 120ms feels instant while still coalescing a
+      // burst of keystrokes into one request. Previously 300ms, which felt
+      // laggy on per-letter auto-fill workflows.
+      const DEBOUNCE_MS = 120;
       if (timersRef.current[binding.id]) clearTimeout(timersRef.current[binding.id]);
-      timersRef.current[binding.id] = setTimeout(() => {
-        if (inFlightRef.current.has(binding.id)) return;
+
+      // fire() is extracted so it can be re-invoked from the in-flight finally
+      // handler when a pending retry has queued up.
+      const fire = (triggeredField: string) => {
+        if (inFlightRef.current.has(binding.id)) {
+          // Queue a re-run with the LATEST snapshot after the current
+          // request finishes. Previously we silently dropped this call —
+          // which is why fast typists saw "missing" auto-fills on the final
+          // keystroke of a burst.
+          pendingRetryRef.current[binding.id] = { triggered: triggeredField };
+          return;
+        }
         inFlightRef.current.add(binding.id);
 
         const snapshot = { ...lastSnapshotRef.current };
@@ -138,7 +156,7 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
           body: JSON.stringify({
             bindingId: binding.id,
             formData: snapshot,
-            triggerFieldId: triggered,
+            triggerFieldId: triggeredField,
           }),
         })
           .then(async (r) => {
@@ -184,8 +202,18 @@ export const FunctionBindingRunner: React.FC<FunctionBindingRunnerProps> = ({
           })
           .finally(() => {
             inFlightRef.current.delete(binding.id);
+            // If a retry was queued while the request was in-flight, fire it
+            // now with the latest snapshot. This guarantees the user's final
+            // keystrokes always reach the server.
+            const pending = pendingRetryRef.current[binding.id];
+            if (pending) {
+              delete pendingRetryRef.current[binding.id];
+              fire(pending.triggered);
+            }
           });
-      }, 300);
+      };
+
+      timersRef.current[binding.id] = setTimeout(() => fire(triggered!), DEBOUNCE_MS);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData, changeBindings, form?.id]);
