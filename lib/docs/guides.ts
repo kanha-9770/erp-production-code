@@ -1328,6 +1328,779 @@ return { deactivated: updated };`,
     demoInput: `100 Leads, 35 untouched in 180d`,
     demoOutput: `35 deactivated; active view shrinks accordingly`,
   },
+
+  // ── Advanced real-world examples ────────────────────────────────────────
+
+  // 23 — Fuzzy duplicate detection (Levenshtein)
+  {
+    slug: "fuzzy-duplicate-detection",
+    title: "Fuzzy duplicate detection with Levenshtein distance",
+    tagline:
+      "Catches typo-level duplicates (Akash Kumar vs Akash Kumr) that exact-match misses.",
+    category: "Data Quality",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Leads"],
+    useCase:
+      "Real users mistype names and domains. Exact-match duplicate detection catches 70% of cases; a fuzzy layer with edit-distance catches another 20%. Run after exact detection to flag likely-duplicates for human review.",
+    script: `// fuzzy_duplicate_detection
+// Uses Levenshtein distance — the minimum single-character edits
+// (insert, delete, substitute) to turn one string into another.
+// "akash" vs "aksh" = distance 1 (one missing char).
+const THRESHOLD = 2;     // max edit distance to consider a match
+const MIN_LENGTH = 4;    // skip very short names (too many false positives)
+
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const current = await ctx.records.get("Leads", currentId);
+if (!current) return { ok: true };
+
+const name = String(current.data.New_Name || "").toLowerCase().trim();
+const email = String(current.data.New_Email || "").toLowerCase().trim();
+if (name.length < MIN_LENGTH && !email) return { ok: true };
+
+// Classic dynamic-programming Levenshtein
+function dist(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const m = Array.from({ length: b.length + 1 }, () => Array(a.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) m[0][i] = i;
+  for (let j = 0; j <= b.length; j++) m[j][0] = j;
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      m[j][i] = Math.min(m[j-1][i]+1, m[j][i-1]+1, m[j-1][i-1]+cost);
+    }
+  }
+  return m[b.length][a.length];
+}
+
+const others = await ctx.records.list("Leads", { limit: 500 });
+const matches = [];
+for (const l of others) {
+  if (l.id === currentId) continue;
+  const otherName = String(l.data.New_Name || "").toLowerCase().trim();
+  const otherEmail = String(l.data.New_Email || "").toLowerCase().trim();
+
+  let bestDist = Infinity;
+  let matchedOn = null;
+  if (name && otherName && Math.abs(name.length - otherName.length) <= THRESHOLD) {
+    const d = dist(name, otherName);
+    if (d <= THRESHOLD) { bestDist = d; matchedOn = "Name"; }
+  }
+  if (email && otherEmail && email !== otherEmail) {
+    const d = dist(email, otherEmail);
+    if (d <= THRESHOLD && d < bestDist) { bestDist = d; matchedOn = "Email"; }
+  }
+  if (matchedOn) {
+    matches.push({ id: l.id, name: otherName, dist: bestDist, on: matchedOn });
+  }
+}
+
+if (matches.length === 0) return { ok: true };
+
+// Pick the closest match
+matches.sort((a, b) => a.dist - b.dist);
+const best = matches[0];
+ctx.info(\`Possible duplicate of \${best.id} (dist=\${best.dist}, matched on \${best.on})\`);
+
+return {
+  Possible_Duplicate_Of: best.id,
+  Fuzzy_Match_Score: Math.round((1 - best.dist / Math.max(name.length, 1)) * 100),
+  Needs_Review: true,
+};`,
+    workflow: {
+      module: "Leads",
+      executeBasedOn: "record-action",
+      recordAction: "Create",
+      conditions: "Needs_Review is empty (avoid re-checking flagged records)",
+      instantAction: "Function → fuzzy_duplicate_detection",
+    },
+    todos: [
+      { id: "t1", text: "Add Possible_Duplicate_Of (text), Fuzzy_Match_Score (number), Needs_Review (checkbox) to Leads" },
+      { id: "t2", text: "Create function `fuzzy_duplicate_detection`" },
+      { id: "t3", text: "Tune THRESHOLD — 2 is a sweet spot for human-review workflows" },
+      { id: "t4", text: "Wire workflow on Leads / Create (runs AFTER exact-match dedup)" },
+      { id: "t5", text: "Add a saved view: `Needs_Review = true` for a manual review queue" },
+      { id: "t6", text: "Test with submitting 'Akash Kumar' and 'Akash Kumr'" },
+    ],
+    demoInput: `Lead A: "Akash Kumar"  →  Lead B: "Akash Kumr" (typo)`,
+    demoOutput: `Lead B gets Possible_Duplicate_Of = A.id, Fuzzy_Match_Score = 91, Needs_Review = true`,
+  },
+
+  // 24 — Churn risk scoring
+  {
+    slug: "churn-risk-score",
+    title: "Multi-signal churn risk scoring",
+    tagline:
+      "Composite 0-100 churn score from activity recency, renewal proximity, MRR, and support load.",
+    category: "Reporting",
+    difficulty: "Advanced",
+    estimatedMinutes: 25,
+    modules: ["Accounts"],
+    useCase:
+      "Customer Success needs to prioritise which accounts to touch this week. A single signal (e.g. 'no activity in 30 days') has too many false positives. Blending 4 signals with weighted thresholds surfaces the genuinely at-risk accounts.",
+    script: `// churn_risk_score
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const acc = await ctx.records.get("Accounts", currentId);
+if (!acc) return { ok: true };
+
+// Signals
+const lastActivity = acc.data.Last_Activity_At;
+const renewalDate  = acc.data.Renewal_Date;
+const mrr          = Number(acc.data.MRR || 0);
+const openTickets  = Number(acc.data.Open_Tickets || 0);
+
+let risk = 0;
+const reasons = [];
+
+// Signal 1: activity decay
+const daysSince = lastActivity
+  ? Math.floor((Date.now() - new Date(lastActivity).getTime()) / 86400000)
+  : 999;
+if (daysSince > 60)      { risk += 40; reasons.push(\`no activity in \${daysSince}d\`); }
+else if (daysSince > 30) { risk += 20; reasons.push(\`slow — \${daysSince}d since activity\`); }
+
+// Signal 2: renewal proximity
+if (renewalDate) {
+  const daysToRenewal = Math.floor((new Date(renewalDate).getTime() - Date.now()) / 86400000);
+  if (daysToRenewal >= 0 && daysToRenewal <= 30) {
+    risk += 25;
+    reasons.push(\`renewal in \${daysToRenewal}d\`);
+  }
+}
+
+// Signal 3: MRR stress
+if (mrr > 0 && mrr < 500) { risk += 15; reasons.push("low MRR"); }
+
+// Signal 4: support load
+if (openTickets >= 3) { risk += 20; reasons.push(\`\${openTickets} open tickets\`); }
+
+risk = Math.min(100, risk);
+const band = risk >= 70 ? "High" : risk >= 40 ? "Medium" : "Low";
+
+// Idempotent: skip write if unchanged
+if (Number(acc.data.Churn_Risk) === risk && acc.data.Churn_Band === band) return { ok: true };
+
+ctx.info(\`\${acc.data.Name}: risk=\${risk} (\${band}) — \${reasons.join(", ") || "healthy"}\`);
+return {
+  Churn_Risk: risk,
+  Churn_Band: band,
+  Churn_Reasons: reasons.join("; "),
+  Risk_Last_Computed: new Date().toISOString(),
+};`,
+    workflow: {
+      module: "Accounts",
+      executeBasedOn: "record-action",
+      recordAction: "Create or Edit",
+      instantAction: "Function → churn_risk_score",
+    },
+    todos: [
+      { id: "t1", text: "Ensure Accounts has: Name, Last_Activity_At, Renewal_Date, MRR, Open_Tickets" },
+      { id: "t2", text: "Add: Churn_Risk (number), Churn_Band (select), Churn_Reasons (text), Risk_Last_Computed (datetime)" },
+      { id: "t3", text: "Create function `churn_risk_score`" },
+      { id: "t4", text: "Tune weights — the 40/25/15/20 default is a sane starting point" },
+      { id: "t5", text: "Wire workflow on Accounts / Create or Edit" },
+      { id: "t6", text: "Create a dashboard filtered by Churn_Band = 'High'" },
+      { id: "t7", text: "Re-run weekly via a scheduled job to catch decay" },
+    ],
+    demoInput: `Account: 45d since activity, renewal in 20d, MRR=$400, 4 open tickets`,
+    demoOutput: `Risk: 100 (High) — "slow — 45d since activity; renewal in 20d; low MRR; 4 open tickets"`,
+  },
+
+  // 25 — Tiered commission calculator
+  {
+    slug: "commission-calculator",
+    title: "Tiered commission calculator for won Deals",
+    tagline:
+      "Sliding-scale rates (5% → 15%) with kickers for pre-qualified and multi-year deals.",
+    category: "Automation",
+    difficulty: "Intermediate",
+    estimatedMinutes: 15,
+    modules: ["Deals"],
+    useCase:
+      "Sales comp plans are always tiered. Manual calculation leads to disputes. Let the system compute the commission the moment a Deal is Closed Won — visible to the rep instantly, stored on the record for payroll audit.",
+    script: `// commission_calculator
+const TIERS = [
+  { min: 250000, rate: 0.15 },
+  { min: 50000,  rate: 0.12 },
+  { min: 10000,  rate: 0.08 },
+  { min: 0,      rate: 0.05 },
+];
+const PRE_QUAL_KICKER = 0.02;   // +2% if Lead came in pre-qualified
+const MULTIYEAR_KICKER = 0.01;  // +1% per extra year beyond year 1
+
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const deal = await ctx.records.get("Deals", currentId);
+if (!deal) return { ok: true };
+
+// Only compute on Won Deals; zero out on Lost
+if (deal.data.Stage === "Closed Lost") {
+  if (Number(deal.data.Commission) === 0) return { ok: true };
+  return { Commission: 0, Commission_Rate: 0 };
+}
+if (deal.data.Stage !== "Closed Won") return { ok: true };
+
+const amount = Number(deal.data.Amount || 0);
+const years = Math.max(1, Number(deal.data.Contract_Years || 1));
+const preQualified = !!deal.data.Is_Pre_Qualified;
+
+// Find the applicable tier
+const tier = TIERS.find((t) => amount >= t.min) || TIERS[TIERS.length - 1];
+let rate = tier.rate;
+if (preQualified) rate += PRE_QUAL_KICKER;
+if (years > 1) rate += (years - 1) * MULTIYEAR_KICKER;
+
+const commission = Math.round(amount * rate * 100) / 100;
+
+// Idempotent guard
+if (Number(deal.data.Commission) === commission &&
+    Number(deal.data.Commission_Rate) === rate) return { ok: true };
+
+ctx.info(\`Deal \${currentId}: $\${amount} × \${(rate*100).toFixed(1)}% = $\${commission}\`);
+return {
+  Commission: commission,
+  Commission_Rate: rate,
+  Commission_Computed_At: new Date().toISOString(),
+};`,
+    workflow: {
+      module: "Deals",
+      executeBasedOn: "record-action",
+      recordAction: "Create or Edit",
+      conditions: "Stage is Closed Won or Closed Lost",
+      instantAction: "Function → commission_calculator",
+    },
+    todos: [
+      { id: "t1", text: "Add fields to Deals: Amount, Stage, Contract_Years, Is_Pre_Qualified, Commission, Commission_Rate, Commission_Computed_At" },
+      { id: "t2", text: "Update TIERS to match your org's comp plan" },
+      { id: "t3", text: "Create function `commission_calculator`" },
+      { id: "t4", text: "Wire workflow on Deals / Create or Edit" },
+      { id: "t5", text: "Test with $5k (5%), $25k (8%), $100k (12%), $500k (15%) amounts" },
+      { id: "t6", text: "Test with pre-qualified + multi-year combos" },
+    ],
+    demoInput: `Deal: $75,000, Closed Won, 3-year contract, pre-qualified`,
+    demoOutput: `Rate: 12% base + 2% pre-qual + 2% multi-year = 16% → Commission: $12,000`,
+  },
+
+  // 26 — Customer health score (composite)
+  {
+    slug: "customer-health-score",
+    title: "Composite customer health score",
+    tagline:
+      "Weighted blend of NPS, resolve time, and activity into a single 0-100 health number.",
+    category: "Reporting",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Accounts"],
+    useCase:
+      "CS teams want one number per account to prioritise. Weighted composites are more stable than any single signal: an account with great NPS but no activity for 90 days is still unhealthy — a composite catches that.",
+    script: `// customer_health_score
+const WEIGHTS = { nps: 0.4, resolve: 0.3, activity: 0.3 };
+
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const acc = await ctx.records.get("Accounts", currentId);
+if (!acc) return { ok: true };
+
+// Raw signals
+const nps = Math.max(0, Math.min(10, Number(acc.data.NPS_Score ?? 5)));
+const avgResolveDays = Math.max(0, Number(acc.data.Avg_Resolve_Days ?? 5));
+const lastActivity = acc.data.Last_Activity_At;
+const daysSinceActivity = lastActivity
+  ? Math.floor((Date.now() - new Date(lastActivity).getTime()) / 86400000)
+  : 99;
+
+// Normalise each signal to a 0-100 sub-score (higher = healthier)
+const npsSub      = nps * 10;                                   // 0 → 0, 10 → 100
+const resolveSub  = Math.max(0, 100 - avgResolveDays * 10);     // 0d → 100, 10d+ → 0
+const activitySub = Math.max(0, 100 - daysSinceActivity * 2);   // 0d → 100, 50d+ → 0
+
+const health = Math.round(
+  npsSub * WEIGHTS.nps +
+  resolveSub * WEIGHTS.resolve +
+  activitySub * WEIGHTS.activity
+);
+const band = health >= 75 ? "Healthy" : health >= 50 ? "Neutral" : "At Risk";
+
+// Idempotent
+if (Number(acc.data.Health_Score) === health && acc.data.Health_Band === band) return { ok: true };
+
+return {
+  Health_Score: health,
+  Health_Band: band,
+  Health_NPS_Sub: Math.round(npsSub),
+  Health_Resolve_Sub: Math.round(resolveSub),
+  Health_Activity_Sub: Math.round(activitySub),
+  Health_Updated_At: new Date().toISOString(),
+};`,
+    workflow: {
+      module: "Accounts",
+      executeBasedOn: "record-action",
+      recordAction: "Create or Edit",
+      instantAction: "Function → customer_health_score",
+    },
+    todos: [
+      { id: "t1", text: "Add signals on Accounts: NPS_Score (0-10), Avg_Resolve_Days, Last_Activity_At" },
+      { id: "t2", text: "Add outputs: Health_Score, Health_Band, sub-scores, Health_Updated_At" },
+      { id: "t3", text: "Create function `customer_health_score`" },
+      { id: "t4", text: "Adjust WEIGHTS to match your org's priorities" },
+      { id: "t5", text: "Wire workflow on Accounts / Create or Edit" },
+      { id: "t6", text: "Build a view sorted by Health_Score ascending for triage" },
+    ],
+    demoInput: `NPS 9, avg resolve 2d, last activity 5d ago`,
+    demoOutput: `Health_Score: 87 (Healthy) — NPS sub: 90, Resolve: 80, Activity: 90`,
+  },
+
+  // 27 — Cross-sell opportunity finder
+  {
+    slug: "cross-sell-finder",
+    title: "Find cross-sell candidates across Accounts",
+    tagline:
+      "Scans closed-won Deals to find Accounts that bought product A but not product B.",
+    category: "Reporting",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Accounts", "Deals"],
+    useCase:
+      "Account teams chase renewals and forget upsell paths. A quarterly scan that tags Accounts with their next best upsell target turns 'random email blast' into 'here's a pre-qualified list with a reason'.",
+    script: `// cross_sell_finder
+// Configure the rule: "accounts with ANCHOR_PRODUCT but not TARGET_PRODUCT"
+const ANCHOR = "Starter Plan";
+const TARGET = "Pro Plan";
+
+const deals = await ctx.records.list("Deals", { limit: 500 });
+
+// Bucket purchased products per Account
+const accountProducts = new Map();
+for (const d of deals) {
+  if (d.data.Stage !== "Closed Won") continue;
+  const accId = d.data.Account_ID;
+  const product = d.data.Product;
+  if (!accId || !product) continue;
+  if (!accountProducts.has(accId)) accountProducts.set(accId, new Set());
+  accountProducts.get(accId).add(product);
+}
+
+// Find candidates: has ANCHOR, lacks TARGET
+const candidates = [];
+for (const [accId, products] of accountProducts.entries()) {
+  if (products.has(ANCHOR) && !products.has(TARGET)) candidates.push(accId);
+}
+
+console.log(\`Scanned \${deals.length} deals, \${accountProducts.size} accounts — found \${candidates.length} cross-sell candidates\`);
+
+// Tag each candidate. Clear the tag for accounts that already have TARGET.
+let tagged = 0, cleared = 0;
+for (const accId of candidates) {
+  try {
+    await ctx.records.update("Accounts", accId, {
+      Cross_Sell_Target: TARGET,
+      Cross_Sell_Reason: \`Owns \${ANCHOR}; does not own \${TARGET}\`,
+      Cross_Sell_Tagged_At: new Date().toISOString(),
+    });
+    tagged++;
+  } catch (err) {
+    console.error(\`  \${accId}: \${err.message}\`);
+  }
+}
+
+// Optional: also clear stale tags on accounts that now have the target
+for (const [accId, products] of accountProducts.entries()) {
+  if (products.has(ANCHOR) && products.has(TARGET)) {
+    try {
+      await ctx.records.update("Accounts", accId, { Cross_Sell_Target: "", Cross_Sell_Reason: "" });
+      cleared++;
+    } catch { /* account may not have the field yet */ }
+  }
+}
+
+return { candidatesFound: candidates.length, tagged, cleared, candidates };`,
+    workflow: {
+      module: "Accounts",
+      executeBasedOn: "record-action",
+      instantAction: "(run manually or schedule weekly — no per-record trigger)",
+    },
+    todos: [
+      { id: "t1", text: "Ensure Deals has: Account_ID, Product, Stage" },
+      { id: "t2", text: "Add to Accounts: Cross_Sell_Target (text), Cross_Sell_Reason (text), Cross_Sell_Tagged_At (datetime)" },
+      { id: "t3", text: "Create function `cross_sell_finder`" },
+      { id: "t4", text: "Set ANCHOR + TARGET product names matching your catalog" },
+      { id: "t5", text: "Run manually from the editor" },
+      { id: "t6", text: "Build a saved view: Cross_Sell_Target = 'Pro Plan' for reps to work" },
+    ],
+    demoInput: `100 Accounts, 400 Closed Won Deals`,
+    demoOutput: `candidatesFound: 23, tagged: 23, cleared: 4 (now own Target)`,
+  },
+
+  // 28 — Lead-to-deal chain
+  {
+    slug: "lead-to-deal-chain",
+    title: "Auto-create Deal when Lead is Qualified",
+    tagline:
+      "Continues the Lead → Contact conversion by also creating a pipeline Deal in one hop.",
+    category: "Automation",
+    difficulty: "Advanced",
+    estimatedMinutes: 15,
+    modules: ["Leads", "Deals"],
+    useCase:
+      "Reps often forget to start a Deal after qualifying a Lead. Wiring both to the same trigger ensures every qualified Lead shows up in pipeline reports without manual steps.",
+    script: `// lead_to_deal_chain
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const lead = await ctx.records.get("Leads", currentId);
+if (!lead) return { ok: true };
+if (lead.data.Status !== "Qualified") return { ok: true };
+
+// Idempotent — if a Deal already exists for this Lead, bail
+if (lead.data.Linked_Deal_ID) return { ok: true };
+
+// Use the Contact that convert_to_contact created, if present
+const contactId = lead.data.Converted_Contact_ID || null;
+
+const dealName = \`\${lead.data.Company || lead.data.New_Name || "Deal"} — initial\`;
+const deal = await ctx.records.create("Deals", {
+  Name: dealName,
+  Amount: Number(lead.data.Budget || 0),
+  Stage: "Qualification",
+  Contact_ID: contactId,
+  Source_Lead_ID: currentId,
+  Owner: lead.data.Owner,
+  Probability: 25,                      // sensible starting probability
+  Expected_Close_Date: new Date(Date.now() + 60 * 86400000).toISOString(),
+});
+
+ctx.info(\`Created Deal \${deal.id} from Lead \${currentId}\`);
+return {
+  Linked_Deal_ID: deal.id,
+  Deal_Created_At: new Date().toISOString(),
+};`,
+    workflow: {
+      module: "Leads",
+      executeBasedOn: "record-action",
+      recordAction: "Edit",
+      conditions: "Status equals 'Qualified'",
+      instantAction: "Function → lead_to_deal_chain",
+    },
+    todos: [
+      { id: "t1", text: "Ensure convert-lead-to-contact guide is already running" },
+      { id: "t2", text: "Add Linked_Deal_ID (text) and Deal_Created_At (datetime) to Leads" },
+      { id: "t3", text: "Ensure Deals has: Name, Amount, Stage, Contact_ID, Source_Lead_ID, Owner, Probability, Expected_Close_Date" },
+      { id: "t4", text: "Create function `lead_to_deal_chain`" },
+      { id: "t5", text: "Wire workflow on Leads / Edit with condition Status = Qualified" },
+      { id: "t6", text: "Qualify a test Lead — verify both Contact and Deal appear" },
+      { id: "t7", text: "Qualify the same Lead again — no second Deal (idempotent)" },
+    ],
+    demoInput: `Edit Lead Status → Qualified`,
+    demoOutput: `Contact created, Deal created (Stage: Qualification, $25k, 25%), both linked back to Lead.`,
+  },
+
+  // 29 — Opportunity aging alerts with SLA
+  {
+    slug: "opportunity-aging-alert",
+    title: "Per-stage SLA alerts on stuck Deals",
+    tagline:
+      "Each pipeline stage has a max-dwell SLA. Deals over the line get flagged + an owner-assigned Task.",
+    category: "Notifications",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Deals", "Tasks"],
+    useCase:
+      "Deals stall silently. A stage-aware SLA (14d in Prospecting, 7d in Qualification, etc.) lights up the ones actually at risk — not a generic 'inactive 30 days' list that everyone ignores.",
+    script: `// opportunity_aging_alert
+const STAGE_SLA_DAYS = {
+  "Prospecting":   14,
+  "Qualification": 7,
+  "Proposal":      10,
+  "Negotiation":   14,
+};
+
+const deals = await ctx.records.list("Deals", { limit: 500 });
+const now = Date.now();
+
+let flagged = 0, skipped = 0;
+for (const d of deals) {
+  const stage = d.data.Stage;
+  if (stage === "Closed Won" || stage === "Closed Lost") continue;
+  const sla = STAGE_SLA_DAYS[stage];
+  if (!sla) { skipped++; continue; }
+
+  const stageChangedAt = d.data.Stage_Changed_At;
+  if (!stageChangedAt) { skipped++; continue; }
+
+  const daysInStage = Math.floor((now - new Date(stageChangedAt).getTime()) / 86400000);
+  if (daysInStage <= sla) continue;
+
+  // Idempotent — don't spam alerts for the same overdue state
+  if (d.data.Aging_Alert_Sent_At) {
+    const alertAgo = (now - new Date(d.data.Aging_Alert_Sent_At).getTime()) / 86400000;
+    if (alertAgo < 7) continue;  // re-alert at most once per week
+  }
+
+  await ctx.records.create("Tasks", {
+    Title: \`⚠️ Stale Deal: \${d.data.Name} in \${stage} for \${daysInStage}d (SLA: \${sla}d)\`,
+    Related_Deal_ID: d.id,
+    Owner: d.data.Owner,
+    Status: "Open",
+    Priority: "High",
+    Due_Date: new Date(now + 2 * 86400000).toISOString(),
+  });
+  await ctx.records.update("Deals", d.id, {
+    Aging_Alert_Sent_At: new Date().toISOString(),
+    Is_Stale: true,
+  });
+  flagged++;
+  console.log(\`  \${d.data.Name}: \${daysInStage}d in \${stage} (SLA \${sla})\`);
+}
+return { flagged, skipped };`,
+    workflow: {
+      module: "Deals",
+      executeBasedOn: "record-action",
+      instantAction: "(manual or scheduled daily — scans all Deals)",
+    },
+    todos: [
+      { id: "t1", text: "Ensure Deals has: Stage, Stage_Changed_At, Owner, Name, Is_Stale (checkbox), Aging_Alert_Sent_At (datetime)" },
+      { id: "t2", text: "Ensure Tasks has: Title, Related_Deal_ID, Owner, Status, Priority, Due_Date" },
+      { id: "t3", text: "Set STAGE_SLA_DAYS to your actual pipeline stages and SLAs" },
+      { id: "t4", text: "Create function `opportunity_aging_alert`" },
+      { id: "t5", text: "Run manually first — review flagged deals" },
+      { id: "t6", text: "Schedule daily runs once happy" },
+    ],
+    demoInput: `Deals: 50 open. 3 have been in 'Qualification' > 7 days.`,
+    demoOutput: `flagged: 3 (Tasks created for each owner). Re-run next day → 0 new (idempotent).`,
+  },
+
+  // 30 — Win/loss analysis report
+  {
+    slug: "win-loss-analysis",
+    title: "Win/loss analysis by rep",
+    tagline: "Aggregate all Deals into per-rep win rates, revenue won, and revenue lost.",
+    category: "Reporting",
+    difficulty: "Intermediate",
+    estimatedMinutes: 10,
+    modules: ["Deals"],
+    useCase:
+      "Monthly reviews need a clean leaderboard: who's winning, who's losing, how much revenue flowed through each rep. Read-only — useful for coaching, not for making changes.",
+    script: `// win_loss_analysis
+const deals = await ctx.records.list("Deals", { limit: 500 });
+const byRep = new Map();
+
+for (const d of deals) {
+  const owner = d.data.Owner || "unassigned";
+  if (!byRep.has(owner)) byRep.set(owner, { won: 0, lost: 0, open: 0, wonAmt: 0, lostAmt: 0 });
+  const b = byRep.get(owner);
+  const amt = Number(d.data.Amount || 0);
+  if (d.data.Stage === "Closed Won") { b.won++; b.wonAmt += amt; }
+  else if (d.data.Stage === "Closed Lost") { b.lost++; b.lostAmt += amt; }
+  else { b.open++; }
+}
+
+const report = [...byRep.entries()].map(([owner, b]) => {
+  const closed = b.won + b.lost;
+  return {
+    owner,
+    winRatePct: closed === 0 ? 0 : Math.round((b.won / closed) * 100),
+    won: b.won,
+    lost: b.lost,
+    open: b.open,
+    wonAmount: b.wonAmt,
+    lostAmount: b.lostAmt,
+    avgWonDeal: b.won ? Math.round(b.wonAmt / b.won) : 0,
+  };
+}).sort((a, b) => b.winRatePct - a.winRatePct || b.wonAmount - a.wonAmount);
+
+console.log("─".repeat(70));
+console.log("Rep                          WinRate  W  L  Open  WonAmt       AvgDeal");
+console.log("─".repeat(70));
+for (const r of report) {
+  console.log(
+    \`\${r.owner.padEnd(28)} \${String(r.winRatePct).padStart(5)}%  \${String(r.won).padStart(2)}  \${String(r.lost).padStart(2)}  \${String(r.open).padStart(4)}  $\${String(r.wonAmount).padStart(10)}  $\${r.avgWonDeal}\`
+  );
+}
+console.log("─".repeat(70));
+
+const totals = report.reduce((acc, r) => ({
+  won: acc.won + r.won, lost: acc.lost + r.lost,
+  wonAmount: acc.wonAmount + r.wonAmount,
+}), { won: 0, lost: 0, wonAmount: 0 });
+console.log(\`Totals: \${totals.won} won / \${totals.lost} lost  |  $\${totals.wonAmount} won\`);
+
+return { reps: report.length, totals, report };`,
+    workflow: {
+      module: "Deals",
+      executeBasedOn: "record-action",
+      instantAction: "(manual run — read-only analysis, no writes)",
+    },
+    todos: [
+      { id: "t1", text: "Ensure Deals has Owner, Stage, Amount fields" },
+      { id: "t2", text: "Create function `win_loss_analysis`" },
+      { id: "t3", text: "Run from editor — read the output panel for the leaderboard" },
+      { id: "t4", text: "Pipe return value into a dashboard widget if your BI tool supports JSON" },
+    ],
+    demoInput: `120 Deals across 5 reps`,
+    demoOutput: `Sorted leaderboard: rep-1 68% (15W/7L/$420k), rep-2 54%, ...`,
+  },
+
+  // 31 — Rep workload rebalancer
+  {
+    slug: "rep-workload-rebalancer",
+    title: "Auto-rebalance rep workload",
+    tagline:
+      "If any rep has more than MAX open Leads, reassigns the oldest overflow to under-loaded reps.",
+    category: "Assignment",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Leads"],
+    useCase:
+      "Round-robin drift, reps on PTO, uneven funnel sources — all create lopsided queues. A weekly rebalance keeps everyone's workload sane without manager babysitting.",
+    script: `// rep_workload_rebalancer
+const MAX_PER_REP = 30;
+const REPS = ["rep-1@acme.com", "rep-2@acme.com", "rep-3@acme.com"];
+
+const leads = await ctx.records.list("Leads", { limit: 500 });
+
+// Group active leads by owner
+const byOwner = new Map();
+for (const r of REPS) byOwner.set(r, []);
+for (const l of leads) {
+  if (l.data.Status === "Qualified" || l.data.Status === "Disqualified") continue;
+  const owner = l.data.Owner;
+  if (!owner || !REPS.includes(owner)) continue;
+  byOwner.get(owner).push(l);
+}
+
+// Summarise load
+const loads = REPS.map((r) => ({ rep: r, count: byOwner.get(r).length }));
+console.log("Current load:");
+for (const l of loads) console.log(\`  \${l.rep.padEnd(24)} \${l.count}\`);
+
+const moves = [];
+for (const [owner, ownedLeads] of byOwner.entries()) {
+  if (ownedLeads.length <= MAX_PER_REP) continue;
+
+  const overflow = ownedLeads
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .slice(0, ownedLeads.length - MAX_PER_REP);
+
+  for (const l of overflow) {
+    // Pick the least-loaded target rep (excluding current owner)
+    const target = REPS
+      .filter((r) => r !== owner)
+      .map((r) => ({ rep: r, count: byOwner.get(r).length }))
+      .sort((a, b) => a.count - b.count)[0];
+
+    if (!target || target.count >= MAX_PER_REP) break;   // nobody has capacity
+
+    await ctx.records.update("Leads", l.id, {
+      Owner: target.rep,
+      Reassigned_From: owner,
+      Reassigned_At: new Date().toISOString(),
+      Reassigned_Reason: \`Workload rebalance — \${owner} had \${ownedLeads.length}\`,
+    });
+    byOwner.get(target.rep).push(l);
+    moves.push({ leadId: l.id, from: owner, to: target.rep });
+  }
+}
+
+console.log(\`\\nMoved \${moves.length} Leads to rebalance\`);
+return { movesCount: moves.length, moves, finalLoads: REPS.map((r) => ({ rep: r, count: byOwner.get(r).length })) };`,
+    workflow: {
+      module: "Leads",
+      executeBasedOn: "record-action",
+      instantAction: "(manual or weekly scheduled run)",
+    },
+    todos: [
+      { id: "t1", text: "Add Leads fields: Reassigned_From, Reassigned_At, Reassigned_Reason" },
+      { id: "t2", text: "Set REPS array to your actual rep identifiers" },
+      { id: "t3", text: "Create function `rep_workload_rebalancer`" },
+      { id: "t4", text: "Run manually — review moves in the console before automating" },
+      { id: "t5", text: "Schedule weekly (e.g. Monday 8am)" },
+      { id: "t6", text: "Set a saved view by Reassigned_At to track recent moves" },
+    ],
+    demoInput: `Rep-1: 42 leads, Rep-2: 18, Rep-3: 15. MAX=30.`,
+    demoOutput: `12 leads reassigned from Rep-1 → Rep-3 and Rep-2.`,
+  },
+
+  // 32 — Renewal cascade
+  {
+    slug: "renewal-cascade",
+    title: "90/60/30-day renewal reminder cascade",
+    tagline:
+      "For each Account with a Renewal_Date, creates three Tasks at 90, 60, and 30 days out — idempotently.",
+    category: "Notifications",
+    difficulty: "Advanced",
+    estimatedMinutes: 20,
+    modules: ["Accounts", "Tasks"],
+    useCase:
+      "Enterprise renewals need multiple touches. Creating three dated reminders automatically means nobody forgets the 90-day QBR prep or the 30-day escalation nudge.",
+    script: `// renewal_cascade
+const BUCKETS = [
+  { days: 90, tag: "90d", title: "Renewal prep (90d): QBR schedule + churn review" },
+  { days: 60, tag: "60d", title: "Renewal check-in (60d): send proposal" },
+  { days: 30, tag: "30d", title: "Renewal close (30d): verify signed" },
+];
+
+const currentId = ctx.input?.recordId;
+if (!currentId) return { ok: true };
+const acc = await ctx.records.get("Accounts", currentId);
+if (!acc) return { ok: true };
+const renewal = acc.data.Renewal_Date;
+if (!renewal) return { ok: true };
+
+const renewalMs = new Date(renewal).getTime();
+const now = Date.now();
+
+// Load existing renewal Tasks for this Account to avoid re-creating
+const allTasks = await ctx.records.list("Tasks", { limit: 500 });
+const mine = allTasks.filter(
+  (t) => t.data.Related_Account_ID === currentId && t.data.Category === "Renewal"
+);
+
+const created = [];
+for (const { days, tag, title } of BUCKETS) {
+  const dueMs = renewalMs - days * 86400000;
+  if (dueMs < now) continue;                              // bucket already in the past
+  if (mine.find((t) => t.data.Renewal_Bucket === tag)) continue; // already exists — idempotent
+
+  await ctx.records.create("Tasks", {
+    Title: \`[\${acc.data.Name || "Account"}] \${title}\`,
+    Related_Account_ID: currentId,
+    Category: "Renewal",
+    Renewal_Bucket: tag,
+    Owner: acc.data.Owner,
+    Status: "Open",
+    Priority: days === 30 ? "High" : "Medium",
+    Due_Date: new Date(dueMs).toISOString(),
+  });
+  created.push({ tag, due: new Date(dueMs).toISOString() });
+}
+
+if (created.length > 0) {
+  ctx.info(\`Created \${created.length} renewal tasks for \${acc.data.Name}\`);
+}
+return { created };`,
+    workflow: {
+      module: "Accounts",
+      executeBasedOn: "record-action",
+      recordAction: "Create or Edit",
+      conditions: "Renewal_Date is not empty",
+      instantAction: "Function → renewal_cascade",
+    },
+    todos: [
+      { id: "t1", text: "Ensure Accounts has: Name, Owner, Renewal_Date" },
+      { id: "t2", text: "Add Tasks fields: Related_Account_ID, Category, Renewal_Bucket, Priority" },
+      { id: "t3", text: "Create function `renewal_cascade`" },
+      { id: "t4", text: "Tune BUCKETS if your org uses different touch points (e.g. add 14d)" },
+      { id: "t5", text: "Wire workflow on Accounts / Create or Edit with Renewal_Date not empty" },
+      { id: "t6", text: "Set a Renewal_Date 120 days out on a test Account" },
+      { id: "t7", text: "Verify 3 Tasks get created with correct due dates" },
+      { id: "t8", text: "Save the account again — no duplicate Tasks (idempotent)" },
+    ],
+    demoInput: `Account "Acme" with Renewal_Date 120 days from now`,
+    demoOutput: `3 Tasks: 90d/Medium, 60d/Medium, 30d/High — none re-created on subsequent saves.`,
+  },
 ]
 
 export function getGuide(slug: string): Guide | undefined {
