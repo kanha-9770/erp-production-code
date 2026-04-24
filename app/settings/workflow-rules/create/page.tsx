@@ -69,6 +69,17 @@ interface InstantAction {
   // For type === "Field Update": which field to write and the literal value
   targetFieldId?: string
   targetValue?: string
+  // For type === "Email Notification": addressing + template + sender config.
+  // Stored inline on the rule (no separate Notifications entity yet) so each
+  // rule carries its own email config. Name is user-facing label.
+  emailName?: string
+  emailToField?: string
+  emailSubject?: string
+  emailBody?: string
+  emailFrom?: string
+  emailReplyTo?: string
+  emailSendAsMass?: boolean
+  emailBestTime?: boolean
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
@@ -103,6 +114,14 @@ function normalizeActions(raw: unknown): InstantAction[] {
           argumentMappings: mappings,
           targetFieldId: typeof entry.targetFieldId === "string" ? entry.targetFieldId : undefined,
           targetValue: typeof entry.targetValue === "string" ? entry.targetValue : undefined,
+          emailName: typeof entry.emailName === "string" ? entry.emailName : undefined,
+          emailToField: typeof entry.emailToField === "string" ? entry.emailToField : undefined,
+          emailSubject: typeof entry.emailSubject === "string" ? entry.emailSubject : undefined,
+          emailBody: typeof entry.emailBody === "string" ? entry.emailBody : undefined,
+          emailFrom: typeof entry.emailFrom === "string" ? entry.emailFrom : undefined,
+          emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
+          emailSendAsMass: typeof entry.emailSendAsMass === "boolean" ? entry.emailSendAsMass : undefined,
+          emailBestTime: typeof entry.emailBestTime === "boolean" ? entry.emailBestTime : undefined,
         }
       }
       return null
@@ -244,6 +263,24 @@ export default function CreateWorkflowRulePage() {
   const [viewFnDialogOpen, setViewFnDialogOpen] = useState(false)
   const [fnArgMappings, setFnArgMappings] = useState<Array<{ id: string; name: string; value: string }>>([])
 
+  // ── Email Notification dialog state ─────────────────────────────────────
+  type EmailDialogStep = null | "associate" | "create"
+  const [emailDialogStep, setEmailDialogStep] = useState<EmailDialogStep>(null)
+  const [emailSearchQuery, setEmailSearchQuery] = useState("")
+  const [emailFormName, setEmailFormName] = useState("")
+  const [emailFormToField, setEmailFormToField] = useState("")
+  const [emailFormSubject, setEmailFormSubject] = useState("")
+  const [emailFormBody, setEmailFormBody] = useState("")
+  const [emailFormFrom, setEmailFormFrom] = useState("")
+  const [emailFormReplyTo, setEmailFormReplyTo] = useState("")
+  const [emailFormSendAsMass, setEmailFormSendAsMass] = useState(false)
+  const [emailFormBestTime, setEmailFormBestTime] = useState(false)
+
+  const emailAction = useMemo(
+    () => selectedInstantActions.find((a) => a.type === "Email Notification"),
+    [selectedInstantActions]
+  )
+
   const filteredFunctions = useMemo(() => {
     const q = fnSearchQuery.trim().toLowerCase()
     if (!q) return availableFunctions
@@ -332,6 +369,81 @@ export default function CreateWorkflowRulePage() {
     }
   }
 
+  // ── Email Notification handlers ─────────────────────────────────────────
+  const resetEmailForm = () => {
+    setEmailFormName("")
+    setEmailFormToField("")
+    setEmailFormSubject("")
+    setEmailFormBody("")
+    setEmailFormFrom("")
+    setEmailFormReplyTo("")
+    setEmailFormSendAsMass(false)
+    setEmailFormBestTime(false)
+  }
+
+  const loadEmailForm = (a: InstantAction | undefined) => {
+    setEmailFormName(a?.emailName || "")
+    setEmailFormToField(a?.emailToField || "")
+    setEmailFormSubject(a?.emailSubject || "")
+    setEmailFormBody(a?.emailBody || "")
+    setEmailFormFrom(a?.emailFrom || "")
+    setEmailFormReplyTo(a?.emailReplyTo || "")
+    setEmailFormSendAsMass(!!a?.emailSendAsMass)
+    setEmailFormBestTime(!!a?.emailBestTime)
+  }
+
+  const openEmailDialog = () => {
+    setEmailSearchQuery("")
+    loadEmailForm(emailAction)
+    setEmailDialogStep("associate")
+  }
+
+  const closeEmailDialog = () => setEmailDialogStep(null)
+
+  const openNewEmailForm = () => {
+    resetEmailForm()
+    setEmailDialogStep("create")
+  }
+
+  const openEditEmailForm = () => {
+    loadEmailForm(emailAction)
+    setEmailDialogStep("create")
+  }
+
+  const saveEmailNotification = async () => {
+    const nextActions = (() => {
+      const filtered = selectedInstantActions.filter((a) => a.type !== "Email Notification")
+      filtered.push({
+        type: "Email Notification",
+        emailName: emailFormName.trim(),
+        emailToField: emailFormToField || undefined,
+        emailSubject: emailFormSubject || undefined,
+        emailBody: emailFormBody || undefined,
+        emailFrom: emailFormFrom || undefined,
+        emailReplyTo: emailFormReplyTo || undefined,
+        emailSendAsMass: emailFormSendAsMass || undefined,
+        emailBestTime: emailFormBestTime || undefined,
+      })
+      return filtered
+    })()
+    setSelectedInstantActions(nextActions)
+    setInstantDone(true)
+    setActiveAction("")
+    closeEmailDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  const removeEmailAction = async () => {
+    const nextActions = selectedInstantActions.filter((a) => a.type !== "Email Notification")
+    setSelectedInstantActions(nextActions)
+    closeEmailDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
   // Auto-derive Function Name from Display Name (snake-case, ASCII)
   useEffect(() => {
     if (fnDialogStep !== "create") return
@@ -405,6 +517,11 @@ export default function CreateWorkflowRulePage() {
     if (type === "Function") {
       // Function uses the multi-step Configure dialog instead of a checkbox toggle.
       openConfigureFunction()
+      return
+    }
+    if (type === "Email Notification") {
+      // Email Notification uses the associate/create dialog — not a toggle.
+      openEmailDialog()
       return
     }
     setSelectedInstantActions((prev) => {
@@ -1066,20 +1183,27 @@ export default function CreateWorkflowRulePage() {
                         {ALL_INSTANT_ACTION_TYPES.map((action) => {
                           const isSelected = selectedInstantActions.some((a) => a.type === action)
                           const isFn = action === "Function"
-                          const fnLabel =
+                          const isEmail = action === "Email Notification"
+                          const label =
                             isFn && functionAction?.functionName
                               ? `Function: ${functionAction.functionName}`
-                              : action
+                              : isEmail && emailAction?.emailName
+                                ? `Email Notification: ${emailAction.emailName}`
+                                : action
                           return (
                             <button
                               key={action}
                               className={`w-full text-left text-xs py-2 px-3 hover:bg-muted transition-colors flex items-center justify-between gap-2 ${isSelected ? "bg-muted font-medium text-primary" : "text-foreground"}`}
                               onClick={() => toggleInstantAction(action)}
                             >
-                              <span className="truncate">{fnLabel}</span>
+                              <span className="truncate">{label}</span>
                               {isFn ? (
                                 <span className="text-[10px] text-muted-foreground shrink-0">
                                   {functionAction?.functionId ? "configured" : "configure ›"}
+                                </span>
+                              ) : isEmail ? (
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {emailAction?.emailName ? "configured" : "configure ›"}
                                 </span>
                               ) : (
                                 isSelected && (
@@ -1127,6 +1251,37 @@ export default function CreateWorkflowRulePage() {
                     <div className="border-t">
                       <div className="px-4 py-3 space-y-3">
                         {selectedInstantActions.map((a) => {
+                          if (a.type === "Email Notification") {
+                            return (
+                              <div
+                                key={a.type}
+                                className="group flex items-start justify-between gap-2"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={openEditEmailForm}
+                                  className="flex-1 min-w-0 text-left -mx-2 px-2 py-0.5 rounded hover:bg-muted/40 transition-colors"
+                                  title="Edit email notification"
+                                >
+                                  <p className="text-xs font-medium text-foreground">Email Notification</p>
+                                  <p
+                                    className="text-xs mt-0.5 truncate text-muted-foreground"
+                                    title={a.emailName || ""}
+                                  >
+                                    {a.emailName || "Unconfigured"}
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={removeEmailAction}
+                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
+                                  title="Remove Email Notification"
+                                >
+                                  <MinusCircle className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )
+                          }
                           if (a.type === "Function") {
                             const fnName = a.functionName || "—"
                             const fnExists =
@@ -1845,6 +2000,255 @@ export default function CreateWorkflowRulePage() {
               Save
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Email Notification Dialog (Zoho-style associate + create) ─── */}
+      <Dialog open={emailDialogStep !== null} onOpenChange={(open) => !open && closeEmailDialog()}>
+        <DialogContent className="max-w-2xl p-0 gap-0">
+          {/* ── Step: Associate (list + search + New button) ──────────── */}
+          {emailDialogStep === "associate" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base">
+                      Email Notification{moduleName ? ` - ${moduleName}` : ""}
+                    </DialogTitle>
+                  </div>
+                  <Button size="sm" className="h-8 text-xs shrink-0" onClick={openNewEmailForm}>
+                    New Email Notification
+                  </Button>
+                </div>
+              </DialogHeader>
+
+              <div className="px-6 pb-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={emailSearchQuery}
+                    onChange={(e) => setEmailSearchQuery(e.target.value)}
+                    placeholder="Search"
+                    className="h-8 text-xs pl-8"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-b max-h-80 overflow-y-auto">
+                {emailAction?.emailName &&
+                (!emailSearchQuery.trim() ||
+                  emailAction.emailName.toLowerCase().includes(emailSearchQuery.trim().toLowerCase())) ? (
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-6 py-2 font-medium">Name</th>
+                        <th className="px-2 py-2 font-medium">Email Template</th>
+                        <th className="px-2 py-2 font-medium">Modified On</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        onClick={openEditEmailForm}
+                        className="cursor-pointer hover:bg-muted/40 transition-colors bg-primary/5"
+                      >
+                        <td className="px-6 py-2.5 font-medium text-foreground truncate max-w-[180px]">
+                          {emailAction.emailName}
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground truncate max-w-[220px]">
+                          {emailAction.emailSubject || "—"}
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {format(new Date(), "dd/MM/yyyy")}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="px-6 py-12 text-center text-xs text-muted-foreground">
+                    {emailAction?.emailName
+                      ? "No notifications match your search."
+                      : 'No email notifications yet. Click "New Email Notification" to create one.'}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-3 border-t flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={emailFormBestTime}
+                    onChange={(e) => setEmailFormBestTime(e.target.checked)}
+                    className="h-3.5 w-3.5"
+                  />
+                  Send this email notification at Best Time to Email.
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeEmailDialog}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    disabled={!emailAction?.emailName}
+                    onClick={closeEmailDialog}
+                  >
+                    Associate
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Step: Create / Edit (form) ────────────────────────────── */}
+          {emailDialogStep === "create" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle className="text-base">
+                  Email Notification{moduleName ? ` - ${moduleName}` : ""}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Configure who receives this email and what it says. Use{" "}
+                  <span className="font-mono">{"{{api_name}}"}</span> in the subject or body to
+                  insert record field values.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="px-6 pb-4 space-y-4 max-h-[65vh] overflow-y-auto">
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="email-name" className="text-xs text-right">Name</Label>
+                  <Input
+                    id="email-name"
+                    value={emailFormName}
+                    onChange={(e) => setEmailFormName(e.target.value)}
+                    placeholder="e.g. Welcome Email"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label className="text-xs text-right pt-2">To</Label>
+                  <div className="space-y-2">
+                    <Select value={emailFormToField} onValueChange={setEmailFormToField}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Pick a field containing the recipient email…" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px]">
+                        {moduleFields.length === 0 ? (
+                          <div className="px-2 py-2 text-[11px] text-muted-foreground">
+                            No fields on this module. Pick a module with fields first.
+                          </div>
+                        ) : (
+                          moduleFields.map((f) => (
+                            <SelectItem key={f.id} value={f.id} className="text-xs">
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <span className="truncate">{f.label}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+                                  {f.apiName}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={emailFormSendAsMass}
+                        onChange={(e) => setEmailFormSendAsMass(e.target.checked)}
+                        className="h-3.5 w-3.5"
+                      />
+                      Send this notification as a Single Mass Email with all recipients displayed
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label htmlFor="email-subject" className="text-xs text-right pt-2">Email Template</Label>
+                  <div className="space-y-2">
+                    <Input
+                      id="email-subject"
+                      value={emailFormSubject}
+                      onChange={(e) => setEmailFormSubject(e.target.value)}
+                      placeholder="Subject"
+                      className="h-8 text-xs"
+                    />
+                    <Textarea
+                      value={emailFormBody}
+                      onChange={(e) => setEmailFormBody(e.target.value)}
+                      placeholder={"Body — e.g. Hi {{full_name}}, welcome!"}
+                      rows={5}
+                      className="text-xs resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="email-from" className="text-xs text-right">From</Label>
+                  <Input
+                    id="email-from"
+                    value={emailFormFrom}
+                    onChange={(e) => setEmailFormFrom(e.target.value)}
+                    placeholder="sender@example.com"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="email-replyto" className="text-xs text-right">Reply to</Label>
+                  <Input
+                    id="email-replyto"
+                    value={emailFormReplyTo}
+                    onChange={(e) => setEmailFormReplyTo(e.target.value)}
+                    placeholder="Optional"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-muted-foreground ml-[122px]">
+                  <input
+                    type="checkbox"
+                    checked={emailFormBestTime}
+                    onChange={(e) => setEmailFormBestTime(e.target.checked)}
+                    className="h-3.5 w-3.5"
+                  />
+                  Send this email notification at Best Time to Email.
+                </label>
+              </div>
+
+              <DialogFooter className="border-t px-6 py-3 gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs mr-auto"
+                  onClick={() => setEmailDialogStep("associate")}
+                >
+                  ← Back
+                </Button>
+                {emailAction?.emailName && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={removeEmailAction}
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeEmailDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!emailFormName.trim() || !emailFormToField}
+                  onClick={saveEmailNotification}
+                >
+                  Save and Associate
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

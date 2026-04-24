@@ -106,3 +106,60 @@ export const sendOTPEmail = async (
     return { success: false, error: error.message }
   }
 }
+
+interface WorkflowEmailOptions {
+  to: string
+  subject: string
+  body: string
+  from?: string
+  replyTo?: string
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+/**
+ * Generic email sender for workflow-rule Email Notification actions.
+ * Uses the same SMTP transport as sendOTPEmail, but accepts arbitrary
+ * subject/body and an optional sender override (for "From:" per-rule).
+ * Falls through to a no-op log in dev when SMTP env vars aren't set.
+ */
+export const sendWorkflowEmail = async (
+  options: WorkflowEmailOptions
+): Promise<{ success: boolean; error?: string }> => {
+  if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER) {
+    console.log(
+      `[DEV] Workflow email would be sent to ${options.to}: ${options.subject}`
+    )
+    return { success: true }
+  }
+
+  const fromAddress = options.from?.trim() || process.env.EMAIL_FROM || ""
+  const bodyHtml = escapeHtml(options.body || "").replace(/\n/g, "<br/>")
+
+  const mailOptions: any = {
+    from: {
+      name: process.env.EMAIL_FROM_NAME || "App5",
+      address: fromAddress,
+    },
+    to: options.to,
+    subject: options.subject,
+    text: options.body || "",
+    html: `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1e293b;line-height:1.5;">${bodyHtml}</body></html>`,
+  }
+  if (options.replyTo) mailOptions.replyTo = options.replyTo
+
+  try {
+    await transporter.sendMail(mailOptions)
+    return { success: true }
+  } catch (error: any) {
+    console.error("Workflow email sending failed:", error)
+    return { success: false, error: error.message }
+  }
+}
