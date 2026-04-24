@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma"
 import { executeFunction } from "@/lib/functions/executor"
 import { attachApiNames } from "@/lib/functions/apiName"
 import { DatabaseService } from "@/lib/database/database-service"
+import { sendWorkflowEmail } from "@/lib/email"
 
 export type WorkflowAction = "Create" | "Edit" | "Create or Edit" | "Delete"
 
@@ -35,6 +36,13 @@ interface InstantActionEntry {
   // For type === "Field Update"
   targetFieldId?: string
   targetValue?: string
+  // For type === "Email Notification"
+  emailName?: string
+  emailToField?: string
+  emailSubject?: string
+  emailBody?: string
+  emailFrom?: string
+  emailReplyTo?: string
 }
 
 function normalizeActions(raw: unknown): InstantActionEntry[] {
@@ -49,11 +57,63 @@ function normalizeActions(raw: unknown): InstantActionEntry[] {
           functionName: typeof entry.functionName === "string" ? entry.functionName : undefined,
           targetFieldId: typeof entry.targetFieldId === "string" ? entry.targetFieldId : undefined,
           targetValue: typeof entry.targetValue === "string" ? entry.targetValue : undefined,
+          emailName: typeof entry.emailName === "string" ? entry.emailName : undefined,
+          emailToField: typeof entry.emailToField === "string" ? entry.emailToField : undefined,
+          emailSubject: typeof entry.emailSubject === "string" ? entry.emailSubject : undefined,
+          emailBody: typeof entry.emailBody === "string" ? entry.emailBody : undefined,
+          emailFrom: typeof entry.emailFrom === "string" ? entry.emailFrom : undefined,
+          emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
         }
       }
       return null
     })
     .filter((a): a is InstantActionEntry => a !== null)
+}
+
+/**
+ * Read a single field's value from a record regardless of storage shape.
+ * Records come in either flat ({ fieldId: value }) or structured
+ * ({ sections: { [sid]: { fields: { [fid]: value | { value } } } } }) form.
+ */
+function getRecordFieldValue(
+  recordData: Record<string, any> | undefined,
+  fieldId: string
+): any {
+  if (!recordData) return undefined
+  if (Object.prototype.hasOwnProperty.call(recordData, fieldId)) {
+    const v = (recordData as any)[fieldId]
+    return v && typeof v === "object" && "value" in v ? v.value : v
+  }
+  const sections = (recordData as any).sections
+  if (sections && typeof sections === "object") {
+    for (const s of Object.values(sections) as any[]) {
+      const f = s?.fields?.[fieldId]
+      if (f !== undefined) return f && typeof f === "object" && "value" in f ? f.value : f
+    }
+  }
+  return undefined
+}
+
+/**
+ * Substitute {{api_name}} / {{Field Label}} / {{fieldId}} placeholders in a
+ * subject or body string using the module's field map + the record's current
+ * values. Unknown placeholders render as an empty string — matches the
+ * permissive philosophy of the condition evaluator (a misspelled placeholder
+ * shouldn't block the email from going out).
+ */
+function renderEmailTemplate(
+  template: string,
+  recordData: Record<string, any> | undefined,
+  fieldMap: Map<string, string>
+): string {
+  if (!template) return ""
+  return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, rawKey) => {
+    const key = String(rawKey).trim()
+    const fieldId = fieldMap.get(key)
+    if (!fieldId) return ""
+    const v = getRecordFieldValue(recordData, fieldId)
+    return v == null ? "" : String(v)
+  })
 }
 
 /**
@@ -209,26 +269,9 @@ function evaluateConditions(
   if (conditionType === "all" || !conditions || conditions.length === 0) return true
   if (!recordData) return false
 
-  const getValue = (fieldId: string): any => {
-    // Records may store either flat { fieldId: value } or structured shapes.
-    // Try the flat shape first, then dig into sections/subforms.
-    if (Object.prototype.hasOwnProperty.call(recordData, fieldId)) {
-      const v = (recordData as any)[fieldId]
-      return v && typeof v === "object" && "value" in v ? v.value : v
-    }
-    const sections = (recordData as any).sections
-    if (sections && typeof sections === "object") {
-      for (const s of Object.values(sections) as any[]) {
-        const f = s?.fields?.[fieldId]
-        if (f !== undefined) return f && typeof f === "object" && "value" in f ? f.value : f
-      }
-    }
-    return undefined
-  }
-
   return conditions.every((c: any) => {
     if (!c?.field || !c?.operator) return true
-    const left = getValue(c.field)
+    const left = getRecordFieldValue(recordData, c.field)
     const right = c.value
     switch (c.operator) {
       case "is":
@@ -300,6 +343,49 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
           } catch (err) {
             console.error(
               `[workflow] rule "${rule.name}" field update failed`,
+              err
+            )
+          }
+          continue
+        }
+
+        // Email Notification — render {{api_name}} placeholders against the
+        // record and send via SMTP. Recipient comes from the user-picked
+        // record field (emailToField). Missing/empty recipient = skip silently;
+        // we don't want to noisily fail when e.g. an HR record is created
+        // without an email address filled in yet.
+        if (act.type === "Email Notification") {
+          if (!act.emailToField) continue
+          const rawTo = getRecordFieldValue(recordData, act.emailToField)
+          const toAddress = typeof rawTo === "string" ? rawTo.trim() : ""
+          if (!toAddress) {
+            console.warn(
+              `[workflow] rule "${rule.name}" email skipped — field "${act.emailToField}" empty on record`
+            )
+            continue
+          }
+          try {
+            const fieldMap = await getFieldMap()
+            const subject =
+              renderEmailTemplate(act.emailSubject || "", recordData, fieldMap) ||
+              act.emailName ||
+              `Notification from ${moduleName}`
+            const body = renderEmailTemplate(act.emailBody || "", recordData, fieldMap)
+            const result = await sendWorkflowEmail({
+              to: toAddress,
+              subject,
+              body,
+              from: act.emailFrom || undefined,
+              replyTo: act.emailReplyTo || undefined,
+            })
+            if (!result.success) {
+              console.warn(
+                `[workflow] rule "${rule.name}" email to "${toAddress}" failed: ${result.error}`
+              )
+            }
+          } catch (err) {
+            console.error(
+              `[workflow] rule "${rule.name}" email send threw`,
               err
             )
           }
