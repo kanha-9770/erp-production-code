@@ -55,6 +55,45 @@ interface FieldMeta {
   apiName: string
 }
 
+// ── Hot-path caches ──────────────────────────────────────────────────────
+//
+// Fast auto-fill (onFieldChange, firing every ~120ms as the user types) means
+// dozens of back-to-back POSTs to /functions/run with the SAME bindingId and
+// formId. Without caching, every call re-fetches:
+//   - the binding row (+ function.script)           ~15-30ms
+//   - the form's sections + fields + subform fields ~15-30ms
+//
+// That's ~30-60ms of pure metadata I/O per keystroke that never changes
+// within a session. A tiny in-memory TTL cache collapses the warm case to
+// ~0ms. The TTL is short enough that edits in Settings → Functions /
+// Form Builder are visible within 30s; longer lived entries are evicted on
+// LRU overflow.
+const FIELD_CACHE_TTL_MS = 30_000
+const BINDING_CACHE_TTL_MS = 30_000
+const CACHE_MAX = 500
+
+function lruTouch<K, V>(map: Map<K, V>, key: K, value: V) {
+  if (map.has(key)) map.delete(key)
+  map.set(key, value)
+  if (map.size > CACHE_MAX) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest as K)
+  }
+}
+
+interface FieldCacheEntry {
+  expires: number
+  value: FieldMeta[]
+}
+const fieldCache = new Map<string, FieldCacheEntry>()
+
+interface BindingCacheEntry {
+  expires: number
+  value: any
+}
+// Key = `${organizationId}::${bindingId}` so cross-org can never collide.
+const bindingCache = new Map<string, BindingCacheEntry>()
+
 /**
  * Resolve the form id this binding is scoped to. Bindings can scope to a
  * form directly, to a field (in which case we walk up to its parent form),
@@ -86,6 +125,12 @@ async function resolveFormIdForBinding(
  * reload needed.
  */
 async function loadFormFields(formId: string): Promise<FieldMeta[]> {
+  const now = Date.now()
+  const hit = fieldCache.get(formId)
+  if (hit && hit.expires > now) {
+    lruTouch(fieldCache, formId, hit)
+    return hit.value
+  }
   const sections = await prisma.formSection.findMany({
     where: { formId },
     orderBy: { order: "asc" },
@@ -109,7 +154,9 @@ async function loadFormFields(formId: string): Promise<FieldMeta[]> {
     for (const f of s.fields) flat.push({ id: f.id, label: f.label })
     for (const sf of s.subforms) for (const f of sf.fields) flat.push({ id: f.id, label: f.label })
   }
-  return attachApiNames(flat) as FieldMeta[]
+  const value = attachApiNames(flat) as FieldMeta[]
+  lruTouch(fieldCache, formId, { expires: now + FIELD_CACHE_TTL_MS, value })
+  return value
 }
 
 const SPECIAL_INPUT_KEYS = new Set([
@@ -444,18 +491,29 @@ export async function runBindingById(
   ctx: BindingContext,
   scope: { formId?: string; fieldId?: string; moduleId?: string }
 ): Promise<BindingRunResult | null> {
-  const binding = await (prisma as any).functionBinding.findFirst({
-    where: {
-      id: bindingId,
-      organizationId: ctx.organizationId,
-      active: true,
-    },
-    include: {
-      function: {
-        select: { id: true, name: true, displayName: true, language: true, script: true },
+  const cacheKey = `${ctx.organizationId}::${bindingId}`
+  const now = Date.now()
+  let binding: any
+  const hit = bindingCache.get(cacheKey)
+  if (hit && hit.expires > now) {
+    binding = hit.value
+    lruTouch(bindingCache, cacheKey, hit)
+  } else {
+    binding = await (prisma as any).functionBinding.findFirst({
+      where: {
+        id: bindingId,
+        organizationId: ctx.organizationId,
+        active: true,
       },
-    },
-  })
+      include: {
+        function: {
+          select: { id: true, name: true, displayName: true, language: true, script: true },
+        },
+      },
+    })
+    if (!binding) return null
+    lruTouch(bindingCache, cacheKey, { expires: now + BINDING_CACHE_TTL_MS, value: binding })
+  }
   if (!binding) return null
   return runOne(binding, ctx, scope)
 }

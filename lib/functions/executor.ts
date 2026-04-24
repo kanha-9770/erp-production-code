@@ -48,6 +48,30 @@ export interface ExecuteResult {
 const DEFAULT_TIMEOUT = 5_000
 const DEFAULT_MAX_OPS = 100
 
+// LRU of compiled vm.Script objects keyed by the wrapped source. V8 parse +
+// compile is ~5-20ms per call; re-running an already-compiled Script is ~0ms.
+// A typical script runs many times across users and sessions, so the cache
+// hit rate is extremely high. Max 200 entries keeps memory bounded.
+const SCRIPT_CACHE_MAX = 200
+const scriptCache = new Map<string, vm.Script>()
+function getCompiledScript(wrappedSource: string): vm.Script {
+  const cached = scriptCache.get(wrappedSource)
+  if (cached) {
+    // LRU touch: re-insert so it's most-recent.
+    scriptCache.delete(wrappedSource)
+    scriptCache.set(wrappedSource, cached)
+    return cached
+  }
+  const script = new vm.Script(wrappedSource, { filename: "user-function.js" })
+  scriptCache.set(wrappedSource, script)
+  if (scriptCache.size > SCRIPT_CACHE_MAX) {
+    // Evict oldest (first inserted / least recently touched).
+    const oldest = scriptCache.keys().next().value
+    if (oldest !== undefined) scriptCache.delete(oldest)
+  }
+  return script
+}
+
 // ── Module / record helpers (org-scoped) ──────────────────────────────────
 
 async function resolveFormByModuleName(organizationId: string, moduleName: string) {
@@ -265,6 +289,34 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
     }) as T
   }
 
+  // Per-script-run cache: resolving `moduleName -> {form, model, fieldMaps}`
+  // used to cost 3 sequential DB round trips on EVERY records.* call. Memoize
+  // within the life of a single script run and parallelize the two calls
+  // that only depend on form.id. Saves 2-3 queries per repeated call to the
+  // same module, and 1 round trip on the very first call.
+  const moduleCtxCache = new Map<string, Promise<{
+    form: { id: string; name: string }
+    model: string
+    fieldMaps: Awaited<ReturnType<typeof loadFieldMaps>>
+  }>>()
+  const getModuleCtx = (moduleName: string) => {
+    const cached = moduleCtxCache.get(moduleName)
+    if (cached) return cached
+    const p = (async () => {
+      const { form } = await resolveFormByModuleName(organizationId, moduleName)
+      const [model, fieldMaps] = await Promise.all([
+        getShardModelForForm(form.id),
+        loadFieldMaps(form.id),
+      ])
+      return { form, model, fieldMaps }
+    })()
+    // If the resolve fails, drop the cached rejection so retries can try
+    // again (e.g. the module just got created mid-session).
+    p.catch(() => moduleCtxCache.delete(moduleName))
+    moduleCtxCache.set(moduleName, p)
+    return p
+  }
+
   const records = {
     /**
      * List records for a module.
@@ -276,9 +328,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
       options: { limit?: number; skip?: number; where?: Record<string, any> } = {}
     ) => {
       guardOp()
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const model = await getShardModelForForm(form.id)
-      const fieldMaps = await loadFieldMaps(form.id)
+      const { form, model, fieldMaps } = await getModuleCtx(moduleName)
       const limit = Math.min(500, Math.max(1, options.limit ?? 50))
       const skip = Math.max(0, options.skip ?? 0)
       // @ts-ignore dynamic model access
@@ -303,9 +353,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
     /** Get a single record by id (returns the same shape as list items). */
     get: wrap("ctx.records.get", async (moduleName: string, recordId: string) => {
       guardOp()
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const model = await getShardModelForForm(form.id)
-      const fieldMaps = await loadFieldMaps(form.id)
+      const { form, model, fieldMaps } = await getModuleCtx(moduleName)
       // @ts-ignore dynamic model access
       const row = await (prisma as any)[model].findFirst({
         where: { id: recordId, formId: form.id },
@@ -334,8 +382,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
       if (!data || typeof data !== "object") {
         throw new Error("data must be an object")
       }
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const fieldMaps = await loadFieldMaps(form.id)
+      const { form, fieldMaps } = await getModuleCtx(moduleName)
       const isStructured = data && typeof data === "object" && data.sections && typeof data.sections === "object"
       const finalData = isStructured
         ? data
@@ -368,9 +415,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
       if (!patch || typeof patch !== "object") {
         throw new Error("patch must be an object")
       }
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const model = await getShardModelForForm(form.id)
-      const fieldMaps = await loadFieldMaps(form.id)
+      const { form, model, fieldMaps } = await getModuleCtx(moduleName)
       // @ts-ignore dynamic model access
       const existing = await (prisma as any)[model].findFirst({
         where: { id: recordId, formId: form.id },
@@ -423,8 +468,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
     /** Delete a record. */
     delete: wrap("ctx.records.delete", async (moduleName: string, recordId: string) => {
       guardOp()
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const model = await getShardModelForForm(form.id)
+      const { form, model } = await getModuleCtx(moduleName)
       // @ts-ignore dynamic model access
       const existing = await (prisma as any)[model].findFirst({
         where: { id: recordId, formId: form.id },
@@ -439,8 +483,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
     /** Count records matching an optional where clause. */
     count: wrap("ctx.records.count", async (moduleName: string, where: Record<string, any> = {}) => {
       guardOp()
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const model = await getShardModelForForm(form.id)
+      const { form, model } = await getModuleCtx(moduleName)
       // @ts-ignore dynamic model access
       return await (prisma as any)[model].count({
         where: { formId: form.id, ...where },
@@ -453,8 +496,7 @@ function buildCtx(opts: ExecuteOptions, logs: ExecuteResult["logs"], opCounter: 
      *  passing values to `ctx.records.create / update`. */
     fields: wrap("ctx.records.fields", async (moduleName: string) => {
       guardOp()
-      const { form } = await resolveFormByModuleName(organizationId, moduleName)
-      const fieldMaps = await loadFieldMaps(form.id)
+      const { fieldMaps } = await getModuleCtx(moduleName)
       return Object.values(fieldMaps.byId).map((f) => ({
         id: f.id,
         label: f.label,
@@ -528,7 +570,7 @@ export async function executeFunction(opts: ExecuteOptions): Promise<ExecuteResu
     })
 
     const wrapped = wrapScript(opts.script)
-    const script = new vm.Script(wrapped, { filename: "user-function.js" })
+    const script = getCompiledScript(wrapped)
 
     // The sync portion (= until first await) is bounded by `timeout`.
     // Async work after that is bounded by the racing Promise below + opCounter.
