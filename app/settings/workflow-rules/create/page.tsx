@@ -59,6 +59,16 @@ interface ArgumentMapping {
   value: string
 }
 
+interface WebhookHeader {
+  key: string
+  value: string
+}
+
+interface WebhookParam {
+  name: string
+  value: string
+}
+
 interface InstantAction {
   type: string
   // For type === "Function": which custom function to invoke
@@ -80,6 +90,15 @@ interface InstantAction {
   emailReplyTo?: string
   emailSendAsMass?: boolean
   emailBestTime?: boolean
+  // For type === "Webhook": HTTP callout config stored inline on the rule.
+  // Name is the user-facing label shown in the actions list.
+  webhookName?: string
+  webhookDescription?: string
+  webhookMethod?: string
+  webhookUrl?: string
+  webhookAuthType?: "General" | "Connection"
+  webhookHeaders?: WebhookHeader[]
+  webhookParams?: WebhookParam[]
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
@@ -122,6 +141,24 @@ function normalizeActions(raw: unknown): InstantAction[] {
           emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
           emailSendAsMass: typeof entry.emailSendAsMass === "boolean" ? entry.emailSendAsMass : undefined,
           emailBestTime: typeof entry.emailBestTime === "boolean" ? entry.emailBestTime : undefined,
+          webhookName: typeof entry.webhookName === "string" ? entry.webhookName : undefined,
+          webhookDescription: typeof entry.webhookDescription === "string" ? entry.webhookDescription : undefined,
+          webhookMethod: typeof entry.webhookMethod === "string" ? entry.webhookMethod : undefined,
+          webhookUrl: typeof entry.webhookUrl === "string" ? entry.webhookUrl : undefined,
+          webhookAuthType:
+            entry.webhookAuthType === "Connection" || entry.webhookAuthType === "General"
+              ? entry.webhookAuthType
+              : undefined,
+          webhookHeaders: Array.isArray(entry.webhookHeaders)
+            ? entry.webhookHeaders
+              .filter((h: any) => h && typeof h.key === "string")
+              .map((h: any) => ({ key: h.key, value: typeof h.value === "string" ? h.value : "" }))
+            : undefined,
+          webhookParams: Array.isArray(entry.webhookParams)
+            ? entry.webhookParams
+              .filter((p: any) => p && typeof p.name === "string")
+              .map((p: any) => ({ name: p.name, value: typeof p.value === "string" ? p.value : "" }))
+            : undefined,
         }
       }
       return null
@@ -278,6 +315,22 @@ export default function CreateWorkflowRulePage() {
 
   const emailAction = useMemo(
     () => selectedInstantActions.find((a) => a.type === "Email Notification"),
+    [selectedInstantActions]
+  )
+
+  // ── Webhook dialog state ────────────────────────────────────────────────
+  type WebhookDialogStep = null | "associate" | "create"
+  const [webhookDialogStep, setWebhookDialogStep] = useState<WebhookDialogStep>(null)
+  const [webhookFormName, setWebhookFormName] = useState("")
+  const [webhookFormDescription, setWebhookFormDescription] = useState("")
+  const [webhookFormMethod, setWebhookFormMethod] = useState("POST")
+  const [webhookFormUrl, setWebhookFormUrl] = useState("")
+  const [webhookFormAuthType, setWebhookFormAuthType] = useState<"General" | "Connection">("General")
+  const [webhookFormHeaders, setWebhookFormHeaders] = useState<Array<{ id: string; key: string; value: string }>>([])
+  const [webhookFormParams, setWebhookFormParams] = useState<Array<{ id: string; name: string; value: string }>>([])
+
+  const webhookAction = useMemo(
+    () => selectedInstantActions.find((a) => a.type === "Webhook"),
     [selectedInstantActions]
   )
 
@@ -444,6 +497,99 @@ export default function CreateWorkflowRulePage() {
     }
   }
 
+  // ── Webhook handlers ────────────────────────────────────────────────────
+  const resetWebhookForm = () => {
+    setWebhookFormName("")
+    setWebhookFormDescription("")
+    setWebhookFormMethod("POST")
+    setWebhookFormUrl("")
+    setWebhookFormAuthType("General")
+    setWebhookFormHeaders([])
+    setWebhookFormParams([])
+  }
+
+  const loadWebhookForm = (a: InstantAction | undefined) => {
+    setWebhookFormName(a?.webhookName || "")
+    setWebhookFormDescription(a?.webhookDescription || "")
+    setWebhookFormMethod(a?.webhookMethod || "POST")
+    setWebhookFormUrl(a?.webhookUrl || "")
+    setWebhookFormAuthType(a?.webhookAuthType || "General")
+    setWebhookFormHeaders(
+      (a?.webhookHeaders || []).map((h, i) => ({ id: String(i), key: h.key, value: h.value }))
+    )
+    setWebhookFormParams(
+      (a?.webhookParams || []).map((p, i) => ({ id: String(i), name: p.name, value: p.value }))
+    )
+  }
+
+  const openWebhookDialog = () => {
+    loadWebhookForm(webhookAction)
+    setWebhookDialogStep("associate")
+  }
+
+  const closeWebhookDialog = () => setWebhookDialogStep(null)
+
+  const openNewWebhookForm = () => {
+    resetWebhookForm()
+    setWebhookDialogStep("create")
+  }
+
+  const openEditWebhookForm = () => {
+    loadWebhookForm(webhookAction)
+    setWebhookDialogStep("create")
+  }
+
+  const addWebhookParam = () => {
+    setWebhookFormParams((prev) => [...prev, { id: Date.now().toString(), name: "", value: "" }])
+  }
+
+  const updateWebhookParam = (id: string, key: "name" | "value", v: string) => {
+    setWebhookFormParams((prev) => prev.map((p) => (p.id === id ? { ...p, [key]: v } : p)))
+  }
+
+  const removeWebhookParam = (id: string) => {
+    setWebhookFormParams((prev) => prev.filter((p) => p.id !== id))
+  }
+
+  const saveWebhook = async () => {
+    const headers: WebhookHeader[] = webhookFormHeaders
+      .filter((h) => h.key.trim())
+      .map(({ key, value }) => ({ key: key.trim(), value }))
+    const params: WebhookParam[] = webhookFormParams
+      .filter((p) => p.name.trim())
+      .map(({ name, value }) => ({ name: name.trim(), value }))
+    const nextActions = (() => {
+      const filtered = selectedInstantActions.filter((a) => a.type !== "Webhook")
+      filtered.push({
+        type: "Webhook",
+        webhookName: webhookFormName.trim(),
+        webhookDescription: webhookFormDescription.trim() || undefined,
+        webhookMethod: webhookFormMethod || "POST",
+        webhookUrl: webhookFormUrl.trim(),
+        webhookAuthType: webhookFormAuthType,
+        webhookHeaders: headers.length > 0 ? headers : undefined,
+        webhookParams: params.length > 0 ? params : undefined,
+      })
+      return filtered
+    })()
+    setSelectedInstantActions(nextActions)
+    setInstantDone(true)
+    setActiveAction("")
+    closeWebhookDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  const removeWebhookAction = async () => {
+    const nextActions = selectedInstantActions.filter((a) => a.type !== "Webhook")
+    setSelectedInstantActions(nextActions)
+    closeWebhookDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
   // Auto-derive Function Name from Display Name (snake-case, ASCII)
   useEffect(() => {
     if (fnDialogStep !== "create") return
@@ -522,6 +668,11 @@ export default function CreateWorkflowRulePage() {
     if (type === "Email Notification") {
       // Email Notification uses the associate/create dialog — not a toggle.
       openEmailDialog()
+      return
+    }
+    if (type === "Webhook") {
+      // Webhook uses the associate/create dialog — not a toggle.
+      openWebhookDialog()
       return
     }
     setSelectedInstantActions((prev) => {
@@ -1184,12 +1335,15 @@ export default function CreateWorkflowRulePage() {
                           const isSelected = selectedInstantActions.some((a) => a.type === action)
                           const isFn = action === "Function"
                           const isEmail = action === "Email Notification"
+                          const isWebhook = action === "Webhook"
                           const label =
                             isFn && functionAction?.functionName
                               ? `Function: ${functionAction.functionName}`
                               : isEmail && emailAction?.emailName
                                 ? `Email Notification: ${emailAction.emailName}`
-                                : action
+                                : isWebhook && webhookAction?.webhookName
+                                  ? `Webhook: ${webhookAction.webhookName}`
+                                  : action
                           return (
                             <button
                               key={action}
@@ -1204,6 +1358,10 @@ export default function CreateWorkflowRulePage() {
                               ) : isEmail ? (
                                 <span className="text-[10px] text-muted-foreground shrink-0">
                                   {emailAction?.emailName ? "configured" : "configure ›"}
+                                </span>
+                              ) : isWebhook ? (
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {webhookAction?.webhookName ? "configured" : "configure ›"}
                                 </span>
                               ) : (
                                 isSelected && (
@@ -1316,6 +1474,38 @@ export default function CreateWorkflowRulePage() {
                                   onClick={removeFunctionAction}
                                   className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
                                   title="Remove function"
+                                >
+                                  <MinusCircle className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )
+                          }
+                          if (a.type === "Webhook") {
+                            return (
+                              <div
+                                key={a.type}
+                                className="group flex items-start justify-between gap-2"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={openEditWebhookForm}
+                                  className="flex-1 min-w-0 text-left -mx-2 px-2 py-0.5 rounded hover:bg-muted/40 transition-colors"
+                                  title="Edit webhook"
+                                >
+                                  <p className="text-xs font-medium text-foreground">Webhook</p>
+                                  <p
+                                    className="text-xs mt-0.5 truncate text-muted-foreground"
+                                    title={a.webhookUrl || ""}
+                                  >
+                                    {a.webhookName || "Unconfigured"}
+                                    {a.webhookUrl ? ` — ${a.webhookMethod || "POST"} ${a.webhookUrl}` : ""}
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={removeWebhookAction}
+                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
+                                  title="Remove Webhook"
                                 >
                                   <MinusCircle className="h-4 w-4" />
                                 </button>
@@ -2243,6 +2433,245 @@ export default function CreateWorkflowRulePage() {
                   className="h-8 text-xs"
                   disabled={!emailFormName.trim() || !emailFormToField}
                   onClick={saveEmailNotification}
+                >
+                  Save and Associate
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Webhook Dialog (associate list + configure form) ──────────── */}
+      <Dialog open={webhookDialogStep !== null} onOpenChange={(open) => !open && closeWebhookDialog()}>
+        <DialogContent className="max-w-2xl p-0 gap-0">
+          {/* ── Step: Associate (list of existing webhooks) ─────────────── */}
+          {webhookDialogStep === "associate" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base">
+                      Webhooks{moduleName ? ` - ${moduleName}` : ""}
+                    </DialogTitle>
+                  </div>
+                  <Button size="sm" className="h-8 text-xs shrink-0" onClick={openNewWebhookForm}>
+                    Configure Webhook
+                  </Button>
+                </div>
+              </DialogHeader>
+
+              <div className="border-t border-b max-h-80 overflow-y-auto">
+                {webhookAction?.webhookName ? (
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-6 py-2 font-medium">Name</th>
+                        <th className="px-2 py-2 font-medium">URL To Notify</th>
+                        <th className="px-2 py-2 font-medium">Modified On</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        onClick={openEditWebhookForm}
+                        className="cursor-pointer hover:bg-muted/40 transition-colors bg-primary/5"
+                      >
+                        <td className="px-6 py-2.5 font-medium text-foreground truncate max-w-[180px]">
+                          {webhookAction.webhookName}
+                        </td>
+                        <td
+                          className="px-2 py-2.5 text-muted-foreground truncate max-w-[260px]"
+                          title={webhookAction.webhookUrl || ""}
+                        >
+                          {webhookAction.webhookUrl || "—"}
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {format(new Date(), "dd/MM/yyyy")}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="px-6 py-12 text-center text-xs text-muted-foreground">
+                    No webhooks yet. Click "Configure Webhook" to create one.
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="px-6 py-3 gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeWebhookDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!webhookAction?.webhookName}
+                  onClick={closeWebhookDialog}
+                >
+                  Associate
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {/* ── Step: Configure (create / edit form) ───────────────────── */}
+          {webhookDialogStep === "create" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle className="text-base">
+                  Webhook{moduleName ? ` - ${moduleName}` : ""}
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="px-6 pb-4 space-y-4 max-h-[65vh] overflow-y-auto">
+                <div className="grid grid-cols-[140px_1fr] items-center gap-3">
+                  <Label htmlFor="webhook-name" className="text-xs text-right">
+                    Name <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="webhook-name"
+                    value={webhookFormName}
+                    onChange={(e) => setWebhookFormName(e.target.value)}
+                    className={`h-8 text-xs ${!webhookFormName.trim() ? "border-destructive/60 focus-visible:ring-destructive/30" : ""}`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-[140px_1fr] items-start gap-3">
+                  <Label htmlFor="webhook-desc" className="text-xs text-right pt-2">Description</Label>
+                  <Textarea
+                    id="webhook-desc"
+                    value={webhookFormDescription}
+                    onChange={(e) => setWebhookFormDescription(e.target.value)}
+                    rows={2}
+                    className="text-xs resize-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-[140px_1fr] items-center gap-3">
+                  <Label htmlFor="webhook-method" className="text-xs text-right">Method</Label>
+                  <Select value={webhookFormMethod} onValueChange={setWebhookFormMethod}>
+                    <SelectTrigger id="webhook-method" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="POST" className="text-xs">POST</SelectItem>
+                      <SelectItem value="GET" className="text-xs">GET</SelectItem>
+                      <SelectItem value="PUT" className="text-xs">PUT</SelectItem>
+                      <SelectItem value="PATCH" className="text-xs">PATCH</SelectItem>
+                      <SelectItem value="DELETE" className="text-xs">DELETE</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-[140px_1fr] items-center gap-3">
+                  <Label htmlFor="webhook-url" className="text-xs text-right">
+                    URL to Notify <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="webhook-url"
+                    value={webhookFormUrl}
+                    onChange={(e) => setWebhookFormUrl(e.target.value)}
+                    placeholder="Example: https://yourdomain.com/getNotified.do"
+                    className={`h-8 text-xs ${!webhookFormUrl.trim() ? "border-destructive/60 focus-visible:ring-destructive/30" : ""}`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-[140px_1fr] items-center gap-3">
+                  <Label className="text-xs text-right">Authorization Type</Label>
+                  <RadioGroup
+                    value={webhookFormAuthType}
+                    onValueChange={(v) => setWebhookFormAuthType(v as "General" | "Connection")}
+                    className="flex items-center gap-6"
+                  >
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="General" id="auth-general" className="h-3.5 w-3.5" />
+                      <Label htmlFor="auth-general" className="text-xs font-normal cursor-pointer flex items-center gap-1">
+                        General
+                        <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem value="Connection" id="auth-connection" className="h-3.5 w-3.5" />
+                      <Label htmlFor="auth-connection" className="text-xs font-normal cursor-pointer flex items-center gap-1">
+                        Connection
+                        <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                      </Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                <div className="border-t pt-3">
+                  <p className="text-xs font-semibold text-foreground mb-1">Header</p>
+                </div>
+
+                <div className="border-t pt-3">
+                  <p className="text-xs font-semibold text-foreground mb-2">Module Parameters</p>
+                  {webhookFormParams.length > 0 && (
+                    <div className="space-y-2 mb-2">
+                      {webhookFormParams.map((p) => (
+                        <div key={p.id} className="flex items-center gap-2">
+                          <Input
+                            value={p.name}
+                            onChange={(e) => updateWebhookParam(p.id, "name", e.target.value)}
+                            placeholder="Parameter name"
+                            className="h-8 text-xs flex-1"
+                          />
+                          <Input
+                            value={p.value}
+                            onChange={(e) => updateWebhookParam(p.id, "value", e.target.value)}
+                            placeholder="Value"
+                            className="h-8 text-xs flex-1"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeWebhookParam(p.id)}
+                            className="text-muted-foreground hover:text-destructive shrink-0"
+                            title="Remove parameter"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addWebhookParam}
+                    className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add parameter
+                  </button>
+                </div>
+              </div>
+
+              <DialogFooter className="border-t px-6 py-3 gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs mr-auto"
+                  onClick={() => setWebhookDialogStep("associate")}
+                >
+                  ← Back
+                </Button>
+                {webhookAction?.webhookName && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={removeWebhookAction}
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeWebhookDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!webhookFormName.trim() || !webhookFormUrl.trim()}
+                  onClick={saveWebhook}
                 >
                   Save and Associate
                 </Button>

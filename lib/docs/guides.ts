@@ -19,19 +19,19 @@ export type GuideCategory =
   | "Notifications"
   | "Reporting"
   | "Integration"
-  | "Cleanup"
+  | "Cleanup";
 
 export interface GuideTodo {
-  id: string
-  text: string
+  id: string;
+  text: string;
 }
 
 export interface WorkflowConfig {
-  module: string
-  executeBasedOn: "record-action" | "record-field"
-  recordAction?: "Create" | "Edit" | "Create or Edit" | "Delete"
-  conditions?: string
-  instantAction: string
+  module: string;
+  executeBasedOn: "record-action" | "record-field";
+  recordAction?: "Create" | "Edit" | "Create or Edit" | "Delete";
+  conditions?: string;
+  instantAction: string;
 }
 
 /**
@@ -42,28 +42,28 @@ export interface WorkflowConfig {
  *    (e.g. creating a module, designing a form). Renders todos + links
  *    prominently; hides script/workflow/flow sections.
  */
-export type GuideKind = "example" | "walkthrough"
+export type GuideKind = "example" | "walkthrough";
 
 export interface Guide {
-  slug: string
-  title: string
-  tagline: string
-  category: GuideCategory
-  difficulty: "Beginner" | "Intermediate" | "Advanced"
-  estimatedMinutes: number
-  modules: string[]
-  useCase: string
+  slug: string;
+  title: string;
+  tagline: string;
+  category: GuideCategory;
+  difficulty: "Beginner" | "Intermediate" | "Advanced";
+  estimatedMinutes: number;
+  modules: string[];
+  useCase: string;
   /** Defaults to "example" when omitted. */
-  kind?: GuideKind
+  kind?: GuideKind;
   /** Required for "example" guides. Optional for "walkthrough". */
-  script?: string
+  script?: string;
   /** Required for "example" guides. Optional for "walkthrough". */
-  workflow?: WorkflowConfig
-  todos: GuideTodo[]
-  demoInput?: string
-  demoOutput?: string
+  workflow?: WorkflowConfig;
+  todos: GuideTodo[];
+  demoInput?: string;
+  demoOutput?: string;
   /** Primary action link surfaced on walkthrough guides (e.g. /admin/modules). */
-  primaryLink?: { label: string; href: string }
+  primaryLink?: { label: string; href: string };
 }
 
 // ── The catalog ────────────────────────────────────────────────────────────
@@ -87,10 +87,19 @@ export const guides: Guide[] = [
     todos: [
       { id: "t1", text: "Go to /admin/modules" },
       { id: "t2", text: "Click the `Create Module` button (top-right)" },
-      { id: "t3", text: "Enter a Name — e.g. `Leads`. Keep it short and clear." },
-      { id: "t4", text: "Add an optional Description so teammates know its purpose" },
+      {
+        id: "t3",
+        text: "Enter a Name — e.g. `Leads`. Keep it short and clear.",
+      },
+      {
+        id: "t4",
+        text: "Add an optional Description so teammates know its purpose",
+      },
       { id: "t5", text: "Leave Parent Module blank for a top-level module" },
-      { id: "t6", text: "Submit — the module appears in the sidebar immediately" },
+      {
+        id: "t6",
+        text: "Submit — the module appears in the sidebar immediately",
+      },
       { id: "t7", text: "Click the new module in the sidebar to select it" },
     ],
   },
@@ -109,12 +118,24 @@ export const guides: Guide[] = [
     kind: "walkthrough",
     primaryLink: { label: "Open Modules", href: "/admin/modules" },
     todos: [
-      { id: "t1", text: "Go to /admin/modules and select your module in the sidebar" },
+      {
+        id: "t1",
+        text: "Go to /admin/modules and select your module in the sidebar",
+      },
       { id: "t2", text: "Click the `Create Form` button under the module" },
-      { id: "t3", text: "Enter a Form Name — often the same as the module (e.g. `Leads`)" },
+      {
+        id: "t3",
+        text: "Enter a Form Name — often the same as the module (e.g. `Leads`)",
+      },
       { id: "t4", text: "Add a Description (optional but helpful for audits)" },
-      { id: "t5", text: "Submit — the form is created empty and opens automatically" },
-      { id: "t6", text: "Note the form ID in the URL — you'll see it in scripts later" },
+      {
+        id: "t5",
+        text: "Submit — the form is created empty and opens automatically",
+      },
+      {
+        id: "t6",
+        text: "Note the form ID in the URL — you'll see it in scripts later",
+      },
     ],
   },
 
@@ -132,14 +153,35 @@ export const guides: Guide[] = [
     kind: "walkthrough",
     primaryLink: { label: "Open Form Builder", href: "/admin/modules" },
     todos: [
-      { id: "t1", text: "From /admin/modules, click `Edit` on your form to open the builder" },
-      { id: "t2", text: "In the left Field Palette, see types: text, email, phone, select, number, date, checkbox, radio, file, lookup" },
-      { id: "t3", text: "Drag a `text` field onto the canvas — this creates a default Section" },
+      {
+        id: "t1",
+        text: "From /admin/modules, click `Edit` on your form to open the builder",
+      },
+      {
+        id: "t2",
+        text: "In the left Field Palette, see types: text, email, phone, select, number, date, checkbox, radio, file, lookup",
+      },
+      {
+        id: "t3",
+        text: "Drag a `text` field onto the canvas — this creates a default Section",
+      },
       { id: "t4", text: "Click the field to open Field Settings on the right" },
-      { id: "t5", text: "Set a meaningful Label (e.g. `Email Address`) — apiName auto-generates from it" },
-      { id: "t6", text: "For contact fields pick the exact type: `email` for email, `phone` for phone" },
-      { id: "t7", text: "Mark required fields as Required in the settings panel" },
-      { id: "t8", text: "Add more fields — aim for 4-6 to keep the form usable" },
+      {
+        id: "t5",
+        text: "Set a meaningful Label (e.g. `Email Address`) — apiName auto-generates from it",
+      },
+      {
+        id: "t6",
+        text: "For contact fields pick the exact type: `email` for email, `phone` for phone",
+      },
+      {
+        id: "t7",
+        text: "Mark required fields as Required in the settings panel",
+      },
+      {
+        id: "t8",
+        text: "Add more fields — aim for 4-6 to keep the form usable",
+      },
       { id: "t9", text: "Organise with multiple Sections if the form is long" },
       { id: "t10", text: "Click Save — your form is now live for submissions" },
     ],
@@ -159,11 +201,20 @@ export const guides: Guide[] = [
     kind: "walkthrough",
     primaryLink: { label: "Open APIs", href: "/settings/apis?tab=apiNames" },
     todos: [
-      { id: "t1", text: "Go to /settings/apis and switch to the `API names` tab" },
+      {
+        id: "t1",
+        text: "Go to /settings/apis and switch to the `API names` tab",
+      },
       { id: "t2", text: "Pick your module from the dropdown" },
-      { id: "t3", text: "Copy the apiName column values — these are what scripts use" },
+      {
+        id: "t3",
+        text: "Copy the apiName column values — these are what scripts use",
+      },
       { id: "t4", text: "Remember: apiNames are case-sensitive" },
-      { id: "t5", text: "Alternative — run `return ctx.records.fields(\"Leads\")` in the Functions editor to see the same list" },
+      {
+        id: "t5",
+        text: 'Alternative — run `return ctx.records.fields("Leads")` in the Functions editor to see the same list',
+      },
     ],
   },
 
@@ -194,9 +245,18 @@ return {
       { id: "t2", text: "Click `New Function`" },
       { id: "t3", text: "Name it `hello_world`, category Standalone" },
       { id: "t4", text: "Paste the script above into the editor and Save" },
-      { id: "t5", text: "Click Run — the output panel shows logs + the return value" },
-      { id: "t6", text: "Verify the module count matches what you have in /admin/modules" },
-      { id: "t7", text: "Skim the ctx comment block in the editor — records, modules, log" },
+      {
+        id: "t5",
+        text: "Click Run — the output panel shows logs + the return value",
+      },
+      {
+        id: "t6",
+        text: "Verify the module count matches what you have in /admin/modules",
+      },
+      {
+        id: "t7",
+        text: "Skim the ctx comment block in the editor — records, modules, log",
+      },
     ],
     demoInput: `(no input — just Run)`,
     demoOutput: `{ ok: true, moduleCount: 3, moduleNames: ["Leads", "Contacts", "Deals"] }`,
@@ -214,9 +274,15 @@ return {
     useCase:
       "Functions on their own do nothing automatically — a Workflow Rule is the glue that fires a function when a record is created, edited, or deleted.",
     kind: "walkthrough",
-    primaryLink: { label: "Open Workflow Rules", href: "/settings/workflow-rules/create" },
+    primaryLink: {
+      label: "Open Workflow Rules",
+      href: "/settings/workflow-rules/create",
+    },
     todos: [
-      { id: "t1", text: "Complete `hello_world` function first (see previous guide)" },
+      {
+        id: "t1",
+        text: "Complete `hello_world` function first (see previous guide)",
+      },
       { id: "t2", text: "Go to /settings/workflow-rules/create" },
       { id: "t3", text: "Name the rule — e.g. `Log new Lead (debug)`" },
       { id: "t4", text: "Module: select your Leads module" },
@@ -224,9 +290,15 @@ return {
       { id: "t6", text: "Record action: `Create`" },
       { id: "t7", text: "Conditions: leave empty (fires for every Create)" },
       { id: "t8", text: "Instant action: `Function` → pick `hello_world`" },
-      { id: "t9", text: "Toggle Active ON (required — inactive rules are silently skipped)" },
+      {
+        id: "t9",
+        text: "Toggle Active ON (required — inactive rules are silently skipped)",
+      },
       { id: "t10", text: "Save the rule" },
-      { id: "t11", text: "Submit a Lead record via the form — function fires in the background" },
+      {
+        id: "t11",
+        text: "Submit a Lead record via the form — function fires in the background",
+      },
     ],
   },
 
@@ -294,15 +366,30 @@ return { ok: true };`,
     },
     todos: [
       { id: "t1", text: "Confirm Leads and Duplicate Lead modules both exist" },
-      { id: "t2", text: "Run the field-discovery script to get exact apiNames" },
-      { id: "t3", text: "Create function `check_lead_duplicate` (category: Automation)" },
-      { id: "t4", text: "Paste the script and replace the constants with your apiNames" },
+      {
+        id: "t2",
+        text: "Run the field-discovery script to get exact apiNames",
+      },
+      {
+        id: "t3",
+        text: "Create function `check_lead_duplicate` (category: Automation)",
+      },
+      {
+        id: "t4",
+        text: "Paste the script and replace the constants with your apiNames",
+      },
       { id: "t5", text: "Save the function" },
       { id: "t6", text: "Create workflow rule on Leads / Create" },
-      { id: "t7", text: "Set the Instant Action to this function and mark rule Active" },
+      {
+        id: "t7",
+        text: "Set the Instant Action to this function and mark rule Active",
+      },
       { id: "t8", text: "Submit a Lead with a brand-new email (should stay)" },
       { id: "t9", text: "Submit same email again (should be quarantined)" },
-      { id: "t10", text: "Verify Leads count unchanged and Duplicate Lead count +1" },
+      {
+        id: "t10",
+        text: "Verify Leads count unchanged and Duplicate Lead count +1",
+      },
     ],
     demoInput: `Submit: { Name: "Akash", Email: "akash@gmail.com", Phone: "+91..." }\nAgain:  { Name: "Akash K.", Email: "akash@gmail.com" }`,
     demoOutput: `Leads: 1 (the first)\nDuplicate Lead: 1 (snapshot of the second with Original_Lead_ID pointing back)`,
@@ -346,7 +433,10 @@ return { Lead_Score: score };`,
       instantAction: "Function → lead_scoring",
     },
     todos: [
-      { id: "t1", text: "Add a numeric `Lead Score` field to the Leads module" },
+      {
+        id: "t1",
+        text: "Add a numeric `Lead Score` field to the Leads module",
+      },
       { id: "t2", text: "Optionally add `Company` and `Budget` fields" },
       { id: "t3", text: "Create function `lead_scoring` and paste the script" },
       { id: "t4", text: "Tune the scoring weights to match your sales team" },
@@ -468,17 +558,47 @@ return {
       instantAction: "(manual run from the editor — no workflow rule needed)",
     },
     todos: [
-      { id: "t1", text: "Confirm the Leads form has a `Lead_Score` number field" },
-      { id: "t2", text: "Open the `lead_scoring` function — note the exact scoring weights" },
-      { id: "t3", text: "Create a new function `backfill_lead_scoring` (category Automation)" },
-      { id: "t4", text: "Paste the script above — update F_* constants to match your apiNames" },
-      { id: "t5", text: "Set DRY_RUN = true and click Run — preview without writing" },
-      { id: "t6", text: "Review the log output: how many will update vs. stay the same" },
-      { id: "t7", text: "Set DRY_RUN = false and Run again — actual write happens" },
-      { id: "t8", text: "If log says `Next run: set SKIP = N`, bump SKIP and Run again" },
+      {
+        id: "t1",
+        text: "Confirm the Leads form has a `Lead_Score` number field",
+      },
+      {
+        id: "t2",
+        text: "Open the `lead_scoring` function — note the exact scoring weights",
+      },
+      {
+        id: "t3",
+        text: "Create a new function `backfill_lead_scoring` (category Automation)",
+      },
+      {
+        id: "t4",
+        text: "Paste the script above — update F_* constants to match your apiNames",
+      },
+      {
+        id: "t5",
+        text: "Set DRY_RUN = true and click Run — preview without writing",
+      },
+      {
+        id: "t6",
+        text: "Review the log output: how many will update vs. stay the same",
+      },
+      {
+        id: "t7",
+        text: "Set DRY_RUN = false and Run again — actual write happens",
+      },
+      {
+        id: "t8",
+        text: "If log says `Next run: set SKIP = N`, bump SKIP and Run again",
+      },
       { id: "t9", text: "Repeat until output says `done: true`" },
-      { id: "t10", text: "Spot-check a few Leads — their Lead_Score should now match the formula" },
-      { id: "t11", text: "Re-run once to confirm it's idempotent (all unchanged, 0 updated)" },
+      {
+        id: "t10",
+        text: "Spot-check a few Leads — their Lead_Score should now match the formula",
+      },
+      {
+        id: "t11",
+        text: "Re-run once to confirm it's idempotent (all unchanged, 0 updated)",
+      },
     ],
     demoInput: `500 existing Leads, some with empty Lead_Score, some old scores from a prior formula`,
     demoOutput: `Processed: 500\n  Updated: 480 (recomputed)\n  Unchanged: 18 (already correct)\n  Errored: 2 (missing email/phone field — safe, logged)`,
@@ -518,10 +638,16 @@ return { Owner: assignee };`,
       instantAction: "Function → round_robin_assign",
     },
     todos: [
-      { id: "t1", text: "Create a Config module with `key` (text) and `value` (text) fields" },
+      {
+        id: "t1",
+        text: "Create a Config module with `key` (text) and `value` (text) fields",
+      },
       { id: "t2", text: "Add an `Owner` field on Leads (email or user type)" },
       { id: "t3", text: "Create function `round_robin_assign`" },
-      { id: "t4", text: "Replace the REPS array with your actual rep emails/ids" },
+      {
+        id: "t4",
+        text: "Replace the REPS array with your actual rep emails/ids",
+      },
       { id: "t5", text: "Wire workflow: Leads / Create → this function" },
       { id: "t6", text: "Submit 4 test Leads and confirm rotation 1→2→3→1" },
     ],
@@ -568,10 +694,16 @@ return { ok: true };`,
       instantAction: "Function → block_personal_emails",
     },
     todos: [
-      { id: "t1", text: "Create a `Personal Email Lead` module with Email/Name/Phone/Reason fields" },
+      {
+        id: "t1",
+        text: "Create a `Personal Email Lead` module with Email/Name/Phone/Reason fields",
+      },
       { id: "t2", text: "Create function `block_personal_emails`" },
       { id: "t3", text: "Tune the PERSONAL array if needed" },
-      { id: "t4", text: "Create workflow rule: Leads / Create → this function" },
+      {
+        id: "t4",
+        text: "Create workflow rule: Leads / Create → this function",
+      },
       { id: "t5", text: "Test with a gmail.com address" },
       { id: "t6", text: "Test with a business address — should pass through" },
     ],
@@ -621,7 +753,10 @@ return { New_Phone: normalized };`,
       { id: "t2", text: "Set DEFAULT_CC to your country's dialing code" },
       { id: "t3", text: "Create workflow on Leads / Create or Edit" },
       { id: "t4", text: "Test by submitting '08305838352' (local format)" },
-      { id: "t5", text: "Confirm it becomes '+918305838352' after workflow runs" },
+      {
+        id: "t5",
+        text: "Confirm it becomes '+918305838352' after workflow runs",
+      },
     ],
     demoInput: `"+91 (830) 583-8352"   |   "08305838352"`,
     demoOutput: `Both become +918305838352`,
@@ -658,10 +793,16 @@ return { Full_Name: full };`,
       instantAction: "Function → compose_full_name",
     },
     todos: [
-      { id: "t1", text: "Ensure Contacts has First Name, Last Name, and Full Name fields" },
+      {
+        id: "t1",
+        text: "Ensure Contacts has First Name, Last Name, and Full Name fields",
+      },
       { id: "t2", text: "Create function `compose_full_name`" },
       { id: "t3", text: "Wire workflow on Contacts / Create or Edit" },
-      { id: "t4", text: "Edit a contact's Last Name — Full Name should update" },
+      {
+        id: "t4",
+        text: "Edit a contact's Last Name — Full Name should update",
+      },
     ],
     demoInput: `First_Name: "Akash", Last_Name: "Kumar"`,
     demoOutput: `Full_Name: "Akash Kumar"`,
@@ -677,7 +818,8 @@ return { Full_Name: full };`,
     difficulty: "Beginner",
     estimatedMinutes: 7,
     modules: ["Leads"],
-    useCase: "Sales has two playbooks — Enterprise (>500 employees) and SMB. Tag Leads so downstream workflows can route to the right team.",
+    useCase:
+      "Sales has two playbooks — Enterprise (>500 employees) and SMB. Tag Leads so downstream workflows can route to the right team.",
     script: `// tag_segment
 const currentId = ctx.input?.recordId;
 if (!currentId) return { ok: true };
@@ -697,7 +839,10 @@ return { Segment: segment };`,
       instantAction: "Function → tag_segment",
     },
     todos: [
-      { id: "t1", text: "Add `Employees` (number) and `Segment` (select) fields on Leads" },
+      {
+        id: "t1",
+        text: "Add `Employees` (number) and `Segment` (select) fields on Leads",
+      },
       { id: "t2", text: "Create function `tag_segment`" },
       { id: "t3", text: "Wire workflow on Leads / Create or Edit" },
       { id: "t4", text: "Test with 10, 100, 1000 employees" },
@@ -741,10 +886,16 @@ return { ok: true };`,
       instantAction: "Function → create_follow_up_task",
     },
     todos: [
-      { id: "t1", text: "Ensure Tasks module exists (Title, Due_Date, Owner, Status, Related_Lead_ID)" },
+      {
+        id: "t1",
+        text: "Ensure Tasks module exists (Title, Due_Date, Owner, Status, Related_Lead_ID)",
+      },
       { id: "t2", text: "Create function `create_follow_up_task`" },
       { id: "t3", text: "Wire workflow on Leads / Create" },
-      { id: "t4", text: "Submit a Lead — check Tasks for a new row due tomorrow" },
+      {
+        id: "t4",
+        text: "Submit a Lead — check Tasks for a new row due tomorrow",
+      },
     ],
     demoInput: `Create Lead "Akash" owned by rep-1`,
     demoOutput: `Task "Follow up with Akash" created, due in 24h, owned by rep-1.`,
@@ -799,7 +950,8 @@ return { flagged: stale.length, ids: stale.map((l) => l.id) };`,
     difficulty: "Intermediate",
     estimatedMinutes: 10,
     modules: ["Leads", "Audit Log"],
-    useCase: "Compliance wants history. Write a row into Audit Log on every Lead create or edit.",
+    useCase:
+      "Compliance wants history. Write a row into Audit Log on every Lead create or edit.",
     script: `// audit_lead_changes
 const currentId = ctx.input?.recordId;
 const action = ctx.input?.action;
@@ -821,7 +973,10 @@ return { ok: true };`,
       instantAction: "Function → audit_lead_changes",
     },
     todos: [
-      { id: "t1", text: "Create Audit Log module (Module, Record_ID, Action, User_ID, Timestamp, Snapshot)" },
+      {
+        id: "t1",
+        text: "Create Audit Log module (Module, Record_ID, Action, User_ID, Timestamp, Snapshot)",
+      },
       { id: "t2", text: "Create function `audit_lead_changes`" },
       { id: "t3", text: "Wire workflow on Leads / Create or Edit" },
       { id: "t4", text: "Edit a Lead and confirm a new Audit Log row appears" },
@@ -866,12 +1021,24 @@ return { Converted_Contact_ID: contact.id, Converted_At: new Date().toISOString(
       instantAction: "Function → convert_to_contact",
     },
     todos: [
-      { id: "t1", text: "Add Status, Converted_Contact_ID, Converted_At fields on Leads" },
-      { id: "t2", text: "Ensure Contacts has First_Name, Email, Phone, Source_Lead_ID" },
+      {
+        id: "t1",
+        text: "Add Status, Converted_Contact_ID, Converted_At fields on Leads",
+      },
+      {
+        id: "t2",
+        text: "Ensure Contacts has First_Name, Email, Phone, Source_Lead_ID",
+      },
       { id: "t3", text: "Create function `convert_to_contact`" },
-      { id: "t4", text: "Wire workflow: Leads / Edit with condition Status = Qualified" },
+      {
+        id: "t4",
+        text: "Wire workflow: Leads / Edit with condition Status = Qualified",
+      },
       { id: "t5", text: "Mark a Lead Qualified — verify Contact is created" },
-      { id: "t6", text: "Edit the Lead again to confirm no second Contact is made" },
+      {
+        id: "t6",
+        text: "Edit the Lead again to confirm no second Contact is made",
+      },
     ],
     demoInput: `Edit Lead → Status: "Qualified"`,
     demoOutput: `Contact created, Lead's Converted_Contact_ID set.`,
@@ -881,12 +1048,14 @@ return { Converted_Contact_ID: contact.id, Converted_At: new Date().toISOString(
   {
     slug: "sla-deadline-setter",
     title: "Set SLA deadline on new support cases",
-    tagline: "Priority → deadline mapping: Urgent 4h, High 24h, Medium 3d, Low 7d.",
+    tagline:
+      "Priority → deadline mapping: Urgent 4h, High 24h, Medium 3d, Low 7d.",
     category: "Automation",
     difficulty: "Beginner",
     estimatedMinutes: 8,
     modules: ["Cases"],
-    useCase: "Support wants a clear SLA clock on every case so the team can prioritise and managers can report breaches.",
+    useCase:
+      "Support wants a clear SLA clock on every case so the team can prioritise and managers can report breaches.",
     script: `// set_sla
 const HOURS = { Urgent: 4, High: 24, Medium: 72, Low: 168 };
 const currentId = ctx.input?.recordId;
@@ -904,7 +1073,10 @@ return { SLA_Deadline: deadline };`,
       instantAction: "Function → set_sla",
     },
     todos: [
-      { id: "t1", text: "Add Priority (select) and SLA_Deadline (datetime) fields on Cases" },
+      {
+        id: "t1",
+        text: "Add Priority (select) and SLA_Deadline (datetime) fields on Cases",
+      },
       { id: "t2", text: "Create function `set_sla`" },
       { id: "t3", text: "Wire workflow on Cases / Create" },
       { id: "t4", text: "Submit one Case per priority and verify deadlines" },
@@ -917,12 +1089,14 @@ return { SLA_Deadline: deadline };`,
   {
     slug: "big-deal-approval",
     title: "Create an Approval Request for big Deals",
-    tagline: "Deals over $50k trigger an approval record for the manager to review.",
+    tagline:
+      "Deals over $50k trigger an approval record for the manager to review.",
     category: "Automation",
     difficulty: "Intermediate",
     estimatedMinutes: 12,
     modules: ["Deals", "Approvals"],
-    useCase: "Finance requires approval on deals above a threshold. Automate so reps can't forget.",
+    useCase:
+      "Finance requires approval on deals above a threshold. Automate so reps can't forget.",
     script: `// request_deal_approval
 const THRESHOLD = 50000;
 const currentId = ctx.input?.recordId;
@@ -952,12 +1126,18 @@ return { Approval_Pending: true };`,
       instantAction: "Function → request_deal_approval",
     },
     todos: [
-      { id: "t1", text: "Create Approvals module (Deal_ID, Amount, Status, Requested_By, Requested_At)" },
+      {
+        id: "t1",
+        text: "Create Approvals module (Deal_ID, Amount, Status, Requested_By, Requested_At)",
+      },
       { id: "t2", text: "Add `Approval Pending` (checkbox) to Deals" },
       { id: "t3", text: "Create function `request_deal_approval`" },
       { id: "t4", text: "Tune THRESHOLD to match your policy" },
       { id: "t5", text: "Wire workflow on Deals / Create or Edit" },
-      { id: "t6", text: "Save a Deal over $50k and verify Approval row appears" },
+      {
+        id: "t6",
+        text: "Save a Deal over $50k and verify Approval row appears",
+      },
     ],
     demoInput: `Deal { Amount: 75000 }`,
     demoOutput: `Approval record with Status: Pending`,
@@ -973,7 +1153,8 @@ return { Approval_Pending: true };`,
     difficulty: "Beginner",
     estimatedMinutes: 8,
     modules: ["Leads"],
-    useCase: "Marketing wants to surface Leads whose profile is incomplete so they can be enriched.",
+    useCase:
+      "Marketing wants to surface Leads whose profile is incomplete so they can be enriched.",
     script: `// completeness_score
 const KEY_FIELDS = ["New_Name", "New_Email", "New_Phone", "Company", "Title", "Source"];
 const currentId = ctx.input?.recordId;
@@ -1012,7 +1193,8 @@ return { Completeness_Pct: pct };`,
     difficulty: "Beginner",
     estimatedMinutes: 7,
     modules: ["Leads"],
-    useCase: "Each region has its own sales team. Leads need a Region tag so the right queue picks them up.",
+    useCase:
+      "Each region has its own sales team. Leads need a Region tag so the right queue picks them up.",
     script: `// region_router
 const MAP = {
   APAC: ["IN", "CN", "JP", "AU", "SG"],
@@ -1034,7 +1216,10 @@ return { Region: region };`,
       instantAction: "Function → region_router",
     },
     todos: [
-      { id: "t1", text: "Add Country (text) and Region (select) fields on Leads" },
+      {
+        id: "t1",
+        text: "Add Country (text) and Region (select) fields on Leads",
+      },
       { id: "t2", text: "Create function `region_router`" },
       { id: "t3", text: "Customise the MAP to your business regions" },
       { id: "t4", text: "Wire workflow on Leads / Create or Edit" },
@@ -1052,7 +1237,8 @@ return { Region: region };`,
     difficulty: "Intermediate",
     estimatedMinutes: 10,
     modules: ["Leads", "Tasks"],
-    useCase: "When a Lead is removed, leaving behind follow-up Tasks confuses the sales queue.",
+    useCase:
+      "When a Lead is removed, leaving behind follow-up Tasks confuses the sales queue.",
     script: `// cascade_delete_tasks
 const currentId = ctx.input?.recordId;
 if (!currentId) return { ok: true };
@@ -1074,7 +1260,10 @@ return { ok: true };`,
       { id: "t1", text: "Confirm Tasks has Related_Lead_ID field" },
       { id: "t2", text: "Create function `cascade_delete_tasks`" },
       { id: "t3", text: "Wire workflow on Leads / Delete" },
-      { id: "t4", text: "Create a Lead + Task, delete the Lead, confirm Task is gone" },
+      {
+        id: "t4",
+        text: "Create a Lead + Task, delete the Lead, confirm Task is gone",
+      },
     ],
     demoInput: `Delete Lead #123 (which has 3 Tasks)`,
     demoOutput: `3 Tasks removed`,
@@ -1089,7 +1278,8 @@ return { ok: true };`,
     difficulty: "Advanced",
     estimatedMinutes: 15,
     modules: ["Accounts"],
-    useCase: "Account management wants to focus on top-10 revenue accounts this quarter.",
+    useCase:
+      "Account management wants to focus on top-10 revenue accounts this quarter.",
     script: `// rank_accounts_by_revenue
 const accounts = await ctx.records.list("Accounts", { limit: 500 });
 const sorted = [...accounts].sort((a, b) => Number(b.data.Revenue || 0) - Number(a.data.Revenue || 0));
@@ -1108,7 +1298,10 @@ return { ranked: sorted.length };`,
       instantAction: "(manual or scheduled — ranks recompute on demand)",
     },
     todos: [
-      { id: "t1", text: "Add Revenue (number), Revenue_Rank (number), Is_Top10 (checkbox) on Accounts" },
+      {
+        id: "t1",
+        text: "Add Revenue (number), Revenue_Rank (number), Is_Top10 (checkbox) on Accounts",
+      },
       { id: "t2", text: "Create function `rank_accounts_by_revenue`" },
       { id: "t3", text: "Run manually whenever revenue data changes" },
       { id: "t4", text: "Filter Accounts by Is_Top10 to see the leaderboard" },
@@ -1126,7 +1319,8 @@ return { ranked: sorted.length };`,
     difficulty: "Intermediate",
     estimatedMinutes: 12,
     modules: ["Contacts", "Tasks"],
-    useCase: "Relationship touch-points matter — send a personal note on birthdays.",
+    useCase:
+      "Relationship touch-points matter — send a personal note on birthdays.",
     script: `// birthday_reminder
 const currentId = ctx.input?.recordId;
 if (!currentId) return { ok: true };
@@ -1170,12 +1364,14 @@ return { ok: true };`,
   {
     slug: "currency-converter",
     title: "Convert Deal amount to USD",
-    tagline: "Keep a USD-normalised column so pipeline reports are comparable across currencies.",
+    tagline:
+      "Keep a USD-normalised column so pipeline reports are comparable across currencies.",
     category: "Enrichment",
     difficulty: "Beginner",
     estimatedMinutes: 8,
     modules: ["Deals"],
-    useCase: "Deals are booked in multiple currencies. Reports need a common denominator.",
+    useCase:
+      "Deals are booked in multiple currencies. Reports need a common denominator.",
     script: `// convert_to_usd
 const RATES = { USD: 1, EUR: 1.08, GBP: 1.27, INR: 0.012, JPY: 0.0067 };
 const currentId = ctx.input?.recordId;
@@ -1196,7 +1392,10 @@ return { Amount_USD: Math.round(amount * rate * 100) / 100 };`,
     todos: [
       { id: "t1", text: "Add Amount, Currency, Amount_USD fields on Deals" },
       { id: "t2", text: "Create function `convert_to_usd`" },
-      { id: "t3", text: "Update the RATES object regularly or fetch from an API" },
+      {
+        id: "t3",
+        text: "Update the RATES object regularly or fetch from an API",
+      },
       { id: "t4", text: "Wire workflow on Deals / Create or Edit" },
     ],
     demoInput: `Amount: 100000, Currency: "INR"`,
@@ -1239,11 +1438,20 @@ return { ok: true };`,
       instantAction: "Function → queue_welcome_email",
     },
     todos: [
-      { id: "t1", text: "Create Email Queue module (To, Template, Payload, Status, Created_At)" },
+      {
+        id: "t1",
+        text: "Create Email Queue module (To, Template, Payload, Status, Created_At)",
+      },
       { id: "t2", text: "Create function `queue_welcome_email`" },
       { id: "t3", text: "Wire workflow on Leads / Create" },
-      { id: "t4", text: "Submit a Lead and confirm an Email Queue row appears" },
-      { id: "t5", text: "Have a worker / cron read Status=Queued rows and send them" },
+      {
+        id: "t4",
+        text: "Submit a Lead and confirm an Email Queue row appears",
+      },
+      {
+        id: "t5",
+        text: "Have a worker / cron read Status=Queued rows and send them",
+      },
     ],
     demoInput: `New Lead with Email "alice@example.com"`,
     demoOutput: `Email Queue row: To, Template, Status: Queued`,
@@ -1258,7 +1466,8 @@ return { ok: true };`,
     difficulty: "Intermediate",
     estimatedMinutes: 10,
     modules: ["Leads"],
-    useCase: "Sales reps forget to update Status after a budget change — let the system do it for them.",
+    useCase:
+      "Sales reps forget to update Status after a budget change — let the system do it for them.",
     script: `// status_on_budget
 const currentId = ctx.input?.recordId;
 if (!currentId) return { ok: true };
@@ -1281,10 +1490,19 @@ return { ok: true };`,
       instantAction: "Function → status_on_budget",
     },
     todos: [
-      { id: "t1", text: "Add Budget (number) and Status (select: Cold, Warm, Hot) on Leads" },
+      {
+        id: "t1",
+        text: "Add Budget (number) and Status (select: Cold, Warm, Hot) on Leads",
+      },
       { id: "t2", text: "Create function `status_on_budget`" },
-      { id: "t3", text: "Wire workflow with executeBasedOn: record-field, watching Budget" },
-      { id: "t4", text: "Edit Budget up to 12000 and verify Status flips to Hot" },
+      {
+        id: "t3",
+        text: "Wire workflow with executeBasedOn: record-field, watching Budget",
+      },
+      {
+        id: "t4",
+        text: "Edit Budget up to 12000 and verify Status flips to Hot",
+      },
     ],
     demoInput: `Update Lead Budget from 5000 → 12000`,
     demoOutput: `Status: "Hot"`,
@@ -1294,12 +1512,14 @@ return { ok: true };`,
   {
     slug: "bulk-deactivate-stale",
     title: "Bulk-deactivate Leads older than 180 days",
-    tagline: "One-shot cleanup — archive Leads the team hasn't touched in 6 months.",
+    tagline:
+      "One-shot cleanup — archive Leads the team hasn't touched in 6 months.",
     category: "Cleanup",
     difficulty: "Advanced",
     estimatedMinutes: 15,
     modules: ["Leads"],
-    useCase: "Quarterly hygiene — clear the view so reps focus on active Leads.",
+    useCase:
+      "Quarterly hygiene — clear the view so reps focus on active Leads.",
     script: `// bulk_deactivate_stale
 const DAYS = 180;
 const cutoff = Date.now() - DAYS * 24 * 3600 * 1000;
@@ -1320,10 +1540,16 @@ return { deactivated: updated };`,
       instantAction: "(manual run from editor, or scheduled)",
     },
     todos: [
-      { id: "t1", text: "Add Is_Active (checkbox, default true) and Deactivated_At (datetime) on Leads" },
+      {
+        id: "t1",
+        text: "Add Is_Active (checkbox, default true) and Deactivated_At (datetime) on Leads",
+      },
       { id: "t2", text: "Create function `bulk_deactivate_stale`" },
       { id: "t3", text: "Run from editor — review output" },
-      { id: "t4", text: "Filter Leads by Is_Active = true in your default view" },
+      {
+        id: "t4",
+        text: "Filter Leads by Is_Active = true in your default view",
+      },
     ],
     demoInput: `100 Leads, 35 untouched in 180d`,
     demoOutput: `35 deactivated; active view shrinks accordingly`,
@@ -1418,11 +1644,23 @@ return {
       instantAction: "Function → fuzzy_duplicate_detection",
     },
     todos: [
-      { id: "t1", text: "Add Possible_Duplicate_Of (text), Fuzzy_Match_Score (number), Needs_Review (checkbox) to Leads" },
+      {
+        id: "t1",
+        text: "Add Possible_Duplicate_Of (text), Fuzzy_Match_Score (number), Needs_Review (checkbox) to Leads",
+      },
       { id: "t2", text: "Create function `fuzzy_duplicate_detection`" },
-      { id: "t3", text: "Tune THRESHOLD — 2 is a sweet spot for human-review workflows" },
-      { id: "t4", text: "Wire workflow on Leads / Create (runs AFTER exact-match dedup)" },
-      { id: "t5", text: "Add a saved view: `Needs_Review = true` for a manual review queue" },
+      {
+        id: "t3",
+        text: "Tune THRESHOLD — 2 is a sweet spot for human-review workflows",
+      },
+      {
+        id: "t4",
+        text: "Wire workflow on Leads / Create (runs AFTER exact-match dedup)",
+      },
+      {
+        id: "t5",
+        text: "Add a saved view: `Needs_Review = true` for a manual review queue",
+      },
       { id: "t6", text: "Test with submitting 'Akash Kumar' and 'Akash Kumr'" },
     ],
     demoInput: `Lead A: "Akash Kumar"  →  Lead B: "Akash Kumr" (typo)`,
@@ -1498,10 +1736,19 @@ return {
       instantAction: "Function → churn_risk_score",
     },
     todos: [
-      { id: "t1", text: "Ensure Accounts has: Name, Last_Activity_At, Renewal_Date, MRR, Open_Tickets" },
-      { id: "t2", text: "Add: Churn_Risk (number), Churn_Band (select), Churn_Reasons (text), Risk_Last_Computed (datetime)" },
+      {
+        id: "t1",
+        text: "Ensure Accounts has: Name, Last_Activity_At, Renewal_Date, MRR, Open_Tickets",
+      },
+      {
+        id: "t2",
+        text: "Add: Churn_Risk (number), Churn_Band (select), Churn_Reasons (text), Risk_Last_Computed (datetime)",
+      },
       { id: "t3", text: "Create function `churn_risk_score`" },
-      { id: "t4", text: "Tune weights — the 40/25/15/20 default is a sane starting point" },
+      {
+        id: "t4",
+        text: "Tune weights — the 40/25/15/20 default is a sane starting point",
+      },
       { id: "t5", text: "Wire workflow on Accounts / Create or Edit" },
       { id: "t6", text: "Create a dashboard filtered by Churn_Band = 'High'" },
       { id: "t7", text: "Re-run weekly via a scheduled job to catch decay" },
@@ -1574,11 +1821,17 @@ return {
       instantAction: "Function → commission_calculator",
     },
     todos: [
-      { id: "t1", text: "Add fields to Deals: Amount, Stage, Contract_Years, Is_Pre_Qualified, Commission, Commission_Rate, Commission_Computed_At" },
+      {
+        id: "t1",
+        text: "Add fields to Deals: Amount, Stage, Contract_Years, Is_Pre_Qualified, Commission, Commission_Rate, Commission_Computed_At",
+      },
       { id: "t2", text: "Update TIERS to match your org's comp plan" },
       { id: "t3", text: "Create function `commission_calculator`" },
       { id: "t4", text: "Wire workflow on Deals / Create or Edit" },
-      { id: "t5", text: "Test with $5k (5%), $25k (8%), $100k (12%), $500k (15%) amounts" },
+      {
+        id: "t5",
+        text: "Test with $5k (5%), $25k (8%), $100k (12%), $500k (15%) amounts",
+      },
       { id: "t6", text: "Test with pre-qualified + multi-year combos" },
     ],
     demoInput: `Deal: $75,000, Closed Won, 3-year contract, pre-qualified`,
@@ -1643,12 +1896,21 @@ return {
       instantAction: "Function → customer_health_score",
     },
     todos: [
-      { id: "t1", text: "Add signals on Accounts: NPS_Score (0-10), Avg_Resolve_Days, Last_Activity_At" },
-      { id: "t2", text: "Add outputs: Health_Score, Health_Band, sub-scores, Health_Updated_At" },
+      {
+        id: "t1",
+        text: "Add signals on Accounts: NPS_Score (0-10), Avg_Resolve_Days, Last_Activity_At",
+      },
+      {
+        id: "t2",
+        text: "Add outputs: Health_Score, Health_Band, sub-scores, Health_Updated_At",
+      },
       { id: "t3", text: "Create function `customer_health_score`" },
       { id: "t4", text: "Adjust WEIGHTS to match your org's priorities" },
       { id: "t5", text: "Wire workflow on Accounts / Create or Edit" },
-      { id: "t6", text: "Build a view sorted by Health_Score ascending for triage" },
+      {
+        id: "t6",
+        text: "Build a view sorted by Health_Score ascending for triage",
+      },
     ],
     demoInput: `NPS 9, avg resolve 2d, last activity 5d ago`,
     demoOutput: `Health_Score: 87 (Healthy) — NPS sub: 90, Resolve: 80, Activity: 90`,
@@ -1721,15 +1983,25 @@ return { candidatesFound: candidates.length, tagged, cleared, candidates };`,
     workflow: {
       module: "Accounts",
       executeBasedOn: "record-action",
-      instantAction: "(run manually or schedule weekly — no per-record trigger)",
+      instantAction:
+        "(run manually or schedule weekly — no per-record trigger)",
     },
     todos: [
       { id: "t1", text: "Ensure Deals has: Account_ID, Product, Stage" },
-      { id: "t2", text: "Add to Accounts: Cross_Sell_Target (text), Cross_Sell_Reason (text), Cross_Sell_Tagged_At (datetime)" },
+      {
+        id: "t2",
+        text: "Add to Accounts: Cross_Sell_Target (text), Cross_Sell_Reason (text), Cross_Sell_Tagged_At (datetime)",
+      },
       { id: "t3", text: "Create function `cross_sell_finder`" },
-      { id: "t4", text: "Set ANCHOR + TARGET product names matching your catalog" },
+      {
+        id: "t4",
+        text: "Set ANCHOR + TARGET product names matching your catalog",
+      },
       { id: "t5", text: "Run manually from the editor" },
-      { id: "t6", text: "Build a saved view: Cross_Sell_Target = 'Pro Plan' for reps to work" },
+      {
+        id: "t6",
+        text: "Build a saved view: Cross_Sell_Target = 'Pro Plan' for reps to work",
+      },
     ],
     demoInput: `100 Accounts, 400 Closed Won Deals`,
     demoOutput: `candidatesFound: 23, tagged: 23, cleared: 4 (now own Target)`,
@@ -1785,13 +2057,31 @@ return {
       instantAction: "Function → lead_to_deal_chain",
     },
     todos: [
-      { id: "t1", text: "Ensure convert-lead-to-contact guide is already running" },
-      { id: "t2", text: "Add Linked_Deal_ID (text) and Deal_Created_At (datetime) to Leads" },
-      { id: "t3", text: "Ensure Deals has: Name, Amount, Stage, Contact_ID, Source_Lead_ID, Owner, Probability, Expected_Close_Date" },
+      {
+        id: "t1",
+        text: "Ensure convert-lead-to-contact guide is already running",
+      },
+      {
+        id: "t2",
+        text: "Add Linked_Deal_ID (text) and Deal_Created_At (datetime) to Leads",
+      },
+      {
+        id: "t3",
+        text: "Ensure Deals has: Name, Amount, Stage, Contact_ID, Source_Lead_ID, Owner, Probability, Expected_Close_Date",
+      },
       { id: "t4", text: "Create function `lead_to_deal_chain`" },
-      { id: "t5", text: "Wire workflow on Leads / Edit with condition Status = Qualified" },
-      { id: "t6", text: "Qualify a test Lead — verify both Contact and Deal appear" },
-      { id: "t7", text: "Qualify the same Lead again — no second Deal (idempotent)" },
+      {
+        id: "t5",
+        text: "Wire workflow on Leads / Edit with condition Status = Qualified",
+      },
+      {
+        id: "t6",
+        text: "Qualify a test Lead — verify both Contact and Deal appear",
+      },
+      {
+        id: "t7",
+        text: "Qualify the same Lead again — no second Deal (idempotent)",
+      },
     ],
     demoInput: `Edit Lead Status → Qualified`,
     demoOutput: `Contact created, Deal created (Stage: Qualification, $25k, 25%), both linked back to Lead.`,
@@ -1861,9 +2151,18 @@ return { flagged, skipped };`,
       instantAction: "(manual or scheduled daily — scans all Deals)",
     },
     todos: [
-      { id: "t1", text: "Ensure Deals has: Stage, Stage_Changed_At, Owner, Name, Is_Stale (checkbox), Aging_Alert_Sent_At (datetime)" },
-      { id: "t2", text: "Ensure Tasks has: Title, Related_Deal_ID, Owner, Status, Priority, Due_Date" },
-      { id: "t3", text: "Set STAGE_SLA_DAYS to your actual pipeline stages and SLAs" },
+      {
+        id: "t1",
+        text: "Ensure Deals has: Stage, Stage_Changed_At, Owner, Name, Is_Stale (checkbox), Aging_Alert_Sent_At (datetime)",
+      },
+      {
+        id: "t2",
+        text: "Ensure Tasks has: Title, Related_Deal_ID, Owner, Status, Priority, Due_Date",
+      },
+      {
+        id: "t3",
+        text: "Set STAGE_SLA_DAYS to your actual pipeline stages and SLAs",
+      },
       { id: "t4", text: "Create function `opportunity_aging_alert`" },
       { id: "t5", text: "Run manually first — review flagged deals" },
       { id: "t6", text: "Schedule daily runs once happy" },
@@ -1876,7 +2175,8 @@ return { flagged, skipped };`,
   {
     slug: "win-loss-analysis",
     title: "Win/loss analysis by rep",
-    tagline: "Aggregate all Deals into per-rep win rates, revenue won, and revenue lost.",
+    tagline:
+      "Aggregate all Deals into per-rep win rates, revenue won, and revenue lost.",
     category: "Reporting",
     difficulty: "Intermediate",
     estimatedMinutes: 10,
@@ -1936,8 +2236,14 @@ return { reps: report.length, totals, report };`,
     todos: [
       { id: "t1", text: "Ensure Deals has Owner, Stage, Amount fields" },
       { id: "t2", text: "Create function `win_loss_analysis`" },
-      { id: "t3", text: "Run from editor — read the output panel for the leaderboard" },
-      { id: "t4", text: "Pipe return value into a dashboard widget if your BI tool supports JSON" },
+      {
+        id: "t3",
+        text: "Run from editor — read the output panel for the leaderboard",
+      },
+      {
+        id: "t4",
+        text: "Pipe return value into a dashboard widget if your BI tool supports JSON",
+      },
     ],
     demoInput: `120 Deals across 5 reps`,
     demoOutput: `Sorted leaderboard: rep-1 68% (15W/7L/$420k), rep-2 54%, ...`,
@@ -2012,12 +2318,21 @@ return { movesCount: moves.length, moves, finalLoads: REPS.map((r) => ({ rep: r,
       instantAction: "(manual or weekly scheduled run)",
     },
     todos: [
-      { id: "t1", text: "Add Leads fields: Reassigned_From, Reassigned_At, Reassigned_Reason" },
+      {
+        id: "t1",
+        text: "Add Leads fields: Reassigned_From, Reassigned_At, Reassigned_Reason",
+      },
       { id: "t2", text: "Set REPS array to your actual rep identifiers" },
       { id: "t3", text: "Create function `rep_workload_rebalancer`" },
-      { id: "t4", text: "Run manually — review moves in the console before automating" },
+      {
+        id: "t4",
+        text: "Run manually — review moves in the console before automating",
+      },
       { id: "t5", text: "Schedule weekly (e.g. Monday 8am)" },
-      { id: "t6", text: "Set a saved view by Reassigned_At to track recent moves" },
+      {
+        id: "t6",
+        text: "Set a saved view by Reassigned_At to track recent moves",
+      },
     ],
     demoInput: `Rep-1: 42 leads, Rep-2: 18, Rep-3: 15. MAX=30.`,
     demoOutput: `12 leads reassigned from Rep-1 → Rep-3 and Rep-2.`,
@@ -2090,25 +2405,37 @@ return { created };`,
     },
     todos: [
       { id: "t1", text: "Ensure Accounts has: Name, Owner, Renewal_Date" },
-      { id: "t2", text: "Add Tasks fields: Related_Account_ID, Category, Renewal_Bucket, Priority" },
+      {
+        id: "t2",
+        text: "Add Tasks fields: Related_Account_ID, Category, Renewal_Bucket, Priority",
+      },
       { id: "t3", text: "Create function `renewal_cascade`" },
-      { id: "t4", text: "Tune BUCKETS if your org uses different touch points (e.g. add 14d)" },
-      { id: "t5", text: "Wire workflow on Accounts / Create or Edit with Renewal_Date not empty" },
+      {
+        id: "t4",
+        text: "Tune BUCKETS if your org uses different touch points (e.g. add 14d)",
+      },
+      {
+        id: "t5",
+        text: "Wire workflow on Accounts / Create or Edit with Renewal_Date not empty",
+      },
       { id: "t6", text: "Set a Renewal_Date 120 days out on a test Account" },
       { id: "t7", text: "Verify 3 Tasks get created with correct due dates" },
-      { id: "t8", text: "Save the account again — no duplicate Tasks (idempotent)" },
+      {
+        id: "t8",
+        text: "Save the account again — no duplicate Tasks (idempotent)",
+      },
     ],
     demoInput: `Account "Acme" with Renewal_Date 120 days from now`,
     demoOutput: `3 Tasks: 90d/Medium, 60d/Medium, 30d/High — none re-created on subsequent saves.`,
   },
-]
+];
 
 export function getGuide(slug: string): Guide | undefined {
-  return guides.find((g) => g.slug === slug)
+  return guides.find((g) => g.slug === slug);
 }
 
 export function getAllSlugs(): string[] {
-  return guides.map((g) => g.slug)
+  return guides.map((g) => g.slug);
 }
 
 export const categories: GuideCategory[] = [
@@ -2122,7 +2449,7 @@ export const categories: GuideCategory[] = [
   "Reporting",
   "Integration",
   "Cleanup",
-]
+];
 
 /** Ordered slugs for the foundation sequence shown on the docs index. */
 export const foundationSequence = [
@@ -2132,4 +2459,4 @@ export const foundationSequence = [
   "discover-api-names",
   "hello-world-function",
   "first-workflow-rule",
-]
+];
