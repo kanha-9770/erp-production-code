@@ -574,14 +574,35 @@ export class LookupService {
           include: { forms: { select: sourceFormSelect } },
         });
 
-        if (!module || module.forms.length === 0) {
-          console.log(`[getData] ❌ Module has no forms`);
+        if (!module) {
+          console.log(`[getData] ❌ Module not found`);
           return [];
         }
 
-        const limitPerForm = Math.ceil((limit * 2) / module.forms.length);
+        // Parent modules in a hierarchy carry no direct forms (e.g.
+        // "HR" → "HR Core" → "Employee Master"). When the selected module
+        // has no direct forms, recurse into descendants and pull records
+        // from THEIR forms. Mirrors the same fallback in getFields() so the
+        // runtime public-form lookup behaves like the form-builder dialog.
+        let formsToScan: any[] = module.forms;
+        if (formsToScan.length === 0) {
+          formsToScan = await this.collectDescendantFormsForData(
+            lookupSource.sourceModuleId,
+            sourceFormSelect,
+          );
+          console.log(
+            `[getData] Module had no direct forms; recursed subtree → ${formsToScan.length} descendant forms`,
+          );
+        }
 
-        const allRecordsPromises = module.forms.map((form) =>
+        if (formsToScan.length === 0) {
+          console.log(`[getData] ❌ Module subtree has no forms`);
+          return [];
+        }
+
+        const limitPerForm = Math.ceil((limit * 2) / formsToScan.length);
+
+        const allRecordsPromises = formsToScan.map((form) =>
           this.getFormRecords(form.id, { limit: limitPerForm }).then(
             (records) => ({ form, records }),
           ),
@@ -764,6 +785,22 @@ export class LookupService {
               fromDefinition++;
             }
           }
+
+          // Parent modules in a hierarchy carry no direct forms (e.g. "HR"
+          // → "HR Core" → "Employee Master"). Without this fallback the
+          // lookup-config dialog says "No Items Found" the moment a user
+          // clicks any non-leaf module. Recurse into descendants so the
+          // dialog returns the union of fields from every descendant form.
+          if (fieldLabels.size === 0) {
+            const subtreeLabels = await this.collectFieldLabelsFromModuleSubtree(
+              lookupSource.sourceModule.id,
+              sectionId,
+            );
+            for (const label of subtreeLabels) {
+              fieldLabels.add(label);
+              fromDefinition++;
+            }
+          }
         }
 
         console.log(
@@ -862,6 +899,18 @@ export class LookupService {
             );
             for (const label of subformFields) fieldLabels.add(label);
           }
+
+          // Parent modules carry no direct forms — recurse into descendants
+          // so non-leaf nodes still return useful field labels. See the same
+          // fallback in the LookupSource branch above.
+          if (fieldLabels.size === 0) {
+            const subtreeLabels = await this.collectFieldLabelsFromModuleSubtree(
+              cleanId,
+              sectionId,
+            );
+            for (const label of subtreeLabels) fieldLabels.add(label);
+          }
+
           const fields = Array.from(fieldLabels).sort((a, b) =>
             a.localeCompare(b),
           );
@@ -876,6 +925,127 @@ export class LookupService {
       return [];
     } catch (error: any) {
       console.error("[getFields] CRITICAL ERROR:", error.message, error.stack);
+      return [];
+    }
+  }
+
+  /**
+   * Sister of `collectFieldLabelsFromModuleSubtree`, but for `getData`:
+   * returns full Form rows (selected via `formSelect`) for every form in
+   * the subtree rooted at `moduleId`. Used so the runtime public-form
+   * lookup picker can pull records from forms anywhere under a parent
+   * module, not only the parent's direct children.
+   */
+  private async collectDescendantFormsForData(
+    moduleId: string,
+    formSelect: any,
+  ): Promise<any[]> {
+    try {
+      const mod = await prisma.formModule.findUnique({
+        where: { id: moduleId },
+        select: { organizationId: true },
+      });
+      if (!mod?.organizationId) return [];
+
+      const descendantRows = await prisma.$queryRaw<{ id: string }[]>`
+        WITH RECURSIVE module_hierarchy AS (
+          SELECT id FROM "form_modules" WHERE id = ${moduleId}
+          UNION ALL
+          SELECT fm.id FROM "form_modules" fm
+          INNER JOIN module_hierarchy mh ON fm.parent_id = mh.id
+          WHERE fm.organization_id = ${mod.organizationId}
+            AND fm."is_active" = true
+        )
+        SELECT id FROM module_hierarchy
+      `;
+      const descendantIds = descendantRows.map((r) => r.id);
+      if (descendantIds.length === 0) return [];
+
+      return await prisma.form.findMany({
+        where: { moduleId: { in: descendantIds } },
+        select: formSelect,
+      });
+    } catch (err: any) {
+      console.error(
+        "[collectDescendantFormsForData] error:",
+        err?.message,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Collect the union of field labels from every form in the subtree
+   * rooted at `moduleId` (the module itself + all descendant modules,
+   * recursive). Used by `getFields` so a parent module like "HR" or
+   * "HR Core" — which carries no direct forms of its own, only
+   * sub-modules — still returns useful field labels for the
+   * lookup-configuration dialog instead of an empty list.
+   *
+   * Mirrors the recursive CTE pattern already used by
+   * `countFormRecordsForSource`.
+   */
+  private async collectFieldLabelsFromModuleSubtree(
+    moduleId: string,
+    sectionId: string = "all",
+  ): Promise<string[]> {
+    try {
+      const mod = await prisma.formModule.findUnique({
+        where: { id: moduleId },
+        select: { organizationId: true },
+      });
+      if (!mod?.organizationId) return [];
+
+      const descendantRows = await prisma.$queryRaw<{ id: string }[]>`
+        WITH RECURSIVE module_hierarchy AS (
+          SELECT id FROM "form_modules" WHERE id = ${moduleId}
+          UNION ALL
+          SELECT fm.id FROM "form_modules" fm
+          INNER JOIN module_hierarchy mh ON fm.parent_id = mh.id
+          WHERE fm.organization_id = ${mod.organizationId}
+            AND fm."is_active" = true
+        )
+        SELECT id FROM module_hierarchy
+      `;
+      const descendantIds = descendantRows.map((r) => r.id);
+      if (descendantIds.length === 0) return [];
+
+      const sectionFilter =
+        sectionId !== "all" ? { where: { id: sectionId } } : {};
+
+      const forms = await prisma.form.findMany({
+        where: { moduleId: { in: descendantIds } },
+        select: {
+          id: true,
+          sections: {
+            include: {
+              fields: { select: { label: true } },
+            },
+            ...sectionFilter,
+          },
+        },
+      });
+
+      const labels = new Set<string>();
+      for (const form of forms) {
+        for (const section of form.sections) {
+          for (const field of section.fields) {
+            const label = field.label?.trim();
+            if (label) labels.add(label);
+          }
+        }
+        const subformLabels = await this.getSubformFieldsForForm(
+          form.id,
+          sectionId,
+        );
+        for (const label of subformLabels) labels.add(label);
+      }
+      return Array.from(labels).sort((a, b) => a.localeCompare(b));
+    } catch (err: any) {
+      console.error(
+        "[collectFieldLabelsFromModuleSubtree] error:",
+        err?.message,
+      );
       return [];
     }
   }
