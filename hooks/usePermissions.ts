@@ -204,25 +204,34 @@ export function usePermissions(): PermissionsState {
       // field-level deny poison the global form-level permission map.
       if (up.resourceType === "section" || up.resourceType === "field") continue
 
-      const flagPerms: { name: string; granted: boolean }[] = [
-        { name: "view", granted: up.canView },
-        { name: "create", granted: up.canCreate },
-        { name: "edit", granted: up.canEdit },
-        { name: "delete", granted: up.canDelete },
-      ]
+      const flagPerms: { name: string; granted: boolean }[] = []
 
-      if (up.permission) {
+      // Permission-tied row (the matrix UI saves these): one row affects ONE
+      // permission name with the row's `granted` value. Do NOT also apply the
+      // can* flags here — those default to false in the schema and would
+      // incorrectly deny VIEW/CREATE/EDIT/DELETE at this scope.
+      if (up.permission && up.permissionId) {
         flagPerms.push({ name: up.permission.name.toLowerCase(), granted: up.granted })
+      } else {
+        // Legacy / flag-based row (no permissionId): use the can* booleans.
+        flagPerms.push(
+          { name: "view", granted: up.canView },
+          { name: "create", granted: up.canCreate },
+          { name: "edit", granted: up.canEdit },
+          { name: "delete", granted: up.canDelete },
+        )
       }
 
       for (const { name: permName, granted } of flagPerms) {
-        const keys: string[] = [permName]
-        if (up.moduleId) keys.push(`${permName}:${up.moduleId}`)
-        if (up.moduleId && up.formId) keys.push(`${permName}:${up.moduleId}:${up.formId}`)
-        if (up.formId) keys.push(`${permName}::${up.formId}`)
+        if (granted) {
+          // Granted user override propagates to all applicable scope keys so
+          // hasPermission lookups at any scope find the grant.
+          const keys: string[] = [permName]
+          if (up.moduleId) keys.push(`${permName}:${up.moduleId}`)
+          if (up.moduleId && up.formId) keys.push(`${permName}:${up.moduleId}:${up.formId}`)
+          if (up.formId) keys.push(`${permName}::${up.formId}`)
 
-        for (const key of keys) {
-          if (granted) {
+          for (const key of keys) {
             map.set(key, {
               id: up.id,
               roleId: "",
@@ -238,7 +247,24 @@ export function usePermissions(): PermissionsState {
               form: null,
             })
             denied.delete(key)
+          }
+        } else {
+          // Denied user override: only deny at the EXACT scope of this row.
+          // A form-specific deny must NOT remove a sibling form's role grant
+          // recorded at the broader module-wide key.
+          const denyKeys: string[] = []
+          if (up.moduleId && up.formId) {
+            denyKeys.push(`${permName}:${up.moduleId}:${up.formId}`)
+            denyKeys.push(`${permName}::${up.formId}`)
+          } else if (up.moduleId) {
+            denyKeys.push(`${permName}:${up.moduleId}`)
+          } else if (up.formId) {
+            denyKeys.push(`${permName}::${up.formId}`)
           } else {
+            denyKeys.push(permName)
+          }
+
+          for (const key of denyKeys) {
             map.delete(key)
             denied.add(key)
           }

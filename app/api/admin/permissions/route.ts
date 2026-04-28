@@ -172,10 +172,38 @@ export async function GET(request: NextRequest) {
 
     const permissions: PermissionItem[] = [];
 
-    // 5a: Role permissions (skip denied)
-    const deniedPermIdSet = new Set(deniedOverridePermIds);
+    // 5a: Role permissions (skip ones explicitly denied at the same scope)
+    // A user-level deny only suppresses the role grant when the (permissionId,
+    // moduleId, formId) tuples match. A deny on form A must NOT hide the
+    // role grant for form B. A row with formId=null / moduleId=null is a
+    // broader scope and suppresses everything below it for that permission.
+    const deniedScopeKey = (
+      permId: string,
+      moduleId: string | null | undefined,
+      formId: string | null | undefined,
+    ) => `${permId}|${moduleId ?? ""}|${formId ?? ""}`;
+
+    const deniedScopeSet = new Set(
+      deniedOverrides.map((o) =>
+        deniedScopeKey(o.permissionId, o.moduleId, o.formId),
+      ),
+    );
+
+    const isRoleRowDenied = (rp: typeof rolePermissions[number]) => {
+      const permId = rp.permission.id;
+      const modId = rp.module?.id ?? null;
+      const fId = rp.form?.id ?? null;
+      // Exact-scope deny
+      if (deniedScopeSet.has(deniedScopeKey(permId, modId, fId))) return true;
+      // Module-wide deny (formId=null, same moduleId) suppresses any form in that module
+      if (fId && deniedScopeSet.has(deniedScopeKey(permId, modId, null))) return true;
+      // Global deny (moduleId=null, formId=null) suppresses everything
+      if (deniedScopeSet.has(deniedScopeKey(permId, null, null))) return true;
+      return false;
+    };
+
     for (const rp of rolePermissions) {
-      if (deniedPermIdSet.has(rp.permission.id)) continue;
+      if (isRoleRowDenied(rp)) continue;
 
       permissions.push({
         id: rp.permission.id,
