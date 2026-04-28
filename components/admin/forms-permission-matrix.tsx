@@ -81,25 +81,38 @@ export function FormsPermissionMatrix({
     })
   }
 
-  // Memoize to avoid nested-loop recalculation on every render
+  // Recursively locate the selected form at any depth in the module tree and
+  // build a breadcrumb path from the ancestors visited along the way.
   const formDetails = useMemo(() => {
     if (!selectedForm) return null
-    for (const mod of modules) {
-      const form = mod.forms?.find((f) => f.id === selectedForm)
-      if (form) return { form, module: mod, submodule: null, path: `${mod.name} > ${form.name}` }
 
-      for (const sub of mod.children ?? []) {
-        const form = sub.forms?.find((f) => f.id === selectedForm)
-        if (form)
+    const search = (
+      nodes: PermissionModule[],
+      ancestors: PermissionModule[],
+    ): {
+      form: PermissionModule["forms"][number]
+      module: PermissionModule
+      submodule: PermissionModule | null
+      path: string
+    } | null => {
+      for (const node of nodes) {
+        const form = node.forms?.find((f) => f.id === selectedForm)
+        if (form) {
+          const trail = [...ancestors, node]
           return {
             form,
-            module: mod,
-            submodule: sub,
-            path: `${mod.name} > ${sub.name} > ${form.name}`,
+            module: trail[0],
+            submodule: trail.length > 1 ? trail[trail.length - 1] : null,
+            path: [...trail.map((n) => n.name), form.name].join(" > "),
           }
+        }
+        const found = search(node.children ?? [], [...ancestors, node])
+        if (found) return found
       }
+      return null
     }
-    return null
+
+    return search(modules, [])
   }, [selectedForm, modules])
 
   // ─── Loading ──────────────────────────────────────────────────────────────

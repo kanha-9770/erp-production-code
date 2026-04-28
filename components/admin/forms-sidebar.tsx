@@ -165,9 +165,10 @@ function ModuleNode({
   onFormSelect,
 }: ModuleNodeProps) {
   const isExpanded = expandedModules.has(module.id)
-  const totalForms =
-    (module.forms?.length ?? 0) +
-    (module.children ?? []).reduce((s, c) => s + (c.forms?.length ?? 0), 0)
+  const countForms = (mod: PermissionModule): number =>
+    (mod.forms?.length ?? 0) +
+    (mod.children ?? []).reduce((s, c) => s + countForms(c), 0)
+  const totalForms = countForms(module)
   const isSubmodule = parentModuleId !== module.id
 
   return (

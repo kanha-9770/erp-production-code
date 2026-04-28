@@ -375,52 +375,20 @@ export async function getModulesWithForms(
   }
 
   try {
-
-    const topLevelWhere: any = {
-      isActive: true,
-      parentId: null,
-    };
-
-    // Only add organizationId filter if provided
+    const where: any = { isActive: true };
     if (organizationId !== undefined) {
-      topLevelWhere.organizationId = organizationId;
-    }
-
-    if (permittedModuleIds && permittedModuleIds.length > 0) {
-      topLevelWhere.id = { in: permittedModuleIds };
-    }
-
-    const childWhere: any = {
-      isActive: true,
-    };
-    if (organizationId !== undefined) {
-      childWhere.organizationId = organizationId;
+      where.organizationId = organizationId;
     }
     if (permittedModuleIds && permittedModuleIds.length > 0) {
-      childWhere.id = { in: permittedModuleIds };
+      where.id = { in: permittedModuleIds };
     }
 
-    const modules = await prisma.formModule.findMany({
-      where: topLevelWhere,
+    // Fetch every accessible module flat (any depth), then assemble the tree
+    // via parentId. The previous implementation only fetched two levels, so
+    // forms on grandchildren and deeper never reached the UI.
+    const flat = await prisma.formModule.findMany({
+      where,
       include: {
-        children: {
-          where: childWhere,
-          include: {
-            forms: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-                isEmployeeForm: true,
-                isUserForm: true,
-                moduleId: true,
-                createdAt: true,
-                updatedAt: true,
-              },
-            },
-          },
-          orderBy: { sortOrder: "asc" },
-        },
         forms: {
           select: {
             id: true,
@@ -437,46 +405,57 @@ export async function getModulesWithForms(
       orderBy: { sortOrder: "asc" },
     });
 
-    const result = modules
-      .map((module: any) => {
-        const showForms =
-          !directlyPermittedModuleIds ||
-          directlyPermittedModuleIds.has(module.id);
-        const effectiveForms = showForms ? module.forms || [] : [];
+    type Node = {
+      id: any;
+      name: string;
+      description: any;
+      icon: any;
+      color: any;
+      parentId: any;
+      level: number;
+      sortOrder: number;
+      forms: any[];
+      children: Node[];
+    };
 
-        return {
-          id: module.id,
-          name: module.name,
-          description: module.description,
-          icon: module.icon,
-          color: module.color,
-          level: module.level,
-          forms: effectiveForms,
-          children: module.children
-            .map((child: any) => {
-              const showChildForms =
-                !directlyPermittedModuleIds ||
-                directlyPermittedModuleIds.has(child.id);
-              const effectiveChildForms = showChildForms
-                ? child.forms || []
-                : [];
-              return {
-                id: child.id,
-                name: child.name,
-                description: child.description,
-                icon: child.icon,
-                color: child.color,
-                parentId: module.id,
-                level: child.level,
-                forms: effectiveChildForms,
-              };
-            })
-            .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0)),
-        };
-      })
-      .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const byId = new Map<any, Node>();
+    for (const m of flat as any[]) {
+      const showForms =
+        !directlyPermittedModuleIds ||
+        directlyPermittedModuleIds.has(m.id);
+      byId.set(m.id, {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        icon: m.icon,
+        color: m.color,
+        parentId: m.parentId ?? null,
+        level: m.level,
+        sortOrder: m.sortOrder ?? 0,
+        forms: showForms ? m.forms || [] : [],
+        children: [],
+      });
+    }
 
-    return result;
+    const roots: Node[] = [];
+    for (const node of byId.values()) {
+      const parent = node.parentId ? byId.get(node.parentId) : undefined;
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        // Either a true top-level module, or one whose parent is not in the
+        // permitted set — surface it as a root so the user can still see it.
+        roots.push(node);
+      }
+    }
+
+    const sortTree = (nodes: Node[]) => {
+      nodes.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      for (const n of nodes) sortTree(n.children);
+    };
+    sortTree(roots);
+
+    return roots;
   } catch (error) {
     return [];
   }
