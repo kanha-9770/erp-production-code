@@ -28,45 +28,126 @@ export interface ImportRowResult {
 const normalizeKey = (str: string): string =>
   String(str).replace(/[\u2018\u2019]/g, "'").trim()
 
+type FieldMeta = { label: string; type: string; exportLabel: string }
+
+const isLegacyWrapped = (v: any): boolean =>
+  v != null &&
+  typeof v === "object" &&
+  !Array.isArray(v) &&
+  "label" in v &&
+  "value" in v
+
 /**
- * Flatten nested recordData into a flat key-value map using field labels.
- * Handles the structured format: { sections: { fieldId: { label, value, type } } }
- * Also handles flat format: { fieldId: value }
+ * Flatten nested recordData into a flat key-value map keyed by export labels.
+ *
+ * Handles three storage shapes:
+ *  - Slim structured (current):
+ *      { sections: { sectionId: { fields: { fieldId: value } } },
+ *        subforms: { subformId: { fields, rows: [{ fields }], childSubforms } } }
+ *  - Legacy structured wrapper: { sections: { sectionId: { fields: { fieldId: { label, value, type } } } } }
+ *  - Old flat: { fieldId: value }
+ *
+ * Subform values across multiple dynamic rows are joined with "; " under a single column.
  */
 function flattenRecordData(
   recordData: Record<string, any>,
-  fieldMap: Map<string, { label: string; type: string }>
+  fieldMap: Map<string, FieldMeta>
 ): Record<string, any> {
   const flat: Record<string, any> = {}
 
-  // Handle structured sections format
+  const setByFieldId = (fieldId: string, value: any) => {
+    if (value === undefined) return
+    const meta = fieldMap.get(fieldId)
+    if (!meta) return // field not in current form definition; skip
+    const formatted = formatExportValue(value, meta.type)
+    if (formatted === "") return
+    const key = meta.exportLabel
+    if (flat[key] !== undefined && flat[key] !== "") {
+      flat[key] = `${flat[key]}; ${formatted}`
+    } else {
+      flat[key] = formatted
+    }
+  }
+
+  // ── Sections (slim or legacy wrapper) ──
   if (recordData.sections && typeof recordData.sections === "object") {
     for (const section of Object.values(recordData.sections) as any[]) {
       const fields = section?.fields || section
       if (fields && typeof fields === "object") {
-        for (const [, fieldData] of Object.entries(fields)) {
-          const fd = fieldData as any
-          if (fd?.label && fd?.value !== undefined) {
-            flat[fd.label] = formatExportValue(fd.value, fd.type)
+        for (const [fieldId, fieldData] of Object.entries(fields)) {
+          if (isLegacyWrapped(fieldData)) {
+            const fd = fieldData as any
+            const meta = fieldMap.get(fieldId)
+            const key = meta?.exportLabel || fd.label
+            flat[key] = formatExportValue(fd.value, meta?.type || fd.type)
+          } else {
+            setByFieldId(fieldId, fieldData)
           }
         }
       }
     }
-    return flat
   }
 
-  // Handle flat format: { fieldId: value } or { fieldId: { value, label, type } }
+  // ── Subforms (recursive: static fields + dynamic rows + childSubforms) ──
+  if (recordData.subforms && typeof recordData.subforms === "object") {
+    const walk = (sub: any) => {
+      if (!sub || typeof sub !== "object") return
+
+      // Static fields directly on the subform
+      const fields = sub.fields
+      if (fields && typeof fields === "object") {
+        for (const [fieldId, value] of Object.entries(fields)) {
+          if (isLegacyWrapped(value)) {
+            const fd = value as any
+            const meta = fieldMap.get(fieldId)
+            const key = meta?.exportLabel || fd.label
+            const formatted = formatExportValue(fd.value, meta?.type || fd.type)
+            if (formatted !== "") {
+              flat[key] = flat[key] ? `${flat[key]}; ${formatted}` : formatted
+            }
+          } else {
+            setByFieldId(fieldId, value)
+          }
+        }
+      }
+
+      // Dynamic rows
+      const rows = sub.rows
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const rowFields = row?.fields || {}
+          for (const [fieldId, value] of Object.entries(rowFields)) {
+            setByFieldId(fieldId, value)
+          }
+        }
+      }
+
+      // Child subforms
+      const children = sub.childSubforms
+      if (children && typeof children === "object") {
+        for (const child of Object.values(children) as any[]) walk(child)
+      }
+    }
+
+    for (const sub of Object.values(recordData.subforms) as any[]) walk(sub)
+  }
+
+  // If we already pulled from sections/subforms, return now.
+  if (recordData.sections || recordData.subforms) return flat
+
+  // ── Old flat format fallback: { fieldId: value | { value, label, type } } ──
   for (const [key, val] of Object.entries(recordData)) {
     if (key === "formId" || key === "formName" || key === "metadata") continue
 
-    if (val && typeof val === "object" && "value" in val && "label" in val) {
-      // Structured field: { fieldId, label, value, type }
-      flat[val.label || key] = formatExportValue(val.value, val.type)
+    if (isLegacyWrapped(val)) {
+      const fd = val as any
+      const meta = fieldMap.get(key)
+      flat[meta?.exportLabel || fd.label || key] = formatExportValue(
+        fd.value,
+        meta?.type || fd.type,
+      )
     } else {
-      // Direct value — use field label from form definition
-      const fieldDef = fieldMap.get(key)
-      const label = fieldDef?.label || key
-      flat[label] = formatExportValue(val, fieldDef?.type)
+      setByFieldId(key, val)
     }
   }
 
@@ -114,16 +195,74 @@ export async function exportFormRecords(
 
   const records = await DatabaseService.getFormRecords(formId)
 
-  // Build field map: fieldId → { label, type }
-  const fieldMap = new Map<string, { label: string; type: string }>()
-  const allFields: { id: string; label: string; type: string; order: number }[] = []
+  // Build field map: fieldId → { label, type, exportLabel }
+  // Section fields use the bare field label as the column header.
+  // Subform fields are prefixed with the subform name path so identical labels
+  // across different subforms don't collide in the exported sheet.
+  const fieldMap = new Map<string, FieldMeta>()
+  const allFields: {
+    id: string
+    label: string
+    exportLabel: string
+    type: string
+    order: number
+  }[] = []
 
-  ;(form as any).sections?.forEach((section: any) => {
-    section.fields?.forEach((field: any) => {
-      fieldMap.set(field.id, { label: field.label, type: field.type })
-      allFields.push({ id: field.id, label: field.label, type: field.type, order: field.order ?? 0 })
+  ;(form as any).sections?.forEach((section: any, sIdx: number) => {
+    section.fields?.forEach((field: any, fIdx: number) => {
+      const exportLabel = field.label
+      fieldMap.set(field.id, {
+        label: field.label,
+        type: field.type,
+        exportLabel,
+      })
+      allFields.push({
+        id: field.id,
+        label: field.label,
+        exportLabel,
+        type: field.type,
+        order: (section.order ?? sIdx) * 1000 + (field.order ?? fIdx),
+      })
     })
   })
+
+  // Recursively walk subforms (and their childSubforms) to collect every field.
+  const sectionCount = ((form as any).sections?.length ?? 0)
+  const collectSubformFields = (
+    subforms: any[],
+    parentPath: string,
+    baseOrder: number,
+  ) => {
+    let local = 0
+    for (const sf of subforms || []) {
+      const path = parentPath ? `${parentPath} › ${sf.name}` : sf.name
+      const subBase = baseOrder + local++ * 100000
+      ;(sf.fields || []).forEach((field: any, fIdx: number) => {
+        if (fieldMap.has(field.id)) return
+        const exportLabel = `${path}: ${field.label}`
+        fieldMap.set(field.id, {
+          label: field.label,
+          type: field.type,
+          exportLabel,
+        })
+        allFields.push({
+          id: field.id,
+          label: field.label,
+          exportLabel,
+          type: field.type,
+          order: subBase + (field.order ?? fIdx),
+        })
+      })
+      if (sf.childSubforms?.length) {
+        collectSubformFields(sf.childSubforms, path, subBase + 50000)
+      }
+    }
+  }
+  collectSubformFields(
+    (form as any).subforms || [],
+    "",
+    (sectionCount + 1) * 1000,
+  )
 
   // Determine which fields to include
   const fieldsToExport = selectedFieldIds?.length
@@ -132,14 +271,14 @@ export async function exportFormRecords(
 
   fieldsToExport.sort((a, b) => a.order - b.order)
 
-  const headers = fieldsToExport.map((f) => f.label)
+  const headers = fieldsToExport.map((f) => f.exportLabel)
 
   // Flatten each record
   const rows: ExportRecordRow[] = records.map((record: any) => {
     const flat = flattenRecordData(record.recordData || {}, fieldMap)
     const row: ExportRecordRow = {}
     for (const field of fieldsToExport) {
-      row[field.label] = flat[field.label] ?? ""
+      row[field.exportLabel] = flat[field.exportLabel] ?? ""
     }
     // Add system fields
     row["Record ID"] = record.id

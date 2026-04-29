@@ -100,6 +100,37 @@ interface FormBodyProps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const SECTION_BORDER_RADIUS_MAP: Record<string, string> = {
+  none: "0px",
+  sm: "0.125rem",
+  md: "0.375rem",
+  lg: "0.5rem",
+  xl: "0.75rem",
+};
+
+const SECTION_PADDING_MAP: Record<string, string> = {
+  none: "0px",
+  sm: "0.5rem",
+  md: "1rem",
+  lg: "1.5rem",
+  xl: "2rem",
+};
+
+function getSectionStyle(
+  styling?: Record<string, any> | null,
+): React.CSSProperties {
+  if (!styling) return {};
+  const style: React.CSSProperties = {};
+  if (styling.backgroundColor) style.backgroundColor = styling.backgroundColor;
+  if (styling.borderColor) style.borderColor = styling.borderColor;
+  if (styling.borderRadius)
+    style.borderRadius =
+      SECTION_BORDER_RADIUS_MAP[styling.borderRadius] || styling.borderRadius;
+  if (styling.padding)
+    style.padding = SECTION_PADDING_MAP[styling.padding] || styling.padding;
+  return style;
+}
+
 function getFieldTypeLabel(type: string) {
   switch (type) {
     case "textarea":
@@ -661,6 +692,7 @@ export function FormBody(props: FormBodyProps) {
             <div
               key={section.id}
               className="rounded-lg border bg-card text-card-foreground overflow-hidden"
+              style={getSectionStyle((section as any).styling)}
             >
               {/* Section header */}
               <div className="bg-muted/40 px-5 py-3 border-b">
