@@ -224,14 +224,17 @@ return { 'fld_staff_total_cost': vac * cost };
 $js$,
      v_org_id, v_user_id, NOW(), NOW()),
 
-    -- ---- 6. Job Application: copy Job Description from opening ------------
+    -- ---- 6. Job Application: copy Job Description (and other fields) from opening ------------
     ('fn_hr_job_app_copy_desc',
      'hr_job_app_copy_desc',
      'HR: Copy Job Description from Opening',
      'Automation', 'JavaScript',
-     'When an applicant is selected for a job opening, copy the opening JD onto the application (for audit).',
+     'On Job Application save/edit, look up the linked Job Opening and copy Job Description, Department, Designation and Employment Type when blank on the application.',
      TRUE, FALSE,
      $js$
+// FIX: Read the opening from the Job Opening module via the lookup field's
+// stored value. Job Opening's lookup-store is fld_open_plan_id (the plan ID
+// text), so fld_app_opening_id on the application stores that same plan ID.
 const data = ctx.input.recordData || {};
 const get = (id) => {
   const flat = data[id];
@@ -243,12 +246,25 @@ const get = (id) => {
   }
   return undefined;
 };
-// Only stamp once if blank. Don't clobber manually edited descriptions.
-const existing = get('fld_app_job_desc');
-if (existing && String(existing).trim() !== '') return { ok: true };
-const fromOpen = get('fld_open_job_desc');
-if (!fromOpen) return { ok: true };
-return { 'fld_app_job_desc': fromOpen };
+const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
+
+const openingKey = norm(get('fld_app_opening_id'));
+if (!openingKey) return { ok: true };
+
+const openings = await ctx.records.list('Job Opening', { limit: 500 });
+const match = openings.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['New Staffing Plan ID']) === openingKey;
+});
+if (!match) return { ok: true };
+
+var od = match.data || {};
+var out = {};
+if (od['Job Description'] && !get('fld_app_job_desc'))   out['fld_app_job_desc']    = od['Job Description'];
+if (od['Department']      && !get('fld_app_department')) out['fld_app_department']  = od['Department'];
+if (od['Designation']     && !get('fld_app_designation'))out['fld_app_designation'] = od['Designation'];
+if (od['Employment Type'] && !get('fld_app_emp_type'))   out['fld_app_emp_type']    = od['Employment Type'];
+return Object.keys(out).length ? out : { ok: true };
 $js$,
      v_org_id, v_user_id, NOW(), NOW()),
 
@@ -379,12 +395,12 @@ return { 'fld_sim_status': emp ? 'ACTIVE' : 'INACTIVE' };
 $js$,
      v_org_id, v_user_id, NOW(), NOW()),
 
-    -- ---- 12. Job Offer: copy applicant contacts from Job Application -------
+    -- ---- 12. Job Offer: defaults + pull applicant info from Job Application ---
     ('fn_hr_offer_populate',
      'hr_offer_populate',
      'HR: Offer Populate from Application',
      'Automation', 'JavaScript',
-     'On Job Offer create, use the applicants selected fields. Sets Offer Date to today if blank.',
+     'On Job Offer save, default Offer Date to today and Status to DRAFT, then look up the most-recent Job Application for the linked opening (preferring HIRED/OFFER/INTERVIEW/SHORTLISTED) and pull Applicant Name / Email / Mobile when blank.',
      TRUE, FALSE,
      $js$
 const data = ctx.input.recordData || {};
@@ -398,11 +414,39 @@ const get = (id) => {
   }
   return undefined;
 };
+const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
+
 const out = {};
-if (!get('fld_offer_date')) {
-  out['fld_offer_date'] = new Date().toISOString().slice(0, 10);
-}
+if (!get('fld_offer_date'))   out['fld_offer_date']   = new Date().toISOString().slice(0, 10);
 if (!get('fld_offer_status')) out['fld_offer_status'] = 'DRAFT';
+
+const openingKey = norm(get('fld_offer_opening_id'));
+const haveName   = String(get('fld_offer_name')   || '').trim();
+const haveEmail  = String(get('fld_offer_email')  || '').trim();
+const haveMobile = String(get('fld_offer_mobile') || '').trim();
+
+if (openingKey && (!haveName || !haveEmail || !haveMobile)) {
+  const apps = await ctx.records.list('Job Application', { limit: 500 });
+  const candidates = apps.filter(function (r) {
+    var d = (r && r.data) || {};
+    return norm(d['New Job Opening ID']) === openingKey;
+  });
+  // Prefer the furthest-along applicant for this opening.
+  var priority = { HIRED: 0, OFFER: 1, INTERVIEW: 2, SHORTLISTED: 3, SCREENING: 4, APPLIED: 5 };
+  candidates.sort(function (a, b) {
+    var sa = norm((a.data && a.data['Status']) || '');
+    var sb = norm((b.data && b.data['Status']) || '');
+    var pa = priority[sa] == null ? 9 : priority[sa];
+    var pb = priority[sb] == null ? 9 : priority[sb];
+    return pa - pb;
+  });
+  var pick = candidates[0];
+  if (pick && pick.data) {
+    if (!haveName   && pick.data['Applicant Name'])          out['fld_offer_name']   = pick.data['Applicant Name'];
+    if (!haveEmail  && pick.data['Applicant Email ID'])      out['fld_offer_email']  = pick.data['Applicant Email ID'];
+    if (!haveMobile && pick.data['Applicant Mobile Number']) out['fld_offer_mobile'] = pick.data['Applicant Mobile Number'];
+  }
+}
 return Object.keys(out).length ? out : { ok: true };
 $js$,
      v_org_id, v_user_id, NOW(), NOW()),
@@ -485,6 +529,315 @@ if (mgr === 'APPROVED' && hr === 'APPROVED') {
   console.log('[HR] Leave fully approved', ctx.input.recordId);
 }
 return { ok: true };
+$js$,
+     v_org_id, v_user_id, NOW(), NOW()),
+
+    -- =========================================================================
+    -- PHASE 1 RECRUITMENT PIPELINE FUNCTIONS (F6 -> F7 -> F8 -> F9 -> F10 -> F1)
+    -- Each step looks up the prior form by its text-key (Plan ID / Opening ID
+    -- / applicant identity). Lookup fields store their configured "value
+    -- field" -- for HR this is the Plan ID text -- so we match records by
+    -- normalising both sides (trim, uppercase, zero-pad-neutral).
+    -- =========================================================================
+
+    -- ---- 16. Job Opening: fill from Staffing Plan -------------------------
+    ('fn_hr_opening_fill_from_plan',
+     'hr_opening_fill_from_plan',
+     'HR: Fill Job Opening from Staffing Plan',
+     'Automation', 'JavaScript',
+     'When New Staffing Plan ID is selected on a Job Opening, copy Profile Name, Company, Department, Designation, Employment Type, and No. of Vacancies from the Staffing Plan (only fills blanks, never clobbers).',
+     TRUE, FALSE,
+     $js$
+const data = ctx.input.recordData || {};
+const get = (id) => {
+  const flat = data[id];
+  if (flat !== undefined) return flat && typeof flat === 'object' && 'value' in flat ? flat.value : flat;
+  const secs = data.sections || {};
+  for (const s of Object.values(secs)) {
+    const f = s && s.fields && s.fields[id];
+    if (f !== undefined) return f && typeof f === 'object' && 'value' in f ? f.value : f;
+  }
+  return undefined;
+};
+function norm(s) {
+  s = String(s == null ? '' : s).trim().toUpperCase().replace(/\s+/g, '');
+  return s.replace(/(\d+)/g, function (n) { return String(Number(n)); });
+}
+// Lookup by binding payload OR record data. Binding sends flat label keys.
+var planKey =
+  (ctx.input && (ctx.input['New Staffing Plan ID'] || ctx.input.New_Staffing_Plan_ID)) || null;
+if (!planKey) planKey = get('fld_open_plan_id');
+var needle = norm(planKey);
+if (!needle) return { ok: false, reason: 'no plan id' };
+
+const plans = await ctx.records.list('Staffing Plan', { limit: 500 });
+const match = plans.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['New Staffing Plan ID']) === needle;
+});
+if (!match) return { ok: false, reason: 'plan not found' };
+
+var pd = match.data || {};
+var out = {};
+if (pd['Profile Name']     && !get('fld_open_profile'))     out['fld_open_profile']     = pd['Profile Name'];
+if (pd['Company']          && !get('fld_open_company'))     out['fld_open_company']     = pd['Company'];
+if (pd['Department']       && !get('fld_open_department'))  out['fld_open_department']  = pd['Department'];
+if (pd['Designation']      && !get('fld_open_designation')) out['fld_open_designation'] = pd['Designation'];
+if (pd['Employment Type']  && !get('fld_open_emp_type'))    out['fld_open_emp_type']    = pd['Employment Type'];
+if (pd['No. of Vacancies'] != null && !get('fld_open_vacancies')) out['fld_open_vacancies'] = pd['No. of Vacancies'];
+return Object.keys(out).length ? out : { ok: true };
+$js$,
+     v_org_id, v_user_id, NOW(), NOW()),
+
+    -- ---- 17. Job Application: fill from Job Opening (and through to Plan) ----
+    ('fn_hr_app_fill_from_opening',
+     'hr_app_fill_from_opening',
+     'HR: Fill Job Application from Opening',
+     'Automation', 'JavaScript',
+     'When New Job Opening ID is selected on a Job Application, copy Department, Designation, Employment Type, and Job Description from the linked Job Opening (only fills blanks).',
+     TRUE, FALSE,
+     $js$
+const data = ctx.input.recordData || {};
+const get = (id) => {
+  const flat = data[id];
+  if (flat !== undefined) return flat && typeof flat === 'object' && 'value' in flat ? flat.value : flat;
+  const secs = data.sections || {};
+  for (const s of Object.values(secs)) {
+    const f = s && s.fields && s.fields[id];
+    if (f !== undefined) return f && typeof f === 'object' && 'value' in f ? f.value : f;
+  }
+  return undefined;
+};
+function norm(s) {
+  s = String(s == null ? '' : s).trim().toUpperCase().replace(/\s+/g, '');
+  return s.replace(/(\d+)/g, function (n) { return String(Number(n)); });
+}
+var openingKey =
+  (ctx.input && (ctx.input['New Job Opening ID'] || ctx.input.New_Job_Opening_ID)) || null;
+if (!openingKey) openingKey = get('fld_app_opening_id');
+var needle = norm(openingKey);
+if (!needle) return { ok: false, reason: 'no opening id' };
+
+const openings = await ctx.records.list('Job Opening', { limit: 500 });
+const match = openings.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['New Staffing Plan ID']) === needle;
+});
+if (!match) return { ok: false, reason: 'opening not found' };
+
+var od = match.data || {};
+var out = {};
+if (od['Department']      && !get('fld_app_department'))  out['fld_app_department']  = od['Department'];
+if (od['Designation']     && !get('fld_app_designation')) out['fld_app_designation'] = od['Designation'];
+if (od['Employment Type'] && !get('fld_app_emp_type'))    out['fld_app_emp_type']    = od['Employment Type'];
+if (od['Job Description'] && !get('fld_app_job_desc'))    out['fld_app_job_desc']    = od['Job Description'];
+return Object.keys(out).length ? out : { ok: true };
+$js$,
+     v_org_id, v_user_id, NOW(), NOW()),
+
+    -- ---- 18. Appointment Letter: auto-create when Offer is ACCEPTED ----------
+    ('fn_hr_appt_create_from_offer',
+     'hr_appt_create_from_offer',
+     'HR: Create Appointment Letter from Offer',
+     'Automation', 'JavaScript',
+     'When a Job Offer status changes to ACCEPTED, auto-create an Appointment Letter for the applicant. Idempotent: skipped if an Appointment Letter already exists for that applicant. Default Appointment Date = Offer Date + 14 days.',
+     TRUE, FALSE,
+     $js$
+const data = ctx.input.recordData || {};
+const get = (id) => {
+  const flat = data[id];
+  if (flat !== undefined) return flat && typeof flat === 'object' && 'value' in flat ? flat.value : flat;
+  const secs = data.sections || {};
+  for (const s of Object.values(secs)) {
+    const f = s && s.fields && s.fields[id];
+    if (f !== undefined) return f && typeof f === 'object' && 'value' in f ? f.value : f;
+  }
+  return undefined;
+};
+const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
+
+const status = norm(get('fld_offer_status'));
+if (status !== 'ACCEPTED') return { ok: true, skipped: 'status not ACCEPTED' };
+
+const applicantName = String(get('fld_offer_name') || '').trim();
+if (!applicantName) return { ok: false, reason: 'offer has no applicant name' };
+
+// Idempotency: if an Appointment Letter already exists for this applicant, skip.
+const existing = await ctx.records.list('Appointment Letter', { limit: 500 });
+const dup = existing.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['Job Applicant Name']) === norm(applicantName);
+});
+if (dup) return { ok: true, alreadyExists: dup.id };
+
+// Default appointment date = Offer Date + 14 days, fallback today + 14.
+var offerDate = get('fld_offer_date');
+var base = offerDate ? new Date(offerDate) : new Date();
+if (isNaN(base.getTime())) base = new Date();
+base.setDate(base.getDate() + 14);
+var apptDate = base.toISOString().slice(0, 10);
+
+// Pull Company from the Staffing Plan if available.
+var company = '';
+var planKey = norm(get('fld_offer_plan_id'));
+if (planKey) {
+  var plans = await ctx.records.list('Staffing Plan', { limit: 500 });
+  var planRow = plans.find(function (r) {
+    var d = (r && r.data) || {};
+    return norm(d['New Staffing Plan ID']) === planKey;
+  });
+  if (planRow && planRow.data && planRow.data['Company']) company = planRow.data['Company'];
+}
+
+var payload = {
+  'Job Applicant Name': applicantName,
+  'Appointment Date':   apptDate,
+};
+if (company) payload['Company'] = company;
+
+try {
+  var created = await ctx.records.create('Appointment Letter', payload);
+  return { ok: true, createdId: created.id };
+} catch (e) {
+  return { ok: false, reason: 'create failed: ' + (e && e.message ? e.message : String(e)) };
+}
+$js$,
+     v_org_id, v_user_id, NOW(), NOW()),
+
+    -- ---- 19. Employee Master: auto-create on Appointment Letter create -------
+    ('fn_hr_emp_create_from_appt',
+     'hr_emp_create_from_appt',
+     'HR: Create Employee Master from Appointment Letter',
+     'Automation', 'JavaScript',
+     'When an Appointment Letter is created, auto-create the Employee Master record. Pulls First/Last Name from the appointment, Department/Designation/Employment Type/Email/Mobile from the matching Job Application, generates a sequential Employee ID. Idempotent.',
+     TRUE, FALSE,
+     $js$
+const data = ctx.input.recordData || {};
+const get = (id) => {
+  const flat = data[id];
+  if (flat !== undefined) return flat && typeof flat === 'object' && 'value' in flat ? flat.value : flat;
+  const secs = data.sections || {};
+  for (const s of Object.values(secs)) {
+    const f = s && s.fields && s.fields[id];
+    if (f !== undefined) return f && typeof f === 'object' && 'value' in f ? f.value : f;
+  }
+  return undefined;
+};
+const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
+
+const applicantName = String(get('fld_appt_applicant') || '').trim();
+if (!applicantName) return { ok: false, reason: 'no applicant name' };
+
+const apptDate = String(get('fld_appt_date') || '').trim() || new Date().toISOString().slice(0, 10);
+const company  = String(get('fld_appt_company') || '').trim();
+
+// Parse "First Middle Last" into firstName + lastName.
+var nameParts = applicantName.split(/\s+/).filter(Boolean);
+var firstName = nameParts.shift() || applicantName;
+var lastName  = nameParts.length ? nameParts.join(' ') : firstName;
+
+// Idempotency: matching first+last already exists?
+const employees = await ctx.records.list('Employee Master', { limit: 500 });
+const empDup = employees.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['First Name']) === norm(firstName) && norm(d['Last Name']) === norm(lastName);
+});
+if (empDup) return { ok: true, alreadyExists: empDup.id };
+
+// Look up the matching Job Application (most recent, by full applicant name).
+var applicationData = {};
+const apps = await ctx.records.list('Job Application', { limit: 500 });
+const appMatch = apps.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['Applicant Name']) === norm(applicantName);
+});
+if (appMatch && appMatch.data) applicationData = appMatch.data;
+
+// Generate sequential Employee ID. Use count() then pad to 4 digits.
+var nextSeq = employees.length + 1;
+try {
+  var c = await ctx.records.count('Employee Master');
+  if (typeof c === 'number' && c >= 0) nextSeq = c + 1;
+} catch (e) { /* fall through */ }
+var empId = 'EMP-' + String(nextSeq).padStart(4, '0');
+
+var payload = {
+  'Employee ID':         empId,
+  'First Name':          firstName,
+  'Last Name':           lastName,
+  'Status':              'ACTIVE',
+  'Date of Joining':     apptDate,
+  'Total Working Hours': 8,
+  'Nationality':         'Indian',
+};
+if (company || applicationData['Company']) payload['Company'] = company || applicationData['Company'];
+if (applicationData['Department'])         payload['Department']      = applicationData['Department'];
+if (applicationData['Designation'])        payload['Designation']     = applicationData['Designation'];
+if (applicationData['Employment Type'])    payload['Employment Type'] = applicationData['Employment Type'];
+if (applicationData['Applicant Email ID'])      payload['Personal Email'] = applicationData['Applicant Email ID'];
+if (applicationData['Applicant Mobile Number']) payload['Cell Number']    = applicationData['Applicant Mobile Number'];
+
+try {
+  var created = await ctx.records.create('Employee Master', payload);
+  return { ok: true, createdId: created.id, employeeId: empId };
+} catch (e) {
+  return { ok: false, reason: 'create failed: ' + (e && e.message ? e.message : String(e)) };
+}
+$js$,
+     v_org_id, v_user_id, NOW(), NOW()),
+
+    -- ---- 20. Employee Referral: auto-create Job Application from referral ----
+    ('fn_hr_referral_create_application',
+     'hr_referral_create_application',
+     'HR: Create Job Application from Referral',
+     'Automation', 'JavaScript',
+     'When an Employee Referral is created, auto-create a Job Application with Source=REFERRAL and the candidate details. Idempotent on candidate email.',
+     TRUE, FALSE,
+     $js$
+const data = ctx.input.recordData || {};
+const get = (id) => {
+  const flat = data[id];
+  if (flat !== undefined) return flat && typeof flat === 'object' && 'value' in flat ? flat.value : flat;
+  const secs = data.sections || {};
+  for (const s of Object.values(secs)) {
+    const f = s && s.fields && s.fields[id];
+    if (f !== undefined) return f && typeof f === 'object' && 'value' in f ? f.value : f;
+  }
+  return undefined;
+};
+const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
+
+const candidateName   = String(get('fld_ref_applicant') || '').trim();
+const candidateEmail  = String(get('fld_ref_email')     || '').trim();
+const candidateMobile = String(get('fld_ref_mobile')    || '').trim();
+const designation     = String(get('fld_ref_designation') || '').trim();
+
+if (!candidateName)  return { ok: false, reason: 'referral has no applicant name' };
+if (!candidateEmail) return { ok: false, reason: 'referral has no applicant email' };
+
+// Idempotency: skip if a Job Application already exists for this email.
+const existing = await ctx.records.list('Job Application', { limit: 500 });
+const dup = existing.find(function (r) {
+  var d = (r && r.data) || {};
+  return norm(d['Applicant Email ID']) === norm(candidateEmail);
+});
+if (dup) return { ok: true, alreadyExists: dup.id };
+
+var payload = {
+  'Applicant Name':          candidateName,
+  'Applicant Email ID':      candidateEmail,
+  'Applicant Source':        'REFERRAL',
+  'Status':                  'APPLIED',
+};
+if (candidateMobile) payload['Applicant Mobile Number'] = candidateMobile;
+if (designation)     payload['Designation']             = designation;
+
+try {
+  var created = await ctx.records.create('Job Application', payload);
+  return { ok: true, createdId: created.id };
+} catch (e) {
+  return { ok: false, reason: 'create failed: ' + (e && e.message ? e.message : String(e)) };
+}
 $js$,
      v_org_id, v_user_id, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
@@ -620,7 +973,7 @@ $js$,
         created_by_id = EXCLUDED.created_by_id,
         updated_at = NOW();
 
-    RAISE NOTICE 'Seeded 16 HR functions (includes Employee lookup)';
+    RAISE NOTICE 'Seeded 21 HR functions (15 automation + 5 recruitment pipeline + 1 employee lookup)';
 
     -- =========================================================================
     -- STEP 3 - WORKFLOW RULES
@@ -752,18 +1105,18 @@ $js$,
 
     -- ===== JOB OFFER =====
     ('wfr_hr_offer_create',
-     'Job Offer - Defaults on Create',
-     'On Offer Create, stamp Offer Date to today and Status=DRAFT if blank.',
-     'Job Offer', 'record-action', 'Create', 'all', NULL,
+     'Job Offer - Defaults + Populate from Application',
+     'On Offer Create or Edit, stamp Offer Date / Status defaults and pull Applicant Name / Email / Mobile from the linked Job Application.',
+     'Job Offer', 'record-action', 'Create or Edit', 'all', NULL,
      '[{"type":"Function","functionId":"fn_hr_offer_populate","functionName":"HR: Offer Populate from Application"}]'::jsonb,
      TRUE, v_org_id, v_user_id, NOW(), NOW()),
 
     ('wfr_hr_offer_accepted',
-     'Job Offer - Accepted triggers appointment',
-     'When Offer is ACCEPTED, stamp Status and prep for appointment letter.',
+     'Job Offer - Accepted triggers Appointment Letter',
+     'When Offer is ACCEPTED, stamp the term text and auto-create an Appointment Letter for the applicant.',
      'Job Offer', 'record-action', 'Edit', 'matching',
      '[{"field":"fld_offer_status","operator":"is","value":"ACCEPTED"}]'::jsonb,
-     '[{"type":"Field Update","targetFieldId":"fld_offer_term","targetValue":"Accepted by applicant"}]'::jsonb,
+     '[{"type":"Field Update","targetFieldId":"fld_offer_term","targetValue":"Accepted by applicant"},{"type":"Function","functionId":"fn_hr_appt_create_from_offer","functionName":"HR: Create Appointment Letter from Offer"}]'::jsonb,
      TRUE, v_org_id, v_user_id, NOW(), NOW()),
 
     -- ===== PERFORMANCE APPRAISAL =====
@@ -844,6 +1197,40 @@ $js$,
      'SIM Management', 'record-action', 'Edit', 'matching',
      '[{"field":"fld_sim_status","operator":"is","value":"LOST"}]'::jsonb,
      '[{"type":"Field Update","targetFieldId":"fld_sim_status","targetValue":"BLOCKED"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    -- =========================================================================
+    -- PHASE 1 RECRUITMENT PIPELINE RULES
+    -- Forward-chain: F6 -> F7 -> F8 -> F9 -> F10 -> F1, plus F11 -> F8.
+    -- These wire the new fn_hr_*_fill_from_* and fn_hr_*_create_from_*
+    -- functions onto record-action triggers.
+    -- =========================================================================
+    ('wfr_hr_opening_fill_from_plan',
+     'Job Opening - Fill from Staffing Plan',
+     'On Job Opening Create or Edit, look up the linked Staffing Plan and auto-fill Profile Name, Company, Department, Designation, Employment Type, No. of Vacancies (only when blank).',
+     'Job Opening', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_opening_fill_from_plan","functionName":"HR: Fill Job Opening from Staffing Plan"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_app_fill_from_opening',
+     'Job Application - Fill from Job Opening',
+     'On Job Application Create or Edit, look up the linked Job Opening and auto-fill Department, Designation, Employment Type, Job Description (only when blank).',
+     'Job Application', 'record-action', 'Create or Edit', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_app_fill_from_opening","functionName":"HR: Fill Job Application from Opening"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_appt_to_employee',
+     'Appointment Letter - Auto-create Employee Master',
+     'When an Appointment Letter is created (the candidate has been onboarded), auto-create the Employee Master record. Pulls dept/designation/email/mobile from the matching Job Application.',
+     'Appointment Letter', 'record-action', 'Create', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_emp_create_from_appt","functionName":"HR: Create Employee Master from Appointment Letter"}]'::jsonb,
+     TRUE, v_org_id, v_user_id, NOW(), NOW()),
+
+    ('wfr_hr_referral_to_application',
+     'Employee Referral - Auto-create Job Application',
+     'When an Employee Referral is created, auto-create a corresponding Job Application with Source = REFERRAL.',
+     'Employee Referral', 'record-action', 'Create', 'all', NULL,
+     '[{"type":"Function","functionId":"fn_hr_referral_create_application","functionName":"HR: Create Job Application from Referral"}]'::jsonb,
      TRUE, v_org_id, v_user_id, NOW(), NOW()),
 
     -- =========================================================================
@@ -936,7 +1323,7 @@ $js$,
         created_by_id = EXCLUDED.created_by_id,
         updated_at = NOW();
 
-    RAISE NOTICE 'Seeded 36 HR workflow rules (26 module + 10 autofill safety-net)';
+    RAISE NOTICE 'Seeded 40 HR workflow rules (30 module + 10 autofill safety-net)';
 
     -- =========================================================================
     -- STEP 4 - FUNCTION BINDINGS
@@ -1041,7 +1428,32 @@ $js$,
      'form_hr_job_offer', NULL, NULL,
      'beforeSubmit',
      '{}'::jsonb, '{}'::jsonb, NULL,
-     TRUE, 10, v_org_id, NOW(), NOW())
+     TRUE, 10, v_org_id, NOW(), NOW()),
+
+    -- Phase 1 Recruitment Pipeline: live onFieldChange auto-fill
+    -- Job Opening: when New Staffing Plan ID is picked, multi-field fill
+    ('fb_hr_open_fill_plan',
+     'fn_hr_opening_fill_from_plan',
+     'form_hr_job_opening', 'fld_open_plan_id', NULL,
+     'onFieldChange',
+     '{}'::jsonb, '{}'::jsonb, NULL,
+     TRUE, 5, v_org_id, NOW(), NOW()),
+
+    -- Job Application: when New Job Opening ID is picked, multi-field fill
+    ('fb_hr_app_fill_open',
+     'fn_hr_app_fill_from_opening',
+     'form_hr_job_application', 'fld_app_opening_id', NULL,
+     'onFieldChange',
+     '{}'::jsonb, '{}'::jsonb, NULL,
+     TRUE, 5, v_org_id, NOW(), NOW()),
+
+    -- Job Offer: when New Job Opening ID is picked, pull applicant info
+    ('fb_hr_offer_fill_open',
+     'fn_hr_offer_populate',
+     'form_hr_job_offer', 'fld_offer_opening_id', NULL,
+     'onFieldChange',
+     '{}'::jsonb, '{}'::jsonb, NULL,
+     TRUE, 5, v_org_id, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
         function_id = EXCLUDED.function_id,
         form_id = EXCLUDED.form_id, field_id = EXCLUDED.field_id,
@@ -1121,13 +1533,13 @@ $js$,
         organization_id = EXCLUDED.organization_id,
         updated_at = NOW();
 
-    RAISE NOTICE 'Seeded 22 HR function bindings (12 calc + 10 employee auto-fill)';
+    RAISE NOTICE 'Seeded 25 HR function bindings (15 calc + 10 employee auto-fill)';
 
     RAISE NOTICE '==========================================';
     RAISE NOTICE 'HR automations ready.';
-    RAISE NOTICE '  Functions:         16 (15 automation + 1 employee lookup)';
-    RAISE NOTICE '  Workflow Rules:    36 (26 module + 10 autofill safety-net)';
-    RAISE NOTICE '  Function Bindings: 22 (12 calc + 10 employee auto-fill)';
+    RAISE NOTICE '  Functions:         21 (15 automation + 5 recruitment pipeline + 1 employee lookup)';
+    RAISE NOTICE '  Workflow Rules:    40 (30 module + 10 autofill safety-net)';
+    RAISE NOTICE '  Function Bindings: 25 (15 calc + 10 employee auto-fill)';
     RAISE NOTICE '==========================================';
 END $$;
 
