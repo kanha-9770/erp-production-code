@@ -25,8 +25,8 @@ BEGIN;
 
 DO $$
 DECLARE
-    v_org_id  TEXT := 'cmo9uk3440005u7ngdg652eoq';
-    v_user_id TEXT := 'cmo9uhu660000u7ngr51zv3wv';
+    v_org_id  TEXT := 'cmojv2bpr000hu700t3jrj0vq';
+    v_user_id TEXT := 'cmojv15ct000cu700xrgwrbe8';
     v_deleted INTEGER;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM organizations WHERE id = v_org_id) THEN

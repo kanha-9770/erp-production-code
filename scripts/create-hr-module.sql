@@ -22,8 +22,8 @@ BEGIN;
 
 DO $$
 DECLARE
-    v_org_id  TEXT := 'cmo9uk3440005u7ngdg652eoq';
-    v_user_id TEXT := 'cmo9uhu660000u7ngr51zv3wv';
+    v_org_id  TEXT := 'cmojv2bpr000hu700t3jrj0vq';
+    v_user_id TEXT := 'cmojv15ct000cu700xrgwrbe8';
     v_deleted INTEGER;
     v_dept_opts       TEXT := '[{"label":"Administration","value":"ADMIN"},{"label":"Human Resources","value":"HR"},{"label":"Finance","value":"FINANCE"},{"label":"Sales","value":"SALES"},{"label":"Marketing","value":"MARKETING"},{"label":"Production","value":"PRODUCTION"},{"label":"Operations","value":"OPERATIONS"},{"label":"IT","value":"IT"},{"label":"R&D","value":"RND"},{"label":"Logistics","value":"LOGISTICS"},{"label":"Quality","value":"QUALITY"},{"label":"Maintenance","value":"MAINTENANCE"}]';
     v_emp_type_opts   TEXT := '[{"label":"Full-Time","value":"FULL_TIME"},{"label":"Part-Time","value":"PART_TIME"},{"label":"Contract","value":"CONTRACT"},{"label":"Intern","value":"INTERN"},{"label":"Consultant","value":"CONSULTANT"},{"label":"Temporary","value":"TEMPORARY"},{"label":"Probation","value":"PROBATION"}]';
@@ -67,8 +67,12 @@ BEGIN
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RAISE NOTICE 'Wiped payroll_configurations: %', v_deleted;
 
+    -- Wipe route_permissions for this org AND any rows that re-use the well-
+    -- known HR ids from a previous bootstrap on a different org (PK is `id`,
+    -- not (id, org), so cross-org id collisions would otherwise block INSERT).
     DELETE FROM route_permissions
-     WHERE organization_id = v_org_id AND pattern LIKE '/hr%';
+     WHERE (organization_id = v_org_id AND pattern LIKE '/hr%')
+        OR id LIKE 'rp_hr%';
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RAISE NOTICE 'Wiped route_permissions: %', v_deleted;
 
@@ -1257,13 +1261,13 @@ END $$;
 -- Module hierarchy:
 --   SELECT id, name, parent_id, level, path, sort_order
 --     FROM form_modules
---    WHERE organization_id = 'cmo9uk3440005u7ngdg652eoq'
+--    WHERE organization_id = 'cmojv2bpr000hu700t3jrj0vq'
 --    ORDER BY level, sort_order;
 --
 -- Forms and their modules:
 --   SELECT f.id, f.name, m.name AS module
 --     FROM forms f JOIN form_modules m ON m.id = f.module_id
---    WHERE m.organization_id = 'cmo9uk3440005u7ngdg652eoq'
+--    WHERE m.organization_id = 'cmojv2bpr000hu700t3jrj0vq'
 --    ORDER BY m.level, m.sort_order;
 --
 -- All HR fields grouped by form/section:
@@ -1272,7 +1276,7 @@ END $$;
 --     JOIN form_sections s ON s.id = ff.section_id
 --     JOIN forms f        ON f.id = s.form_id
 --     JOIN form_modules m ON m.id = f.module_id
---    WHERE m.organization_id = 'cmo9uk3440005u7ngdg652eoq'
+--    WHERE m.organization_id = 'cmojv2bpr000hu700t3jrj0vq'
 --    ORDER BY f.name, s."order", ff."order";
 --
 -- Field count per form (should match: 52,9,6,10,5,9,11,15,10,8,10,4,7,8,9,12,19,11,11,15 = 241):
@@ -1281,7 +1285,7 @@ END $$;
 --     JOIN form_sections s ON s.form_id = f.id
 --     JOIN form_fields ff  ON ff.section_id = s.id
 --     JOIN form_modules m  ON m.id = f.module_id
---    WHERE m.organization_id = 'cmo9uk3440005u7ngdg652eoq'
+--    WHERE m.organization_id = 'cmojv2bpr000hu700t3jrj0vq'
 --    GROUP BY f.name
 --    ORDER BY f.name;
 --
@@ -1292,5 +1296,5 @@ END $$;
 -- User permissions:
 --   SELECT module_id, form_id, can_view, can_edit, can_delete, is_system_admin, reason
 --     FROM user_permissions
---    WHERE user_id = 'cmo9uhu660000u7ngr51zv3wv'
+--    WHERE user_id = 'cmojv15ct000cu700xrgwrbe8'
 --    ORDER BY module_id NULLS LAST, form_id NULLS LAST;
