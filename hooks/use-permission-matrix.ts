@@ -250,20 +250,26 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
       setSaving(true)
 
       try {
-        // Find the moduleId for the selected form
-        let moduleId: string | null = null
-        outer: for (const mod of modules) {
-          if (mod.forms?.some((f) => f.id === selectedFormId)) {
-            moduleId = mod.id
-            break
-          }
-          for (const sub of mod.children ?? []) {
-            if (sub.forms?.some((f) => f.id === selectedFormId)) {
-              moduleId = sub.id
-              break outer
+        // Find the moduleId for the selected form. Walk the full tree —
+        // forms can live under deeply nested submodules and the row must be
+        // saved with moduleId set (computeRouteMeta and the modules-permission
+        // query both rely on it; a null moduleId silently strips the module
+        // from the user's accessible list).
+        const findOwningModuleId = (
+          nodes: PermissionModule[],
+          formId: string,
+        ): string | null => {
+          for (const node of nodes) {
+            if (node.forms?.some((f) => f.id === formId)) return node.id
+            if (node.children?.length) {
+              const found = findOwningModuleId(node.children, formId)
+              if (found) return found
             }
           }
+          return null
         }
+
+        const moduleId = findOwningModuleId(modules, selectedFormId)
 
         const roleUpdates: object[] = []
         const userUpdates: object[] = []

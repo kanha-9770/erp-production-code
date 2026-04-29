@@ -67,7 +67,10 @@ export const permissionsApi = baseApi.injectEndpoints({
         headers: { "Content-Type": "application/json" },
         body,
       }),
-      invalidatesTags: ["RolePermissions"],
+      // Also invalidate Permissions so the dynamic module page (which reads
+      // /api/admin/permissions via the "Permissions" tag) refetches and
+      // picks up the new role grants without a hard reload.
+      invalidatesTags: ["RolePermissions", "Permissions"],
     }),
 
     // Batch update user permissions
@@ -78,7 +81,8 @@ export const permissionsApi = baseApi.injectEndpoints({
         headers: { "Content-Type": "application/json" },
         body,
       }),
-      invalidatesTags: ["UserPermissions"],
+      // Same reason as above — admin/permissions composes role + user data.
+      invalidatesTags: ["UserPermissions", "Permissions"],
     }),
 
     // Admin permissions (for module page slug)
