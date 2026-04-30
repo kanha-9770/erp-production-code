@@ -273,18 +273,28 @@ export function FormFieldRenderer({
           className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""} ${isInSubform ? "border-purple-200 focus:border-purple-400" : ""}`}
         />
       );
-    case "date":
+    case "date": {
+      // Disallow past dates for "Leave Start Date" fields or when explicitly configured
+      const dateLabelLower = (field.label || "").toLowerCase();
+      const dateDisallowPast =
+        field.properties?.disallowPastDates === true ||
+        dateLabelLower.includes("leave start");
+      const dateTodayStr = dateDisallowPast
+        ? new Date().toISOString().split("T")[0]
+        : undefined;
       return (
         <Input
           {...fieldProps}
           type="date"
           value={value || ""}
+          min={dateTodayStr}
           onChange={(e) => onFieldChange(field.id, e.target.value)}
           readOnly={field.readonly || field.properties?.autoFetchDate}
           className={`${fieldProps.className} ${isReadOnly ? "bg-muted cursor-not-allowed" : ""
             } ${isInSubform ? "border-purple-200" : ""}`}
         />
       );
+    }
     case "time":
       return (
         <Input

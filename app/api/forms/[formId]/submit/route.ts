@@ -174,7 +174,43 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       // return NextResponse.json({ error: "Cannot submit user form: no user context" }, { status: 400 });
     }
 
-    // ─── 4. Generate unique IDs ─────────────────────────────────
+    // ─── 4a. Validate leave start date (server-side) ────────────
+    // Reject if any date field labeled "Leave Start Date" contains a past date.
+    // Uses server date (normalized to midnight) so client clock manipulation is irrelevant.
+    {
+      const serverToday = new Date();
+      serverToday.setHours(0, 0, 0, 0);
+
+      const allFields: FormField[] = [
+        ...form.sections.flatMap((s) => s.fields),
+        ...flattenSubformFields(form.subforms || []),
+      ];
+
+      for (const field of allFields) {
+        const labelLower = (field.label || "").toLowerCase();
+        const isLeaveStartDate =
+          labelLower.includes("leave start") && field.type === "date";
+        const isExplicitlyGuarded =
+          (field.properties as Record<string, any> | null)?.disallowPastDates === true &&
+          field.type === "date";
+
+        if (isLeaveStartDate || isExplicitlyGuarded) {
+          const submittedValue = body.recordData?.[field.id];
+          if (submittedValue) {
+            const submittedDate = new Date(submittedValue);
+            submittedDate.setHours(0, 0, 0, 0);
+            if (submittedDate < serverToday) {
+              return NextResponse.json(
+                { error: "Leave cannot start from a past date." },
+                { status: 400 }
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // ─── 4b. Generate unique IDs ─────────────────────────────────
     const finalRecordData = await generateUniqueIds(form, body.recordData);
 
     // ─── 5. Build structured record data ────────────────────────

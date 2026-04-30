@@ -376,18 +376,30 @@ export function FormRenderer({
         />
       );
 
-    case "date":
+    case "date": {
       if (!isFieldVisible()) return null;
+      // Determine if this date field should disallow past dates.
+      // Applies to fields whose label contains "leave start" (case-insensitive)
+      // or fields with properties.disallowPastDates explicitly set.
+      const labelLower = (field.label || "").toLowerCase();
+      const disallowPast =
+        field.properties?.disallowPastDates === true ||
+        labelLower.includes("leave start");
+      const todayStr = disallowPast
+        ? new Date().toISOString().split("T")[0]
+        : undefined;
       return (
         <Input
           {...fieldProps}
           type="date"
           value={value || ""}
+          min={todayStr}
           onChange={(e: { target: { value: any } }) =>
             !isFieldReadOnly() && handleFieldChange(field.id, e.target.value)
           }
         />
       );
+    }
 
     case "time":
       if (!isFieldVisible()) return null;
