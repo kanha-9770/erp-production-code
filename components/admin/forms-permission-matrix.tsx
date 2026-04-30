@@ -10,7 +10,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
   TableBody,
@@ -197,11 +196,13 @@ export function FormsPermissionMatrix({
           {filteredRoles.length === 0 ? (
             <EmptyRoles />
           ) : (
-            <ScrollArea className="h-[calc(100vh-420px)] min-h-[500px] rounded-md border">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background z-10">
+            <div className="max-h-[calc(100vh-420px)] min-h-[500px] overflow-auto rounded-md border [&>div]:overflow-visible">
+              <Table className="min-w-[640px]">
+                <TableHeader className="sticky top-0 z-20 bg-background">
                   <TableRow>
-                    <TableHead className="w-[160px] min-w-[160px] px-2 font-semibold">Role / User</TableHead>
+                    <TableHead className="sticky left-0 z-30 w-[160px] min-w-[160px] bg-background px-2 font-semibold shadow-[1px_0_0_0_hsl(var(--border))]">
+                      Role / User
+                    </TableHead>
                     {permissions.map((p) => (
                       <TableHead
                         key={p.id}
@@ -229,10 +230,13 @@ export function FormsPermissionMatrix({
                       >
                         <>
                           {/* Role row */}
-                          <TableRow className="hover:bg-muted/60">
-                            <TableCell className="px-2 font-medium">
+                          <TableRow className="group hover:bg-muted/60">
+                            <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-background px-2 font-medium shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted/60">
                               <CollapsibleTrigger asChild>
-                                <button className="flex items-center gap-1.5 text-sm hover:text-primary focus:outline-none">
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-1.5 text-sm hover:text-primary focus:outline-none"
+                                >
                                   {isExpanded ? (
                                     <ChevronDown className="h-4 w-4 shrink-0" />
                                   ) : (
@@ -294,7 +298,7 @@ export function FormsPermissionMatrix({
                   })}
                 </TableBody>
               </Table>
-            </ScrollArea>
+            </div>
           )}
 
           {/* Action bar */}
@@ -377,8 +381,8 @@ function UserRow({
   togglePermission,
 }: UserRowProps) {
   return (
-    <TableRow className="bg-muted/30 hover:bg-muted/50">
-      <TableCell className="pl-8 pr-2 text-sm">
+    <TableRow className="group bg-muted/30 hover:bg-muted/50">
+      <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-muted/30 pl-8 pr-2 text-sm shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted/50">
         <div className="truncate">{user.first_name} {user.last_name}</div>
         <div className="truncate text-xs text-muted-foreground">{user.email}</div>
       </TableCell>
