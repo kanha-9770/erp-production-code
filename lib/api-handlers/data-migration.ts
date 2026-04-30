@@ -165,7 +165,14 @@ function formatExportValue(value: any, type?: string): string {
   }
 
   if (typeof value === "object") {
-    if (value.label) return value.label
+    // Phone-input fields commonly store { number, countryCode, ... } shapes
+    if (value.number || value.phoneNumber) {
+      const num = String(value.number || value.phoneNumber)
+      const cc = value.countryCode || value.dialCode || ""
+      const joined = cc && !num.startsWith("+") ? `${cc}${num}` : num
+      return formatPhoneForCsv(joined)
+    }
+    if (value.label) return String(value.label)
     if (value.value) return String(value.value)
     return JSON.stringify(value)
   }
@@ -177,7 +184,28 @@ function formatExportValue(value: any, type?: string): string {
     } catch { /* use raw */ }
   }
 
-  return String(value)
+  const str = String(value)
+
+  // Phone numbers and other long digit strings get parsed by Excel as numbers
+  // (and displayed in scientific notation). Wrap them as ="..." so Excel
+  // imports them as text from the CSV.
+  if (type === "phone" || type === "phone-input" || type === "tel") {
+    return formatPhoneForCsv(str)
+  }
+
+  return str
+}
+
+/**
+ * Wrap a phone-like string as an Excel CSV text-formula so Excel preserves
+ * it as text instead of parsing it as a number.
+ *   "+911234567890"  →  '="+911234567890"'
+ * Already-wrapped values pass through unchanged.
+ */
+function formatPhoneForCsv(raw: string): string {
+  if (!raw) return ""
+  if (raw.startsWith('="') && raw.endsWith('"')) return raw
+  return `="${raw.replace(/"/g, '""')}"`
 }
 
 // ─── Export ──────────────────────────────────────────────────────────────────
@@ -227,19 +255,30 @@ export async function exportFormRecords(
   })
 
   // Recursively walk subforms (and their childSubforms) to collect every field.
+  // Use the bare field label as the column header. If two fields share a label,
+  // suffix with " (2)", " (3)" etc. to keep columns distinct.
   const sectionCount = ((form as any).sections?.length ?? 0)
-  const collectSubformFields = (
-    subforms: any[],
-    parentPath: string,
-    baseOrder: number,
-  ) => {
+  const usedLabels = new Map<string, number>()
+  for (const f of allFields) usedLabels.set(f.exportLabel, 1)
+
+  const uniquifyLabel = (label: string): string => {
+    const count = usedLabels.get(label) ?? 0
+    if (count === 0) {
+      usedLabels.set(label, 1)
+      return label
+    }
+    const next = count + 1
+    usedLabels.set(label, next)
+    return `${label} (${next})`
+  }
+
+  const collectSubformFields = (subforms: any[], baseOrder: number) => {
     let local = 0
     for (const sf of subforms || []) {
-      const path = parentPath ? `${parentPath} › ${sf.name}` : sf.name
       const subBase = baseOrder + local++ * 100000
       ;(sf.fields || []).forEach((field: any, fIdx: number) => {
         if (fieldMap.has(field.id)) return
-        const exportLabel = `${path}: ${field.label}`
+        const exportLabel = uniquifyLabel(field.label)
         fieldMap.set(field.id, {
           label: field.label,
           type: field.type,
@@ -254,15 +293,11 @@ export async function exportFormRecords(
         })
       })
       if (sf.childSubforms?.length) {
-        collectSubformFields(sf.childSubforms, path, subBase + 50000)
+        collectSubformFields(sf.childSubforms, subBase + 50000)
       }
     }
   }
-  collectSubformFields(
-    (form as any).subforms || [],
-    "",
-    (sectionCount + 1) * 1000,
-  )
+  collectSubformFields((form as any).subforms || [], (sectionCount + 1) * 1000)
 
   // Determine which fields to include
   const fieldsToExport = selectedFieldIds?.length
