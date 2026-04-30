@@ -164,6 +164,7 @@ model User {
   savedFilters        SavedFilter[]            @relation("SavedFilterCreator")
   workflowRules       WorkflowRule[]           @relation("WorkflowRuleCreator")
   functions           CrmFunction[]            @relation("CrmFunctionCreator")
+  notifications       Notification[]           @relation("NotificationRecipient")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -232,6 +233,7 @@ model Organization {
   workflowRules     WorkflowRule[]
   functions         CrmFunction[]
   functionBindings  FunctionBinding[]
+  notifications     Notification[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1914,4 +1916,46 @@ model FunctionBinding {
   @@index([event])
   @@index([organizationId])
   @@map("function_bindings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications — in-app system notifications fanned out to recipients by the
+// "System Notification" workflow action. One row per (recipient, event); the
+// bell in the sidebar reads from this table and marks rows read on click.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id              String       @id @default(cuid())
+  recipientId     String       @map("recipient_id")
+  recipient       User         @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  organizationId  String       @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Display content. Both rendered server-side from the rule's templates so the
+  // bell can show them as-is without needing to re-resolve field values.
+  title           String
+  body            String?      @db.Text
+
+  // Origin metadata — useful for "View record" links and audit trails.
+  ruleId          String?      @map("rule_id")
+  ruleName        String?      @map("rule_name")
+  moduleName      String?      @map("module_name")
+  formId          String?      @map("form_id")
+  recordId        String?      @map("record_id")
+  link            String?      // optional deep link the bell can navigate to
+
+  // Structured payload — currently `{ fields: [{ label, apiName, value }] }`
+  // populated by the System Notification action so the bell's detail popup
+  // can render the admin-selected fields as a clean table instead of an
+  // appended text blob.
+  data            Json?
+
+  isRead          Boolean      @default(false) @map("is_read")
+  readAt          DateTime?    @map("read_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  @@index([recipientId, isRead, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([ruleId])
+  @@map("notifications")
 }

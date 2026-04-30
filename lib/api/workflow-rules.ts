@@ -41,6 +41,13 @@ export interface WorkflowInstantAction {
   // For type === "Field Update"
   targetFieldId?: string
   targetValue?: string
+  // For type === "System Notification"
+  notifyName?: string
+  notifyRoleIds?: string[]
+  notifyFormId?: string
+  notifyFieldIds?: string[]
+  notifyTitle?: string
+  notifyMessage?: string
 }
 
 export interface CreateWorkflowRuleBody {

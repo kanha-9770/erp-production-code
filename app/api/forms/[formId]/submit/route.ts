@@ -236,7 +236,11 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
       // refetches on the submit response) shows pre-workflow state. Errors
       // are already swallowed inside triggerWorkflowsForRecord, so awaiting
       // it can never break the save.
-      if (organizationId && currentUserId) {
+      //
+      // Workflows fire on org alone — anonymous public-form submissions
+      // need to trigger Email / System Notification actions too. The trigger
+      // skips Function actions internally when there's no acting user.
+      if (organizationId) {
         const mod = await prisma.formModule
           .findFirst({ where: { id: form.moduleId }, select: { name: true } })
           .catch(() => null)
@@ -245,25 +249,28 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
             moduleName: mod.name,
             action: "Edit",
             organizationId: organizationId!,
-            userId: currentUserId!,
+            userId: currentUserId,
+            formId: form.id,
             recordId: updatedRecord.id,
             recordData: structuredRecordData as any,
           })
         }
 
-        // afterUpdate FunctionBindings — still fire-and-forget; they don't
-        // persist anything to the record by design (side-effects only).
-        runBindings(
-          "afterUpdate",
-          { formId: form.id, moduleId: form.moduleId },
-          {
-            organizationId,
-            userId: currentUserId,
-            formData: finalRecordData,
-            recordData: structuredRecordData,
-            recordId: updatedRecord.id,
-          }
-        ).catch((err) => console.error("[binding] afterUpdate failed", err));
+        // afterUpdate FunctionBindings still need an acting user — keep
+        // them gated until that's ready to support anonymous runs.
+        if (currentUserId) {
+          runBindings(
+            "afterUpdate",
+            { formId: form.id, moduleId: form.moduleId },
+            {
+              organizationId,
+              userId: currentUserId,
+              formData: finalRecordData,
+              recordData: structuredRecordData,
+              recordId: updatedRecord.id,
+            }
+          ).catch((err) => console.error("[binding] afterUpdate failed", err));
+        }
       }
 
       return NextResponse.json({
@@ -292,7 +299,10 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
     // Fire workflow rules attached to "Create" / "Create or Edit".
     // See note above on the Edit path — awaited so the submit response
     // reflects any Field Update / Function writes the workflow makes.
-    if (organizationId && currentUserId) {
+    //
+    // Workflows fire on org alone so anonymous public-form submissions
+    // still dispatch Email / System Notifications.
+    if (organizationId) {
       const mod = await prisma.formModule
         .findFirst({ where: { id: form.moduleId }, select: { name: true } })
         .catch(() => null)
@@ -301,24 +311,27 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
           moduleName: mod.name,
           action: "Create",
           organizationId: organizationId!,
-          userId: currentUserId!,
+          userId: currentUserId,
+          formId: form.id,
           recordId: record.id,
           recordData: structuredRecordData as any,
         })
       }
 
-      // afterCreate FunctionBindings — still fire-and-forget; side-effects only.
-      runBindings(
-        "afterCreate",
-        { formId: form.id, moduleId: form.moduleId },
-        {
-          organizationId,
-          userId: currentUserId,
-          formData: finalRecordData,
-          recordData: structuredRecordData,
-          recordId: record.id,
-        }
-      ).catch((err) => console.error("[binding] afterCreate failed", err));
+      // afterCreate FunctionBindings still need an acting user.
+      if (currentUserId) {
+        runBindings(
+          "afterCreate",
+          { formId: form.id, moduleId: form.moduleId },
+          {
+            organizationId,
+            userId: currentUserId,
+            formData: finalRecordData,
+            recordData: structuredRecordData,
+            recordId: record.id,
+          }
+        ).catch((err) => console.error("[binding] afterCreate failed", err));
+      }
     }
 
     return NextResponse.json({

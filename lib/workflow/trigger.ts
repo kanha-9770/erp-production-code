@@ -24,7 +24,19 @@ interface TriggerInput {
   moduleName: string
   action: WorkflowAction
   organizationId: string
-  userId: string
+  /**
+   * Acting user. Optional — anonymous public-form submissions fire workflows
+   * too (System / Email Notifications and Field Updates don't need a user
+   * context). Function actions that require an actor will be skipped when
+   * userId is absent.
+   */
+  userId?: string | null
+  /**
+   * The form whose submission triggered this run. Lets the System
+   * Notification action's form-scope filter compare directly without
+   * walking the 15 sharded record tables.
+   */
+  formId?: string
   recordId?: string
   recordData?: Record<string, any>
 }
@@ -43,6 +55,13 @@ interface InstantActionEntry {
   emailBody?: string
   emailFrom?: string
   emailReplyTo?: string
+  // For type === "System Notification"
+  notifyName?: string
+  notifyRoleIds?: string[]
+  notifyFormId?: string
+  notifyFieldIds?: string[]
+  notifyTitle?: string
+  notifyMessage?: string
 }
 
 function normalizeActions(raw: unknown): InstantActionEntry[] {
@@ -63,6 +82,16 @@ function normalizeActions(raw: unknown): InstantActionEntry[] {
           emailBody: typeof entry.emailBody === "string" ? entry.emailBody : undefined,
           emailFrom: typeof entry.emailFrom === "string" ? entry.emailFrom : undefined,
           emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
+          notifyName: typeof entry.notifyName === "string" ? entry.notifyName : undefined,
+          notifyRoleIds: Array.isArray(entry.notifyRoleIds)
+            ? entry.notifyRoleIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          notifyFormId: typeof entry.notifyFormId === "string" ? entry.notifyFormId : undefined,
+          notifyFieldIds: Array.isArray(entry.notifyFieldIds)
+            ? entry.notifyFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          notifyTitle: typeof entry.notifyTitle === "string" ? entry.notifyTitle : undefined,
+          notifyMessage: typeof entry.notifyMessage === "string" ? entry.notifyMessage : undefined,
         }
       }
       return null
@@ -296,7 +325,7 @@ function evaluateConditions(
 
 export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<void> {
   try {
-    const { moduleName, action, organizationId, userId, recordId, recordData } = input
+    const { moduleName, action, organizationId, userId, formId, recordId, recordData } = input
 
     const rules = await prisma.workflowRule.findMany({
       where: {
@@ -315,6 +344,10 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
       },
     })
 
+    console.log(
+      `[workflow] trigger fired — module="${moduleName}" action="${action}" formId=${formId || "?"} recordId=${recordId || "?"} userId=${userId || "(anonymous)"} → ${rules.length} active rule(s)`
+    )
+
     // Resolve the module's field map once per trigger pass. Cheap enough to
     // reuse across every rule + every Function action below.
     let fieldMapPromise: Promise<Map<string, string>> | null = null
@@ -326,11 +359,22 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
     }
 
     for (const rule of rules) {
-      if (!actionMatchesRule(rule.recordAction, action)) continue
+      if (!actionMatchesRule(rule.recordAction, action)) {
+        console.log(
+          `[workflow] rule "${rule.name}" skipped — recordAction="${rule.recordAction}" does not match fired="${action}"`
+        )
+        continue
+      }
       const conds = (rule.conditions as any[]) || null
-      if (!evaluateConditions(rule.conditionType, conds, recordData)) continue
+      if (!evaluateConditions(rule.conditionType, conds, recordData)) {
+        console.log(`[workflow] rule "${rule.name}" skipped — conditions not satisfied`)
+        continue
+      }
 
       const actions = normalizeActions(rule.instantActions)
+      console.log(
+        `[workflow] rule "${rule.name}" matched — running ${actions.length} action(s): ${actions.map((a) => a.type).join(", ") || "(none)"}`
+      )
       for (const act of actions) {
         // Field Update — patch a single field on the record in-place. Runs
         // even for anonymous users (workflow is server-side, no auth gate).
@@ -344,6 +388,180 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
             console.error(
               `[workflow] rule "${rule.name}" field update failed`,
               err
+            )
+          }
+          continue
+        }
+
+        // System Notification — fan-out one in-app notification per user
+        // assigned to any of the chosen roles. Title/body templates accept
+        // {{field}} placeholders the same way Email Notification does. The
+        // selected fields are stored as structured data on each row so the
+        // bell's detail dialog can render them as a clean table.
+        if (act.type === "System Notification") {
+          if (!act.notifyRoleIds || act.notifyRoleIds.length === 0) {
+            console.warn(
+              `[workflow] rule "${rule.name}" system notification skipped — no roles configured`
+            )
+            continue
+          }
+          // notifyFormId scopes the notification to a specific form within
+          // the module. The trigger now gets the form id directly from the
+          // caller (see submit/route.ts), so we just compare — no fragile
+          // walk through the 15 sharded record tables.
+          if (act.notifyFormId && formId && formId !== act.notifyFormId) {
+            continue
+          }
+
+          try {
+            const fieldMap = await getFieldMap()
+            const title =
+              renderEmailTemplate(act.notifyTitle || "", recordData, fieldMap) ||
+              act.notifyName ||
+              `${moduleName} — ${action}`
+
+            // Inverse maps (fieldId → label, fieldId → apiName) for the
+            // structured payload the detail popup renders as a table.
+            const idToLabel = new Map<string, string>()
+            const idToApiName = new Map<string, string>()
+            for (const [k, v] of fieldMap.entries()) {
+              if (k === v) continue // raw fieldId entry
+              // First key seen for a given fieldId tends to be the apiName
+              // (loadModuleFieldMap adds apiName before label). The label
+              // pass overwrites apiName, so track both separately.
+              if (!idToApiName.has(v)) idToApiName.set(v, k)
+              idToLabel.set(v, k)
+            }
+
+            // Structured field payload — admin-selected fields with their
+            // current values on this record. Only fields that have a value
+            // make it through; empty ones are skipped to keep the popup tidy.
+            const fieldsPayload: Array<{ label: string; apiName: string; value: any }> = []
+            for (const fid of act.notifyFieldIds || []) {
+              const v = getRecordFieldValue(recordData, fid)
+              if (v === undefined || v === null || v === "") continue
+              const label = idToLabel.get(fid) || fid
+              const apiName = idToApiName.get(fid) || fid
+              const safeValue = typeof v === "object" ? JSON.stringify(v) : String(v)
+              fieldsPayload.push({ label, apiName, value: safeValue })
+            }
+
+            // Body now stores ONLY the rendered message template — the field
+            // summary lives in `data.fields` so the detail popup can render
+            // it as a definition list. Bell list previews still get a useful
+            // one-liner from the message.
+            const body = renderEmailTemplate(act.notifyMessage || "", recordData, fieldMap)
+
+            // Resolve recipients — every user in the org with a unit
+            // assignment under any of the chosen roles. Distinct so a user
+            // assigned the same role across multiple units only gets one row.
+            // Org owners are also included even if they don't have a row in
+            // user_unit_assignments — otherwise an "Admin"-targeted rule
+            // misses the owner who created the org.
+            const [assignments, orgOwners] = await Promise.all([
+              prisma.userUnitAssignment.findMany({
+                where: {
+                  roleId: { in: act.notifyRoleIds },
+                  user: { organizationId },
+                },
+                select: { userId: true },
+              }),
+              prisma.role.findMany({
+                where: { id: { in: act.notifyRoleIds }, isAdmin: true },
+                select: { id: true },
+              }).then(async (adminRoles) => {
+                if (adminRoles.length === 0) return [] as Array<{ id: string }>
+                const org = await prisma.organization.findUnique({
+                  where: { id: organizationId },
+                  select: { ownerId: true },
+                })
+                return org?.ownerId ? [{ id: org.ownerId }] : []
+              }),
+            ])
+            const recipientIds = Array.from(
+              new Set([
+                ...assignments.map((a) => a.userId),
+                ...orgOwners.map((u) => u.id),
+              ])
+            )
+            if (recipientIds.length === 0) {
+              console.warn(
+                `[workflow] rule "${rule.name}" system notification — no users found for roles ${JSON.stringify(act.notifyRoleIds)} in org ${organizationId}`
+              )
+              continue
+            }
+
+            // Build a deep link to the originating record when we know the
+            // module + record. The dynamic route is /[module_name]/[module_Id]/...
+            // — without the moduleId we still have a useful module-level link.
+            let link: string | null = null
+            try {
+              const mod = await prisma.formModule.findFirst({
+                where: { name: moduleName, organizationId },
+                select: { id: true },
+              })
+              if (mod?.id) {
+                const slug = encodeURIComponent(moduleName)
+                link = recordId
+                  ? `/${slug}/${mod.id}/${recordId}`
+                  : `/${slug}/${mod.id}`
+              }
+            } catch {}
+
+            // Bulk insert — createMany skips per-row hooks but is by far the
+            // cheapest way to fan out to dozens/hundreds of users.
+            const notificationData =
+              fieldsPayload.length > 0 ? { fields: fieldsPayload } : null
+
+            const buildRow = (uid: string, includeData: boolean) => ({
+              recipientId: uid,
+              organizationId,
+              title,
+              body: body || null,
+              ...(includeData ? { data: notificationData } : {}),
+              ruleId: rule.id,
+              ruleName: rule.name,
+              moduleName,
+              formId: act.notifyFormId || formId || null,
+              recordId: recordId || null,
+              link,
+            })
+
+            // First attempt with the structured `data` payload. If the
+            // running Prisma client is stale (generated before the `data`
+            // column was added to the schema) it will throw a validation
+            // error rejecting the unknown argument. Retry once without
+            // `data` so the notification still lands — losing the
+            // per-field table is far better than losing the whole row.
+            let writeResult: any = null
+            try {
+              writeResult = await (prisma as any).notification.createMany({
+                data: recipientIds.map((uid: string) => buildRow(uid, true)),
+                skipDuplicates: true,
+              })
+            } catch (validationErr: any) {
+              const msg = String(validationErr?.message || validationErr || "")
+              const looksLikeUnknownDataArg =
+                msg.includes("Unknown arg") ||
+                msg.includes("Unknown argument") ||
+                msg.includes("data")
+              if (!looksLikeUnknownDataArg) throw validationErr
+              console.warn(
+                `[workflow] rule "${rule.name}" system notification — Prisma client appears stale (run \`npx prisma generate && npx prisma db push\`). Retrying without structured \`data\` payload.`
+              )
+              writeResult = await (prisma as any).notification.createMany({
+                data: recipientIds.map((uid: string) => buildRow(uid, false)),
+                skipDuplicates: true,
+              })
+            }
+            console.log(
+              `[workflow] rule "${rule.name}" system notification dispatched — ${writeResult?.count ?? recipientIds.length} row(s) for ${recipientIds.length} recipient(s)`
+            )
+          } catch (err: any) {
+            console.error(
+              `[workflow] rule "${rule.name}" system notification failed:`,
+              err?.message || err,
+              err?.stack ? `\n${err.stack}` : ""
             )
           }
           continue
@@ -394,6 +612,15 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
 
         if (act.type !== "Function") continue
         if (!act.functionId) continue
+        // Function actions need an actor (userId is required by executeFunction).
+        // For anonymous public-form submissions we don't have one — skip the
+        // function but keep firing the rest of the rule's actions.
+        if (!userId) {
+          console.warn(
+            `[workflow] rule "${rule.name}" function action skipped — no acting user (anonymous submission)`
+          )
+          continue
+        }
         try {
           const fn = await prisma.crmFunction.findFirst({
             where: { id: act.functionId, organizationId },

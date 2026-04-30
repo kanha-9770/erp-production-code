@@ -53,6 +53,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { useGetUserQuery } from "@/lib/api/auth";
+import { NotificationBell } from "@/components/layout/notification-bell";
 
 import { useOptimisticModules } from "@/hooks/useOptimisticModules";
 import { usePermissionContext } from "@/context/PermissionContext";
@@ -546,17 +547,17 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
         {/* User area */}
         {canAccess("/profile") && (
-          <Link href="/profile">
-            <div
-              className="border-t px-3 py-3 relative"
-              style={{ borderColor: "#5a4d96" }}
-            >
+          <div
+            className="border-t px-3 py-3 relative flex items-center gap-2"
+            style={{ borderColor: "#5a4d96" }}
+          >
+            <Link href="/profile" className="flex-1 min-w-0">
               <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-black hover:text-white hover:bg-black transition-colors group">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded bg-[#5a4d96] flex items-center justify-center text-xs font-semibold text-white">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-5 h-5 rounded bg-[#5a4d96] flex items-center justify-center text-xs font-semibold text-white shrink-0">
                     {userData?.user?.first_name?.charAt(0)?.toUpperCase() || "CT"}
                   </div>
-                  <span className="text-sm font-medium text-black group-hover:text-white">
+                  <span className="text-sm font-medium text-black group-hover:text-white truncate">
                     {userData?.user
                       ? userData.user.first_name || userData.user.last_name
                         ? `${userData.user.first_name ?? ""} ${userData.user.last_name ?? ""
@@ -567,13 +568,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                       : "CRM Teamspace"}
                   </span>
                 </div>
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-4 h-4 shrink-0" />
               </button>
-              <div className="absolute bottom-3 left-7 w-5 h-5 rounded-full bg-[#5a4d96] flex items-center justify-center">
-                <span className="text-xs font-semibold text-white">1</span>
-              </div>
-            </div>
-          </Link>
+            </Link>
+            <NotificationBell />
+          </div>
         )}
 
         {/* Resize handle — desktop only */}

@@ -62,6 +62,9 @@ export const baseApi = createApi({
     // Functions
     "Functions",
     "FunctionBindings",
+    // Notifications
+    "Notifications",
+    "NotificationsUnreadCount",
   ],
   endpoints: () => ({}),
 })

@@ -6,6 +6,7 @@ import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery } from "@/lib/api/forms"
 import { useCreateWorkflowRuleMutation, useUpdateWorkflowRuleMutation, useGetWorkflowRulesQuery } from "@/lib/api/workflow-rules"
 import { useGetFunctionsQuery, useCreateFunctionMutation, useGetBindingsTreeQuery } from "@/lib/api/functions"
+import { useGetRolesQuery } from "@/lib/api/permissions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -99,10 +100,21 @@ interface InstantAction {
   webhookAuthType?: "General" | "Connection"
   webhookHeaders?: WebhookHeader[]
   webhookParams?: WebhookParam[]
+  // For type === "System Notification": fans out an in-app notification to
+  // every user assigned any of the chosen roles. Optional formId scopes the
+  // rule down to a single form within the module; notifyFieldIds controls
+  // which record fields are surfaced in the notification body.
+  notifyName?: string
+  notifyRoleIds?: string[]
+  notifyFormId?: string
+  notifyFieldIds?: string[]
+  notifyTitle?: string
+  notifyMessage?: string
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
   "Email Notification",
+  "System Notification",
   "Task",
   "Field Update",
   "Create Record",
@@ -159,6 +171,16 @@ function normalizeActions(raw: unknown): InstantAction[] {
               .filter((p: any) => p && typeof p.name === "string")
               .map((p: any) => ({ name: p.name, value: typeof p.value === "string" ? p.value : "" }))
             : undefined,
+          notifyName: typeof entry.notifyName === "string" ? entry.notifyName : undefined,
+          notifyRoleIds: Array.isArray(entry.notifyRoleIds)
+            ? entry.notifyRoleIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          notifyFormId: typeof entry.notifyFormId === "string" ? entry.notifyFormId : undefined,
+          notifyFieldIds: Array.isArray(entry.notifyFieldIds)
+            ? entry.notifyFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          notifyTitle: typeof entry.notifyTitle === "string" ? entry.notifyTitle : undefined,
+          notifyMessage: typeof entry.notifyMessage === "string" ? entry.notifyMessage : undefined,
         }
       }
       return null
@@ -332,6 +354,35 @@ export default function CreateWorkflowRulePage() {
   const webhookAction = useMemo(
     () => selectedInstantActions.find((a) => a.type === "Webhook"),
     [selectedInstantActions]
+  )
+
+  // ── System Notification dialog state ────────────────────────────────────
+  // Mirrors the email-notification flow: an "associate" list (showing the one
+  // configured notification, if any) and a "create" form. The form picks a
+  // role multi-select, an optional form-within-the-module to scope by, the
+  // record fields to surface in the body, and title/message templates.
+  type NotifyDialogStep = null | "associate" | "create"
+  const [notifyDialogStep, setNotifyDialogStep] = useState<NotifyDialogStep>(null)
+  const [notifyFormName, setNotifyFormNameLocal] = useState("")
+  const [notifyFormRoleIds, setNotifyFormRoleIds] = useState<string[]>([])
+  const [notifyFormFormId, setNotifyFormFormId] = useState<string>("")
+  const [notifyFormFieldIds, setNotifyFormFieldIds] = useState<string[]>([])
+  const [notifyFormTitle, setNotifyFormTitle] = useState("")
+  const [notifyFormMessage, setNotifyFormMessage] = useState("")
+  const [notifyRoleSearch, setNotifyRoleSearch] = useState("")
+  const [notifyFieldSearch, setNotifyFieldSearch] = useState("")
+
+  const notifyAction = useMemo(
+    () => selectedInstantActions.find((a) => a.type === "System Notification"),
+    [selectedInstantActions]
+  )
+
+  // Roles for the org — used to pick recipients. RTK keeps this cached for
+  // 5 min so opening the dialog repeatedly is cheap.
+  const { data: rolesResp } = useGetRolesQuery()
+  const availableRoles = useMemo(
+    () => (rolesResp?.data || []).filter((r: any) => r.isActive !== false),
+    [rolesResp]
   )
 
   const filteredFunctions = useMemo(() => {
@@ -590,6 +641,90 @@ export default function CreateWorkflowRulePage() {
     }
   }
 
+  // ── System Notification handlers ────────────────────────────────────────
+  const resetNotifyForm = () => {
+    setNotifyFormNameLocal("")
+    setNotifyFormRoleIds([])
+    setNotifyFormFormId("")
+    setNotifyFormFieldIds([])
+    setNotifyFormTitle("")
+    setNotifyFormMessage("")
+    setNotifyRoleSearch("")
+    setNotifyFieldSearch("")
+  }
+
+  const loadNotifyForm = (a: InstantAction | undefined) => {
+    setNotifyFormNameLocal(a?.notifyName || "")
+    setNotifyFormRoleIds(a?.notifyRoleIds || [])
+    setNotifyFormFormId(a?.notifyFormId || "")
+    setNotifyFormFieldIds(a?.notifyFieldIds || [])
+    setNotifyFormTitle(a?.notifyTitle || "")
+    setNotifyFormMessage(a?.notifyMessage || "")
+    setNotifyRoleSearch("")
+    setNotifyFieldSearch("")
+  }
+
+  const openNotifyDialog = () => {
+    loadNotifyForm(notifyAction)
+    setNotifyDialogStep(notifyAction?.notifyName ? "associate" : "create")
+  }
+
+  const closeNotifyDialog = () => setNotifyDialogStep(null)
+
+  const openNewNotifyForm = () => {
+    resetNotifyForm()
+    setNotifyDialogStep("create")
+  }
+
+  const openEditNotifyForm = () => {
+    loadNotifyForm(notifyAction)
+    setNotifyDialogStep("create")
+  }
+
+  const toggleNotifyRole = (id: string) => {
+    setNotifyFormRoleIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
+
+  const toggleNotifyField = (id: string) => {
+    setNotifyFormFieldIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
+
+  const saveSystemNotification = async () => {
+    const nextActions = (() => {
+      const filtered = selectedInstantActions.filter((a) => a.type !== "System Notification")
+      filtered.push({
+        type: "System Notification",
+        notifyName: notifyFormName.trim(),
+        notifyRoleIds: notifyFormRoleIds.length > 0 ? notifyFormRoleIds : undefined,
+        notifyFormId: notifyFormFormId || undefined,
+        notifyFieldIds: notifyFormFieldIds.length > 0 ? notifyFormFieldIds : undefined,
+        notifyTitle: notifyFormTitle || undefined,
+        notifyMessage: notifyFormMessage || undefined,
+      })
+      return filtered
+    })()
+    setSelectedInstantActions(nextActions)
+    setInstantDone(true)
+    setActiveAction("")
+    closeNotifyDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  const removeNotifyAction = async () => {
+    const nextActions = selectedInstantActions.filter((a) => a.type !== "System Notification")
+    setSelectedInstantActions(nextActions)
+    closeNotifyDialog()
+    if (isEditing && canSaveRule) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
   // Auto-derive Function Name from Display Name (snake-case, ASCII)
   useEffect(() => {
     if (fnDialogStep !== "create") return
@@ -675,6 +810,11 @@ export default function CreateWorkflowRulePage() {
       openWebhookDialog()
       return
     }
+    if (type === "System Notification") {
+      // System Notification uses its own dialog — not a toggle.
+      openNotifyDialog()
+      return
+    }
     setSelectedInstantActions((prev) => {
       const exists = prev.some((a) => a.type === type)
       if (exists) return prev.filter((a) => a.type !== type)
@@ -715,22 +855,38 @@ export default function CreateWorkflowRulePage() {
   // renamed, or if fields live in subforms only — all scenarios where the
   // original `formFields` (tied to first published form detail) returns [].
   const { data: treeData } = useGetBindingsTreeQuery()
-  const moduleFields = useMemo(() => {
+  const treeModule = useMemo(() => {
     const mods = treeData?.data || []
-    // Match by name first (our URL carries moduleName), fall back to any
-    // module whose name matches case-insensitively.
-    const mod =
+    return (
       mods.find((m: any) => m.name === moduleName) ||
       mods.find((m: any) => (m.name || "").toLowerCase() === moduleName.toLowerCase())
-    if (!mod) return [] as Array<{ id: string; label: string; formName: string; apiName: string }>
-    const out: Array<{ id: string; label: string; formName: string; apiName: string }> = []
-    for (const f of mod.forms || []) {
+    )
+  }, [treeData, moduleName])
+
+  const moduleFields = useMemo(() => {
+    if (!treeModule) return [] as Array<{ id: string; label: string; formId: string; formName: string; apiName: string }>
+    const out: Array<{ id: string; label: string; formId: string; formName: string; apiName: string }> = []
+    for (const f of (treeModule as any).forms || []) {
       for (const fld of f.fields || []) {
-        out.push({ id: fld.id, label: fld.label, formName: f.name, apiName: fld.apiName })
+        out.push({ id: fld.id, label: fld.label, formId: f.id, formName: f.name, apiName: fld.apiName })
       }
     }
     return out
-  }, [treeData, moduleName])
+  }, [treeModule])
+
+  // Forms in the active module — sourced from the bindings tree so the
+  // System Notification dialog's form picker lists every form (including
+  // unpublished ones). The permitted-modules response only attaches forms
+  // that are published, which is why the picker came up empty for users
+  // configuring a notification before any form was published.
+  const moduleForms = useMemo<Array<{ id: string; name: string; isPublished: boolean }>>(() => {
+    if (!treeModule) return []
+    return ((treeModule as any).forms || []).map((f: any) => ({
+      id: f.id,
+      name: f.name,
+      isPublished: !!f.isPublished,
+    }))
+  }, [treeModule])
 
   const canGoNext =
     executeBasedOn === "record-action"
@@ -1336,6 +1492,7 @@ export default function CreateWorkflowRulePage() {
                           const isFn = action === "Function"
                           const isEmail = action === "Email Notification"
                           const isWebhook = action === "Webhook"
+                          const isNotify = action === "System Notification"
                           const label =
                             isFn && functionAction?.functionName
                               ? `Function: ${functionAction.functionName}`
@@ -1343,7 +1500,9 @@ export default function CreateWorkflowRulePage() {
                                 ? `Email Notification: ${emailAction.emailName}`
                                 : isWebhook && webhookAction?.webhookName
                                   ? `Webhook: ${webhookAction.webhookName}`
-                                  : action
+                                  : isNotify && notifyAction?.notifyName
+                                    ? `System Notification: ${notifyAction.notifyName}`
+                                    : action
                           return (
                             <button
                               key={action}
@@ -1362,6 +1521,10 @@ export default function CreateWorkflowRulePage() {
                               ) : isWebhook ? (
                                 <span className="text-[10px] text-muted-foreground shrink-0">
                                   {webhookAction?.webhookName ? "configured" : "configure ›"}
+                                </span>
+                              ) : isNotify ? (
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {notifyAction?.notifyName ? "configured" : "configure ›"}
                                 </span>
                               ) : (
                                 isSelected && (
@@ -1474,6 +1637,42 @@ export default function CreateWorkflowRulePage() {
                                   onClick={removeFunctionAction}
                                   className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
                                   title="Remove function"
+                                >
+                                  <MinusCircle className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )
+                          }
+                          if (a.type === "System Notification") {
+                            const roleNames = (a.notifyRoleIds || [])
+                              .map((id) => availableRoles.find((r: any) => r.id === id)?.name)
+                              .filter(Boolean)
+                              .join(", ")
+                            return (
+                              <div
+                                key={a.type}
+                                className="group flex items-start justify-between gap-2"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={openEditNotifyForm}
+                                  className="flex-1 min-w-0 text-left -mx-2 px-2 py-0.5 rounded hover:bg-muted/40 transition-colors"
+                                  title="Edit system notification"
+                                >
+                                  <p className="text-xs font-medium text-foreground">System Notification</p>
+                                  <p
+                                    className="text-xs mt-0.5 truncate text-muted-foreground"
+                                    title={a.notifyName || ""}
+                                  >
+                                    {a.notifyName || "Unconfigured"}
+                                    {roleNames ? ` — ${roleNames}` : ""}
+                                  </p>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={removeNotifyAction}
+                                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive mt-0.5"
+                                  title="Remove System Notification"
                                 >
                                   <MinusCircle className="h-4 w-4" />
                                 </button>
@@ -2433,6 +2632,367 @@ export default function CreateWorkflowRulePage() {
                   className="h-8 text-xs"
                   disabled={!emailFormName.trim() || !emailFormToField}
                   onClick={saveEmailNotification}
+                >
+                  Save and Associate
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── System Notification Dialog (associate list + configure form) ─ */}
+      <Dialog open={notifyDialogStep !== null} onOpenChange={(open) => !open && closeNotifyDialog()}>
+        <DialogContent className="max-w-2xl p-0 gap-0">
+          {/* ── Step: Associate (list of existing notifications) ──────── */}
+          {notifyDialogStep === "associate" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base">
+                      System Notification{moduleName ? ` - ${moduleName}` : ""}
+                    </DialogTitle>
+                    <DialogDescription className="text-xs">
+                      An in-app notification fanned out to every user with the chosen role(s).
+                    </DialogDescription>
+                  </div>
+                  <Button size="sm" className="h-8 text-xs shrink-0" onClick={openNewNotifyForm}>
+                    New Notification
+                  </Button>
+                </div>
+              </DialogHeader>
+
+              <div className="border-t border-b max-h-80 overflow-y-auto">
+                {notifyAction?.notifyName ? (
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-6 py-2 font-medium">Name</th>
+                        <th className="px-2 py-2 font-medium">Roles</th>
+                        <th className="px-2 py-2 font-medium">Form Scope</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        onClick={openEditNotifyForm}
+                        className="cursor-pointer hover:bg-muted/40 transition-colors bg-primary/5"
+                      >
+                        <td className="px-6 py-2.5 font-medium text-foreground truncate max-w-[180px]">
+                          {notifyAction.notifyName}
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground truncate max-w-[220px]">
+                          {(notifyAction.notifyRoleIds || [])
+                            .map((id) => availableRoles.find((r: any) => r.id === id)?.name)
+                            .filter(Boolean)
+                            .join(", ") || "—"}
+                        </td>
+                        <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {notifyAction.notifyFormId
+                            ? moduleForms.find((f) => f.id === notifyAction.notifyFormId)?.name || "—"
+                            : "Any form"}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="px-6 py-12 text-center text-xs text-muted-foreground">
+                    No notification yet. Click "New Notification" to create one.
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-3 border-t flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeNotifyDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!notifyAction?.notifyName}
+                  onClick={closeNotifyDialog}
+                >
+                  Associate
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── Step: Create / Edit (form) ────────────────────────────── */}
+          {notifyDialogStep === "create" && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle className="text-base">
+                  System Notification{moduleName ? ` - ${moduleName}` : ""}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Pick the role(s) to notify, optionally narrow to one form, and choose which
+                  record fields to include in the message. Use{" "}
+                  <span className="font-mono">{"{{api_name}}"}</span> in the title or message
+                  to insert other field values.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="px-6 pb-4 space-y-4 max-h-[65vh] overflow-y-auto">
+                {/* Module-required warning — the form list and field list both
+                    derive from moduleName, so without it the Form/Fields
+                    selectors will be empty. Surface this up-front instead of
+                    silently showing empty pickers. */}
+                {!moduleName && (
+                  <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 space-y-1">
+                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                      Pick a module first
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      The form list and field list are scoped to the rule's module. Choose
+                      one and the pickers below will populate.
+                    </p>
+                    <Select
+                      value={moduleName}
+                      onValueChange={(v) => setModuleName(v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs mt-1">
+                        <SelectValue placeholder="Select a module…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(treeData?.data || []).length === 0 ? (
+                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                            No modules yet. Create one in Settings → Modules.
+                          </div>
+                        ) : (
+                          (treeData?.data || []).map((m: any) => (
+                            <SelectItem key={m.id} value={m.name} className="text-xs">
+                              {m.name}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Name */}
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label htmlFor="notify-name" className="text-xs text-right">Name</Label>
+                  <Input
+                    id="notify-name"
+                    value={notifyFormName}
+                    onChange={(e) => setNotifyFormNameLocal(e.target.value)}
+                    placeholder="e.g. New Lead Assigned"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                {/* Roles */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label className="text-xs text-right pt-2">Notify Roles</Label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={notifyRoleSearch}
+                        onChange={(e) => setNotifyRoleSearch(e.target.value)}
+                        placeholder="Search roles…"
+                        className="h-8 text-xs pl-8"
+                      />
+                    </div>
+                    <div className="rounded border max-h-[180px] overflow-y-auto">
+                      {availableRoles.length === 0 ? (
+                        <div className="px-3 py-3 text-[11px] text-muted-foreground">
+                          No roles found in this organization.
+                        </div>
+                      ) : (
+                        availableRoles
+                          .filter((r: any) =>
+                            !notifyRoleSearch.trim() ||
+                            r.name.toLowerCase().includes(notifyRoleSearch.trim().toLowerCase())
+                          )
+                          .map((r: any) => {
+                            const checked = notifyFormRoleIds.includes(r.id)
+                            return (
+                              <label
+                                key={r.id}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/40 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleNotifyRole(r.id)}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate">{r.name}</span>
+                                {typeof r.userCount === "number" && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {r.userCount} user{r.userCount === 1 ? "" : "s"}
+                                  </span>
+                                )}
+                              </label>
+                            )
+                          })
+                      )}
+                    </div>
+                    {notifyFormRoleIds.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {notifyFormRoleIds.length} role{notifyFormRoleIds.length === 1 ? "" : "s"} selected
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Form scope */}
+                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
+                  <Label className="text-xs text-right">Form</Label>
+                  <Select
+                    value={notifyFormFormId || "__any__"}
+                    onValueChange={(v) => setNotifyFormFormId(v === "__any__" ? "" : v)}
+                    disabled={!moduleName}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder={moduleName ? "Any form in this module" : "Pick a module first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__any__" className="text-xs">
+                        Any form in this module
+                      </SelectItem>
+                      {moduleForms.length === 0 ? (
+                        <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                          {moduleName
+                            ? `Module "${moduleName}" has no forms yet.`
+                            : "Pick a module to see its forms."}
+                        </div>
+                      ) : (
+                        moduleForms.map((f) => (
+                          <SelectItem key={f.id} value={f.id} className="text-xs">
+                            <div className="flex items-center justify-between gap-2 w-full">
+                              <span className="truncate">{f.name}</span>
+                              {!f.isPublished && (
+                                <span className="shrink-0 text-[9px] uppercase tracking-wider text-amber-600">
+                                  draft
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Fields to include */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label className="text-xs text-right pt-2">Include Fields</Label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={notifyFieldSearch}
+                        onChange={(e) => setNotifyFieldSearch(e.target.value)}
+                        placeholder="Search fields…"
+                        className="h-8 text-xs pl-8"
+                      />
+                    </div>
+                    <div className="rounded border max-h-[180px] overflow-y-auto">
+                      {moduleFields.length === 0 ? (
+                        <div className="px-3 py-3 text-[11px] text-muted-foreground">
+                          {moduleName
+                            ? `Module "${moduleName}" has no fields yet. Create a form with fields first.`
+                            : "Pick a module above to see its fields."}
+                        </div>
+                      ) : (
+                        moduleFields
+                          .filter((f) => {
+                            // Scope-filter: when a specific form is chosen, only
+                            // that form's fields are eligible. Compared by
+                            // formId (stable) rather than form name.
+                            if (notifyFormFormId && f.formId !== notifyFormFormId) return false
+                            const q = notifyFieldSearch.trim().toLowerCase()
+                            if (!q) return true
+                            return (
+                              f.label.toLowerCase().includes(q) ||
+                              (f.apiName || "").toLowerCase().includes(q)
+                            )
+                          })
+                          .map((f) => {
+                            const checked = notifyFormFieldIds.includes(f.id)
+                            return (
+                              <label
+                                key={f.id}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/40 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleNotifyField(f.id)}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate">{f.label}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+                                  {f.apiName} · {f.formName}
+                                </span>
+                              </label>
+                            )
+                          })
+                      )}
+                    </div>
+                    {notifyFormFieldIds.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {notifyFormFieldIds.length} field{notifyFormFieldIds.length === 1 ? "" : "s"} selected — their values will be appended to the notification body.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Templates */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label htmlFor="notify-title" className="text-xs text-right pt-2">Title</Label>
+                  <div className="space-y-2">
+                    <Input
+                      id="notify-title"
+                      value={notifyFormTitle}
+                      onChange={(e) => setNotifyFormTitle(e.target.value)}
+                      placeholder="e.g. New {{Form Name}} submitted"
+                      className="h-8 text-xs"
+                    />
+                    <Textarea
+                      value={notifyFormMessage}
+                      onChange={(e) => setNotifyFormMessage(e.target.value)}
+                      placeholder={"Optional message — e.g. Hi team, a new entry was added by {{full_name}}."}
+                      rows={4}
+                      className="text-xs resize-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="border-t px-6 py-3 gap-2">
+                {notifyAction?.notifyName && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs mr-auto"
+                    onClick={() => setNotifyDialogStep("associate")}
+                  >
+                    ← Back
+                  </Button>
+                )}
+                {notifyAction?.notifyName && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={removeNotifyAction}
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={closeNotifyDialog}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!notifyFormName.trim() || notifyFormRoleIds.length === 0}
+                  onClick={saveSystemNotification}
                 >
                   Save and Associate
                 </Button>
