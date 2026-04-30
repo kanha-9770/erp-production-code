@@ -278,7 +278,8 @@ export function FormFieldRenderer({
       const dateLabelLower = (field.label || "").toLowerCase();
       const dateDisallowPast =
         field.properties?.disallowPastDates === true ||
-        dateLabelLower.includes("leave start");
+        dateLabelLower.includes("leave start") ||
+        dateLabelLower.includes("leave end");
       const dateTodayStr = dateDisallowPast
         ? new Date().toISOString().split("T")[0]
         : undefined;
