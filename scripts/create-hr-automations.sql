@@ -712,6 +712,15 @@ $js$,
      'When an Appointment Letter is created, auto-create the Employee Master record. Pulls First/Last Name from the appointment, Department/Designation/Employment Type/Email/Mobile from the matching Job Application, generates a sequential Employee ID. Idempotent.',
      TRUE, FALSE,
      $js$
+// Read the just-saved appointment via ctx.records.get so we get fields keyed
+// by LABEL, not by fieldId. The Applicant Name / Company / Job Application
+// fields are lookup-type with auto-generated cuids that vary per environment;
+// reading by label keeps this function stable across schema rebuilds.
+const recordId = ctx.input && ctx.input.recordId;
+if (!recordId) return { ok: false, reason: 'no recordId' };
+const appt = await ctx.records.get('Appointment Letter', recordId);
+if (!appt) return { ok: false, reason: 'appointment not found' };
+const a = appt.data || {};
 const data = ctx.input.recordData || {};
 const get = (id) => {
   const flat = data[id];
@@ -725,11 +734,11 @@ const get = (id) => {
 };
 const norm = (s) => String(s == null ? '' : s).trim().toUpperCase();
 
-const applicantName = String(get('fld_appt_applicant') || '').trim();
+const applicantName = String(a['Applicant Name'] || get('fld_appt_applicant') || '').trim();
 if (!applicantName) return { ok: false, reason: 'no applicant name' };
 
-const apptDate = String(get('fld_appt_date') || '').trim() || new Date().toISOString().slice(0, 10);
-const company  = String(get('fld_appt_company') || '').trim();
+const apptDate = String(a['Appointment Date'] || get('fld_appt_date') || '').trim() || new Date().toISOString().slice(0, 10);
+const company  = String(a['Company'] || get('fld_appt_company') || '').trim();
 
 // Parse "First Middle Last" into firstName + lastName.
 var nameParts = applicantName.split(/\s+/).filter(Boolean);
