@@ -257,7 +257,30 @@ export function LookupField({
       }).unwrap();
 
       if (result.success) {
-        const transformedOptions: LookupOption[] = result.data.map(
+        // Top-level keys on a transformed record that are NOT user-defined
+        // form fields. The previous "first field with a value" fallback
+        // could latch onto these and surface e.g. the formId as a label
+        // (showing "form_hr_appointment_letter" in a Staffing Plan picker)
+        // when the requested mapping field was missing on a sibling form.
+        const META_KEYS = new Set([
+          "formId",
+          "formName",
+          "metadata",
+          "record_id",
+          "form_id",
+          "_recordId",
+          "_formId",
+          "_formName",
+          "_moduleId",
+          "_moduleName",
+          "createdAt",
+          "updatedAt",
+          "description",
+        ]);
+
+        const hasExplicitMapping = !!field.lookup?.fieldMapping?.display;
+
+        const rawOptions: (LookupOption | null)[] = result.data.map(
           (item: any) => {
             const mapping = field.lookup?.fieldMapping || {
               display: "New Text",
@@ -295,36 +318,57 @@ export function LookupField({
               return null;
             };
 
-            const fieldData =
+            const explicitFieldData =
               findFieldData(mapping.display) ||
-              item[mapping.display] ||
-              item["New Text"] ||
-              {};
+              (item[mapping.display] && typeof item[mapping.display] === "object"
+                ? item[mapping.display]
+                : null);
+
+            const fieldData = explicitFieldData || item["New Text"] || {};
 
             const storeData =
               findFieldData(mapping.store) ||
-              item[mapping.store] ||
+              (item[mapping.store] && typeof item[mapping.store] === "object"
+                ? item[mapping.store]
+                : null) ||
               fieldData;
 
             let fieldValue =
               fieldData.field_value ?? (typeof item[mapping.display] === "string" ? item[mapping.display] : undefined);
             let storeValue = storeData.field_value ?? fieldValue;
 
-            // Fallback: try to find any meaningful value from the record
+            // If the explicitly requested display field was not found on
+            // this record, drop it. The previous "first field with a
+            // value" fallback could pick up meta keys like formId, which
+            // is how form IDs leaked into the user-facing dropdown when
+            // the lookup source was a module spanning forms that don't
+            // share the same field.
+            if (
+              hasExplicitMapping &&
+              (fieldValue === undefined || fieldValue === null || String(fieldValue).trim() === "")
+            ) {
+              return null;
+            }
+
+            // Last-resort fallback for the no-explicit-mapping case:
+            // pick the first user-field value, but skip meta keys.
             if (fieldValue === undefined || fieldValue === null) {
-              const firstField = Object.values(item).find(
-                (val: any) => val && typeof val === "object" && val.field_value !== undefined && val.field_value !== null && String(val.field_value).trim() !== ""
-              ) as any;
+              const firstField = Object.entries(item).find(
+                ([k, val]: [string, any]) =>
+                  !META_KEYS.has(k) &&
+                  val &&
+                  typeof val === "object" &&
+                  val.field_value !== undefined &&
+                  val.field_value !== null &&
+                  String(val.field_value).trim() !== ""
+              )?.[1] as any;
               if (firstField) {
                 fieldValue = firstField.field_value;
                 if (storeValue === undefined || storeValue === null) {
                   storeValue = fieldValue;
                 }
               } else {
-                fieldValue = `Item ${item.record_id || "unknown"}`;
-                if (storeValue === undefined || storeValue === null) {
-                  storeValue = fieldValue;
-                }
+                return null;
               }
             }
 
@@ -365,6 +409,20 @@ export function LookupField({
             };
           }
         );
+
+        // Drop skipped records and dedupe by (storeValue|label). When the
+        // lookup source is a module that fans out to multiple forms,
+        // matching values from sibling forms would otherwise show up as
+        // duplicate rows (e.g. SP-001 listed twice).
+        const seen = new Set<string>();
+        const transformedOptions: LookupOption[] = [];
+        for (const opt of rawOptions) {
+          if (!opt) continue;
+          const dedupeKey = `${String(opt.storeValue ?? "")}|${opt.label}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+          transformedOptions.push(opt);
+        }
 
         console.log(
           `Fetched ${transformedOptions.length} options for source ${sourceId}`,
