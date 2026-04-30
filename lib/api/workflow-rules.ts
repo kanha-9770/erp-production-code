@@ -41,6 +41,18 @@ export interface WorkflowInstantAction {
   // For type === "Field Update"
   targetFieldId?: string
   targetValue?: string
+  // For type === "Email Notification"
+  emailName?: string
+  emailToField?: string
+  emailToStatic?: string
+  emailToRoleIds?: string[]
+  emailSubject?: string
+  emailBody?: string
+  emailFrom?: string
+  emailReplyTo?: string
+  emailSmtpUser?: string
+  emailSmtpPass?: string
+  emailFieldIds?: string[]
   // For type === "System Notification"
   notifyName?: string
   notifyRoleIds?: string[]

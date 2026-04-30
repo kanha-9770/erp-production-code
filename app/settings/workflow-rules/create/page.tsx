@@ -7,6 +7,7 @@ import { useGetFormDetailQuery } from "@/lib/api/forms"
 import { useCreateWorkflowRuleMutation, useUpdateWorkflowRuleMutation, useGetWorkflowRulesQuery } from "@/lib/api/workflow-rules"
 import { useGetFunctionsQuery, useCreateFunctionMutation, useGetBindingsTreeQuery } from "@/lib/api/functions"
 import { useGetRolesQuery } from "@/lib/api/permissions"
+import { useGetAdminUsersQuery } from "@/lib/api/users"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -84,11 +85,26 @@ interface InstantAction {
   // Stored inline on the rule (no separate Notifications entity yet) so each
   // rule carries its own email config. Name is user-facing label.
   emailName?: string
+  /** Field on the record holding the recipient email. */
   emailToField?: string
+  /** Comma- or semicolon-separated list of literal email addresses. */
+  emailToStatic?: string
+  /** Roles whose users will receive the email at their account email. */
+  emailToRoleIds?: string[]
   emailSubject?: string
   emailBody?: string
   emailFrom?: string
   emailReplyTo?: string
+  /**
+   * SMTP credentials. Required so the email is authenticated as the picked
+   * sender — without these the relaying SMTP server (e.g. Gmail) silently
+   * rewrites the visible `From` to its env-level auth account. `emailSmtpUser`
+   * defaults to `emailFrom` when absent.
+   */
+  emailSmtpUser?: string
+  emailSmtpPass?: string
+  /** Field IDs whose values get appended to the body. */
+  emailFieldIds?: string[]
   emailSendAsMass?: boolean
   emailBestTime?: boolean
   // For type === "Webhook": HTTP callout config stored inline on the rule.
@@ -147,10 +163,19 @@ function normalizeActions(raw: unknown): InstantAction[] {
           targetValue: typeof entry.targetValue === "string" ? entry.targetValue : undefined,
           emailName: typeof entry.emailName === "string" ? entry.emailName : undefined,
           emailToField: typeof entry.emailToField === "string" ? entry.emailToField : undefined,
+          emailToStatic: typeof entry.emailToStatic === "string" ? entry.emailToStatic : undefined,
+          emailToRoleIds: Array.isArray(entry.emailToRoleIds)
+            ? entry.emailToRoleIds.filter((x: any) => typeof x === "string")
+            : undefined,
           emailSubject: typeof entry.emailSubject === "string" ? entry.emailSubject : undefined,
           emailBody: typeof entry.emailBody === "string" ? entry.emailBody : undefined,
           emailFrom: typeof entry.emailFrom === "string" ? entry.emailFrom : undefined,
           emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
+          emailSmtpUser: typeof entry.emailSmtpUser === "string" ? entry.emailSmtpUser : undefined,
+          emailSmtpPass: typeof entry.emailSmtpPass === "string" ? entry.emailSmtpPass : undefined,
+          emailFieldIds: Array.isArray(entry.emailFieldIds)
+            ? entry.emailFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
           emailSendAsMass: typeof entry.emailSendAsMass === "boolean" ? entry.emailSendAsMass : undefined,
           emailBestTime: typeof entry.emailBestTime === "boolean" ? entry.emailBestTime : undefined,
           webhookName: typeof entry.webhookName === "string" ? entry.webhookName : undefined,
@@ -328,12 +353,53 @@ export default function CreateWorkflowRulePage() {
   const [emailSearchQuery, setEmailSearchQuery] = useState("")
   const [emailFormName, setEmailFormName] = useState("")
   const [emailFormToField, setEmailFormToField] = useState("")
+  // Comma/semicolon-separated list of static email addresses.
+  const [emailFormToStatic, setEmailFormToStatic] = useState("")
+  const [emailFormToRoleIds, setEmailFormToRoleIds] = useState<string[]>([])
+  const [emailFormFieldIds, setEmailFormFieldIds] = useState<string[]>([])
   const [emailFormSubject, setEmailFormSubject] = useState("")
   const [emailFormBody, setEmailFormBody] = useState("")
   const [emailFormFrom, setEmailFormFrom] = useState("")
   const [emailFormReplyTo, setEmailFormReplyTo] = useState("")
   const [emailFormSendAsMass, setEmailFormSendAsMass] = useState(false)
   const [emailFormBestTime, setEmailFormBestTime] = useState(false)
+  const [emailRoleSearch, setEmailRoleSearch] = useState("")
+  const [emailFieldSearch, setEmailFieldSearch] = useState("")
+  // SMTP credentials for the picked sender. SMTP user defaults to From, so
+  // we don't surface a separate input unless the admin wants a different
+  // auth username (rare). Password input is masked, with a "kept" sentinel
+  // when editing an existing rule so the admin doesn't have to re-enter it.
+  const [emailFormSmtpUser, setEmailFormSmtpUser] = useState("")
+  const [emailFormSmtpPass, setEmailFormSmtpPass] = useState("")
+  const [emailFormShowAdvanced, setEmailFormShowAdvanced] = useState(false)
+  const [emailFormShowSmtpPass, setEmailFormShowSmtpPass] = useState(false)
+  // Tracks whether the edited rule already has a stored SMTP password. We
+  // never receive the plaintext from the API, so we keep an empty input as
+  // "leave existing password unchanged" when this flag is true.
+  const [emailFormSmtpPassPreserved, setEmailFormSmtpPassPreserved] = useState(false)
+  // From-address combobox state — admin either picks an org user's email
+  // from the dropdown or types one directly. The free-text wins; the
+  // dropdown just helps them avoid typos.
+  const [emailFromOpen, setEmailFromOpen] = useState(false)
+
+  // Org users for the "From" picker. Reused for the dropdown; manual typing
+  // remains the source of truth (so admins can use any sender they're
+  // allowed to relay through).
+  const { data: adminUsersResp } = useGetAdminUsersQuery()
+  const orgUserOptions = useMemo(() => {
+    const rows = adminUsersResp?.data || []
+    return rows
+      .filter((u) => !!u.email)
+      .map((u) => ({
+        id: u.id,
+        email: u.email,
+        name:
+          (u.fullName && u.fullName.trim()) ||
+          [u.first_name, u.last_name].filter(Boolean).join(" ").trim() ||
+          u.username ||
+          u.email,
+      }))
+  }, [adminUsersResp])
 
   const emailAction = useMemo(
     () => selectedInstantActions.find((a) => a.type === "Email Notification"),
@@ -477,23 +543,64 @@ export default function CreateWorkflowRulePage() {
   const resetEmailForm = () => {
     setEmailFormName("")
     setEmailFormToField("")
+    setEmailFormToStatic("")
+    setEmailFormToRoleIds([])
+    setEmailFormFieldIds([])
     setEmailFormSubject("")
     setEmailFormBody("")
     setEmailFormFrom("")
     setEmailFormReplyTo("")
     setEmailFormSendAsMass(false)
     setEmailFormBestTime(false)
+    setEmailRoleSearch("")
+    setEmailFieldSearch("")
+    setEmailFormSmtpUser("")
+    setEmailFormSmtpPass("")
+    setEmailFormShowSmtpPass(false)
+    setEmailFormShowAdvanced(false)
+    setEmailFormSmtpPassPreserved(false)
   }
 
   const loadEmailForm = (a: InstantAction | undefined) => {
     setEmailFormName(a?.emailName || "")
     setEmailFormToField(a?.emailToField || "")
+    setEmailFormToStatic(a?.emailToStatic || "")
+    setEmailFormToRoleIds(a?.emailToRoleIds || [])
+    setEmailFormFieldIds(a?.emailFieldIds || [])
     setEmailFormSubject(a?.emailSubject || "")
     setEmailFormBody(a?.emailBody || "")
     setEmailFormFrom(a?.emailFrom || "")
     setEmailFormReplyTo(a?.emailReplyTo || "")
     setEmailFormSendAsMass(!!a?.emailSendAsMass)
     setEmailFormBestTime(!!a?.emailBestTime)
+    setEmailRoleSearch("")
+    setEmailFieldSearch("")
+    setEmailFormSmtpUser(a?.emailSmtpUser || "")
+    // GET /workflow-rules masks emailSmtpPass with a sentinel so we can
+    // distinguish "no password set" (empty) from "password exists but
+    // not exposed" (sentinel). Show a placeholder + leave the input
+    // empty in the latter case.
+    const hadStoredPass =
+      typeof a?.emailSmtpPass === "string" &&
+      a.emailSmtpPass.startsWith("__KEPT__")
+    setEmailFormSmtpPass("")
+    setEmailFormSmtpPassPreserved(hadStoredPass)
+    setEmailFormShowSmtpPass(false)
+    // Auto-expand SMTP section when editing an existing email notification
+    // — admins editing in place want to see the picked sender's auth state.
+    setEmailFormShowAdvanced(!!a?.emailFrom)
+  }
+
+  const toggleEmailRole = (id: string) => {
+    setEmailFormToRoleIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
+
+  const toggleEmailField = (id: string) => {
+    setEmailFormFieldIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
   }
 
   const openEmailDialog = () => {
@@ -515,16 +622,39 @@ export default function CreateWorkflowRulePage() {
   }
 
   const saveEmailNotification = async () => {
+    // Find the existing action so we can preserve a previously-saved SMTP
+    // password when the admin leaves the input blank during edit. The GET
+    // route masks the stored password with `__KEPT__…`, so we re-read the
+    // raw current rule from the cache via selectedInstantActions.
+    const existing = selectedInstantActions.find(
+      (a) => a.type === "Email Notification"
+    )
+    const newPass = emailFormSmtpPass.trim()
+    // Preserve old password when the admin didn't type a new one AND we
+    // know one is on file (preserved sentinel from load). Pass the marker
+    // through; the API's PUT/POST handler unwraps it back to the stored
+    // ciphertext.
+    const passToPersist = newPass
+      ? newPass
+      : emailFormSmtpPassPreserved && existing?.emailSmtpPass
+        ? existing.emailSmtpPass
+        : undefined
+
     const nextActions = (() => {
       const filtered = selectedInstantActions.filter((a) => a.type !== "Email Notification")
       filtered.push({
         type: "Email Notification",
         emailName: emailFormName.trim(),
         emailToField: emailFormToField || undefined,
+        emailToStatic: emailFormToStatic.trim() || undefined,
+        emailToRoleIds: emailFormToRoleIds.length > 0 ? emailFormToRoleIds : undefined,
+        emailFieldIds: emailFormFieldIds.length > 0 ? emailFormFieldIds : undefined,
         emailSubject: emailFormSubject || undefined,
         emailBody: emailFormBody || undefined,
         emailFrom: emailFormFrom || undefined,
         emailReplyTo: emailFormReplyTo || undefined,
+        emailSmtpUser: emailFormSmtpUser.trim() || undefined,
+        emailSmtpPass: passToPersist,
         emailSendAsMass: emailFormSendAsMass || undefined,
         emailBestTime: emailFormBestTime || undefined,
       })
@@ -2503,6 +2633,38 @@ export default function CreateWorkflowRulePage() {
               </DialogHeader>
 
               <div className="px-6 pb-4 space-y-4 max-h-[65vh] overflow-y-auto">
+                {/* Module-required warning — both the field-based recipient
+                    and the Include Fields list derive from moduleName. */}
+                {!moduleName && (
+                  <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 space-y-1">
+                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                      Pick a module first
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      The recipient field picker and the Include Fields list are scoped
+                      to the rule's module.
+                    </p>
+                    <Select value={moduleName} onValueChange={(v) => setModuleName(v)}>
+                      <SelectTrigger className="h-8 text-xs mt-1">
+                        <SelectValue placeholder="Select a module…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(treeData?.data || []).length === 0 ? (
+                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                            No modules yet. Create one in Settings → Modules.
+                          </div>
+                        ) : (
+                          (treeData?.data || []).map((m: any) => (
+                            <SelectItem key={m.id} value={m.name} className="text-xs">
+                              {m.name}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-[110px_1fr] items-center gap-3">
                   <Label htmlFor="email-name" className="text-xs text-right">Name</Label>
                   <Input
@@ -2514,33 +2676,128 @@ export default function CreateWorkflowRulePage() {
                   />
                 </div>
 
+                {/* Recipients — three sources, any combination. The trigger
+                    de-dupes the union before sending. */}
                 <div className="grid grid-cols-[110px_1fr] items-start gap-3">
-                  <Label className="text-xs text-right pt-2">To</Label>
-                  <div className="space-y-2">
-                    <Select value={emailFormToField} onValueChange={setEmailFormToField}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Pick a field containing the recipient email…" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[300px]">
-                        {moduleFields.length === 0 ? (
-                          <div className="px-2 py-2 text-[11px] text-muted-foreground">
-                            No fields on this module. Pick a module with fields first.
+                  <Label className="text-xs text-right pt-2">Recipients</Label>
+                  <div className="space-y-3 rounded border border-dashed p-3">
+                    <p className="text-[10px] text-muted-foreground">
+                      Use any combination of these. At least one source must resolve to
+                      a non-empty address.
+                    </p>
+
+                    {/* Source 1: field on the record */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">From a field on the record</Label>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={emailFormToField || "__none__"}
+                          onValueChange={(v) => setEmailFormToField(v === "__none__" ? "" : v)}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder={moduleName ? "Pick a field containing an email…" : "Pick a module first"} />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[300px]">
+                            <SelectItem value="__none__" className="text-xs">
+                              — none —
+                            </SelectItem>
+                            {moduleFields.length === 0 ? (
+                              <div className="px-2 py-2 text-[11px] text-muted-foreground">
+                                {moduleName
+                                  ? `Module "${moduleName}" has no fields yet.`
+                                  : "Pick a module to see its fields."}
+                              </div>
+                            ) : (
+                              moduleFields.map((f) => (
+                                <SelectItem key={f.id} value={f.id} className="text-xs">
+                                  <div className="flex items-center justify-between gap-2 w-full">
+                                    <span className="truncate">{f.label}</span>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+                                      {f.apiName} · {f.formName}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Source 2: literal address list */}
+                    <div className="space-y-1">
+                      <Label htmlFor="email-to-static" className="text-[11px] text-muted-foreground">
+                        Specific email addresses
+                      </Label>
+                      <Input
+                        id="email-to-static"
+                        value={emailFormToStatic}
+                        onChange={(e) => setEmailFormToStatic(e.target.value)}
+                        placeholder="alice@x.com, bob@x.com"
+                        className="h-8 text-xs"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Comma- or semicolon-separated.
+                      </p>
+                    </div>
+
+                    {/* Source 3: roles → user emails */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">
+                        Users in roles
+                      </Label>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                          value={emailRoleSearch}
+                          onChange={(e) => setEmailRoleSearch(e.target.value)}
+                          placeholder="Search roles…"
+                          className="h-8 text-xs pl-8"
+                        />
+                      </div>
+                      <div className="rounded border max-h-[140px] overflow-y-auto">
+                        {availableRoles.length === 0 ? (
+                          <div className="px-3 py-3 text-[11px] text-muted-foreground">
+                            No roles found in this organization.
                           </div>
                         ) : (
-                          moduleFields.map((f) => (
-                            <SelectItem key={f.id} value={f.id} className="text-xs">
-                              <div className="flex items-center justify-between gap-2 w-full">
-                                <span className="truncate">{f.label}</span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
-                                  {f.apiName}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))
+                          availableRoles
+                            .filter((r: any) =>
+                              !emailRoleSearch.trim() ||
+                              r.name.toLowerCase().includes(emailRoleSearch.trim().toLowerCase())
+                            )
+                            .map((r: any) => {
+                              const checked = emailFormToRoleIds.includes(r.id)
+                              return (
+                                <label
+                                  key={r.id}
+                                  className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/40 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleEmailRole(r.id)}
+                                    className="h-3.5 w-3.5"
+                                  />
+                                  <span className="flex-1 truncate">{r.name}</span>
+                                  {typeof r.userCount === "number" && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {r.userCount} user{r.userCount === 1 ? "" : "s"}
+                                    </span>
+                                  )}
+                                </label>
+                              )
+                            })
                         )}
-                      </SelectContent>
-                    </Select>
-                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      </div>
+                      {emailFormToRoleIds.length > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {emailFormToRoleIds.length} role{emailFormToRoleIds.length === 1 ? "" : "s"} selected — emails go to each user's account email.
+                        </p>
+                      )}
+                    </div>
+
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground pt-1">
                       <input
                         type="checkbox"
                         checked={emailFormSendAsMass}
@@ -2552,6 +2809,7 @@ export default function CreateWorkflowRulePage() {
                   </div>
                 </div>
 
+                {/* Subject + body templates */}
                 <div className="grid grid-cols-[110px_1fr] items-start gap-3">
                   <Label htmlFor="email-subject" className="text-xs text-right pt-2">Email Template</Label>
                   <div className="space-y-2">
@@ -2572,15 +2830,232 @@ export default function CreateWorkflowRulePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
-                  <Label htmlFor="email-from" className="text-xs text-right">From</Label>
-                  <Input
-                    id="email-from"
-                    value={emailFormFrom}
-                    onChange={(e) => setEmailFormFrom(e.target.value)}
-                    placeholder="sender@example.com"
-                    className="h-8 text-xs"
-                  />
+                {/* Include Fields — appended as a "Field — Value" block to the body */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label className="text-xs text-right pt-2">Include Fields</Label>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={emailFieldSearch}
+                        onChange={(e) => setEmailFieldSearch(e.target.value)}
+                        placeholder="Search fields…"
+                        className="h-8 text-xs pl-8"
+                      />
+                    </div>
+                    <div className="rounded border max-h-[160px] overflow-y-auto">
+                      {moduleFields.length === 0 ? (
+                        <div className="px-3 py-3 text-[11px] text-muted-foreground">
+                          {moduleName
+                            ? `Module "${moduleName}" has no fields yet.`
+                            : "Pick a module to see its fields."}
+                        </div>
+                      ) : (
+                        moduleFields
+                          .filter((f) => {
+                            const q = emailFieldSearch.trim().toLowerCase()
+                            if (!q) return true
+                            return (
+                              f.label.toLowerCase().includes(q) ||
+                              (f.apiName || "").toLowerCase().includes(q)
+                            )
+                          })
+                          .map((f) => {
+                            const checked = emailFormFieldIds.includes(f.id)
+                            return (
+                              <label
+                                key={f.id}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/40 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleEmailField(f.id)}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate">{f.label}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground font-mono">
+                                  {f.apiName} · {f.formName}
+                                </span>
+                              </label>
+                            )
+                          })
+                      )}
+                    </div>
+                    {emailFormFieldIds.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {emailFormFieldIds.length} field{emailFormFieldIds.length === 1 ? "" : "s"} selected — their values will be appended to the email body.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* From — combobox seeded with org user emails. Admin can
+                    either click a user from the suggestion list or type any
+                    address manually; the typed/selected value is what gets
+                    sent. There is no env fallback — this field is the only
+                    source of the sender address. */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label htmlFor="email-from" className="text-xs text-right pt-2">From</Label>
+                  <div className="space-y-1">
+                    <Popover open={emailFromOpen} onOpenChange={setEmailFromOpen}>
+                      <PopoverTrigger asChild>
+                        <Input
+                          id="email-from"
+                          value={emailFormFrom}
+                          onChange={(e) => {
+                            setEmailFormFrom(e.target.value)
+                            if (!emailFromOpen) setEmailFromOpen(true)
+                          }}
+                          onFocus={() => setEmailFromOpen(true)}
+                          placeholder="Pick an org user or type any address…"
+                          className="h-8 text-xs"
+                          autoComplete="off"
+                        />
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        sideOffset={4}
+                        // Prevent the popover from stealing focus on open so
+                        // the user can keep typing in the input above.
+                        onOpenAutoFocus={(e) => e.preventDefault()}
+                        className="p-0 w-[var(--radix-popover-trigger-width)] max-h-60 overflow-y-auto"
+                      >
+                        {(() => {
+                          const q = emailFormFrom.trim().toLowerCase()
+                          const filtered = q
+                            ? orgUserOptions.filter(
+                                (u) =>
+                                  u.email.toLowerCase().includes(q) ||
+                                  (u.name || "").toLowerCase().includes(q)
+                              )
+                            : orgUserOptions
+                          if (orgUserOptions.length === 0) {
+                            return (
+                              <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                                No users found in this organization.
+                              </div>
+                            )
+                          }
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                                No users match. Press Enter to use the typed address as-is.
+                              </div>
+                            )
+                          }
+                          return filtered.map((u) => (
+                            <button
+                              type="button"
+                              key={u.id}
+                              onClick={() => {
+                                setEmailFormFrom(u.email)
+                                setEmailFromOpen(false)
+                              }}
+                              className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-foreground truncate">
+                                  {u.email}
+                                </p>
+                                {u.name && u.name !== u.email && (
+                                  <p className="text-[10px] text-muted-foreground truncate">
+                                    {u.name}
+                                  </p>
+                                )}
+                              </div>
+                              {emailFormFrom.trim().toLowerCase() === u.email.toLowerCase() && (
+                                <span className="text-[10px] text-emerald-600 shrink-0">
+                                  selected
+                                </span>
+                              )}
+                            </button>
+                          ))
+                        })()}
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-[10px] text-muted-foreground">
+                      Pick a teammate's address from the list or type any sender. This is
+                      required — no env-var fallback.
+                    </p>
+                  </div>
+                </div>
+
+                {/* SMTP password — OPTIONAL. Leave blank to relay through
+                    your env-level account (EMAIL_USER). The recipient may
+                    then see the From rewritten to that account by Gmail /
+                    Outlook. To preserve the picked sender on the recipient
+                    side, paste an app password for that sender here. */}
+                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
+                  <Label htmlFor="email-smtp-pass" className="text-xs text-right pt-2">
+                    SMTP Password
+                    <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-normal mt-0.5">
+                      optional
+                    </span>
+                  </Label>
+                  <div className="space-y-1">
+                    <div className="flex gap-2">
+                      <Input
+                        id="email-smtp-pass"
+                        type={emailFormShowSmtpPass ? "text" : "password"}
+                        value={emailFormSmtpPass}
+                        onChange={(e) => setEmailFormSmtpPass(e.target.value)}
+                        placeholder={
+                          emailFormSmtpPassPreserved
+                            ? "•••••••• (saved — leave blank to keep)"
+                            : "Optional — app password for the picked sender"
+                        }
+                        className="h-8 text-xs"
+                        autoComplete="new-password"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-[11px] px-2 shrink-0"
+                        onClick={() => setEmailFormShowSmtpPass((v) => !v)}
+                      >
+                        {emailFormShowSmtpPass ? "Hide" : "Show"}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-snug">
+                      Leave blank to relay via the org's configured SMTP account —
+                      emails will go out, but Gmail / Outlook rewrite the visible
+                      <span className="font-mono"> From </span> to that account.
+                      To make the recipient see <span className="font-mono">{emailFormFrom || "the picked sender"}</span> in their inbox, paste an{" "}
+                      <span className="font-medium">app password</span> for that
+                      account here (Gmail → Account → Security → App passwords).
+                    </p>
+                    <button
+                      type="button"
+                      className="text-[10px] text-primary hover:underline"
+                      onClick={() => setEmailFormShowAdvanced((v) => !v)}
+                    >
+                      {emailFormShowAdvanced ? "Hide" : "Show"} advanced SMTP options
+                    </button>
+                    {emailFormShowAdvanced && (
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">
+                            SMTP user (defaults to From)
+                          </Label>
+                          <Input
+                            value={emailFormSmtpUser}
+                            onChange={(e) => setEmailFormSmtpUser(e.target.value)}
+                            placeholder={emailFormFrom || "user@example.com"}
+                            className="h-8 text-xs mt-0.5"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <p className="text-[10px] text-muted-foreground leading-snug">
+                            Override only if the SMTP login differs from the From address
+                            (e.g. an alias). SMTP host & port stay from your env config.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-[110px_1fr] items-center gap-3">
@@ -2630,7 +3105,14 @@ export default function CreateWorkflowRulePage() {
                 <Button
                   size="sm"
                   className="h-8 text-xs"
-                  disabled={!emailFormName.trim() || !emailFormToField}
+                  disabled={
+                    !emailFormName.trim() ||
+                    !emailFormFrom.trim() ||
+                    !/\S+@\S+\.\S+/.test(emailFormFrom.trim()) ||
+                    (!emailFormToField &&
+                      !emailFormToStatic.trim() &&
+                      emailFormToRoleIds.length === 0)
+                  }
                   onClick={saveEmailNotification}
                 >
                   Save and Associate

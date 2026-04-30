@@ -1870,18 +1870,37 @@ export function usePublicForm({
     setSubmitting(true);
     try {
       const userId = (window as any).__currentUserId || currentUser?.id;
-      if (!userId) {
+
+      // Public-form submissions are allowed without a userId. The form's
+      // own `requireLogin` flag (set by the publish dialog) is the only
+      // thing that should gate this — and the submit API enforces it
+      // server-side anyway. The previous unconditional userId guard broke
+      // every anonymous submission even when the admin had explicitly
+      // turned on "Allow Anonymous Submissions".
+      if (!userId && form?.requireLogin && !form?.allowAnonymous) {
         toast({
-          title: "Error",
-          description: "User not authenticated",
+          title: "Login required",
+          description: "This form requires you to be logged in to submit.",
           variant: "destructive",
         });
         setSubmitting(false);
         return;
       }
+
       let attendanceHandled = false;
       const formNameLower = (form?.name || "").trim().toLowerCase();
       if (formNameLower === "check-in" || formNameLower === "checkin") {
+        // Attendance writes attach to a specific user — there's no
+        // meaningful anonymous check-in. Reject up-front.
+        if (!userId) {
+          toast({
+            title: "Login required",
+            description: "Check-In must be performed while logged in.",
+            variant: "destructive",
+          });
+          setSubmitting(false);
+          return;
+        }
         const response = await fetch("/api/attendance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1894,6 +1913,15 @@ export function usePublicForm({
         formNameLower === "check-out" ||
         formNameLower === "checkout"
       ) {
+        if (!userId) {
+          toast({
+            title: "Login required",
+            description: "Check-Out must be performed while logged in.",
+            variant: "destructive",
+          });
+          setSubmitting(false);
+          return;
+        }
         const response = await fetch("/api/attendance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

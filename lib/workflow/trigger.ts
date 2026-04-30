@@ -17,6 +17,7 @@ import { executeFunction } from "@/lib/functions/executor"
 import { attachApiNames } from "@/lib/functions/apiName"
 import { DatabaseService } from "@/lib/database/database-service"
 import { sendWorkflowEmail } from "@/lib/email"
+import { decryptStoredSmtpPass } from "@/lib/workflow/email-secrets"
 
 export type WorkflowAction = "Create" | "Edit" | "Create or Edit" | "Delete"
 
@@ -50,11 +51,31 @@ interface InstantActionEntry {
   targetValue?: string
   // For type === "Email Notification"
   emailName?: string
+  /**
+   * Field on the record whose value is the recipient email. Optional —
+   * `emailToStatic` and `emailToRoleIds` are alternative recipient sources
+   * that can be combined with this. At least one source must resolve to
+   * a non-empty address for the email to dispatch.
+   */
   emailToField?: string
+  /** Comma- or semicolon-separated list of literal email addresses. */
+  emailToStatic?: string
+  /** Roles whose users will receive the email at their account email. */
+  emailToRoleIds?: string[]
   emailSubject?: string
   emailBody?: string
   emailFrom?: string
   emailReplyTo?: string
+  /**
+   * SMTP credentials for the sender. Required so the email is authenticated
+   * as the picked sender — otherwise relaying SMTP servers rewrite the
+   * visible `From` to the env-level auth account. `emailSmtpUser` defaults
+   * to `emailFrom` if absent on the rule.
+   */
+  emailSmtpUser?: string
+  emailSmtpPass?: string
+  /** Field IDs whose values get appended to the body, mirroring System Notification. */
+  emailFieldIds?: string[]
   // For type === "System Notification"
   notifyName?: string
   notifyRoleIds?: string[]
@@ -78,10 +99,19 @@ function normalizeActions(raw: unknown): InstantActionEntry[] {
           targetValue: typeof entry.targetValue === "string" ? entry.targetValue : undefined,
           emailName: typeof entry.emailName === "string" ? entry.emailName : undefined,
           emailToField: typeof entry.emailToField === "string" ? entry.emailToField : undefined,
+          emailToStatic: typeof entry.emailToStatic === "string" ? entry.emailToStatic : undefined,
+          emailToRoleIds: Array.isArray(entry.emailToRoleIds)
+            ? entry.emailToRoleIds.filter((x: any) => typeof x === "string")
+            : undefined,
           emailSubject: typeof entry.emailSubject === "string" ? entry.emailSubject : undefined,
           emailBody: typeof entry.emailBody === "string" ? entry.emailBody : undefined,
           emailFrom: typeof entry.emailFrom === "string" ? entry.emailFrom : undefined,
           emailReplyTo: typeof entry.emailReplyTo === "string" ? entry.emailReplyTo : undefined,
+          emailSmtpUser: typeof entry.emailSmtpUser === "string" ? entry.emailSmtpUser : undefined,
+          emailSmtpPass: typeof entry.emailSmtpPass === "string" ? entry.emailSmtpPass : undefined,
+          emailFieldIds: Array.isArray(entry.emailFieldIds)
+            ? entry.emailFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
           notifyName: typeof entry.notifyName === "string" ? entry.notifyName : undefined,
           notifyRoleIds: Array.isArray(entry.notifyRoleIds)
             ? entry.notifyRoleIds.filter((x: any) => typeof x === "string")
@@ -103,23 +133,58 @@ function normalizeActions(raw: unknown): InstantActionEntry[] {
  * Read a single field's value from a record regardless of storage shape.
  * Records come in either flat ({ fieldId: value }) or structured
  * ({ sections: { [sid]: { fields: { [fid]: value | { value } } } } }) form.
+ *
+ * Also searches subforms — both top-level (recordData.subforms) and
+ * section-nested (recordData.sections[sid].subforms). Without this an
+ * Email Notification's "To" field that lives inside a subform was always
+ * resolving to undefined and the email got silently skipped.
  */
 function getRecordFieldValue(
   recordData: Record<string, any> | undefined,
   fieldId: string
 ): any {
   if (!recordData) return undefined
+  const unwrap = (v: any) =>
+    v && typeof v === "object" && "value" in v ? v.value : v
+
   if (Object.prototype.hasOwnProperty.call(recordData, fieldId)) {
-    const v = (recordData as any)[fieldId]
-    return v && typeof v === "object" && "value" in v ? v.value : v
+    return unwrap((recordData as any)[fieldId])
   }
+
+  // 1) Sections + per-section subforms
   const sections = (recordData as any).sections
   if (sections && typeof sections === "object") {
     for (const s of Object.values(sections) as any[]) {
       const f = s?.fields?.[fieldId]
-      if (f !== undefined) return f && typeof f === "object" && "value" in f ? f.value : f
+      if (f !== undefined) return unwrap(f)
+      const sectionSubforms = s?.subforms
+      if (sectionSubforms && typeof sectionSubforms === "object") {
+        for (const sf of Object.values(sectionSubforms) as any[]) {
+          const sff = sf?.fields?.[fieldId]
+          if (sff !== undefined) return unwrap(sff)
+        }
+      }
     }
   }
+
+  // 2) Top-level subforms (older records put subforms here, not under sections)
+  const subforms = (recordData as any).subforms
+  if (subforms && typeof subforms === "object") {
+    for (const sf of Object.values(subforms) as any[]) {
+      const sff = sf?.fields?.[fieldId]
+      if (sff !== undefined) return unwrap(sff)
+      // Subform rows — grab the first row's value if a repeating subform
+      // has multiple entries; better than returning undefined.
+      const rows = sf?.rows
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const rowField = row?.fields?.[fieldId]
+          if (rowField !== undefined) return unwrap(rowField)
+        }
+      }
+    }
+  }
+
   return undefined
 }
 
@@ -568,43 +633,136 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
         }
 
         // Email Notification — render {{api_name}} placeholders against the
-        // record and send via SMTP. Recipient comes from the user-picked
-        // record field (emailToField). Missing/empty recipient = skip silently;
-        // we don't want to noisily fail when e.g. an HR record is created
-        // without an email address filled in yet.
+        // record and send via SMTP. Recipients are the union of three
+        // configurable sources: a record field (emailToField), a literal
+        // address list (emailToStatic), and the email addresses of every
+        // user assigned any of the chosen roles (emailToRoleIds). At least
+        // one source must resolve to a non-empty address.
         if (act.type === "Email Notification") {
-          if (!act.emailToField) continue
-          const rawTo = getRecordFieldValue(recordData, act.emailToField)
-          const toAddress = typeof rawTo === "string" ? rawTo.trim() : ""
-          if (!toAddress) {
-            console.warn(
-              `[workflow] rule "${rule.name}" email skipped — field "${act.emailToField}" empty on record`
-            )
-            continue
-          }
           try {
             const fieldMap = await getFieldMap()
+
+            // Collect recipients from every source.
+            const recipientSet = new Set<string>()
+
+            const isEmailish = (s: string) => /\S+@\S+\.\S+/.test(s)
+
+            if (act.emailToField) {
+              const rawTo = getRecordFieldValue(recordData, act.emailToField)
+              const value = typeof rawTo === "string" ? rawTo : rawTo == null ? "" : String(rawTo)
+              for (const part of value.split(/[,;\s]+/)) {
+                const t = part.trim()
+                if (t && isEmailish(t)) recipientSet.add(t)
+              }
+            }
+
+            if (act.emailToStatic) {
+              for (const part of act.emailToStatic.split(/[,;\s]+/)) {
+                const t = part.trim()
+                if (t && isEmailish(t)) recipientSet.add(t)
+              }
+            }
+
+            if (act.emailToRoleIds && act.emailToRoleIds.length > 0) {
+              const [assignments, orgOwners] = await Promise.all([
+                prisma.userUnitAssignment.findMany({
+                  where: {
+                    roleId: { in: act.emailToRoleIds },
+                    user: { organizationId },
+                  },
+                  select: { user: { select: { email: true } } },
+                }),
+                prisma.role.findMany({
+                  where: { id: { in: act.emailToRoleIds }, isAdmin: true },
+                  select: { id: true },
+                }).then(async (adminRoles) => {
+                  if (adminRoles.length === 0) return [] as Array<{ email: string | null }>
+                  const org = await prisma.organization.findUnique({
+                    where: { id: organizationId },
+                    select: { owner: { select: { email: true } } },
+                  })
+                  return org?.owner ? [{ email: org.owner.email }] : []
+                }),
+              ])
+              for (const a of assignments) {
+                const e = (a.user?.email || "").trim()
+                if (e && isEmailish(e)) recipientSet.add(e)
+              }
+              for (const u of orgOwners) {
+                const e = (u.email || "").trim()
+                if (e && isEmailish(e)) recipientSet.add(e)
+              }
+            }
+
+            const toAddresses = Array.from(recipientSet)
+            if (toAddresses.length === 0) {
+              console.warn(
+                `[workflow] rule "${rule.name}" email skipped — no recipients resolved (field=${act.emailToField || "—"}, static=${act.emailToStatic || "—"}, roles=${JSON.stringify(act.emailToRoleIds || [])})`
+              )
+              continue
+            }
+
             const subject =
               renderEmailTemplate(act.emailSubject || "", recordData, fieldMap) ||
               act.emailName ||
               `Notification from ${moduleName}`
-            const body = renderEmailTemplate(act.emailBody || "", recordData, fieldMap)
-            const result = await sendWorkflowEmail({
-              to: toAddress,
-              subject,
-              body,
-              from: act.emailFrom || undefined,
-              replyTo: act.emailReplyTo || undefined,
-            })
-            if (!result.success) {
-              console.warn(
-                `[workflow] rule "${rule.name}" email to "${toAddress}" failed: ${result.error}`
+            const renderedBody = renderEmailTemplate(act.emailBody || "", recordData, fieldMap)
+
+            // Append a "Field — Value" block when admin selected fields,
+            // mirroring the System Notification UX so the recipient sees
+            // the relevant record context inline. Empty values skipped.
+            const idToLabel = new Map<string, string>()
+            for (const [k, v] of fieldMap.entries()) {
+              if (k === v) continue
+              if (!idToLabel.has(v)) idToLabel.set(v, k)
+            }
+            const fieldLines: string[] = []
+            for (const fid of act.emailFieldIds || []) {
+              const v = getRecordFieldValue(recordData, fid)
+              if (v === undefined || v === null || v === "") continue
+              const label = idToLabel.get(fid) || fid
+              fieldLines.push(
+                `${label}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`
               )
             }
-          } catch (err) {
+            const bodyParts = [renderedBody, fieldLines.join("\n")].filter(Boolean)
+            const body = bodyParts.join(bodyParts.length === 2 ? "\n\n" : "")
+
+            // Send one email per recipient — keeps replies/bounces clean and
+            // lets one bad address not block the rest. SMTP auth uses the
+            // picked sender's credentials so the recipient sees the email
+            // truly from that user (not the env-level relay account).
+            const smtpUser = (act.emailSmtpUser || act.emailFrom || "").trim()
+            // Stored ciphertext → plaintext for the SMTP transport. Returns
+            // "" on failure; sendWorkflowEmail will then warn and skip.
+            const smtpPass = decryptStoredSmtpPass(act.emailSmtpPass)
+            let okCount = 0
+            for (const to of toAddresses) {
+              const result = await sendWorkflowEmail({
+                to,
+                subject,
+                body,
+                from: act.emailFrom || undefined,
+                replyTo: act.emailReplyTo || undefined,
+                smtpUser: smtpUser || undefined,
+                smtpPass: smtpPass || undefined,
+              })
+              if (result.success) {
+                okCount++
+              } else {
+                console.warn(
+                  `[workflow] rule "${rule.name}" email to "${to}" failed: ${result.error}`
+                )
+              }
+            }
+            console.log(
+              `[workflow] rule "${rule.name}" email dispatched — ${okCount}/${toAddresses.length} sent (subject="${subject}", auth=${smtpUser || "(none)"})`
+            )
+          } catch (err: any) {
             console.error(
-              `[workflow] rule "${rule.name}" email send threw`,
-              err
+              `[workflow] rule "${rule.name}" email send threw:`,
+              err?.message || err,
+              err?.stack ? `\n${err.stack}` : ""
             )
           }
           continue

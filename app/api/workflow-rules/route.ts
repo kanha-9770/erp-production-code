@@ -3,6 +3,10 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import {
+  prepareInstantActionsForWrite,
+  redactInstantActionsForRead,
+} from "@/lib/workflow/email-secrets"
 
 /**
  * GET /api/workflow-rules?moduleName=xxx
@@ -50,7 +54,15 @@ export async function GET(request: NextRequest) {
       orderBy: { updatedAt: "desc" },
     })
 
-    return NextResponse.json({ success: true, data: rules })
+    // Mask any stored SMTP passwords with a sentinel so plaintext (or even
+    // ciphertext) never reaches the browser. The UI treats the sentinel as
+    // "password on file — leave the input blank to keep it."
+    const safeRules = rules.map((r) => ({
+      ...r,
+      instantActions: redactInstantActionsForRead(r.instantActions as any, r.id),
+    }))
+
+    return NextResponse.json({ success: true, data: safeRules })
   } catch (error) {
     console.error("[GET /api/workflow-rules]", error)
     return NextResponse.json(
@@ -108,6 +120,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Encrypt any plaintext SMTP password before storing. New rules have no
+    // previous state, so KEPT sentinels (which shouldn't occur on create
+    // anyway) resolve to undefined.
+    const writableInstantActions = instantActions
+      ? prepareInstantActionsForWrite(instantActions, { previous: null })
+      : null
+
     const rule = await prisma.workflowRule.create({
       data: {
         name: name.trim(),
@@ -118,7 +137,7 @@ export async function POST(request: NextRequest) {
         dateField: dateField || null,
         conditionType: conditionType || "all",
         conditions: conditions || null,
-        instantActions: instantActions || null,
+        instantActions: writableInstantActions,
         scheduledExecute: scheduledExecute || null,
         scheduledUnit: scheduledUnit || null,
         organizationId: authUser.organizationId,
@@ -126,7 +145,13 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ success: true, data: rule })
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...rule,
+        instantActions: redactInstantActionsForRead(rule.instantActions as any, rule.id),
+      },
+    })
   } catch (error) {
     console.error("[POST /api/workflow-rules]", error)
     return NextResponse.json(
@@ -179,7 +204,15 @@ export async function PUT(request: NextRequest) {
     if (fields.dateField !== undefined) updateData.dateField = fields.dateField || null
     if (fields.conditionType) updateData.conditionType = fields.conditionType
     if (fields.conditions !== undefined) updateData.conditions = fields.conditions
-    if (fields.instantActions !== undefined) updateData.instantActions = fields.instantActions
+    if (fields.instantActions !== undefined) {
+      // Encrypt new plaintext SMTP password OR restore the stored ciphertext
+      // when the client sends back the `__KEPT__:<id>` sentinel from the
+      // last GET (it has no plaintext to send).
+      updateData.instantActions = prepareInstantActionsForWrite(
+        fields.instantActions,
+        { previous: existing.instantActions }
+      )
+    }
     if (fields.scheduledExecute !== undefined) updateData.scheduledExecute = fields.scheduledExecute || null
     if (fields.scheduledUnit !== undefined) updateData.scheduledUnit = fields.scheduledUnit || null
     if (fields.active !== undefined) updateData.active = fields.active
@@ -189,7 +222,13 @@ export async function PUT(request: NextRequest) {
       data: updateData,
     })
 
-    return NextResponse.json({ success: true, data: updated })
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...updated,
+        instantActions: redactInstantActionsForRead(updated.instantActions as any, updated.id),
+      },
+    })
   } catch (error) {
     console.error("[PUT /api/workflow-rules]", error)
     return NextResponse.json(

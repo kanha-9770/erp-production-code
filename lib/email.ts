@@ -113,6 +113,20 @@ interface WorkflowEmailOptions {
   body: string
   from?: string
   replyTo?: string
+  /**
+   * Per-rule SMTP credentials. When set, a transporter is built on the fly
+   * authenticating as `smtpUser` with `smtpPass` — that way the sender shown
+   * to the recipient actually matches the account used to relay the message.
+   *
+   * Without these the env-credentialed singleton would still relay successfully
+   * but Gmail/Outlook/etc. rewrite the visible `From` to the auth account,
+   * silently overriding whatever the admin picked.
+   */
+  smtpUser?: string
+  smtpPass?: string
+  smtpHost?: string
+  smtpPort?: number
+  smtpSecure?: boolean
 }
 
 function escapeHtml(s: string): string {
@@ -140,7 +154,49 @@ export const sendWorkflowEmail = async (
     return { success: true }
   }
 
-  const fromAddress = options.from?.trim() || process.env.EMAIL_FROM || ""
+  // "From" can come either from the rule (admin's pick), or fall back to
+  // the env-level FROM/USER so emails still go out when no rule-level
+  // sender is set. Note: most SMTP servers (Gmail in particular) rewrite
+  // the visible From header to whichever account they're authenticated
+  // with, so the recipient may see the env-level address regardless.
+  // For true sender impersonation, set per-rule SMTP credentials below
+  // (smtpUser + smtpPass) — when both are present we authenticate as the
+  // picked sender so the From header is preserved.
+  const fromAddress =
+    options.from?.trim() ||
+    process.env.EMAIL_FROM ||
+    process.env.EMAIL_USER ||
+    ""
+  if (!fromAddress) {
+    console.warn(
+      "[email] sendWorkflowEmail aborted — no 'From' address resolved (set act.emailFrom, EMAIL_FROM, or EMAIL_USER)."
+    )
+    return { success: false, error: "No 'From' address configured" }
+  }
+
+  // Per-rule SMTP override — admin can supply explicit credentials so we
+  // authenticate as the picked sender. Without them we fall back to the
+  // env-credentialed singleton transporter (relays through EMAIL_USER).
+  const smtpUserOverride = options.smtpUser?.trim() || ""
+  const smtpPassOverride = options.smtpPass || ""
+  const haveOverride = !!(smtpUserOverride && smtpPassOverride)
+
+  let activeTransporter = transporter
+  if (haveOverride) {
+    const host = options.smtpHost || process.env.EMAIL_HOST || ""
+    const port =
+      options.smtpPort ||
+      (process.env.EMAIL_PORT ? Number.parseInt(process.env.EMAIL_PORT) : 587)
+    const secure =
+      typeof options.smtpSecure === "boolean" ? options.smtpSecure : false
+    activeTransporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user: smtpUserOverride, pass: smtpPassOverride },
+    })
+  }
+
   const bodyHtml = escapeHtml(options.body || "").replace(/\n/g, "<br/>")
 
   const mailOptions: any = {
@@ -156,10 +212,21 @@ export const sendWorkflowEmail = async (
   if (options.replyTo) mailOptions.replyTo = options.replyTo
 
   try {
-    await transporter.sendMail(mailOptions)
+    await activeTransporter.sendMail(mailOptions)
     return { success: true }
   } catch (error: any) {
-    console.error("Workflow email sending failed:", error)
+    console.error(
+      `[email] Workflow email send failed (from=${fromAddress}, auth=${haveOverride ? smtpUserOverride : "(env)"}):`,
+      error?.message || error
+    )
     return { success: false, error: error.message }
+  } finally {
+    if (haveOverride) {
+      try {
+        activeTransporter.close()
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }

@@ -187,7 +187,16 @@ export async function GET(
           // Only enforce publicEditable restrictions for users WITHOUT write
           // permissions (anonymous visitors, VIEW-only users).  Users with
           // CREATE/EDIT/DELETE should be able to fill in all fields.
-          if (!hasWritePermission) {
+          //
+          // EXCEPTION: when the admin explicitly enabled "Allow Anonymous
+          // Submissions" on the form, every field stays editable by default
+          // — the per-field `publicEditable` opt-in is only meant for
+          // restrictive public-view forms (where admin wants to expose just
+          // a subset). Without this exception every published anonymous
+          // form rendered as fully read-only and submissions were
+          // impossible (form fields are not flagged `publicEditable: true`
+          // by the publish dialog — there's no UI for it).
+          if (!hasWritePermission && !form.allowAnonymous) {
             const markReadonly = (sections: any[]) => {
               if (!Array.isArray(sections)) return;
               sections.forEach((section) => {
