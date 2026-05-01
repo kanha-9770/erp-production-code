@@ -5,6 +5,7 @@ import {
   createContext,
   useContext,
   useCallback,
+  useRef,
 } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -42,6 +43,8 @@ import {
   Users,
   Settings,
   UserCheck,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -53,12 +56,14 @@ import {
   useGetFormDetailQuery,
   useCreateFieldMutation,
   useUpdateFieldMutation,
+  useDeleteFieldMutation,
   useCreateSubformMutation,
   useUpdateSubformMutation,
   useCreateSectionMutation,
   useSaveFormMutation,
   useUpdateSectionMutation,
 } from "@/lib/api/forms";
+import { useFormHistory } from "@/hooks/use-form-history";
 
 // Enhanced interface for subform hierarchy tracking
 interface SubformHierarchy {
@@ -82,6 +87,69 @@ interface FormBuilderContextType {
 const FormBuilderContext = createContext<FormBuilderContextType | undefined>(
   undefined,
 );
+
+// Patch helpers for history undo/redo of field create/delete
+const removeFieldById = (form: any, fieldId: string): any => {
+  const removeFromSubs = (subs: any[]): any[] =>
+    subs.map((sf: any) => ({
+      ...sf,
+      fields: (sf.fields || []).filter((x: any) => x.id !== fieldId),
+      childSubforms: sf.childSubforms ? removeFromSubs(sf.childSubforms) : sf.childSubforms,
+    }));
+  return {
+    ...form,
+    sections: (form.sections || []).map((s: any) => ({
+      ...s,
+      fields: (s.fields || []).filter((x: any) => x.id !== fieldId),
+      subforms: s.subforms ? removeFromSubs(s.subforms) : s.subforms,
+    })),
+    subforms: form.subforms ? removeFromSubs(form.subforms) : form.subforms,
+  };
+};
+
+const insertFieldAtLocation = (form: any, field: any): any => {
+  const sectionId = field.sectionId;
+  const subformId = field.subformId;
+
+  if (subformId) {
+    const insertInSubs = (subs: any[]): any[] =>
+      subs.map((sf: any) => {
+        if (sf.id === subformId) {
+          const fields = [...(sf.fields || []), field].sort(
+            (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+          );
+          return { ...sf, fields };
+        }
+        return {
+          ...sf,
+          childSubforms: sf.childSubforms ? insertInSubs(sf.childSubforms) : sf.childSubforms,
+        };
+      });
+    return {
+      ...form,
+      sections: (form.sections || []).map((s: any) => ({
+        ...s,
+        subforms: s.subforms ? insertInSubs(s.subforms) : s.subforms,
+      })),
+      subforms: form.subforms ? insertInSubs(form.subforms) : form.subforms,
+    };
+  }
+
+  if (sectionId) {
+    return {
+      ...form,
+      sections: (form.sections || []).map((s: any) => {
+        if (s.id !== sectionId) return s;
+        const fields = [...(s.fields || []), field].sort(
+          (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+        );
+        return { ...s, fields };
+      }),
+    };
+  }
+
+  return form;
+};
 
 export function useFormBuilderContext() {
   const context = useContext(FormBuilderContext);
@@ -108,6 +176,7 @@ export default function FormBuilderPage() {
   // RTK Query: mutation hooks
   const [createFieldMutation] = useCreateFieldMutation();
   const [updateFieldMutation] = useUpdateFieldMutation();
+  const [deleteFieldMutation] = useDeleteFieldMutation();
   const [createSubformMutation] = useCreateSubformMutation();
   const [updateSubformMutation] = useUpdateSubformMutation();
   const [createSectionMutation] = useCreateSectionMutation();
@@ -115,6 +184,10 @@ export default function FormBuilderPage() {
   const [updateSectionMutation] = useUpdateSectionMutation();
 
   const [form, setForm] = useState<Form | null>(null);
+  const formRef = useRef<Form | null>(null);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [isLookupDialogOpen, setIsLookupDialogOpen] = useState(false);
   const [isUserFormSettingsOpen, setIsUserFormSettingsOpen] = useState(false);
@@ -144,6 +217,8 @@ export default function FormBuilderPage() {
   const [subformHierarchyMap, setSubformHierarchyMap] = useState<
     Map<string, SubformHierarchy>
   >(new Map());
+
+  const history = useFormHistory();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -190,6 +265,41 @@ export default function FormBuilderPage() {
       setSubformHierarchyMap(hierarchyMap);
     }
   }, [formQueryData]);
+
+  // Reset history when switching forms
+  useEffect(() => {
+    history.reset();
+  }, [formId, history.reset]);
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl+Y = redo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        history.undo();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        history.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [history.undo, history.redo]);
 
   // Build hierarchical path map for all top-level subforms in form
   const buildSubformHierarchyMap = (
@@ -816,6 +926,32 @@ export default function FormBuilderPage() {
 
         optimisticFormUpdate(finalForm);
 
+        // Skip history tracking for formula fields — formula creation is a
+        // multi-step flow (create field → configure formula) and undoing
+        // partway through would leave dangling state.
+        if (fieldType !== "formula") {
+          const idRef = { current: result.data.id };
+          const fieldSnapshot = { ...newField, id: result.data.id };
+          history.push({
+            description: "Add field",
+            redo: async () => {
+              const cur = formRef.current;
+              if (!cur) return;
+              const r: any = await createFieldMutation(fieldData as any).unwrap();
+              if (!r?.success) return;
+              idRef.current = r.data.id;
+              const recreated = { ...fieldSnapshot, id: r.data.id };
+              optimisticFormUpdate(insertFieldAtLocation(cur, recreated) as Form);
+            },
+            undo: async () => {
+              const cur = formRef.current;
+              if (!cur) return;
+              optimisticFormUpdate(removeFieldById(cur, idRef.current) as Form);
+              await deleteFieldMutation(idRef.current).unwrap();
+            },
+          });
+        }
+
         if (fieldType === "formula") {
           setPendingFormulaFieldId(result.data.id);
           setIsFormulaDialogOpen(true);
@@ -1116,6 +1252,11 @@ export default function FormBuilderPage() {
     if (activeContainer !== overContainer) return;
 
     const containerId = activeContainer;
+    const formBefore = JSON.parse(JSON.stringify(form));
+
+    let updatedForm: Form | null = null;
+    let oldOrders: Array<{ id: string; order: number }> = [];
+    let newOrders: Array<{ id: string; order: number }> = [];
 
     // Check if it's a section
     const section = form.sections.find((s: { id: any }) => s.id === containerId);
@@ -1123,6 +1264,8 @@ export default function FormBuilderPage() {
       const sortedFields = [...(section.fields || [])].sort(
         (a, b) => a.order - b.order,
       );
+      oldOrders = sortedFields.map((f) => ({ id: f.id, order: f.order }));
+
       const oldIndex = sortedFields.findIndex((i) => i.id === active.id);
       let newIndex = sortedFields.findIndex((i) => i.id === over.id);
 
@@ -1136,85 +1279,108 @@ export default function FormBuilderPage() {
 
       const newFields = arrayMove(sortedFields, oldIndex, newIndex);
       newFields.forEach((f, idx) => (f.order = idx));
+      newOrders = newFields.map((f) => ({ id: f.id, order: f.order }));
 
       const updatedSections = form.sections.map((s: { id: any }) =>
         s.id === containerId ? { ...s, fields: newFields } : s,
       );
+      updatedForm = { ...form, sections: updatedSections };
+    } else {
+      // Check if it's a subform
+      const findAndReorderSubform = (
+        subforms: Subform[],
+      ): Subform[] | null => {
+        for (let i = 0; i < subforms.length; i++) {
+          if (subforms[i].id === containerId) {
+            const sf = subforms[i];
+            const sortedFields = [...(sf.fields || [])].sort(
+              (a: { order: number }, b: { order: number }) => a.order - b.order,
+            );
+            const oldIndex = sortedFields.findIndex((f) => f.id === active.id);
+            let newIndex = sortedFields.findIndex((f) => f.id === over!.id);
 
-      optimisticFormUpdate({ ...form, sections: updatedSections });
+            if (oldIndex === -1 || newIndex === -1) return null;
 
-      newFields.forEach((f) =>
-        updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
-      );
-      return;
-    }
+            oldOrders = sortedFields.map((f: any) => ({
+              id: f.id,
+              order: f.order,
+            }));
 
-    // Check if it's a subform
-    const findAndReorderSubform = (subforms: Subform[]): Subform[] | null => {
-      for (let i = 0; i < subforms.length; i++) {
-        if (subforms[i].id === containerId) {
-          const sf = subforms[i];
-          const sortedFields = [...(sf.fields || [])].sort(
-            (a: { order: number }, b: { order: number }) => a.order - b.order,
-          );
-          const oldIndex = sortedFields.findIndex((f) => f.id === active.id);
-          let newIndex = sortedFields.findIndex((f) => f.id === over!.id);
+            const activeCenter = active.rect.current.translated
+              ? active.rect.current.translated.left +
+              active.rect.current.translated.width / 2
+              : 0;
+            const overCenter = over!.rect.left + over!.rect.width / 2;
+            const isAfter = activeCenter > overCenter;
+            newIndex += isAfter ? 1 : 0;
 
-          if (oldIndex === -1 || newIndex === -1) return null;
+            const newFields = arrayMove(sortedFields, oldIndex, newIndex);
+            newFields.forEach((f: any, idx: number) => (f.order = idx));
+            newOrders = newFields.map((f: any) => ({
+              id: f.id,
+              order: f.order,
+            }));
 
-          const activeCenter = active.rect.current.translated
-            ? active.rect.current.translated.left +
-            active.rect.current.translated.width / 2
-            : 0;
-          const overCenter = over!.rect.left + over!.rect.width / 2;
-          const isAfter = activeCenter > overCenter;
-          newIndex += isAfter ? 1 : 0;
-
-          const newFields = arrayMove(sortedFields, oldIndex, newIndex);
-          newFields.forEach((f: any, idx: number) => (f.order = idx));
-
-          const updatedSubforms = [...subforms];
-          updatedSubforms[i] = { ...sf, fields: newFields };
-
-          // Persist order
-          newFields.forEach((f: any) =>
-            updateFieldMutation({ fieldId: f.id, body: { order: f.order } }),
-          );
-
-          return updatedSubforms;
-        }
-        if (subforms[i].childSubforms) {
-          const result = findAndReorderSubform(subforms[i].childSubforms);
-          if (result) {
             const updatedSubforms = [...subforms];
-            updatedSubforms[i] = { ...subforms[i], childSubforms: result };
+            updatedSubforms[i] = { ...sf, fields: newFields };
             return updatedSubforms;
+          }
+          if (subforms[i].childSubforms) {
+            const result = findAndReorderSubform(subforms[i].childSubforms);
+            if (result) {
+              const updatedSubforms = [...subforms];
+              updatedSubforms[i] = { ...subforms[i], childSubforms: result };
+              return updatedSubforms;
+            }
+          }
+        }
+        return null;
+      };
+
+      // Search in top-level subforms
+      const updatedTopSubforms = findAndReorderSubform(form.subforms || []);
+      if (updatedTopSubforms) {
+        updatedForm = { ...form, subforms: updatedTopSubforms };
+      } else {
+        // Search in section subforms
+        for (const sec of form.sections) {
+          if (sec.subforms) {
+            const result = findAndReorderSubform(sec.subforms);
+            if (result) {
+              const updatedSections = form.sections.map((s: any) =>
+                s.id === sec.id ? { ...s, subforms: result } : s,
+              );
+              updatedForm = { ...form, sections: updatedSections };
+              break;
+            }
           }
         }
       }
-      return null;
-    };
-
-    // Search in top-level subforms
-    const updatedSubforms = findAndReorderSubform(form.subforms || []);
-    if (updatedSubforms) {
-      optimisticFormUpdate({ ...form, subforms: updatedSubforms });
-      return;
     }
 
-    // Search in section subforms
-    for (const sec of form.sections) {
-      if (sec.subforms) {
-        const result = findAndReorderSubform(sec.subforms);
-        if (result) {
-          const updatedSections = form.sections.map((s: any) =>
-            s.id === sec.id ? { ...s, subforms: result } : s,
-          );
-          optimisticFormUpdate({ ...form, sections: updatedSections });
-          return;
-        }
-      }
-    }
+    if (!updatedForm || newOrders.length === 0) return;
+
+    optimisticFormUpdate(updatedForm);
+    newOrders.forEach(({ id, order }) =>
+      updateFieldMutation({ fieldId: id, body: { order } }),
+    );
+
+    const formAfter = JSON.parse(JSON.stringify(updatedForm));
+    history.push({
+      description: "Reorder fields",
+      redo: () => {
+        optimisticFormUpdate(formAfter);
+        newOrders.forEach(({ id, order }) =>
+          updateFieldMutation({ fieldId: id, body: { order } }),
+        );
+      },
+      undo: () => {
+        optimisticFormUpdate(formBefore);
+        oldOrders.forEach(({ id, order }) =>
+          updateFieldMutation({ fieldId: id, body: { order } }),
+        );
+      },
+    });
   };
 
   const handleReorderUnified = (event: DragEndEvent) => {
@@ -1222,6 +1388,8 @@ export default function FormBuilderPage() {
 
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+
+    const formBefore = JSON.parse(JSON.stringify(form));
 
     // Build a unified list of sections + top-level subforms sorted by order
     const topSubforms = (form.subforms || []).filter(
@@ -1238,8 +1406,21 @@ export default function FormBuilderPage() {
 
     if (oldIndex === -1 || newIndex === -1) return;
 
+    // Snapshot old orders before mutation
+    const oldOrders = unified.map((u) => ({
+      id: u.id,
+      order: u.order,
+      type: u._type,
+    }));
+
     const reordered = arrayMove(unified, oldIndex, newIndex);
     reordered.forEach((u, idx) => (u.order = idx));
+
+    const newOrders = reordered.map((u) => ({
+      id: u.id,
+      order: u.order,
+      type: u._type,
+    }));
 
     // Apply new orders to sections
     const newSections = form.sections.map((s: any) => {
@@ -1253,21 +1434,36 @@ export default function FormBuilderPage() {
       return match ? { ...s, order: match.order } : s;
     });
 
-    optimisticFormUpdate({ ...form, sections: newSections, subforms: newSubforms });
+    const updatedForm = { ...form, sections: newSections, subforms: newSubforms };
+    optimisticFormUpdate(updatedForm);
 
-    // Persist section orders
-    reordered
-      .filter((u) => u._type === "section")
-      .forEach((u) =>
-        updateSectionMutation({ sectionId: u.id, body: { order: u.order } }),
-      );
+    const persist = (orders: typeof newOrders) => {
+      orders
+        .filter((u) => u.type === "section")
+        .forEach((u) =>
+          updateSectionMutation({ sectionId: u.id, body: { order: u.order } }),
+        );
+      orders
+        .filter((u) => u.type === "subform")
+        .forEach((u) =>
+          updateSubformMutation({ subformId: u.id, body: { order: u.order } }),
+        );
+    };
 
-    // Persist subform orders
-    reordered
-      .filter((u) => u._type === "subform")
-      .forEach((u) =>
-        updateSubformMutation({ subformId: u.id, body: { order: u.order } }),
-      );
+    persist(newOrders);
+
+    const formAfter = JSON.parse(JSON.stringify(updatedForm));
+    history.push({
+      description: "Reorder sections/subforms",
+      redo: () => {
+        optimisticFormUpdate(formAfter);
+        persist(newOrders);
+      },
+      undo: () => {
+        optimisticFormUpdate(formBefore);
+        persist(oldOrders);
+      },
+    });
   };
 
   const handleLookupFieldsConfirm = async (
@@ -1493,6 +1689,11 @@ export default function FormBuilderPage() {
   ) => {
     if (!form) return;
 
+    const formBefore = JSON.parse(JSON.stringify(form));
+    const beforeSectionId = field.sectionId;
+    const beforeSubformId = field.subformId;
+    const beforeOrder = field.order;
+
     try {
       const updatedForm = JSON.parse(JSON.stringify(form));
 
@@ -1614,6 +1815,33 @@ export default function FormBuilderPage() {
         },
       }).unwrap();
 
+      const formAfter = JSON.parse(JSON.stringify(updatedForm));
+      history.push({
+        description: "Move field",
+        redo: async () => {
+          optimisticFormUpdate(formAfter);
+          await updateFieldMutation({
+            fieldId: field.id,
+            body: {
+              sectionId: targetSubformId ? null : targetSectionId,
+              subformId: targetSubformId || null,
+              order: movedField.order,
+            },
+          }).unwrap();
+        },
+        undo: async () => {
+          optimisticFormUpdate(formBefore);
+          await updateFieldMutation({
+            fieldId: field.id,
+            body: {
+              sectionId: beforeSubformId ? null : beforeSectionId ?? null,
+              subformId: beforeSubformId ?? null,
+              order: beforeOrder,
+            },
+          }).unwrap();
+        },
+      });
+
       toast({
         title: "Success",
         description: `Field moved successfully`,
@@ -1710,6 +1938,28 @@ export default function FormBuilderPage() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
+                  size="icon"
+                  onClick={() => history.undo()}
+                  disabled={!history.canUndo}
+                  className="h-8 w-8"
+                  title="Undo (Ctrl+Z)"
+                  aria-label="Undo"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => history.redo()}
+                  disabled={!history.canRedo}
+                  className="h-8 w-8"
+                  title="Redo (Ctrl+Shift+Z)"
+                  aria-label="Redo"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => setIsUserFormSettingsOpen(true)}
                   className="text-xs h-8"
@@ -1746,6 +1996,7 @@ export default function FormBuilderPage() {
                 hasOtherEmployeeForm={false}   // We will improve this later when you fetch all forms
                 activeOverId={activeOverId}
                 isDragging={!!(activePaletteItem || activeDragItem)}
+                onPushHistory={history.push}
               />
             </main>
           </div>

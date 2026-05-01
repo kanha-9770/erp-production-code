@@ -1,5 +1,5 @@
 "use client"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { useDroppable } from "@dnd-kit/core"
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,7 @@ import {
   useCreateSectionMutation,
   useUpdateSectionMutation,
   useDeleteSectionMutation,
+  useCreateFieldMutation,
   useUpdateFieldMutation,
   useDeleteFieldMutation,
   useUpdateSubformMutation,
@@ -33,6 +34,7 @@ import {
   useCreateSubformMutation,
   useSaveFormMutation,
 } from "@/lib/api/forms"
+import type { HistoryEntry } from "@/hooks/use-form-history"
 
 interface FormCanvasProps {
   form: Form & {
@@ -44,12 +46,14 @@ interface FormCanvasProps {
   }
   onFormUpdate: (form: FormCanvasProps["form"]) => void
   hasOtherEmployeeForm: boolean   // true = some OTHER form is already Employee Form
+  onPushHistory?: (entry: HistoryEntry) => void
 }
 
-export default function FormCanvas({ 
-  form, 
-  onFormUpdate, 
-  hasOtherEmployeeForm 
+export default function FormCanvas({
+  form,
+  onFormUpdate,
+  hasOtherEmployeeForm,
+  onPushHistory,
 }: FormCanvasProps) {
 
   const [isAddingSection, setIsAddingSection] = useState(false)
@@ -69,12 +73,127 @@ export default function FormCanvas({
   const [createSectionMut] = useCreateSectionMutation()
   const [updateSectionMut] = useUpdateSectionMutation()
   const [deleteSectionMut] = useDeleteSectionMutation()
+  const [createFieldMut] = useCreateFieldMutation()
   const [updateFieldMut] = useUpdateFieldMutation()
   const [deleteFieldMut] = useDeleteFieldMutation()
   const [updateSubformMut] = useUpdateSubformMutation()
   const [deleteSubformMut] = useDeleteSubformMutation()
   const [createSubformMut] = useCreateSubformMutation()
   const [saveFormMut] = useSaveFormMutation()
+
+  // Mirror latest form into a ref so history callbacks always operate on
+  // the up-to-date state, not a stale closure.
+  const formRef = useRef(form)
+  useEffect(() => {
+    formRef.current = form
+  }, [form])
+
+  // Helpers for patch-based undo of field create/delete operations
+  const removeFieldFromForm = (
+    f: FormCanvasProps["form"],
+    fieldId: string,
+  ): FormCanvasProps["form"] => {
+    const removeFromSubs = (subs: any[]): any[] =>
+      subs.map((sf) => ({
+        ...sf,
+        fields: (sf.fields || []).filter((x: any) => x.id !== fieldId),
+        childSubforms: sf.childSubforms ? removeFromSubs(sf.childSubforms) : sf.childSubforms,
+      }))
+    return {
+      ...f,
+      sections: (f.sections || []).map((s: any) => ({
+        ...s,
+        fields: (s.fields || []).filter((x: any) => x.id !== fieldId),
+        subforms: s.subforms ? removeFromSubs(s.subforms) : s.subforms,
+      })),
+      subforms: f.subforms ? (removeFromSubs(f.subforms) as any) : f.subforms,
+    } as FormCanvasProps["form"]
+  }
+
+  const insertFieldIntoForm = (
+    f: FormCanvasProps["form"],
+    field: any,
+  ): FormCanvasProps["form"] => {
+    const sectionId = field.sectionId
+    const subformId = field.subformId
+
+    if (subformId) {
+      const insertInSubs = (subs: any[]): any[] =>
+        subs.map((sf) => {
+          if (sf.id === subformId) {
+            const fields = [...(sf.fields || []), field].sort(
+              (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+            )
+            return { ...sf, fields }
+          }
+          return {
+            ...sf,
+            childSubforms: sf.childSubforms ? insertInSubs(sf.childSubforms) : sf.childSubforms,
+          }
+        })
+      return {
+        ...f,
+        sections: (f.sections || []).map((s: any) => ({
+          ...s,
+          subforms: s.subforms ? insertInSubs(s.subforms) : s.subforms,
+        })),
+        subforms: f.subforms ? (insertInSubs(f.subforms) as any) : f.subforms,
+      } as FormCanvasProps["form"]
+    }
+
+    if (sectionId) {
+      return {
+        ...f,
+        sections: (f.sections || []).map((s: any) => {
+          if (s.id !== sectionId) return s
+          const fields = [...(s.fields || []), field].sort(
+            (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+          )
+          return { ...s, fields }
+        }),
+      } as FormCanvasProps["form"]
+    }
+
+    return f
+  }
+
+  const findFieldInForm = (
+    f: FormCanvasProps["form"],
+    fieldId: string,
+  ): FormField | null => {
+    for (const s of f.sections || []) {
+      const found = (s.fields || []).find((x: any) => x.id === fieldId)
+      if (found) return found as FormField
+      const inSubs = (subs: any[]): FormField | null => {
+        for (const sf of subs) {
+          const hit = (sf.fields || []).find((x: any) => x.id === fieldId)
+          if (hit) return hit
+          if (sf.childSubforms) {
+            const r = inSubs(sf.childSubforms)
+            if (r) return r
+          }
+        }
+        return null
+      }
+      if ((s as any).subforms) {
+        const r = inSubs((s as any).subforms)
+        if (r) return r
+      }
+    }
+    const inSubs = (subs: any[]): FormField | null => {
+      for (const sf of subs) {
+        const hit = (sf.fields || []).find((x: any) => x.id === fieldId)
+        if (hit) return hit
+        if (sf.childSubforms) {
+          const r = inSubs(sf.childSubforms)
+          if (r) return r
+        }
+      }
+      return null
+    }
+    if (f.subforms) return inSubs(f.subforms)
+    return null
+  }
 
   // Group subforms by parentSectionId
   const subformsByParentSection = useMemo(() => {
@@ -296,24 +415,67 @@ export default function FormCanvas({
   }
 
   const deleteField = async (fieldId: string) => {
-    const sections = form.sections || []
-    const subforms = form.subforms || []
-    const previousSections = sections
-    const previousSubforms = subforms
+    const previousForm = form
+    const deletedField = findFieldInForm(form, fieldId)
     try {
-      const updatedSections = sections.map((section) => ({
-        ...section,
-        fields: section.fields.filter((field) => field.id !== fieldId),
-      }))
-      const updatedSubforms = subforms.map((subform) => ({
-        ...subform,
-        fields: subform.fields.filter((field) => field.id !== fieldId),
-      }))
-      onFormUpdate({ ...form, sections: updatedSections, subforms: updatedSubforms })
+      const updated = removeFieldFromForm(form, fieldId)
+      onFormUpdate(updated)
       await deleteFieldMut(fieldId).unwrap()
       toast({ title: "Success", description: "Field deleted successfully" })
+
+      if (deletedField && onPushHistory) {
+        const fieldSnapshot: any = JSON.parse(JSON.stringify(deletedField))
+        const idRef = { current: fieldId }
+        const recreatePayload: any = {
+          sectionId: fieldSnapshot.sectionId ?? null,
+          subformId: fieldSnapshot.subformId ?? null,
+          type: fieldSnapshot.type,
+          label: fieldSnapshot.label,
+          placeholder: fieldSnapshot.placeholder,
+          description: fieldSnapshot.description,
+          defaultValue: fieldSnapshot.defaultValue,
+          options: fieldSnapshot.options,
+          validation: fieldSnapshot.validation,
+          visible: fieldSnapshot.visible,
+          readonly: fieldSnapshot.readonly,
+          width: fieldSnapshot.width,
+          order: fieldSnapshot.order,
+          ...(fieldSnapshot.lookup ? { lookup: fieldSnapshot.lookup } : {}),
+          ...(fieldSnapshot.formula ? { formula: fieldSnapshot.formula } : {}),
+          ...(fieldSnapshot.parentFieldId
+            ? { parentFieldId: fieldSnapshot.parentFieldId, isDependent: true }
+            : {}),
+        }
+
+        onPushHistory({
+          description: "Delete field",
+          redo: async () => {
+            const cur = formRef.current
+            const next = removeFieldFromForm(cur, idRef.current)
+            onFormUpdate(next)
+            await deleteFieldMut(idRef.current).unwrap()
+          },
+          undo: async () => {
+            const result: any = await createFieldMut(recreatePayload).unwrap()
+            if (!result?.success) {
+              toast({
+                title: "Error",
+                description: "Failed to restore field",
+                variant: "destructive",
+              })
+              return
+            }
+            const newId = result.data.id
+            idRef.current = newId
+            const cur = formRef.current
+            const restored = { ...fieldSnapshot, id: newId }
+            const next = insertFieldIntoForm(cur, restored)
+            onFormUpdate(next)
+          },
+        })
+      }
     } catch (error) {
-      onFormUpdate({ ...form, sections: previousSections, subforms: previousSubforms })
+      onFormUpdate(previousForm)
       toast({ title: "Error", description: "Failed to delete field", variant: "destructive" })
     }
   }
