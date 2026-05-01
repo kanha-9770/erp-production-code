@@ -197,20 +197,20 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
 
       for (const field of allFields) {
         const labelLower = (field.label || "").toLowerCase();
-        const isLeaveStartDate =
-          labelLower.includes("leave start") && field.type === "date";
+        const isLeaveDate =
+          (labelLower.includes("leave start") || labelLower.includes("leave end")) && field.type === "date";
         const isExplicitlyGuarded =
           (field.properties as Record<string, any> | null)?.disallowPastDates === true &&
           field.type === "date";
 
-        if (isLeaveStartDate || isExplicitlyGuarded) {
+        if (isLeaveDate || isExplicitlyGuarded) {
           const submittedValue = body.recordData?.[field.id];
           if (submittedValue) {
             const submittedDate = new Date(submittedValue);
             submittedDate.setHours(0, 0, 0, 0);
             if (submittedDate < serverToday) {
               return NextResponse.json(
-                { error: "Leave cannot start from a past date." },
+                { error: "Leave dates cannot be in the past." },
                 { status: 400 }
               );
             }
