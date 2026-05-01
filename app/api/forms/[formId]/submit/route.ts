@@ -100,6 +100,15 @@ interface StructuredRecordData {
   };
 }
 
+function flattenSubformFields(subforms: Subform[]): FormField[] {
+  const out: FormField[] = [];
+  for (const sf of subforms) {
+    if (sf.fields?.length) out.push(...sf.fields);
+    if (sf.childSubforms?.length) out.push(...flattenSubformFields(sf.childSubforms));
+  }
+  return out;
+}
+
 // ──────────────────────────────────────────────
 // POST handler
 // ──────────────────────────────────────────────

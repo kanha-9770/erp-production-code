@@ -7,10 +7,12 @@ export interface SampleEmployee {
   designation: string;
   department: string;
   totalSalary: number;
+  matchKeys: string[];
 }
 
 export interface SampleAttendance {
   email: string;
+  matchKey: string;
   date: string;
   checkInTime: string;
   checkOutTime: string;
@@ -57,6 +59,7 @@ const CHECK_OUT_FORM_NAMES = ['Check-Out', 'Check Out', 'CheckOut', 'Attendance 
 const SETUP_META_KEY = 'payroll-v2';
 
 interface PayrollSetupShape {
+  defaultBaseSalary?: number | null;
   employee: { formId: string | null; fields: Record<string, string | null> };
   checkIn: { formId: string | null; fields: Record<string, string | null> };
   checkOut: { formId: string | null; fields: Record<string, string | null> };
@@ -71,6 +74,7 @@ async function loadSetup(): Promise<PayrollSetupShape | null> {
     const m: any = config?.attendanceFieldMappings;
     if (m && typeof m === 'object' && m._meta === SETUP_META_KEY) {
       return {
+        defaultBaseSalary: typeof m.defaultBaseSalary === 'number' ? m.defaultBaseSalary : null,
         employee: m.employee ?? { formId: null, fields: {} },
         checkIn: m.checkIn ?? { formId: null, fields: {} },
         checkOut: m.checkOut ?? { formId: null, fields: {} },
@@ -100,6 +104,44 @@ async function getFieldLabelMap(formId: string): Promise<Record<string, string>>
   } catch {
     return {};
   }
+}
+
+function flattenRecordData(recordData: any): Record<string, any> {
+  if (!recordData || typeof recordData !== 'object') return {};
+  const plain: Record<string, any> = {};
+
+  if (recordData.sections && typeof recordData.sections === 'object') {
+    for (const section of Object.values(recordData.sections) as any[]) {
+      const fields = section?.fields;
+      if (fields && typeof fields === 'object') {
+        for (const [fieldId, val] of Object.entries(fields)) {
+          plain[fieldId] = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+        }
+      }
+    }
+  }
+
+  if (recordData.subforms && typeof recordData.subforms === 'object') {
+    for (const subform of Object.values(recordData.subforms) as any[]) {
+      const fields = subform?.fields;
+      if (fields && typeof fields === 'object') {
+        for (const [fieldId, val] of Object.entries(fields)) {
+          plain[fieldId] = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+        }
+      }
+    }
+  }
+
+  const structuredKeys = new Set(['formId', 'formName', 'sections', 'subforms', 'metadata']);
+  for (const [key, entry] of Object.entries(recordData)) {
+    if (structuredKeys.has(key)) continue;
+    if (plain[key] !== undefined) continue;
+    plain[key] = entry && typeof entry === 'object' && 'value' in (entry as any)
+      ? (entry as any).value
+      : entry;
+  }
+
+  return plain;
 }
 
 function pickValue(recordData: any, candidates: string[]): any {
@@ -162,6 +204,138 @@ function toTimeStr(v: any): string | null {
   return null;
 }
 
+export async function diagnose(month: string): Promise<any> {
+  const setup = await loadSetup();
+  const employeeForm = await resolveFromConfigOrName(setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
+  const checkInForm = await resolveFromConfigOrName(setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
+  const checkOutForm = await resolveFromConfigOrName(setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
+
+  const result: any = {
+    hasSavedSetup: !!setup,
+    month,
+    employee: { found: !!employeeForm, formId: employeeForm?.id, rawCount: 0, parsedCount: 0, sample: [], reasons: {} },
+    checkIn: { found: !!checkInForm, formId: checkInForm?.id, rawCount: 0, parsedInMonth: 0, sample: [], reasons: {} },
+    checkOut: { found: !!checkOutForm, formId: checkOutForm?.id, rawCount: 0, parsedInMonth: 0, sample: [], reasons: {} },
+  };
+
+  if (employeeForm) {
+    const rows = await readRecords(employeeForm);
+    result.employee.rawCount = rows.length;
+    const reasons: Record<string, number> = {
+      noIdentity: 0,
+      noSalaryNoDefault: 0,
+      ok: 0,
+    };
+    const fields = setup?.employee.fields ?? {};
+    const fallbackSalary = setup?.defaultBaseSalary ?? 0;
+    for (const row of rows.slice(0, 100)) {
+      const data = flattenRecordData(row.recordData);
+      const email =
+        pickWithMapping(data, fields.email, employeeForm.labels, ['email', 'Email', 'employeeEmail']) ||
+        row.user?.email;
+      const empId = pickWithMapping(data, fields.employeeId, employeeForm.labels, [
+        'employeeId',
+        'employee_id',
+        'empId',
+      ]);
+      const mappedSalary = toNumber(
+        pickWithMapping(data, fields.salary, employeeForm.labels, [
+          'totalSalary',
+          'salary',
+          'CTC',
+          'givenSalary',
+        ]),
+        0,
+      );
+      const salary = mappedSalary > 0 ? mappedSalary : fallbackSalary;
+
+      if (!email && !empId) reasons.noIdentity++;
+      else if (salary <= 0) reasons.noSalaryNoDefault++;
+      else reasons.ok++;
+
+      if (result.employee.sample.length < 3) {
+        result.employee.sample.push({
+          recordId: row.id,
+          email: email ?? null,
+          employeeId: empId ?? null,
+          mappedSalary,
+          fallbackSalary,
+          effectiveSalary: salary,
+          dataKeys: Object.keys(data).slice(0, 25),
+        });
+      }
+    }
+    result.employee.parsedCount = reasons.ok;
+    result.employee.reasons = reasons;
+  }
+
+  const fillAttendance = async (
+    target: 'checkIn' | 'checkOut',
+    formInfo: typeof checkInForm,
+    fields: Record<string, string | null>,
+    timeKey: 'checkInTime' | 'checkOutTime',
+  ) => {
+    if (!formInfo) return;
+    const rows = await readRecords(formInfo);
+    result[target].rawCount = rows.length;
+    const reasons: Record<string, number> = {
+      missingDate: 0,
+      missingTime: 0,
+      outOfMonth: 0,
+      noIdentity: 0,
+      ok: 0,
+    };
+    for (const row of rows.slice(0, 200)) {
+      const data = flattenRecordData(row.recordData);
+      const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+      const email =
+        pickWithMapping(data, fields.email, formInfo.labels, ['email', 'Email', 'employeeEmail']) ||
+        userEmail;
+      const empId = pickWithMapping(data, fields.employeeId, formInfo.labels, [
+        'employeeId',
+        'employee_id',
+        'empId',
+      ]);
+      const dateValue =
+        pickWithMapping(data, fields.date, formInfo.labels, ['date', 'attendanceDate']) ?? row.date;
+      const time = pickWithMapping(
+        data,
+        fields[timeKey] ?? null,
+        formInfo.labels,
+        timeKey === 'checkInTime'
+          ? ['checkInTime', 'checkIn', 'inTime']
+          : ['checkOutTime', 'checkOut', 'outTime'],
+      );
+      const dateStr = toDateStr(dateValue);
+      const timeStr = toTimeStr(time);
+      if (!dateStr) reasons.missingDate++;
+      else if (!timeStr) reasons.missingTime++;
+      else if (!email && !empId) reasons.noIdentity++;
+      else if (dateStr.slice(0, 7) !== month) reasons.outOfMonth++;
+      else reasons.ok++;
+      if (result[target].sample.length < 3) {
+        result[target].sample.push({
+          recordId: row.id,
+          email: email ?? null,
+          employeeId: empId ?? null,
+          parsedDate: dateStr,
+          parsedTime: timeStr,
+          rawDateColumn: row.date,
+          submittedByUserEmail: userEmail,
+          dataKeys: Object.keys(data).slice(0, 25),
+        });
+      }
+    }
+    result[target].parsedInMonth = reasons.ok;
+    result[target].reasons = reasons;
+  };
+
+  await fillAttendance('checkIn', checkInForm, setup?.checkIn.fields ?? {}, 'checkInTime');
+  await fillAttendance('checkOut', checkOutForm, setup?.checkOut.fields ?? {}, 'checkOutTime');
+
+  return result;
+}
+
 async function findFormByNames(names: string[]): Promise<{ id: string; storageTable: string | null } | null> {
   const form = await prisma.form.findFirst({
     where: { name: { in: names, mode: 'insensitive' } },
@@ -171,7 +345,10 @@ async function findFormByNames(names: string[]): Promise<{ id: string; storageTa
   return { id: form.id, storageTable: form.tableMapping?.storageTable ?? null };
 }
 
-async function readRecords(formInfo: { id: string; storageTable: string | null }, where: any = {}): Promise<any[]> {
+async function readRecords(
+  formInfo: { id: string; storageTable: string | null },
+  where: any = {},
+): Promise<any[]> {
   const baseWhere = { formId: formInfo.id, ...where };
 
   if (formInfo.storageTable) {
@@ -180,7 +357,10 @@ async function readRecords(formInfo: { id: string; storageTable: string | null }
       const key = `formRecord${num}` as keyof typeof prisma;
       if (key in prisma) {
         try {
-          const rows = await (prisma[key] as any).findMany({ where: baseWhere });
+          let rows = await (prisma[key] as any).findMany({ where: baseWhere });
+          if (rows.length === 0 && Object.keys(where).length > 0) {
+            rows = await (prisma[key] as any).findMany({ where: { formId: formInfo.id } });
+          }
           if (rows.length > 0) return rows;
         } catch (err) {
           console.warn(`[payroll] Failed reading ${String(key)}:`, err);
@@ -190,15 +370,26 @@ async function readRecords(formInfo: { id: string; storageTable: string | null }
   }
 
   try {
-    const rows = await prisma.formRecord.findMany({
+    let rows = await prisma.formRecord.findMany({
       where: baseWhere,
       include: { user: { select: { email: true, username: true } } },
     });
+    if (rows.length === 0 && Object.keys(where).length > 0) {
+      rows = await prisma.formRecord.findMany({
+        where: { formId: formInfo.id },
+        include: { user: { select: { email: true, username: true } } },
+      });
+    }
     return rows;
   } catch (err) {
     console.warn('[payroll] Failed reading unified formRecord:', err);
     return [];
   }
+}
+
+function inMonth(dateStr: string | null, month: string): boolean {
+  if (!dateStr) return false;
+  return dateStr.slice(0, 7) === month;
 }
 
 async function resolveFromConfigOrName(
@@ -251,28 +442,55 @@ export async function getEmployeesFromDB(): Promise<SampleEmployee[]> {
   if (!formInfo) return [];
 
   const fields = setup?.employee.fields ?? {};
+  const fallbackSalary = setup?.defaultBaseSalary ?? 0;
   const rows = await readRecords(formInfo);
   const employees: SampleEmployee[] = [];
+  const seen = new Set<string>();
 
   for (const row of rows) {
-    const data = row.recordData ?? {};
-    const userEmail = row.user?.email;
+    const data = flattenRecordData(row.recordData);
+    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
 
-    const email =
-      pickWithMapping(data, fields.email, formInfo.labels, ['email', 'Email', 'emailId', 'employeeEmail']) ||
-      userEmail;
-    if (!email) continue;
+    const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, [
+      'email',
+      'Email',
+      'emailId',
+      'employeeEmail',
+    ]);
+    const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, [
+      'employeeId',
+      'employee_id',
+      'empId',
+      'EmployeeID',
+    ]);
 
+    const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
     const employeeId =
-      pickWithMapping(data, fields.employeeId, formInfo.labels, [
-        'employeeId',
-        'employee_id',
-        'empId',
-        'EmployeeID',
-      ]) ||
+      (rawEmpId ? String(rawEmpId) : null) ||
       row.employee_id ||
-      String(email).split('@')[0].toUpperCase();
+      (email ? email.split('@')[0].toUpperCase() : `EMP-${row.id.slice(0, 6)}`);
 
+    const matchKeys: string[] = [];
+    if (email) matchKeys.push(`email:${email}`);
+    if (employeeId) matchKeys.push(`empId:${String(employeeId).toLowerCase()}`);
+    if (userEmail && (!email || userEmail !== email)) matchKeys.push(`email:${userEmail}`);
+    if (matchKeys.length === 0) continue;
+
+    const dedupKey = matchKeys[0];
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+
+    const firstName = pickWithMapping(data, null, formInfo.labels, [
+      'firstName',
+      'First Name',
+      'fld_emp_first_name',
+    ]);
+    const lastName = pickWithMapping(data, null, formInfo.labels, [
+      'lastName',
+      'Last Name',
+      'fld_emp_last_name',
+    ]);
+    const composedName = [firstName, lastName].filter(Boolean).join(' ').trim();
     const employeeName =
       pickWithMapping(data, fields.name, formInfo.labels, [
         'employeeName',
@@ -281,10 +499,11 @@ export async function getEmployeesFromDB(): Promise<SampleEmployee[]> {
         'employee_name',
         'Name',
       ]) ||
+      composedName ||
       row.user?.username ||
-      String(email).split('@')[0];
+      (email ? email.split('@')[0] : String(employeeId));
 
-    const totalSalary = toNumber(
+    const mappedSalary = toNumber(
       pickWithMapping(data, fields.salary, formInfo.labels, [
         'totalSalary',
         'salary',
@@ -295,40 +514,33 @@ export async function getEmployeesFromDB(): Promise<SampleEmployee[]> {
       ]),
       0,
     );
-
-    if (totalSalary <= 0) continue;
+    const totalSalary = mappedSalary > 0 ? mappedSalary : fallbackSalary;
 
     const designation =
-      pickWithMapping(data, fields.designation, formInfo.labels, ['designation', 'jobTitle', 'role', 'position']) ||
-      '';
+      pickWithMapping(data, fields.designation, formInfo.labels, [
+        'designation',
+        'jobTitle',
+        'role',
+        'position',
+      ]) || '';
     const department =
       pickWithMapping(data, fields.department, formInfo.labels, ['department', 'dept', 'team']) || '';
 
     employees.push({
       employeeId: String(employeeId),
       employeeName: String(employeeName),
-      email: String(email).toLowerCase(),
+      email: email || '',
       designation: String(designation || ''),
       department: String(department || ''),
       totalSalary,
+      matchKeys,
     });
   }
 
-  const seen = new Set<string>();
-  return employees.filter((e) => {
-    if (seen.has(e.email)) return false;
-    seen.add(e.email);
-    return true;
-  });
+  return employees;
 }
 
 export async function getAttendanceFromDB(month: string): Promise<SampleAttendance[]> {
-  const [yearStr, monthStr] = month.split('-');
-  const year = Number(yearStr);
-  const monthIdx = Number(monthStr) - 1;
-  const start = new Date(year, monthIdx, 1);
-  const end = new Date(year, monthIdx + 1, 0, 23, 59, 59);
-
   const setup = await loadSetup();
   const checkInForm = await resolveFromConfigOrName(setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
   const checkOutForm = await resolveFromConfigOrName(setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
@@ -338,24 +550,36 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
   const checkInFields = setup?.checkIn.fields ?? {};
   const checkOutFields = setup?.checkOut.fields ?? {};
 
-  const checkInRows = await readRecords(checkInForm, { date: { gte: start, lte: end } });
-  const checkOutRows = checkOutForm
-    ? await readRecords(checkOutForm, { date: { gte: start, lte: end } })
-    : [];
+  const checkInRows = await readRecords(checkInForm);
+  const checkOutRows = checkOutForm ? await readRecords(checkOutForm) : [];
 
   const dailyMap = new Map<string, SampleAttendance>();
 
+  const buildMatchKey = (
+    data: any,
+    fields: Record<string, string | null>,
+    formLabels: Record<string, string>,
+    userEmail: string | null,
+  ): { matchKey: string; email: string } | null => {
+    const rawEmail = pickWithMapping(data, fields.email, formLabels, ['email', 'Email', 'employeeEmail']);
+    const rawEmpId = pickWithMapping(data, fields.employeeId, formLabels, [
+      'employeeId',
+      'employee_id',
+      'empId',
+    ]);
+    const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
+    const empId = rawEmpId ? String(rawEmpId).toLowerCase() : null;
+    if (email) return { matchKey: `email:${email}`, email };
+    if (empId) return { matchKey: `empId:${empId}`, email: '' };
+    if (userEmail) return { matchKey: `email:${userEmail}`, email: userEmail };
+    return null;
+  };
+
   for (const row of checkInRows) {
-    const data = row.recordData ?? {};
-    const userEmail = row.user?.email;
-    const email =
-      pickWithMapping(data, checkInFields.email, checkInForm.labels, [
-        'email',
-        'Email',
-        'employeeEmail',
-      ]) ||
-      userEmail ||
-      pickValue(data, ['employeeId', 'employee_id']);
+    const data = flattenRecordData(row.recordData);
+    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+    const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
+
     const dateValue =
       pickWithMapping(data, checkInFields.date, checkInForm.labels, ['date', 'attendanceDate', 'Date']) ??
       row.date;
@@ -369,12 +593,14 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
     const dateStr = toDateStr(dateValue);
     const inTime = toTimeStr(checkInTime);
 
-    if (!email || !dateStr || !inTime) continue;
+    if (!id || !dateStr || !inTime) continue;
+    if (!inMonth(dateStr, month)) continue;
 
-    const key = `${String(email).toLowerCase()}_${dateStr}`;
+    const key = `${id.matchKey}_${dateStr}`;
     if (!dailyMap.has(key)) {
       dailyMap.set(key, {
-        email: String(email).toLowerCase(),
+        email: id.email,
+        matchKey: id.matchKey,
         date: dateStr,
         checkInTime: inTime,
         checkOutTime: '',
@@ -384,16 +610,10 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
 
   if (checkOutForm) {
     for (const row of checkOutRows) {
-      const data = row.recordData ?? {};
-      const userEmail = row.user?.email;
-      const email =
-        pickWithMapping(data, checkOutFields.email, checkOutForm.labels, [
-          'email',
-          'Email',
-          'employeeEmail',
-        ]) ||
-        userEmail ||
-        pickValue(data, ['employeeId', 'employee_id']);
+      const data = flattenRecordData(row.recordData);
+      const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+      const id = buildMatchKey(data, checkOutFields, checkOutForm.labels, userEmail);
+
       const dateValue =
         pickWithMapping(data, checkOutFields.date, checkOutForm.labels, ['date', 'attendanceDate', 'Date']) ??
         row.date;
@@ -407,15 +627,17 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
       const dateStr = toDateStr(dateValue);
       const outTime = toTimeStr(checkOutTime);
 
-      if (!email || !dateStr || !outTime) continue;
+      if (!id || !dateStr || !outTime) continue;
+      if (!inMonth(dateStr, month)) continue;
 
-      const key = `${String(email).toLowerCase()}_${dateStr}`;
+      const key = `${id.matchKey}_${dateStr}`;
       const existing = dailyMap.get(key);
       if (existing) {
         existing.checkOutTime = outTime;
       } else {
         dailyMap.set(key, {
-          email: String(email).toLowerCase(),
+          email: id.email,
+          matchKey: id.matchKey,
           date: dateStr,
           checkInTime: '09:00',
           checkOutTime: outTime,
@@ -425,16 +647,9 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
   }
 
   for (const row of checkInRows) {
-    const data = row.recordData ?? {};
-    const userEmail = row.user?.email;
-    const email =
-      pickWithMapping(data, checkInFields.email, checkInForm.labels, [
-        'email',
-        'Email',
-        'employeeEmail',
-      ]) ||
-      userEmail ||
-      pickValue(data, ['employeeId', 'employee_id']);
+    const data = flattenRecordData(row.recordData);
+    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+    const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
     const dateValue =
       pickWithMapping(data, checkInFields.date, checkInForm.labels, ['date', 'attendanceDate', 'Date']) ??
       row.date;
@@ -442,27 +657,37 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
     const dateStr = toDateStr(dateValue);
     const outTime = toTimeStr(checkOutTime);
 
-    if (!email || !dateStr || !outTime) continue;
+    if (!id || !dateStr || !outTime) continue;
+    if (!inMonth(dateStr, month)) continue;
 
-    const key = `${String(email).toLowerCase()}_${dateStr}`;
+    const key = `${id.matchKey}_${dateStr}`;
     const existing = dailyMap.get(key);
     if (existing && !existing.checkOutTime) {
       existing.checkOutTime = outTime;
     }
   }
 
-  return Array.from(dailyMap.values()).filter((r) => r.checkInTime && r.checkOutTime);
+  return Array.from(dailyMap.values()).filter((r) => r.checkInTime || r.checkOutTime);
 }
 
 export async function getEmployeeFormsStatus(): Promise<{
   hasEmployeeForm: boolean;
   hasCheckInForm: boolean;
   hasCheckOutForm: boolean;
+  hasSavedSetup: boolean;
   employeeFormName?: string;
   checkInFormName?: string;
   checkOutFormName?: string;
 }> {
-  const [emp, ci, co] = await Promise.all([
+  const setup = await loadSetup();
+
+  const lookupName = async (formId: string | null | undefined) => {
+    if (!formId) return null;
+    const f = await prisma.form.findUnique({ where: { id: formId }, select: { name: true } });
+    return f?.name ?? null;
+  };
+
+  const [empByName, ciByName, coByName, empConfigName, ciConfigName, coConfigName] = await Promise.all([
     prisma.form.findFirst({
       where: { name: { in: EMPLOYEE_FORM_NAMES, mode: 'insensitive' } },
       select: { name: true },
@@ -475,14 +700,23 @@ export async function getEmployeeFormsStatus(): Promise<{
       where: { name: { in: CHECK_OUT_FORM_NAMES, mode: 'insensitive' } },
       select: { name: true },
     }),
+    lookupName(setup?.employee.formId),
+    lookupName(setup?.checkIn.formId),
+    lookupName(setup?.checkOut.formId),
   ]);
+
+  const employeeFormName = empConfigName ?? empByName?.name;
+  const checkInFormName = ciConfigName ?? ciByName?.name;
+  const checkOutFormName = coConfigName ?? coByName?.name;
+
   return {
-    hasEmployeeForm: !!emp,
-    hasCheckInForm: !!ci,
-    hasCheckOutForm: !!co,
-    employeeFormName: emp?.name,
-    checkInFormName: ci?.name,
-    checkOutFormName: co?.name,
+    hasEmployeeForm: !!employeeFormName,
+    hasCheckInForm: !!checkInFormName,
+    hasCheckOutForm: !!checkOutFormName,
+    hasSavedSetup: !!setup,
+    employeeFormName,
+    checkInFormName,
+    checkOutFormName,
   };
 }
 

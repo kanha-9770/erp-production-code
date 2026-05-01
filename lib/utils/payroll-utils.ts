@@ -15,8 +15,12 @@ const TAX_PERCENT = 5;
 const INSURANCE_FIXED = 500;
 const LUNCH_BREAK_HOURS = 1;
 
+const DEFAULT_DAY_HOURS = 8;
+
 export function calculateWorkingHours(checkInTime: string, checkOutTime?: string): number {
-  if (!checkOutTime) return 0;
+  if (!checkInTime && !checkOutTime) return 0;
+  if (!checkOutTime) return DEFAULT_DAY_HOURS;
+  if (!checkInTime) return DEFAULT_DAY_HOURS;
   const [inH, inM] = checkInTime.split(':').map(Number);
   const [outH, outM] = checkOutTime.split(':').map(Number);
   const inMinutes = inH * 60 + inM;
@@ -77,15 +81,26 @@ export async function calculatePayroll(month: string): Promise<PayrollCalculatio
     getAttendanceFromDB(targetMonth),
   ]);
 
-  const byEmail = new Map<string, SampleAttendance[]>();
+  const byKey = new Map<string, SampleAttendance[]>();
   attendance.forEach((a) => {
-    if (!byEmail.has(a.email)) byEmail.set(a.email, []);
-    byEmail.get(a.email)!.push(a);
+    if (!byKey.has(a.matchKey)) byKey.set(a.matchKey, []);
+    byKey.get(a.matchKey)!.push(a);
   });
 
-  return employees.map((emp) =>
-    calculateForEmployee(emp, byEmail.get(emp.email) ?? [], targetMonth),
-  );
+  return employees.map((emp) => {
+    const merged: SampleAttendance[] = [];
+    const seenDates = new Set<string>();
+    for (const key of emp.matchKeys) {
+      const list = byKey.get(key);
+      if (!list) continue;
+      for (const a of list) {
+        if (seenDates.has(a.date)) continue;
+        seenDates.add(a.date);
+        merged.push(a);
+      }
+    }
+    return calculateForEmployee(emp, merged, targetMonth);
+  });
 }
 
 interface DailyAttendance {

@@ -39,6 +39,7 @@ interface FieldOption {
 }
 
 interface Setup {
+  defaultBaseSalary: number | null;
   employee: {
     formId: string | null;
     fields: {
@@ -54,6 +55,7 @@ interface Setup {
     formId: string | null;
     fields: {
       email: string | null;
+      employeeId: string | null;
       date: string | null;
       checkInTime: string | null;
     };
@@ -62,6 +64,7 @@ interface Setup {
     formId: string | null;
     fields: {
       email: string | null;
+      employeeId: string | null;
       date: string | null;
       checkOutTime: string | null;
     };
@@ -69,12 +72,13 @@ interface Setup {
 }
 
 const EMPTY_SETUP: Setup = {
+  defaultBaseSalary: null,
   employee: {
     formId: null,
     fields: { email: null, employeeId: null, name: null, salary: null, designation: null, department: null },
   },
-  checkIn: { formId: null, fields: { email: null, date: null, checkInTime: null } },
-  checkOut: { formId: null, fields: { email: null, date: null, checkOutTime: null } },
+  checkIn: { formId: null, fields: { email: null, employeeId: null, date: null, checkInTime: null } },
+  checkOut: { formId: null, fields: { email: null, employeeId: null, date: null, checkOutTime: null } },
 };
 
 const NONE = '__none__';
@@ -203,8 +207,8 @@ export default function PayrollConfigurePage() {
         section === 'employee'
           ? { email: null, employeeId: null, name: null, salary: null, designation: null, department: null }
           : section === 'checkIn'
-            ? { email: null, date: null, checkInTime: null }
-            : { email: null, date: null, checkOutTime: null };
+            ? { email: null, employeeId: null, date: null, checkInTime: null }
+            : { email: null, employeeId: null, date: null, checkOutTime: null };
       return { ...prev, [section]: { formId, fields: blankFields as any } };
     });
     if (section === 'employee') setEmployeeFields([]);
@@ -302,7 +306,7 @@ export default function PayrollConfigurePage() {
 
   const requirementsMet =
     !!setup.employee.formId &&
-    !!setup.employee.fields.salary &&
+    (!!setup.employee.fields.salary || !!setup.defaultBaseSalary) &&
     (!!setup.employee.fields.email || !!setup.employee.fields.employeeId) &&
     !!setup.checkIn.formId &&
     !!setup.checkIn.fields.date &&
@@ -389,8 +393,7 @@ export default function PayrollConfigurePage() {
                 </p>
                 <FieldMappingRow
                   label="Salary (CTC)"
-                  description="Monthly base salary number"
-                  required
+                  description="Monthly base salary; falls back to default below if blank"
                   fields={employeeFields}
                   value={setup.employee.fields.salary}
                   onChange={(v) => updateMapping('employee', 'salary', v)}
@@ -427,6 +430,28 @@ export default function PayrollConfigurePage() {
                   value={setup.employee.fields.department}
                   onChange={(v) => updateMapping('employee', 'department', v)}
                 />
+
+                <div className="grid grid-cols-1 gap-2 border-t border-border pt-3 sm:grid-cols-[200px_1fr] sm:items-center">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Default Base Salary</p>
+                    <p className="text-xs text-muted-foreground">
+                      Used when an employee has no salary value (₹/month)
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="e.g. 30000"
+                    value={setup.defaultBaseSalary ?? ''}
+                    onChange={(e) =>
+                      setSetup((p) => ({
+                        ...p,
+                        defaultBaseSalary: e.target.value ? Number(e.target.value) : null,
+                      }))
+                    }
+                    className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
               </div>
             )}
           </CardContent>
@@ -476,6 +501,13 @@ export default function PayrollConfigurePage() {
                   value={setup.checkIn.fields.email}
                   onChange={(v) => updateMapping('checkIn', 'email', v)}
                 />
+                <FieldMappingRow
+                  label="Employee ID"
+                  description="Alternative match if email is not stored on check-ins"
+                  fields={checkInFields}
+                  value={setup.checkIn.fields.employeeId}
+                  onChange={(v) => updateMapping('checkIn', 'employeeId', v)}
+                />
               </div>
             )}
           </CardContent>
@@ -522,6 +554,12 @@ export default function PayrollConfigurePage() {
                   fields={checkOutFields}
                   value={setup.checkOut.fields.email}
                   onChange={(v) => updateMapping('checkOut', 'email', v)}
+                />
+                <FieldMappingRow
+                  label="Employee ID"
+                  fields={checkOutFields}
+                  value={setup.checkOut.fields.employeeId}
+                  onChange={(v) => updateMapping('checkOut', 'employeeId', v)}
                 />
               </div>
             )}
