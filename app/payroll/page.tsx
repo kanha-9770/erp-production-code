@@ -45,6 +45,8 @@ import {
   Mail,
   ArrowRight,
   Minus,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -248,6 +250,7 @@ export default function PayrollPage() {
   const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
   const [diagnoseLoading, setDiagnoseLoading] = useState(false);
   const [diagnoseOpen, setDiagnoseOpen] = useState(false);
+  const [diagnoseCopied, setDiagnoseCopied] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [lastGeneratedAt, setLastGeneratedAt] = useState<Date | null>(null);
@@ -324,6 +327,120 @@ export default function PayrollPage() {
       console.error('[payroll-page] diagnose error', e);
     } finally {
       setDiagnoseLoading(false);
+    }
+  };
+
+  // Build a human-readable text dump of the diagnose result for sharing.
+  // Includes formsStatus + per-section counts + reasons + sample rows so a
+  // single paste captures everything needed to debug the engine remotely.
+  const formatDiagnoseReport = (): string => {
+    if (!diagnoseReport) return '';
+    const lines: string[] = [];
+    const rule = '═'.repeat(56);
+    const sub = '─'.repeat(56);
+
+    lines.push(`PAYROLL DIAGNOSTIC — ${monthLabel}`);
+    lines.push(rule);
+    lines.push('');
+
+    const fs = stats?.formsStatus;
+    if (fs) {
+      lines.push('Setup status:');
+      lines.push(
+        `  Employee Profile : ${
+          fs.hasEmployeeForm ? `found (${fs.employeeFormName ?? '—'})` : 'MISSING'
+        }`,
+      );
+      lines.push(
+        `  Check-In         : ${
+          fs.hasCheckInForm ? `found (${fs.checkInFormName ?? '—'})` : 'MISSING'
+        }`,
+      );
+      lines.push(
+        `  Check-Out        : ${
+          fs.hasCheckOutForm ? `found (${fs.checkOutFormName ?? '—'})` : 'optional, not configured'
+        }`,
+      );
+      lines.push(
+        `  Setup saved      : ${diagnoseReport.hasSavedSetup ? 'yes' : 'no'}`,
+      );
+      lines.push('');
+    }
+
+    const sections = [
+      { key: 'employee', label: 'EMPLOYEE PROFILE', usableKey: 'parsedCount' },
+      { key: 'checkIn', label: 'CHECK-IN', usableKey: 'parsedInMonth' },
+      { key: 'checkOut', label: 'CHECK-OUT', usableKey: 'parsedInMonth' },
+    ] as const;
+
+    for (const s of sections) {
+      const sec = diagnoseReport[s.key];
+      if (!sec) continue;
+      lines.push(sub);
+      lines.push(s.label);
+      lines.push(sub);
+      if (!sec.found) {
+        lines.push('  Form not found in this organization');
+        lines.push('');
+        continue;
+      }
+      lines.push(`  Form ID         : ${sec.formId ?? '—'}`);
+      lines.push(`  Raw rows        : ${sec.rawCount ?? 0}`);
+      lines.push(
+        `  ${s.usableKey === 'parsedCount' ? 'Usable          ' : 'In selected month'} : ${
+          sec[s.usableKey] ?? 0
+        }`,
+      );
+      if (sec.reasons && Object.keys(sec.reasons).length > 0) {
+        lines.push('  Reasons:');
+        for (const [k, v] of Object.entries(sec.reasons)) {
+          lines.push(`    ${k.padEnd(22)} ${v}`);
+        }
+      }
+      if (sec.sample && sec.sample.length > 0) {
+        lines.push(`  Sample rows (${sec.sample.length}):`);
+        const sampleJson = JSON.stringify(sec.sample, null, 2);
+        for (const ln of sampleJson.split('\n')) {
+          lines.push(`    ${ln}`);
+        }
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  };
+
+  const handleCopyDiagnose = async () => {
+    const text = formatDiagnoseReport();
+    if (!text) return;
+    try {
+      // Modern Clipboard API. Requires HTTPS or localhost AND a user gesture
+      // (the click that called this counts).
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-secure contexts: hidden textarea + execCommand.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setDiagnoseCopied(true);
+      setTimeout(() => setDiagnoseCopied(false), 2000);
+    } catch (e) {
+      console.error('[payroll-page] copy diagnose failed', e);
+      // As a last resort, drop into a window prompt so the user can grab it.
+      try {
+        window.prompt('Copy the diagnostic report below:', text);
+      } catch {
+        // ignore
+      }
     }
   };
 
@@ -602,11 +719,41 @@ export default function PayrollPage() {
                     Payroll Diagnostic Report
                   </CardTitle>
                 </div>
-                {diagnoseOpen ? (
-                  <ChevronUp className="h-4 w-4 text-gray-400 shrink-0" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
-                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Copy entire report to clipboard. Click stops propagation
+                      so the card doesn't toggle open/closed. */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={diagnoseCopied ? 'Report copied' : 'Copy diagnostic report'}
+                    title={diagnoseCopied ? 'Copied!' : 'Copy report'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopyDiagnose();
+                    }}
+                    className={cn(
+                      'h-7 px-2 gap-1.5 transition-colors',
+                      diagnoseCopied
+                        ? 'text-[#5a4d96] bg-[#5a4d96]/10 hover:bg-[#5a4d96]/15'
+                        : 'text-gray-600 hover:bg-black/5 hover:text-gray-900',
+                    )}
+                  >
+                    {diagnoseCopied ? (
+                      <Check className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span className="hidden sm:inline text-xs font-medium">
+                      {diagnoseCopied ? 'Copied' : 'Copy'}
+                    </span>
+                  </Button>
+                  {diagnoseOpen ? (
+                    <ChevronUp className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  )}
+                </div>
               </div>
               <CardDescription className="text-gray-500 text-xs sm:text-sm">
                 What the engine actually finds in your forms
