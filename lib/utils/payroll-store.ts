@@ -78,6 +78,130 @@ const EMPLOYEE_FORM_NAMES = ['Employee Master', 'Employee Profile', 'Employee Pr
 const CHECK_IN_FORM_NAMES = ['Check In', 'Check-In', 'CheckIn', 'Attendance Check-In', 'Check-in'];
 const CHECK_OUT_FORM_NAMES = ['Check Out', 'Check-Out', 'CheckOut', 'Attendance Check-Out', 'Check-out'];
 
+// =============================================================================
+// FIELD-LOOKUP FALLBACK NAMES
+// =============================================================================
+// Used when the user hasn't explicitly mapped a field on /payroll/configure.
+// These cover both:
+//   - the API-style camelCase keys the seed script writes at top level
+//     (`email`, `employeeId`, `salary`, …)
+//   - the human labels the HR module assigns to its form fields
+//     (`Company Email`, `Employee ID`, `In Date`, `In Time`, …)
+//
+// `flattenRecordData` is now label-aware: it emits values keyed by both the
+// fieldId AND the field's label. Combined with these fallback lists, manually
+// submitted records (which only have nested sections.<sid>.fields.<fid>) and
+// seeded records (which carry top-level convenience keys) both resolve.
+// =============================================================================
+const EMAIL_FALLBACKS = [
+  'email',
+  'Email',
+  'emailId',
+  'employeeEmail',
+  'Company Email',
+  'Personal Email',
+  'Work Email',
+  'Email Address',
+  'Applicant Email ID',
+];
+const EMP_ID_FALLBACKS = [
+  'employeeId',
+  'employee_id',
+  'empId',
+  'EmployeeID',
+  'Employee ID',
+  'Emp ID',
+];
+const FULL_NAME_FALLBACKS = [
+  'employeeName',
+  'name',
+  'fullName',
+  'employee_name',
+  'Name',
+  'Employee Name',
+  'Applicant Name',
+  'Candidate Name',
+];
+const FIRST_NAME_FALLBACKS = [
+  'firstName',
+  'first_name',
+  'First Name',
+  'fld_emp_first_name',
+];
+const LAST_NAME_FALLBACKS = [
+  'lastName',
+  'last_name',
+  'Last Name',
+  'fld_emp_last_name',
+];
+const SALARY_FALLBACKS = [
+  'totalSalary',
+  'salary',
+  'CTC',
+  'monthlySalary',
+  'givenSalary',
+  'baseSalary',
+  'Salary Amount',
+  'Total Salary',
+  'Monthly Salary',
+  'Base Salary',
+];
+const DESIGNATION_FALLBACKS = [
+  'designation',
+  'jobTitle',
+  'role',
+  'position',
+  'Designation',
+  'Job Title',
+  'Title',
+];
+const DEPARTMENT_FALLBACKS = [
+  'department',
+  'dept',
+  'team',
+  'Department',
+];
+const CHECKIN_DATE_FALLBACKS = [
+  'date',
+  'attendanceDate',
+  'Date',
+  'In Date',
+  'Check-In Date',
+  'Check In Date',
+  'Attendance Date',
+];
+const CHECKOUT_DATE_FALLBACKS = [
+  'date',
+  'attendanceDate',
+  'Date',
+  'Out Date',
+  'Check-Out Date',
+  'Check Out Date',
+  'Attendance Date',
+];
+const CHECKIN_TIME_FALLBACKS = [
+  'checkInTime',
+  'checkIn',
+  'inTime',
+  'check_in_time',
+  'In Time',
+  'Check-In Time',
+  'Check In Time',
+  'Time',
+  'Time In',
+];
+const CHECKOUT_TIME_FALLBACKS = [
+  'checkOutTime',
+  'checkOut',
+  'outTime',
+  'check_out_time',
+  'Out Time',
+  'Check-Out Time',
+  'Check Out Time',
+  'Time',
+  'Time Out',
+];
+
 const SETUP_META_KEY = 'payroll-v2';
 
 interface PayrollSetupShape {
@@ -128,16 +252,48 @@ async function getFieldLabelMap(formId: string, organizationId: string): Promise
   }
 }
 
-function flattenRecordData(recordData: any): Record<string, any> {
+/**
+ * Flatten a stored record_data into a plain { key: value } map.
+ *
+ * Why labels matter:
+ *   The seed script writes attendance/employee records with top-level convenience
+ *   keys like { email, employeeId, ... }, which makes name-based lookup easy.
+ *   The form submission UI does NOT — it stores values strictly under
+ *   sections.<sectionId>.fields.<fieldId>, where fieldId is something like
+ *   `fld_ci_in_date`. The fallback lookup `pickValue(data, ['date', 'In Date'])`
+ *   then can't find the date because no key in `data` matches.
+ *
+ * Solution: accept the form's fieldId→label map and emit values under BOTH
+ *   plain[fieldId] AND plain[label]. So a manual submission whose field is
+ *   labeled "In Date" becomes findable via either `fld_ci_in_date` (mapped
+ *   path) or `In Date` (label-fallback path).
+ */
+function flattenRecordData(
+  recordData: any,
+  labels?: Record<string, string>,
+): Record<string, any> {
   if (!recordData || typeof recordData !== 'object') return {};
   const plain: Record<string, any> = {};
+
+  const setBoth = (fieldId: string, value: any) => {
+    plain[fieldId] = value;
+    if (labels) {
+      const label = labels[fieldId];
+      // Don't clobber a previously-set label key (a later field with the
+      // same label would otherwise overwrite an earlier one).
+      if (label && plain[label] === undefined) {
+        plain[label] = value;
+      }
+    }
+  };
 
   if (recordData.sections && typeof recordData.sections === 'object') {
     for (const section of Object.values(recordData.sections) as any[]) {
       const fields = section?.fields;
       if (fields && typeof fields === 'object') {
         for (const [fieldId, val] of Object.entries(fields)) {
-          plain[fieldId] = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+          const v = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+          setBoth(fieldId, v);
         }
       }
     }
@@ -148,7 +304,8 @@ function flattenRecordData(recordData: any): Record<string, any> {
       const fields = subform?.fields;
       if (fields && typeof fields === 'object') {
         for (const [fieldId, val] of Object.entries(fields)) {
-          plain[fieldId] = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+          const v = val && typeof val === 'object' && 'value' in val ? (val as any).value : val;
+          setBoth(fieldId, v);
         }
       }
     }
@@ -252,22 +409,13 @@ export async function diagnose(organizationId: string, month: string): Promise<a
     const fields = setup?.employee.fields ?? {};
     const fallbackSalary = setup?.defaultBaseSalary ?? 0;
     for (const row of rows.slice(0, 100)) {
-      const data = flattenRecordData(row.recordData);
+      const data = flattenRecordData(row.recordData, employeeForm.labels);
       const email =
-        pickWithMapping(data, fields.email, employeeForm.labels, ['email', 'Email', 'employeeEmail']) ||
+        pickWithMapping(data, fields.email, employeeForm.labels, EMAIL_FALLBACKS) ||
         row.user?.email;
-      const empId = pickWithMapping(data, fields.employeeId, employeeForm.labels, [
-        'employeeId',
-        'employee_id',
-        'empId',
-      ]);
+      const empId = pickWithMapping(data, fields.employeeId, employeeForm.labels, EMP_ID_FALLBACKS);
       const mappedSalary = toNumber(
-        pickWithMapping(data, fields.salary, employeeForm.labels, [
-          'totalSalary',
-          'salary',
-          'CTC',
-          'givenSalary',
-        ]),
+        pickWithMapping(data, fields.salary, employeeForm.labels, SALARY_FALLBACKS),
         0,
       );
       const salary = mappedSalary > 0 ? mappedSalary : fallbackSalary;
@@ -309,25 +457,24 @@ export async function diagnose(organizationId: string, month: string): Promise<a
       ok: 0,
     };
     for (const row of rows.slice(0, 200)) {
-      const data = flattenRecordData(row.recordData);
+      const data = flattenRecordData(row.recordData, formInfo.labels);
       const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
       const email =
-        pickWithMapping(data, fields.email, formInfo.labels, ['email', 'Email', 'employeeEmail']) ||
+        pickWithMapping(data, fields.email, formInfo.labels, EMAIL_FALLBACKS) ||
         userEmail;
-      const empId = pickWithMapping(data, fields.employeeId, formInfo.labels, [
-        'employeeId',
-        'employee_id',
-        'empId',
-      ]);
+      const empId = pickWithMapping(data, fields.employeeId, formInfo.labels, EMP_ID_FALLBACKS);
       const dateValue =
-        pickWithMapping(data, fields.date, formInfo.labels, ['date', 'attendanceDate']) ?? row.date;
+        pickWithMapping(
+          data,
+          fields.date,
+          formInfo.labels,
+          target === 'checkOut' ? CHECKOUT_DATE_FALLBACKS : CHECKIN_DATE_FALLBACKS,
+        ) ?? row.date;
       const time = pickWithMapping(
         data,
         fields[timeKey] ?? null,
         formInfo.labels,
-        timeKey === 'checkInTime'
-          ? ['checkInTime', 'checkIn', 'inTime']
-          : ['checkOutTime', 'checkOut', 'outTime'],
+        timeKey === 'checkInTime' ? CHECKIN_TIME_FALLBACKS : CHECKOUT_TIME_FALLBACKS,
       );
       const dateStr = toDateStr(dateValue);
       const timeStr = toTimeStr(time);
@@ -507,21 +654,11 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
   const seen = new Set<string>();
 
   for (const row of rows) {
-    const data = flattenRecordData(row.recordData);
+    const data = flattenRecordData(row.recordData, formInfo.labels);
     const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
 
-    const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, [
-      'email',
-      'Email',
-      'emailId',
-      'employeeEmail',
-    ]);
-    const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, [
-      'employeeId',
-      'employee_id',
-      'empId',
-      'EmployeeID',
-    ]);
+    const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, EMAIL_FALLBACKS);
+    const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, EMP_ID_FALLBACKS);
 
     const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
     const employeeId =
@@ -539,51 +676,25 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
 
-    const firstName = pickWithMapping(data, null, formInfo.labels, [
-      'firstName',
-      'First Name',
-      'fld_emp_first_name',
-    ]);
-    const lastName = pickWithMapping(data, null, formInfo.labels, [
-      'lastName',
-      'Last Name',
-      'fld_emp_last_name',
-    ]);
+    const firstName = pickWithMapping(data, null, formInfo.labels, FIRST_NAME_FALLBACKS);
+    const lastName = pickWithMapping(data, null, formInfo.labels, LAST_NAME_FALLBACKS);
     const composedName = [firstName, lastName].filter(Boolean).join(' ').trim();
     const employeeName =
-      pickWithMapping(data, fields.name, formInfo.labels, [
-        'employeeName',
-        'name',
-        'fullName',
-        'employee_name',
-        'Name',
-      ]) ||
+      pickWithMapping(data, fields.name, formInfo.labels, FULL_NAME_FALLBACKS) ||
       composedName ||
       row.user?.username ||
       (email ? email.split('@')[0] : String(employeeId));
 
     const mappedSalary = toNumber(
-      pickWithMapping(data, fields.salary, formInfo.labels, [
-        'totalSalary',
-        'salary',
-        'CTC',
-        'monthlySalary',
-        'givenSalary',
-        'baseSalary',
-      ]),
+      pickWithMapping(data, fields.salary, formInfo.labels, SALARY_FALLBACKS),
       0,
     );
     const totalSalary = mappedSalary > 0 ? mappedSalary : fallbackSalary;
 
     const designation =
-      pickWithMapping(data, fields.designation, formInfo.labels, [
-        'designation',
-        'jobTitle',
-        'role',
-        'position',
-      ]) || '';
+      pickWithMapping(data, fields.designation, formInfo.labels, DESIGNATION_FALLBACKS) || '';
     const department =
-      pickWithMapping(data, fields.department, formInfo.labels, ['department', 'dept', 'team']) || '';
+      pickWithMapping(data, fields.department, formInfo.labels, DEPARTMENT_FALLBACKS) || '';
 
     employees.push({
       employeeId: String(employeeId),
@@ -620,12 +731,8 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
     formLabels: Record<string, string>,
     userEmail: string | null,
   ): { matchKey: string; email: string } | null => {
-    const rawEmail = pickWithMapping(data, fields.email, formLabels, ['email', 'Email', 'employeeEmail']);
-    const rawEmpId = pickWithMapping(data, fields.employeeId, formLabels, [
-      'employeeId',
-      'employee_id',
-      'empId',
-    ]);
+    const rawEmail = pickWithMapping(data, fields.email, formLabels, EMAIL_FALLBACKS);
+    const rawEmpId = pickWithMapping(data, fields.employeeId, formLabels, EMP_ID_FALLBACKS);
     const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
     const empId = rawEmpId ? String(rawEmpId).toLowerCase() : null;
     if (email) return { matchKey: `email:${email}`, email };
@@ -635,19 +742,23 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
   };
 
   for (const row of checkInRows) {
-    const data = flattenRecordData(row.recordData);
+    const data = flattenRecordData(row.recordData, checkInForm.labels);
     const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
     const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
 
     const dateValue =
-      pickWithMapping(data, checkInFields.date, checkInForm.labels, ['date', 'attendanceDate', 'Date']) ??
-      row.date;
-    const checkInTime = pickWithMapping(data, checkInFields.checkInTime, checkInForm.labels, [
-      'checkInTime',
-      'checkIn',
-      'inTime',
-      'check_in_time',
-    ]);
+      pickWithMapping(
+        data,
+        checkInFields.date,
+        checkInForm.labels,
+        CHECKIN_DATE_FALLBACKS,
+      ) ?? row.date;
+    const checkInTime = pickWithMapping(
+      data,
+      checkInFields.checkInTime,
+      checkInForm.labels,
+      CHECKIN_TIME_FALLBACKS,
+    );
 
     const dateStr = toDateStr(dateValue);
     const inTime = toTimeStr(checkInTime);
@@ -669,19 +780,23 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
 
   if (checkOutForm) {
     for (const row of checkOutRows) {
-      const data = flattenRecordData(row.recordData);
+      const data = flattenRecordData(row.recordData, checkOutForm.labels);
       const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
       const id = buildMatchKey(data, checkOutFields, checkOutForm.labels, userEmail);
 
       const dateValue =
-        pickWithMapping(data, checkOutFields.date, checkOutForm.labels, ['date', 'attendanceDate', 'Date']) ??
-        row.date;
-      const checkOutTime = pickWithMapping(data, checkOutFields.checkOutTime, checkOutForm.labels, [
-        'checkOutTime',
-        'checkOut',
-        'outTime',
-        'check_out_time',
-      ]);
+        pickWithMapping(
+          data,
+          checkOutFields.date,
+          checkOutForm.labels,
+          CHECKOUT_DATE_FALLBACKS,
+        ) ?? row.date;
+      const checkOutTime = pickWithMapping(
+        data,
+        checkOutFields.checkOutTime,
+        checkOutForm.labels,
+        CHECKOUT_TIME_FALLBACKS,
+      );
 
       const dateStr = toDateStr(dateValue);
       const outTime = toTimeStr(checkOutTime);
@@ -706,13 +821,17 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
   }
 
   for (const row of checkInRows) {
-    const data = flattenRecordData(row.recordData);
+    const data = flattenRecordData(row.recordData, checkInForm.labels);
     const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
     const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
     const dateValue =
-      pickWithMapping(data, checkInFields.date, checkInForm.labels, ['date', 'attendanceDate', 'Date']) ??
-      row.date;
-    const checkOutTime = pickValue(data, ['checkOutTime', 'checkOut', 'outTime']);
+      pickWithMapping(
+        data,
+        checkInFields.date,
+        checkInForm.labels,
+        CHECKIN_DATE_FALLBACKS,
+      ) ?? row.date;
+    const checkOutTime = pickValue(data, CHECKOUT_TIME_FALLBACKS);
     const dateStr = toDateStr(dateValue);
     const outTime = toTimeStr(checkOutTime);
 

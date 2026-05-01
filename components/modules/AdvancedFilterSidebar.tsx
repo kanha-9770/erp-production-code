@@ -206,53 +206,55 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
+      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col bg-white border border-black/10 rounded-lg">
         <DialogHeader>
-          <DialogTitle className="text-sm">Select values for &quot;{fieldLabel}&quot;</DialogTitle>
+          <DialogTitle className="text-sm font-semibold text-gray-900">
+            Select values for &quot;{fieldLabel}&quot;
+          </DialogTitle>
           <DialogDescription className="text-xs text-gray-500">
             Choose one or more values to filter by. {localSelected.size > 0 && `${localSelected.size} selected`}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        <div className="relative group">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 group-focus-within:text-[#5a4d96] transition-colors" />
           <Input
-            placeholder="Search values..."
+            placeholder="Search values"
             value={dialogSearch}
             onChange={(e) => setDialogSearch(e.target.value)}
-            className="pl-9 h-8 text-xs"
+            className="pl-8 h-8 text-xs bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40"
           />
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <button type="button" onClick={selectAll} className="text-blue-600 hover:text-blue-800 hover:underline">
+        <div className="flex items-center gap-2 text-[11px]">
+          <button type="button" onClick={selectAll} className="font-medium text-[#5a4d96] hover:underline">
             Select all{dialogSearch ? " visible" : ""}
           </button>
-          <span className="text-gray-300">|</span>
+          <span className="text-gray-300">·</span>
           <button type="button" onClick={clearAll} className="text-gray-500 hover:text-gray-700 hover:underline">
             Clear{dialogSearch ? " visible" : " all"}
           </button>
         </div>
 
         {localSelected.size > 0 && (
-          <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+          <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto sidebar-scroll">
             {Array.from(localSelected).map((val) => (
               <Badge
                 key={val}
                 variant="secondary"
-                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer hover:bg-red-100 hover:text-red-700"
+                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer bg-black/5 text-gray-700 border-transparent hover:bg-red-100 hover:text-red-700 transition-colors"
                 onClick={() => toggleValue(val)}
               >
-                {val.length > 20 ? val.slice(0, 20) + "..." : val}
+                {val.length > 20 ? val.slice(0, 20) + "…" : val}
                 <X className="h-2.5 w-2.5 ml-1" />
               </Badge>
             ))}
           </div>
         )}
 
-        <div className="flex-1 min-h-0 max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+        <div className="flex-1 min-h-0 max-h-60 overflow-y-auto sidebar-scroll border border-black/10 rounded-md bg-white">
           {filtered.length === 0 ? (
-            <div className="p-4 text-center text-xs text-gray-400">No values found</div>
+            <div className="p-4 text-center text-xs text-gray-500">No values found</div>
           ) : (
             filtered.map((val) => {
               const isChecked = localSelected.has(val)
@@ -260,12 +262,18 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
                 <label
                   key={val}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-b-0",
-                    isChecked && "bg-blue-50"
+                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors border-b border-black/5 last:border-b-0",
+                    isChecked
+                      ? "bg-[#5a4d96]/[0.06]"
+                      : "hover:bg-black/[0.03]"
                   )}
                 >
-                  <Checkbox checked={isChecked} onCheckedChange={() => toggleValue(val)} className="h-3.5 w-3.5" />
-                  <span className="text-xs text-gray-700 truncate">{val}</span>
+                  <Checkbox
+                    checked={isChecked}
+                    onCheckedChange={() => toggleValue(val)}
+                    className="h-3.5 w-3.5 border-black/20 data-[state=checked]:bg-[#5a4d96] data-[state=checked]:border-[#5a4d96]"
+                  />
+                  <span className="text-xs text-gray-800 truncate">{val}</span>
                 </label>
               )
             })
@@ -273,7 +281,12 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="text-xs">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            className="text-xs border-black/10 bg-white hover:bg-black/5 text-gray-700"
+          >
             Cancel
           </Button>
           <Button
@@ -282,7 +295,14 @@ const ValuePickerDialog: React.FC<ValuePickerDialogProps> = ({
               onApply(Array.from(localSelected))
               onOpenChange(false)
             }}
-            className="text-xs"
+            className="text-xs text-white"
+            style={{ backgroundColor: "#5a4d96" }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.backgroundColor = "#6b5da8")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.backgroundColor = "#5a4d96")
+            }
           >
             Apply ({localSelected.size})
           </Button>
@@ -548,14 +568,14 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
 
   return (
     <div
-      className="bg-white border-r border-gray-200 flex flex-col h-full shadow-lg relative select-none"
+      className="bg-white border-r border-black/10 flex flex-col h-full relative select-none"
       style={{ width: `${sidebarWidth}px`, transition: isResizing ? 'none' : 'width 0.2s ease' }}
     >
-      {/* Resize handle */}
+      {/* Resize handle — palette consistent with the main sidebar */}
       <div
         className={cn(
-          "absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-500 transition-colors duration-200 z-50 group",
-          isResizing && "bg-blue-600 w-1.5"
+          "absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-[#5a4d96]/40 transition-colors duration-200 z-50 group",
+          isResizing && "bg-[#5a4d96]/60 w-1.5"
         )}
         onMouseDown={handleResizeStart}
         title="Drag to resize"
@@ -564,40 +584,40 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
           "absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-12 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200",
           isResizing && "opacity-100"
         )}>
-          <div className="w-0.5 h-8 bg-blue-500 rounded-full mr-0.5 shadow-sm" />
-          <div className="w-0.5 h-8 bg-blue-500 rounded-full shadow-sm" />
+          <div className="w-0.5 h-8 bg-[#5a4d96] rounded-full mr-0.5" />
+          <div className="w-0.5 h-8 bg-[#5a4d96] rounded-full" />
         </div>
       </div>
 
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-slate-50 to-gray-50">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold text-gray-900">Filter Leads by</h2>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="h-8 w-8 rounded-lg hover:bg-gray-200 text-gray-600 hover:text-gray-900"
-              aria-label="Close filter sidebar"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+      <div className="px-4 pt-4 pb-3 border-b border-black/10 bg-gray-50">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-[15px] font-semibold tracking-tight text-gray-900">Filters</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="h-7 w-7 rounded-md hover:bg-black/5 text-gray-500 hover:text-gray-900"
+            aria-label="Close filter sidebar"
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <div className="relative group">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 group-focus-within:text-[#5a4d96] transition-colors" />
           <Input
             type="text"
             placeholder={
               columnSearchMode && preselectedField
-                ? `Filter values in ${preselectedField.label}...`
-                : "Search fields..."
+                ? `Filter values in ${preselectedField.label}…`
+                : "Search fields"
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className={cn(
-              "pl-9 h-9 bg-gray-50 border-gray-300 focus:border-blue-500 focus:ring-blue-500",
+              "pl-8 pr-8 h-8 text-sm bg-white border-black/10 rounded-md",
+              "shadow-none focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/50",
+              "placeholder:text-gray-400",
               columnSearchMode && "pr-8"
             )}
           />
@@ -609,23 +629,32 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                   onColumnSearch(preselectedFieldId, "")
                 }
               }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 hover:bg-gray-200 rounded-full p-0.5 z-10"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:text-gray-700 hover:bg-black/5 z-10"
+              aria-label="Clear search"
             >
-              <X className="h-3.5 w-3.5 text-gray-500" />
+              <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
 
         {/* Active filter count + clear all */}
         {filters.length > 0 && (
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-gray-500">{filters.length} active filter{filters.length > 1 ? "s" : ""}</span>
+          <div className="flex items-center justify-between mt-2.5">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-600">
+              <span
+                className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[10px] font-semibold text-white"
+                style={{ backgroundColor: "#5a4d96" }}
+              >
+                {filters.length}
+              </span>
+              active filter{filters.length > 1 ? "s" : ""}
+            </span>
             <button
               onClick={() => {
                 setExpandedFields(new Map())
                 onFiltersChange([])
               }}
-              className="text-xs text-red-500 hover:text-red-700 hover:underline"
+              className="text-[11px] font-medium text-gray-600 hover:text-red-600 transition-colors"
             >
               Clear all
             </button>
@@ -633,25 +662,25 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto sidebar-scroll">
         {/* ── Field Filters Section ── */}
-        <div className="border-b border-gray-200">
+        <div>
           <button
             onClick={() => setFieldFiltersExpanded(!fieldFiltersExpanded)}
-            className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+            className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-black/[0.03] transition-colors"
           >
-            <div className="flex items-center gap-2">
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 text-gray-600 transition-transform",
-                  !fieldFiltersExpanded && "-rotate-90"
-                )}
-              />
-              <span className="text-sm font-semibold text-gray-900">Filter By Fields</span>
-            </div>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 text-gray-500 transition-transform",
+                !fieldFiltersExpanded && "-rotate-90"
+              )}
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+              Filter by Field
+            </span>
           </button>
           {fieldFiltersExpanded && (
-            <div className="px-4 pb-3 space-y-3">
+            <div className="px-3 pb-3 space-y-1.5">
               {filteredFields.map((field) => {
                 const isExpanded = isFieldExpanded(field.id)
                 const expandedData = getFieldExpandedData(field.id)
@@ -663,34 +692,40 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                     key={field.id}
                     ref={isPreselected ? preselectedFieldRef : null}
                     className={cn(
-                      "space-y-2 rounded-lg transition-all duration-300",
-                      isPreselected && "bg-blue-50 border-2 border-blue-400 p-2 shadow-md"
+                      "rounded-md transition-all duration-300",
+                      isPreselected && "bg-[#5a4d96]/[0.06] ring-1 ring-[#5a4d96]/30 p-1.5"
                     )}
                   >
                     <label className={cn(
-                      "flex items-center gap-2 cursor-pointer hover:bg-gray-50 py-1.5 px-2 rounded transition-colors",
-                      isPreselected && "bg-blue-100"
+                      "flex items-center gap-2 cursor-pointer py-1.5 px-2 rounded-md transition-colors",
+                      !isPreselected && "hover:bg-black/[0.03]",
+                      isPreselected && "bg-white"
                     )}>
                       <Checkbox
                         checked={isExpanded}
                         onCheckedChange={(checked) => toggleFieldExpansion(field.id, !!checked)}
-                        className="h-4 w-4"
+                        className="h-3.5 w-3.5 border-black/20 data-[state=checked]:bg-[#5a4d96] data-[state=checked]:border-[#5a4d96]"
                       />
-                      <span className="text-sm text-gray-700 font-medium">
+                      <span className="text-sm text-gray-800 font-medium flex-1 truncate">
                         {field.label}
-                        {isPreselected && (
-                          <span className="ml-2 text-xs text-blue-600 font-bold">(Selected)</span>
-                        )}
                       </span>
+                      {isPreselected && (
+                        <span
+                          className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full"
+                          style={{ backgroundColor: "#5a4d96", color: "white" }}
+                        >
+                          Selected
+                        </span>
+                      )}
                     </label>
 
                     {isExpanded && expandedData && (
-                      <div className="ml-6 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                      <div className="ml-5 mt-1.5 space-y-1.5 animate-in slide-in-from-top-2 duration-200">
                         <Select
                           value={expandedData.operator}
                           onValueChange={(value) => updateFieldFilter(field.id, { operator: value })}
                         >
-                          <SelectTrigger className="h-8 text-xs bg-white border-gray-300 hover:border-gray-400">
+                          <SelectTrigger className="h-8 text-xs bg-white border-black/10 hover:border-black/20 focus:ring-2 focus:ring-[#5a4d96]/30 focus:border-[#5a4d96]/40">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -719,8 +754,8 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                                 }}
                               >
                                 <SelectTrigger className={cn(
-                                  "h-8 text-xs bg-white border-gray-300 hover:border-gray-400",
-                                  isPreselected && "ring-2 ring-blue-400 border-blue-400"
+                                  "h-8 text-xs bg-white border-black/10 hover:border-black/20 focus:ring-2 focus:ring-[#5a4d96]/30 focus:border-[#5a4d96]/40",
+                                  isPreselected && "ring-2 ring-[#5a4d96]/40 border-[#5a4d96]/40"
                                 )}>
                                   <SelectValue placeholder="Select a value" />
                                 </SelectTrigger>
@@ -750,12 +785,12 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                                     ? "date"
                                     : "text"
                               }
-                              placeholder={expandedData.operator === "is one of" ? "value1, value2, ..." : "Type here"}
+                              placeholder={expandedData.operator === "is one of" ? "value1, value2, …" : "Type here"}
                               value={expandedData.value}
                               onChange={(e) => updateFieldFilter(field.id, { value: e.target.value })}
                               className={cn(
-                                "h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500",
-                                isPreselected && "ring-2 ring-blue-400 border-blue-400"
+                                "h-8 text-xs bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40",
+                                isPreselected && "ring-2 ring-[#5a4d96]/40 border-[#5a4d96]/40"
                               )}
                             />
                           )
@@ -773,7 +808,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                             placeholder="And"
                             value={expandedData.value2 || ""}
                             onChange={(e) => updateFieldFilter(field.id, { value2: e.target.value })}
-                            className="h-8 text-xs border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                            className="h-8 text-xs bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40"
                           />
                         )}
 
@@ -784,7 +819,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                               <Badge
                                 key={val}
                                 variant="secondary"
-                                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer hover:bg-red-100 hover:text-red-700"
+                                className="text-[10px] px-1.5 py-0 h-5 cursor-pointer bg-black/5 text-gray-700 border-transparent hover:bg-red-100 hover:text-red-700 transition-colors"
                                 onClick={() => {
                                   const current = expandedData.value.split(",").map((v) => v.trim()).filter(Boolean)
                                   const updated = current.filter((v) => v !== val)
@@ -794,7 +829,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                                   })
                                 }}
                               >
-                                {val.length > 15 ? val.slice(0, 15) + "..." : val}
+                                {val.length > 15 ? val.slice(0, 15) + "…" : val}
                                 <X className="h-2.5 w-2.5 ml-0.5" />
                               </Badge>
                             ))}
@@ -806,7 +841,7 @@ const AdvancedFilterSidebar: React.FC<AdvancedFilterSidebarProps> = ({
                           <Button
                             variant="outline"
                             size="sm"
-                            className="w-full h-7 text-[11px] text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-400"
+                            className="w-full h-7 text-[11px] border-black/10 bg-white hover:bg-[#5a4d96]/[0.06] hover:border-[#5a4d96]/30 text-[#5a4d96]"
                             onClick={() => {
                               setValuePickerFieldId(field.id)
                               setValuePickerOpen(true)

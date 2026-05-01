@@ -160,31 +160,31 @@ function KpiCard({
 }) {
   return (
     <Card className="relative overflow-hidden border border-black/10 bg-white shadow-none transition-shadow hover:shadow-sm">
-      <CardContent className="relative p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1.5 min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+      <CardContent className="relative p-3.5 sm:p-5">
+        <div className="flex items-start justify-between gap-2 sm:gap-3">
+          <div className="space-y-1 sm:space-y-1.5 min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 truncate">
               {label}
             </p>
             {loading ? (
-              <Skeleton className="h-7 w-32 bg-black/5" />
+              <Skeleton className="h-6 sm:h-7 w-24 sm:w-32 bg-black/5" />
             ) : (
-              <p className="text-2xl font-bold text-gray-900 tabular-nums tracking-tight">
+              <p className="text-lg sm:text-2xl font-bold text-gray-900 tabular-nums tracking-tight truncate">
                 {value}
               </p>
             )}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {delta !== undefined && !loading && <TrendBadge delta={delta ?? null} />}
               {hint && (
-                <span className="text-[11px] text-gray-500 truncate">{hint}</span>
+                <span className="text-[10px] sm:text-[11px] text-gray-500 truncate">{hint}</span>
               )}
             </div>
           </div>
           <div
-            className="rounded-lg p-2 shrink-0 ring-1 ring-black/5"
+            className="rounded-lg p-1.5 sm:p-2 shrink-0 ring-1 ring-black/5"
             style={{ backgroundColor: `${ACCENT}14` }}
           >
-            <Icon className="h-5 w-5" style={{ color: ACCENT }} />
+            <Icon className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: ACCENT }} />
           </div>
         </div>
       </CardContent>
@@ -394,15 +394,15 @@ export default function PayrollPage() {
 
   if (!mounted) {
     return (
-      <div className="min-h-screen bg-background p-6">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <Skeleton className="h-12 w-72" />
-          <div className="grid grid-cols-4 gap-4">
+      <div className="min-h-screen bg-gray-50 p-3 sm:p-4 md:p-6">
+        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+          <Skeleton className="h-10 sm:h-12 w-48 sm:w-72 bg-black/5" />
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-28" />
+              <Skeleton key={i} className="h-24 sm:h-28 bg-black/5" />
             ))}
           </div>
-          <Skeleton className="h-64" />
+          <Skeleton className="h-56 sm:h-64 bg-black/5" />
         </div>
       </div>
     );
@@ -410,57 +410,66 @@ export default function PayrollPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* Sticky header */}
-        <header className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-gray-50/95 backdrop-blur-sm border-b border-black/10">
+      <div className="max-w-7xl mx-auto p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6">
+        {/* Sticky header — negative margin tracks the outer padding so the
+            backdrop spans edge-to-edge at every breakpoint */}
+        <header className="sticky top-0 z-20 -mx-3 sm:-mx-4 md:-mx-6 px-3 sm:px-4 md:px-6 py-3 sm:py-4 bg-gray-50/95 backdrop-blur-sm border-b border-black/10">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
+            <div className="space-y-1 min-w-0">
               <div className="flex items-center gap-2.5">
                 <div
-                  className="rounded-lg p-2 ring-1 ring-black/5"
+                  className="rounded-lg p-1.5 sm:p-2 ring-1 ring-black/5 shrink-0"
                   style={{ backgroundColor: `${ACCENT}14` }}
                 >
-                  <Wallet className="h-5 w-5" style={{ color: ACCENT }} />
+                  <Wallet className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: ACCENT }} />
                 </div>
-                <h1 className="text-xl font-semibold tracking-tight text-gray-900">
+                <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-gray-900 truncate">
                   Payroll
                 </h1>
               </div>
-              <div className="flex items-center gap-2 text-[12px] text-gray-500 pl-[44px]">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-[12px] text-gray-500 pl-[36px] sm:pl-[44px]">
                 <span className="font-medium text-gray-700">{monthLabel}</span>
                 {lastGeneratedAt && (
                   <>
                     <span className="text-gray-300">·</span>
                     <span className="inline-flex items-center gap-1">
-                      <CalendarDays className="h-3 w-3" />
-                      Last generated{' '}
-                      {lastGeneratedAt.toLocaleString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      <CalendarDays className="h-3 w-3 shrink-0" />
+                      <span className="truncate">
+                        Last generated{' '}
+                        {lastGeneratedAt.toLocaleString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
                     </span>
                   </>
                 )}
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Action row — month picker takes available width on mobile,
+                secondary buttons collapse to icon-only below sm.
+                Primary CTA stays labeled at every size. */}
+            <div className="flex flex-wrap items-stretch gap-2">
               <input
                 type="month"
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
-                className="h-9 rounded-md border border-black/10 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#5a4d96]/30 focus:border-[#5a4d96]/40"
+                aria-label="Select month"
+                className="h-9 min-w-0 flex-1 sm:flex-initial rounded-md border border-black/10 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#5a4d96]/30 focus:border-[#5a4d96]/40"
               />
-              <Link href="/payroll/configure">
+              <Link href="/payroll/configure" className="shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
+                  aria-label="Configure"
+                  title="Configure"
+                  className="h-9 px-2.5 sm:px-3 gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
                 >
-                  <Settings className="h-4 w-4" />
-                  Configure
+                  <Settings className="h-4 w-4 shrink-0" />
+                  <span className="hidden sm:inline">Configure</span>
                 </Button>
               </Link>
               <Button
@@ -471,28 +480,33 @@ export default function PayrollPage() {
                   setDiagnoseOpen(true);
                 }}
                 disabled={diagnoseLoading}
-                className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
+                aria-label="Diagnose"
+                title="Diagnose"
+                className="h-9 px-2.5 sm:px-3 gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700 shrink-0"
               >
                 <Stethoscope
-                  className={cn('h-4 w-4', diagnoseLoading && 'animate-pulse')}
+                  className={cn('h-4 w-4 shrink-0', diagnoseLoading && 'animate-pulse')}
                 />
-                Diagnose
+                <span className="hidden sm:inline">Diagnose</span>
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => loadData(month)}
                 disabled={loading}
-                className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
+                aria-label="Refresh"
+                title="Refresh"
+                className="h-9 px-2.5 sm:px-3 gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700 shrink-0"
               >
-                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-                Refresh
+                <RefreshCw className={cn('h-4 w-4 shrink-0', loading && 'animate-spin')} />
+                <span className="hidden sm:inline">Refresh</span>
               </Button>
               <Button
                 size="sm"
                 onClick={generate}
                 disabled={generating}
-                className="gap-2 text-white shadow-sm"
+                aria-label={generating ? 'Generating' : 'Auto-Generate'}
+                className="h-9 px-3 gap-2 text-white shadow-sm shrink-0"
                 style={{ backgroundColor: ACCENT }}
                 onMouseEnter={(e) =>
                   ((e.currentTarget as HTMLButtonElement).style.backgroundColor =
@@ -502,8 +516,15 @@ export default function PayrollPage() {
                   ((e.currentTarget as HTMLButtonElement).style.backgroundColor = ACCENT)
                 }
               >
-                <Sparkles className={cn('h-4 w-4', generating && 'animate-pulse')} />
-                {generating ? 'Generating…' : 'Auto-Generate'}
+                <Sparkles className={cn('h-4 w-4 shrink-0', generating && 'animate-pulse')} />
+                <span className="whitespace-nowrap">
+                  {generating ? 'Generating…' : (
+                    <>
+                      <span className="sm:hidden">Generate</span>
+                      <span className="hidden sm:inline">Auto-Generate</span>
+                    </>
+                  )}
+                </span>
               </Button>
             </div>
           </div>
@@ -571,23 +592,23 @@ export default function PayrollPage() {
         {diagnoseReport && (
           <Card className="border border-black/10 bg-white shadow-none">
             <CardHeader
-              className="cursor-pointer select-none"
+              className="cursor-pointer select-none px-4 py-3 sm:px-6 sm:py-4"
               onClick={() => setDiagnoseOpen((v) => !v)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Stethoscope className="h-5 w-5" style={{ color: ACCENT }} />
-                  <CardTitle className="text-base text-gray-900">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Stethoscope className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" style={{ color: ACCENT }} />
+                  <CardTitle className="text-sm sm:text-base text-gray-900 truncate">
                     Payroll Diagnostic Report
                   </CardTitle>
                 </div>
                 {diagnoseOpen ? (
-                  <ChevronUp className="h-4 w-4 text-gray-400" />
+                  <ChevronUp className="h-4 w-4 text-gray-400 shrink-0" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                  <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
                 )}
               </div>
-              <CardDescription className="text-gray-500">
+              <CardDescription className="text-gray-500 text-xs sm:text-sm">
                 What the engine actually finds in your forms
               </CardDescription>
             </CardHeader>
@@ -699,43 +720,47 @@ export default function PayrollPage() {
           <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-white border border-black/10 p-1 rounded-md">
             <TabsTrigger
               value="overview"
-              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+              aria-label="Overview"
+              className="gap-1 px-2 text-xs sm:text-sm text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
             >
-              <CheckCircle2 className="h-4 w-4" />
-              Overview
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Overview</span>
             </TabsTrigger>
             <TabsTrigger
               value="run"
-              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+              aria-label="Run Payroll"
+              className="gap-1 px-2 text-xs sm:text-sm text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
             >
-              <Sparkles className="h-4 w-4" />
-              Run Payroll
+              <Sparkles className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Run Payroll</span>
             </TabsTrigger>
             <TabsTrigger
               value="records"
-              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+              aria-label="Records"
+              className="gap-1 px-2 text-xs sm:text-sm text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
             >
-              <FileText className="h-4 w-4" />
-              Records
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Records</span>
             </TabsTrigger>
             <TabsTrigger
               value="analytics"
-              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+              aria-label="Analytics"
+              className="gap-1 px-2 text-xs sm:text-sm text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
             >
-              <TrendingUp className="h-4 w-4" />
-              Analytics
+              <TrendingUp className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Analytics</span>
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="mt-4 space-y-4">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <Card className="lg:col-span-2 border border-black/10 bg-white shadow-none">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-gray-900 text-base">
-                    <Building2 className="h-5 w-5" style={{ color: ACCENT }} />
+                <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+                  <CardTitle className="flex items-center gap-2 text-gray-900 text-sm sm:text-base">
+                    <Building2 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" style={{ color: ACCENT }} />
                     Department Breakdown
                   </CardTitle>
-                  <CardDescription className="text-gray-500">
+                  <CardDescription className="text-gray-500 text-xs sm:text-sm">
                     Net payroll by department for {monthLabel}
                   </CardDescription>
                 </CardHeader>
@@ -804,12 +829,12 @@ export default function PayrollPage() {
               </Card>
 
               <Card className="border border-black/10 bg-white shadow-none">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-gray-900 text-base">
-                    <Wallet className="h-5 w-5" style={{ color: ACCENT }} />
+                <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+                  <CardTitle className="flex items-center gap-2 text-gray-900 text-sm sm:text-base">
+                    <Wallet className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" style={{ color: ACCENT }} />
                     Cost Composition
                   </CardTitle>
-                  <CardDescription className="text-gray-500">
+                  <CardDescription className="text-gray-500 text-xs sm:text-sm">
                     How the payroll splits
                   </CardDescription>
                 </CardHeader>
@@ -861,20 +886,22 @@ export default function PayrollPage() {
             </div>
 
             <Card className="border border-black/10 bg-white shadow-none">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-base text-gray-900">Top Earners</CardTitle>
-                  <CardDescription className="text-gray-500">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4">
+                <div className="min-w-0">
+                  <CardTitle className="text-sm sm:text-base text-gray-900 truncate">
+                    Top Earners
+                  </CardTitle>
+                  <CardDescription className="text-gray-500 text-xs sm:text-sm truncate">
                     Highest net salaries this month
                   </CardDescription>
                 </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="gap-1 text-gray-600 hover:bg-black/5 hover:text-gray-900"
+                  className="gap-1 shrink-0 text-gray-600 hover:bg-black/5 hover:text-gray-900"
                   onClick={() => setActiveTab('records')}
                 >
-                  See all
+                  <span className="hidden sm:inline">See all</span>
                   <ArrowRight className="h-3 w-3" />
                 </Button>
               </CardHeader>
@@ -936,10 +963,10 @@ export default function PayrollPage() {
 
           <TabsContent value="records" className="mt-4">
             <Card className="border border-black/10 bg-white shadow-none">
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle className="text-gray-900 text-base">
+              <CardHeader className="px-3 py-3 sm:px-6 sm:py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <CardTitle className="text-gray-900 text-base truncate">
                       Payroll Records — {monthLabel}
                     </CardTitle>
                     <CardDescription className="text-gray-500">
@@ -947,19 +974,20 @@ export default function PayrollPage() {
                       {payrolls.length === 1 ? '' : 's'}
                     </CardDescription>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="relative">
+                  {/* Search + status: each takes its share of the row on mobile */}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="relative flex-1 sm:flex-initial">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                       <Input
                         type="search"
                         placeholder="Search name, email, dept…"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="h-9 pl-8 w-56 bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40"
+                        className="h-9 pl-8 w-full sm:w-56 bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40"
                       />
                     </div>
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="h-9 w-36 bg-white border-black/10">
+                      <SelectTrigger className="h-9 w-full sm:w-36 bg-white border-black/10">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -979,7 +1007,7 @@ export default function PayrollPage() {
                     ))}
                   </div>
                 ) : filteredPayrolls.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                     <FileText className="h-10 w-10 text-gray-300" />
                     <p className="mt-3 text-sm font-medium text-gray-700">
                       {payrolls.length === 0 ? 'No records yet' : 'No matches'}
@@ -1002,19 +1030,28 @@ export default function PayrollPage() {
                     )}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  /*
+                   * Responsive table strategy:
+                   *  - Phone (< sm):       Employee | Net | Status | Action
+                   *  - Tablet (sm – md):   + Department, Gross, Deductions
+                   *  - Desktop (lg+):      everything (Days, Hours)
+                   * The Employee cell shows Department under the name on
+                   * mobile so users still see the department even though the
+                   * column itself is hidden — no information is lost.
+                   */
+                  <div className="overflow-x-auto sidebar-scroll">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-black/10 bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                          <th className="px-4 py-3">Employee</th>
-                          <th className="px-3 py-3">Department</th>
-                          <th className="px-3 py-3 text-center">Days</th>
-                          <th className="px-3 py-3 text-center">Hours</th>
-                          <th className="px-3 py-3 text-right">Gross</th>
-                          <th className="px-3 py-3 text-right">Deductions</th>
+                        <tr className="border-b border-black/10 bg-gray-50 text-left text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                          <th className="px-3 sm:px-4 py-2.5 sm:py-3">Employee</th>
+                          <th className="hidden md:table-cell px-3 py-3">Department</th>
+                          <th className="hidden lg:table-cell px-3 py-3 text-center">Days</th>
+                          <th className="hidden lg:table-cell px-3 py-3 text-center">Hours</th>
+                          <th className="hidden md:table-cell px-3 py-3 text-right">Gross</th>
+                          <th className="hidden md:table-cell px-3 py-3 text-right">Deductions</th>
                           <th className="px-3 py-3 text-right">Net</th>
-                          <th className="px-3 py-3 text-center">Status</th>
-                          <th className="px-3 py-3 text-center">Action</th>
+                          <th className="hidden sm:table-cell px-3 py-3 text-center">Status</th>
+                          <th className="px-2 sm:px-3 py-3 text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-black/5">
@@ -1030,46 +1067,59 @@ export default function PayrollPage() {
                               className="hover:bg-black/[0.03] transition-colors cursor-pointer"
                               onClick={() => setSelected(p)}
                             >
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-3">
+                              <td className="px-3 sm:px-4 py-2.5 sm:py-3">
+                                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                                   <div
-                                    className="h-8 w-8 shrink-0 rounded-md flex items-center justify-center text-xs font-semibold text-white ring-1 ring-black/5"
+                                    className="h-8 w-8 shrink-0 rounded-md flex items-center justify-center text-[11px] font-semibold text-white ring-1 ring-black/5"
                                     style={{ backgroundColor: ACCENT }}
                                   >
                                     {initialsOf(p.employeeName)}
                                   </div>
-                                  <div className="min-w-0">
-                                    <p className="font-semibold text-gray-900 truncate">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-semibold text-gray-900 truncate text-[13px] sm:text-sm">
                                       {p.employeeName}
                                     </p>
-                                    <p className="text-xs text-gray-500 truncate">
+                                    <p className="text-[11px] text-gray-500 truncate">
                                       {p.email || p.employeeId}
                                     </p>
+                                    {/* Show department + status inline on
+                                        mobile since their dedicated columns
+                                        are hidden below md/sm. */}
+                                    <div className="md:hidden flex items-center gap-2 mt-1 flex-wrap">
+                                      {p.department && (
+                                        <span className="text-[10px] text-gray-500 truncate">
+                                          {p.department}
+                                        </span>
+                                      )}
+                                      <span className="sm:hidden">
+                                        <StatusPill status={p.status} />
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-3 text-gray-600">
+                              <td className="hidden md:table-cell px-3 py-3 text-gray-600">
                                 {p.department || '—'}
                               </td>
-                              <td className="px-3 py-3 text-center tabular-nums text-gray-700">
+                              <td className="hidden lg:table-cell px-3 py-3 text-center tabular-nums text-gray-700">
                                 {p.workingDays}
                               </td>
-                              <td className="px-3 py-3 text-center tabular-nums text-gray-700">
+                              <td className="hidden lg:table-cell px-3 py-3 text-center tabular-nums text-gray-700">
                                 {p.workingHours.toFixed(1)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums text-gray-700">
+                              <td className="hidden md:table-cell px-3 py-3 text-right tabular-nums text-gray-700">
                                 ₹{formatINR(p.grossSalary)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums text-gray-500">
+                              <td className="hidden md:table-cell px-3 py-3 text-right tabular-nums text-gray-500">
                                 ₹{formatINR(totalDed)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums font-bold text-gray-900">
+                              <td className="px-3 py-2.5 sm:py-3 text-right tabular-nums font-bold text-gray-900 whitespace-nowrap">
                                 ₹{formatINR(p.netSalary)}
                               </td>
-                              <td className="px-3 py-3 text-center">
+                              <td className="hidden sm:table-cell px-3 py-3 text-center">
                                 <StatusPill status={p.status} />
                               </td>
-                              <td className="px-3 py-3 text-center">
+                              <td className="px-2 sm:px-3 py-2.5 sm:py-3 text-center">
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1077,10 +1127,11 @@ export default function PayrollPage() {
                                     e.stopPropagation();
                                     setSelected(p);
                                   }}
-                                  className="gap-1 h-8 text-gray-600 hover:bg-black/5 hover:text-gray-900"
+                                  aria-label="View details"
+                                  className="gap-1 h-8 px-2 sm:px-2.5 text-gray-600 hover:bg-black/5 hover:text-gray-900"
                                 >
-                                  <Eye className="h-3.5 w-3.5" />
-                                  View
+                                  <Eye className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="hidden sm:inline">View</span>
                                 </Button>
                               </td>
                             </tr>
@@ -1115,45 +1166,49 @@ export default function PayrollPage() {
 
         {/* Employee detail drawer */}
         <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-lg overflow-y-auto bg-white">
+          <SheetContent className="w-full sm:max-w-lg overflow-y-auto sidebar-scroll bg-white px-4 sm:px-6">
             {selected && (
               <>
-                <SheetHeader className="space-y-3">
-                  <div className="flex items-center gap-3">
+                <SheetHeader className="space-y-3 text-left">
+                  <div className="flex items-start gap-3">
                     <div
-                      className="h-12 w-12 rounded-md flex items-center justify-center text-base font-semibold text-white ring-1 ring-black/5"
+                      className="h-10 w-10 sm:h-12 sm:w-12 rounded-md flex items-center justify-center text-sm sm:text-base font-semibold text-white ring-1 ring-black/5 shrink-0"
                       style={{ backgroundColor: ACCENT }}
                     >
                       {initialsOf(selected.employeeName)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <SheetTitle className="truncate text-gray-900">
+                      <SheetTitle className="truncate text-gray-900 text-base sm:text-lg">
                         {selected.employeeName}
                       </SheetTitle>
-                      <SheetDescription className="flex items-center gap-2 text-xs text-gray-500">
-                        <Briefcase className="h-3 w-3" />
-                        {selected.designation || '—'} · {selected.department || 'Unassigned'}
+                      <SheetDescription className="flex items-center gap-1.5 text-xs text-gray-500 truncate">
+                        <Briefcase className="h-3 w-3 shrink-0" />
+                        <span className="truncate">
+                          {selected.designation || '—'} · {selected.department || 'Unassigned'}
+                        </span>
                       </SheetDescription>
                     </div>
-                    <StatusPill status={selected.status} />
+                    <div className="shrink-0">
+                      <StatusPill status={selected.status} />
+                    </div>
                   </div>
                   {selected.email && (
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <Mail className="h-3 w-3" />
-                      {selected.email}
+                    <div className="flex items-center gap-2 text-xs text-gray-500 truncate">
+                      <Mail className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{selected.email}</span>
                     </div>
                   )}
                 </SheetHeader>
 
-                <div className="mt-6 space-y-5">
+                <div className="mt-5 sm:mt-6 space-y-4 sm:space-y-5">
                   <div
-                    className="rounded-md border border-black/10 p-4"
+                    className="rounded-md border border-black/10 p-3 sm:p-4"
                     style={{ backgroundColor: `${ACCENT}0d` }}
                   >
                     <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
                       Net Salary
                     </p>
-                    <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
+                    <p className="text-2xl sm:text-3xl font-bold text-gray-900 tabular-nums mt-1 break-all">
                       ₹{formatINR(selected.netSalary)}
                     </p>
                     <p className="text-xs text-gray-500">for {monthLabel}</p>

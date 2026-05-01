@@ -1158,9 +1158,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                 importableForms={importableForms}
               />
 
-              <div className="border border-gray-200 bg-white rounded-xl overflow-hidden shadow-lg flex-1 flex flex-col">
+              <div className="border border-black/10 bg-white rounded-md overflow-hidden flex-1 flex flex-col">
                 <div
-                  className="flex-1 overflow-y-auto overflow-x-scroll min-h-0"
+                  className="flex-1 overflow-y-auto sidebar-scroll overflow-x-scroll min-h-0"
                   ref={tableContainerRef}
                 >
                   <DndContext
@@ -1196,8 +1196,19 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                         />
 
                         {paginatedRecords.length === 0 ? (
-                          <div className="flex items-center justify-center py-12 text-gray-500">
-                            <p className="text-sm font-medium">No records found</p>
+                          <div className="flex flex-col items-center justify-center py-16 text-center">
+                            <div
+                              className="rounded-full p-3 mb-3"
+                              style={{ backgroundColor: "rgba(0,0,0,0.04)" }}
+                            >
+                              <Eye className="h-6 w-6 text-gray-400" />
+                            </div>
+                            <p className="text-sm font-medium text-gray-700">
+                              No records found
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Try clearing filters or submitting a new entry
+                            </p>
                           </div>
                         ) : (
                           <>
@@ -1208,9 +1219,9 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                               return (
                                 <div
                                   key={record.id}
-                                  className="flex items-stretch hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 min-w-max border-b border-gray-200 last:border-b-0"
+                                  className="flex items-stretch transition-colors duration-150 min-w-max border-b border-black/5 last:border-b-0 hover:bg-black/[0.02]"
                                 >
-                                  <div className="w-10 min-h-[32px] border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-10 min-h-[32px] border-r border-black/5 bg-white flex items-center justify-center flex-shrink-0">
                                     <Checkbox
                                       checked={selectedRecords.has(record.id)}
                                       onCheckedChange={(c) => {
@@ -1218,16 +1229,16 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         c ? newSel.add(record.id) : newSel.delete(record.id);
                                         setSelectedRecords(newSel);
                                       }}
-                                      className="h-4 w-4"
+                                      className="h-3.5 w-3.5 border-black/20 data-[state=checked]:bg-[#5a4d96] data-[state=checked]:border-[#5a4d96]"
                                     />
                                   </div>
-                                  <div className="w-12 min-h-[32px] border-r border-gray-200 bg-gray-50 flex items-center justify-center text-xs font-semibold text-gray-700 flex-shrink-0">
+                                  <div className="w-12 min-h-[32px] border-r border-black/5 bg-gray-50 flex items-center justify-center text-xs font-medium text-gray-500 flex-shrink-0 tabular-nums">
                                     {startIdx + rowIndex + 1}
                                   </div>
-                                  <div className="w-20 sm:w-24 min-h-[32px] border-r border-gray-200 bg-white flex items-center justify-center flex-shrink-0">
+                                  <div className="w-20 sm:w-24 min-h-[32px] border-r border-black/5 bg-white flex items-center justify-center flex-shrink-0">
                                     <DropdownMenu>
                                       <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" className="h-6 w-6 p-0 hover:bg-gray-200 rounded">
+                                        <Button variant="ghost" className="h-6 w-6 p-0 hover:bg-black/5 rounded text-gray-600">
                                           <MoreHorizontal className="h-4 w-4" />
                                         </Button>
                                       </DropdownMenuTrigger>
@@ -1389,15 +1400,15 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                             {Array.from({ length: numDummyRows }).map((_, i) => (
                               <div
                                 key={`dummy-${i}`}
-                                className="flex h-8 border-b border-gray-200 bg-white min-w-max last:border-b-0"
+                                className="flex h-8 border-b border-black/5 bg-white min-w-max last:border-b-0"
                               >
-                                <div className="w-10 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-12 border-r border-gray-200 flex-shrink-0" />
-                                <div className="w-20 sm:w-24 border-r border-gray-200 flex-shrink-0" />
+                                <div className="w-10 border-r border-black/5 flex-shrink-0" />
+                                <div className="w-12 border-r border-black/5 flex-shrink-0" />
+                                <div className="w-20 sm:w-24 border-r border-black/5 flex-shrink-0" />
                                 {allFieldsForTable.map((field) => (
                                   <div
                                     key={field.id}
-                                    className="border-r border-gray-200 bg-white px-3 flex-shrink-0"
+                                    className="border-r border-black/5 bg-white px-3 flex-shrink-0"
                                     style={{ width: `${columnWidths.get(field.id) || 192}px` }}
                                   />
                                 ))}
@@ -1410,7 +1421,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
 
                     <DragOverlay>
                       {activeDragId ? (
-                        <div className="bg-white shadow-2xl border-2 border-blue-500 rounded-lg px-4 py-2 opacity-90 font-medium">
+                        <div
+                          className="bg-white border rounded-md px-4 py-2 opacity-95 font-medium text-gray-800 shadow-lg"
+                          style={{ borderColor: "#5a4d96" }}
+                        >
                           {allDisplayableFields.find((f) => f.id === activeDragId)?.label || "Column"}
                         </div>
                       ) : null}
@@ -1418,14 +1432,14 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                   </DndContext>
                 </div>
 
-                <div className="border-t border-gray-300 bg-gray-50 px-4 pt-2 flex items-center gap-1 overflow-x-auto">
+                <div className="border-t border-black/10 bg-gray-50 px-3 pt-2 flex items-center gap-0.5 overflow-x-auto sidebar-scroll">
                   <button
                     onClick={() => setActiveTab("merged")}
                     className={cn(
-                      "px-5 py-1 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
+                      "px-4 py-1.5 text-[13px] font-medium rounded-t-md transition-colors duration-150 whitespace-nowrap relative -mb-px",
                       activeTab === "merged"
-                        ? "bg-white text-blue-700 border-t-2 border-l border-r border-blue-500 shadow-sm -mt-px"
-                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-200"
+                        ? "bg-white text-[#5a4d96] border border-black/10 border-b-white"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-black/[0.04]"
                     )}
                   >
                     Merged Data
@@ -1435,10 +1449,10 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                       key={form.id}
                       onClick={() => setActiveTab(form.id)}
                       className={cn(
-                        "px-5 py-1 text-sm font-medium rounded-t-lg transition-all duration-200 whitespace-nowrap",
+                        "px-4 py-1.5 text-[13px] font-medium rounded-t-md transition-colors duration-150 whitespace-nowrap relative -mb-px",
                         activeTab === form.id
-                          ? "bg-white text-blue-700 border-t-2 border-l border-r border-blue-500 shadow-sm -mt-px"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-gray-200"
+                          ? "bg-white text-[#5a4d96] border border-black/10 border-b-white"
+                          : "text-gray-600 hover:text-gray-900 hover:bg-black/[0.04]"
                       )}
                     >
                       {form.name}
