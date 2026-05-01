@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculatePayroll } from '@/lib/utils/payroll-utils';
 import { getEmployeeFormsStatus, setPayrollRecords } from '@/lib/utils/payroll-store';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'User is not a member of any organization' },
+        { status: 403 },
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
     const month: string = body?.month || new Date().toISOString().slice(0, 7);
 
-    const formsStatus = await getEmployeeFormsStatus();
+    const formsStatus = await getEmployeeFormsStatus(authUser.organizationId);
 
     if (!formsStatus.hasEmployeeForm || !formsStatus.hasCheckInForm) {
       const missing: string[] = [];
@@ -23,8 +35,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const payrolls = await calculatePayroll(month);
-    setPayrollRecords(month, payrolls);
+    const payrolls = await calculatePayroll(authUser.organizationId, month);
+    setPayrollRecords(authUser.organizationId, month, payrolls);
 
     if (payrolls.length === 0) {
       return NextResponse.json({

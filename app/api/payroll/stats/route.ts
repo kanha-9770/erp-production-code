@@ -5,17 +5,30 @@ import {
   getPayrollRecords,
   getStoredMonths,
 } from '@/lib/utils/payroll-store';
+import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'User is not a member of any organization' },
+        { status: 403 },
+      );
+    }
+
+    const orgId = authUser.organizationId;
     const { searchParams } = new URL(request.url);
     const month = searchParams.get('month') ?? undefined;
-    const records = getPayrollRecords(month);
+    const records = getPayrollRecords(orgId, month);
     const [employees, formsStatus] = await Promise.all([
-      getEmployeesFromDB(),
-      getEmployeeFormsStatus(),
+      getEmployeesFromDB(orgId),
+      getEmployeeFormsStatus(orgId),
     ]);
 
     const totalEmployees = employees.length;
@@ -42,7 +55,7 @@ export async function GET(request: NextRequest) {
         totalDeductions,
         averageSalary,
         totalWorkingHours: Math.round(totalWorkingHours),
-        availableMonths: getStoredMonths(),
+        availableMonths: getStoredMonths(orgId),
         currentMonth: month ?? new Date().toISOString().slice(0, 7),
         formsStatus,
       },

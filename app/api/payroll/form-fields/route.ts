@@ -1,9 +1,21 @@
 export const dynamic = 'force-dynamic';
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
+    const authUser = await getAuthenticatedUser(request);
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const formId = searchParams.get("formId");
 
@@ -14,9 +26,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch form sections and fields
-    const form = await prisma.form.findUnique({
-      where: { id: formId },
+    // The form must belong to the caller's org. Without this, anyone with
+    // a guessable formId could enumerate another tenant's field schema.
+    const form = await prisma.form.findFirst({
+      where: { id: formId, module: { organizationId: authUser.organizationId } },
       include: {
         sections: {
           include: {
@@ -36,7 +49,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Flatten all fields from all sections
     const fields = form.sections.flatMap((section) =>
       section.fields.map((field) => ({
         id: field.id,
@@ -50,7 +62,7 @@ export async function GET(request: NextRequest) {
       fields,
     });
   } catch (error) {
-    console.error("[v0] Error fetching form fields:", error);
+    console.error("[payroll] form-fields error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch form fields" },
       { status: 500 }

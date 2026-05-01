@@ -77,14 +77,50 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
     }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'User is not a member of any organization' },
+        { status: 403 },
+      );
+    }
 
+    // Always scope to the caller's org so a user from Org A can never read
+    // Org B's payroll setup.
     const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, organizationId: authUser.organizationId },
       orderBy: { createdAt: 'desc' },
     });
 
     const setup = extractSetup(config?.attendanceFieldMappings);
-    return NextResponse.json({ success: true, setup, hasConfig: !!config });
+
+    // The sidebar uses anchorModuleId to nest the Payroll route under the
+    // module that owns the configured Employee form. We walk from the form's
+    // direct module up to the top-level (level-0) ancestor, so Payroll
+    // appears as a peer of "HR Core" / "Recruitment" / etc. rather than
+    // buried under "Employee Master".
+    let anchorModuleId: string | null = null;
+    if (setup.employee.formId) {
+      const form = await prisma.form.findFirst({
+        where: {
+          id: setup.employee.formId,
+          module: { organizationId: authUser.organizationId },
+        },
+        select: { module: { select: { id: true, parentId: true } } },
+      });
+      let cursor = form?.module ?? null;
+      // Cap at 6 hops to prevent runaway loops on malformed data.
+      for (let i = 0; cursor?.parentId && i < 6; i++) {
+        const parent = await prisma.formModule.findFirst({
+          where: { id: cursor.parentId, organizationId: authUser.organizationId },
+          select: { id: true, parentId: true },
+        });
+        if (!parent) break;
+        cursor = parent;
+      }
+      anchorModuleId = cursor?.id ?? null;
+    }
+
+    return NextResponse.json({ success: true, setup, hasConfig: !!config, anchorModuleId });
   } catch (error) {
     console.error('[payroll] setup GET error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load setup' }, { status: 500 });
@@ -97,8 +133,14 @@ export async function POST(request: NextRequest) {
     if (!authUser) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
     }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'User is not a member of any organization' },
+        { status: 403 },
+      );
+    }
 
-    const body = (await request.json()) as { setup?: PayrollSetup; organizationId?: string };
+    const body = (await request.json()) as { setup?: PayrollSetup };
     const setup = body.setup;
 
     if (!setup) {
@@ -121,14 +163,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: errors.join('. ') }, { status: 400 });
     }
 
+    // Defence-in-depth: every form referenced in the setup must belong to the
+    // caller's org. Stops a malicious or stale client from binding the org's
+    // config to forms owned by a different tenant.
     const formIds = [setup.employee.formId, setup.checkIn.formId, setup.checkOut.formId].filter(
       (x): x is string => Boolean(x),
     );
+    if (formIds.length > 0) {
+      const ownedCount = await prisma.form.count({
+        where: { id: { in: formIds }, module: { organizationId: authUser.organizationId } },
+      });
+      if (ownedCount !== formIds.length) {
+        return NextResponse.json(
+          { success: false, error: 'One or more selected forms do not belong to your organization' },
+          { status: 403 },
+        );
+      }
+    }
 
     const mappings = { _meta: META_KEY, ...setup };
 
+    // Deactivate ONLY this org's previous active configs. Without the
+    // organizationId filter this updateMany used to clobber every other
+    // tenant's config, which is what produced the "my configuration is
+    // showing on others' pages" symptom.
     await prisma.payrollConfiguration.updateMany({
-      where: { isActive: true },
+      where: { isActive: true, organizationId: authUser.organizationId },
       data: { isActive: false },
     });
 
@@ -138,7 +198,9 @@ export async function POST(request: NextRequest) {
         leaveFormIds: [],
         attendanceFieldMappings: mappings as any,
         leaveFieldMappings: {},
-        organizationId: body.organizationId ?? null,
+        // Pin to the SESSION'S org. The previous version trusted body.organizationId
+        // which a malicious client could spoof to write into another tenant.
+        organizationId: authUser.organizationId,
         isActive: true,
       },
     });

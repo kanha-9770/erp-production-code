@@ -1,6 +1,19 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
+import { getEmployeesFromDB } from "@/lib/utils/payroll-store";
+
+// Confirm that an employeeId belongs to the caller's org. PayrollRecord has
+// no organization_id column, so we fall back to checking the org's employee
+// roster (read from form_hr_employee_master scoped to the org).
+async function employeeBelongsToOrg(organizationId: string, employeeId: string): Promise<boolean> {
+  const employees = await getEmployeesFromDB(organizationId);
+  const target = String(employeeId).toLowerCase();
+  return employees.some(
+    (e) => String(e.employeeId).toLowerCase() === target ||
+           (e.email && String(e.email).toLowerCase() === target),
+  );
+}
 
 // PATCH - Update payroll record
 export async function PATCH(
@@ -10,17 +23,14 @@ export async function PATCH(
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
-    // Check if user is admin
-    const userWithRoles = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
-    });
-    const isAdmin = userWithRoles?.unitAssignments.some(
-      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
-    ) ?? false;
-
-    if (!isAdmin) {
+    if (!(await isUserAdmin(authUser.id, authUser.organizationId))) {
       return NextResponse.json(
         { success: false, error: "Unauthorized - Admin access required" },
         { status: 403 }
@@ -40,7 +50,15 @@ export async function PATCH(
       );
     }
 
-    // Validate the update data
+    // Verify the employee belongs to the caller's org. Without this, an
+    // admin in Org A could mutate Org B's payroll rows by guessing IDs.
+    if (!(await employeeBelongsToOrg(authUser.organizationId, employeeId))) {
+      return NextResponse.json(
+        { success: false, error: "Payroll record not found in your organization" },
+        { status: 404 }
+      );
+    }
+
     const updateData: any = {
       processedBy: authUser.id,
       processedAt: new Date(),
@@ -56,7 +74,6 @@ export async function PATCH(
       updateData.deductions = Number.parseFloat(body.deductions);
     if (body.status !== undefined) updateData.status = body.status;
 
-    // Recalculate net salary if gross salary or deductions changed
     if (body.grossSalary !== undefined || body.deductions !== undefined) {
       const currentRecord = await prisma.payrollRecord.findUnique({
         where: {
@@ -72,17 +89,16 @@ export async function PATCH(
         const newGrossSalary =
           body.grossSalary !== undefined
             ? Number.parseFloat(body.grossSalary)
-            : currentRecord.grossSalary;
+            : Number(currentRecord.grossSalary);
         const newDeductions =
           body.deductions !== undefined
             ? Number.parseFloat(body.deductions)
-            : currentRecord.deductions;
+            : Number(currentRecord.deductions);
         updateData.netSalary = newGrossSalary - newDeductions;
         updateData.baseSalary = newGrossSalary;
       }
     }
 
-    // Update or create the payroll record
     const updatedRecord = await prisma.payrollRecord.upsert({
       where: {
         employeeId_month_year: {
@@ -114,7 +130,7 @@ export async function PATCH(
       message: "Payroll record updated successfully",
     });
   } catch (error) {
-    console.error("[v0] Error updating payroll record:", error);
+    console.error("[payroll] records[id] PATCH error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to update payroll record" },
       { status: 500 }
@@ -130,17 +146,14 @@ export async function DELETE(
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
-    // Check if user is admin
-    const userWithRoles = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
-    });
-    const isAdmin = userWithRoles?.unitAssignments.some(
-      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
-    ) ?? false;
-
-    if (!isAdmin) {
+    if (!(await isUserAdmin(authUser.id, authUser.organizationId))) {
       return NextResponse.json(
         { success: false, error: "Unauthorized - Admin access required" },
         { status: 403 }
@@ -148,8 +161,6 @@ export async function DELETE(
     }
 
     const { id } = params;
-
-    // Parse the ID to get employeeId, month, year
     const [employeeId, month, year] = id.split("-");
 
     if (!employeeId || !month || !year) {
@@ -159,7 +170,14 @@ export async function DELETE(
       );
     }
 
-    // Delete the payroll record
+    // Same org check as PATCH: stop a cross-org delete by ID guess.
+    if (!(await employeeBelongsToOrg(authUser.organizationId, employeeId))) {
+      return NextResponse.json(
+        { success: false, error: "Payroll record not found in your organization" },
+        { status: 404 }
+      );
+    }
+
     await prisma.payrollRecord.delete({
       where: {
         employeeId_month_year: {
@@ -175,7 +193,7 @@ export async function DELETE(
       message: "Payroll record deleted successfully",
     });
   } catch (error) {
-    console.error("[v0] Error deleting payroll record:", error);
+    console.error("[payroll] records[id] DELETE error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to delete payroll record" },
       { status: 500 }

@@ -74,11 +74,14 @@ function calculateForEmployee(
   };
 }
 
-export async function calculatePayroll(month: string): Promise<PayrollCalculation[]> {
+export async function calculatePayroll(
+  organizationId: string,
+  month: string,
+): Promise<PayrollCalculation[]> {
   const targetMonth = month || new Date().toISOString().slice(0, 7);
   const [employees, attendance] = await Promise.all([
-    getEmployeesFromDB(),
-    getAttendanceFromDB(targetMonth),
+    getEmployeesFromDB(organizationId),
+    getAttendanceFromDB(organizationId, targetMonth),
   ]);
 
   const byKey = new Map<string, SampleAttendance[]>();

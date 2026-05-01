@@ -57,6 +57,7 @@ import {
 import PayrollEngine from '@/components/payroll/payroll-engine';
 import PayrollAnalytics from '@/components/payroll/payroll-analytics';
 import PayslipPreview from '@/components/payroll/payslip-preview';
+import { cn } from '@/lib/utils';
 
 interface PayrollRecord {
   employeeId: string;
@@ -112,10 +113,12 @@ function deltaPercent(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
+const ACCENT = "#5a4d96";
+
 function TrendBadge({ delta }: { delta: number | null }) {
   if (delta === null) {
     return (
-      <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-0.5 text-[11px] text-gray-500">
         <Minus className="h-3 w-3" />
         no prior data
       </span>
@@ -123,13 +126,17 @@ function TrendBadge({ delta }: { delta: number | null }) {
   }
   const positive = delta > 0;
   const Icon = positive ? TrendingUp : delta < 0 ? TrendingDown : Minus;
-  const color = positive
-    ? 'text-emerald-600 bg-emerald-500/10'
-    : delta < 0
-      ? 'text-red-600 bg-red-500/10'
-      : 'text-muted-foreground bg-muted';
   return (
-    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${color}`}>
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+        positive
+          ? "text-gray-700 bg-black/5"
+          : delta < 0
+            ? "text-gray-700 bg-black/5"
+            : "text-gray-500 bg-black/5",
+      )}
+    >
       <Icon className="h-3 w-3" />
       {Math.abs(delta).toFixed(1)}%
     </span>
@@ -141,46 +148,43 @@ function KpiCard({
   value,
   hint,
   icon: Icon,
-  accent,
   delta,
   loading,
 }: {
   label: string;
   value: string;
   hint?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: 'emerald' | 'blue' | 'amber' | 'violet';
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   delta?: number | null;
   loading?: boolean;
 }) {
-  const accentMap = {
-    emerald: 'from-emerald-500/15 via-emerald-500/5 to-transparent text-emerald-600 border-emerald-500/20',
-    blue: 'from-blue-500/15 via-blue-500/5 to-transparent text-blue-600 border-blue-500/20',
-    amber: 'from-amber-500/15 via-amber-500/5 to-transparent text-amber-600 border-amber-500/20',
-    violet: 'from-violet-500/15 via-violet-500/5 to-transparent text-violet-600 border-violet-500/20',
-  } as const;
-
   return (
-    <Card className={`relative overflow-hidden border bg-gradient-to-br ${accentMap[accent]} transition-all hover:shadow-md`}>
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-background/40 pointer-events-none" />
+    <Card className="relative overflow-hidden border border-black/10 bg-white shadow-none transition-shadow hover:shadow-sm">
       <CardContent className="relative p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1.5 min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
               {label}
             </p>
             {loading ? (
-              <Skeleton className="h-7 w-32" />
+              <Skeleton className="h-7 w-32 bg-black/5" />
             ) : (
-              <p className="text-2xl font-bold text-foreground tabular-nums tracking-tight">{value}</p>
+              <p className="text-2xl font-bold text-gray-900 tabular-nums tracking-tight">
+                {value}
+              </p>
             )}
             <div className="flex items-center gap-1.5">
               {delta !== undefined && !loading && <TrendBadge delta={delta ?? null} />}
-              {hint && <span className="text-[10px] text-muted-foreground truncate">{hint}</span>}
+              {hint && (
+                <span className="text-[11px] text-gray-500 truncate">{hint}</span>
+              )}
             </div>
           </div>
-          <div className="rounded-xl bg-background/70 p-2.5 backdrop-blur-sm shadow-sm shrink-0">
-            <Icon className="h-5 w-5" />
+          <div
+            className="rounded-lg p-2 shrink-0 ring-1 ring-black/5"
+            style={{ backgroundColor: `${ACCENT}14` }}
+          >
+            <Icon className="h-5 w-5" style={{ color: ACCENT }} />
           </div>
         </div>
       </CardContent>
@@ -188,18 +192,28 @@ function KpiCard({
   );
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400',
-  processed: 'bg-blue-500/10 text-blue-700 border-blue-500/30 dark:text-blue-400',
-  paid: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400',
-};
-
 function StatusPill({ status }: { status: string }) {
+  // Single tonal scheme — accent for "active" states, gray for the rest.
+  // Stays inside the sidebar's palette while keeping states distinguishable.
+  const map: Record<string, { bg: string; fg: string }> = {
+    paid: { bg: `${ACCENT}1a`, fg: ACCENT },
+    processed: { bg: `${ACCENT}14`, fg: ACCENT },
+    pending: { bg: "rgba(0,0,0,0.06)", fg: "#374151" },
+  };
+  const tone = map[status] ?? { bg: "rgba(0,0,0,0.06)", fg: "#374151" };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${STATUS_STYLES[status] ?? 'bg-muted text-muted-foreground'}`}
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+      style={{
+        backgroundColor: tone.bg,
+        color: tone.fg,
+        borderColor: "rgba(0,0,0,0.08)",
+      }}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: tone.fg }}
+      />
       {status}
     </span>
   );
@@ -214,8 +228,10 @@ function initialsOf(name: string): string {
     .join('');
 }
 
-const DEDUCTION_COLORS = ['#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
-const COMPOSITION_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'];
+// Charts use tonal variations of the accent so the page stays inside the
+// sidebar palette. Recharts can fall back through these for distinct slices.
+const DEDUCTION_COLORS = ['#5a4d96', '#7d6fb5', '#9c8fcc', '#bcb1e0'];
+const COMPOSITION_COLORS = ['#5a4d96', '#7d6fb5', '#9c8fcc', '#bcb1e0', '#d4cce8'];
 
 export default function PayrollPage() {
   const [mounted, setMounted] = useState(false);
@@ -393,29 +409,28 @@ export default function PayrollPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/20">
+    <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto p-6 space-y-6">
         {/* Sticky header */}
-        <header className="sticky top-0 z-20 -mx-6 px-6 py-4 backdrop-blur-md bg-background/80 border-b border-border/40">
+        <header className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-gray-50/95 backdrop-blur-sm border-b border-black/10">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="rounded-xl bg-primary/10 p-2 ring-1 ring-primary/20">
-                  <Wallet className="h-5 w-5 text-primary" />
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="rounded-lg p-2 ring-1 ring-black/5"
+                  style={{ backgroundColor: `${ACCENT}14` }}
+                >
+                  <Wallet className="h-5 w-5" style={{ color: ACCENT }} />
                 </div>
-                <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                  Payroll Management
+                <h1 className="text-xl font-semibold tracking-tight text-gray-900">
+                  Payroll
                 </h1>
-                <Badge variant="secondary" className="ml-1 gap-1">
-                  <Sparkles className="h-3 w-3" />
-                  Smart Engine
-                </Badge>
               </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{monthLabel}</span>
+              <div className="flex items-center gap-2 text-[12px] text-gray-500 pl-[44px]">
+                <span className="font-medium text-gray-700">{monthLabel}</span>
                 {lastGeneratedAt && (
                   <>
-                    <span>·</span>
+                    <span className="text-gray-300">·</span>
                     <span className="inline-flex items-center gap-1">
                       <CalendarDays className="h-3 w-3" />
                       Last generated{' '}
@@ -436,10 +451,14 @@ export default function PayrollPage() {
                 type="month"
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-9 rounded-md border border-black/10 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#5a4d96]/30 focus:border-[#5a4d96]/40"
               />
               <Link href="/payroll/configure">
-                <Button variant="outline" size="sm" className="gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
+                >
                   <Settings className="h-4 w-4" />
                   Configure
                 </Button>
@@ -452,9 +471,11 @@ export default function PayrollPage() {
                   setDiagnoseOpen(true);
                 }}
                 disabled={diagnoseLoading}
-                className="gap-2"
+                className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
               >
-                <Stethoscope className={`h-4 w-4 ${diagnoseLoading ? 'animate-pulse' : ''}`} />
+                <Stethoscope
+                  className={cn('h-4 w-4', diagnoseLoading && 'animate-pulse')}
+                />
                 Diagnose
               </Button>
               <Button
@@ -462,26 +483,34 @@ export default function PayrollPage() {
                 size="sm"
                 onClick={() => loadData(month)}
                 disabled={loading}
-                className="gap-2"
+                className="gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
               >
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
                 Refresh
               </Button>
               <Button
                 size="sm"
                 onClick={generate}
                 disabled={generating}
-                className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                className="gap-2 text-white shadow-sm"
+                style={{ backgroundColor: ACCENT }}
+                onMouseEnter={(e) =>
+                  ((e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                    '#6b5da8')
+                }
+                onMouseLeave={(e) =>
+                  ((e.currentTarget as HTMLButtonElement).style.backgroundColor = ACCENT)
+                }
               >
-                <Sparkles className={`h-4 w-4 ${generating ? 'animate-pulse' : ''}`} />
-                {generating ? 'Generating...' : 'Auto-Generate'}
+                <Sparkles className={cn('h-4 w-4', generating && 'animate-pulse')} />
+                {generating ? 'Generating…' : 'Auto-Generate'}
               </Button>
             </div>
           </div>
         </header>
 
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 shadow-sm">
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
@@ -490,40 +519,47 @@ export default function PayrollPage() {
           (!stats.formsStatus.hasEmployeeForm ||
             !stats.formsStatus.hasCheckInForm ||
             !stats.formsStatus.hasCheckOutForm) && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm">
+            <div className="rounded-md border border-black/10 bg-white px-4 py-3 text-sm">
               <div className="flex items-start gap-3">
-                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
                 <div className="space-y-1 flex-1">
-                  <p className="font-semibold text-amber-900">HR forms detected</p>
-                  <ul className="list-inside list-disc text-amber-800/90">
+                  <p className="font-semibold text-gray-900">HR forms detected</p>
+                  <ul className="list-inside list-disc text-gray-600">
                     <li>
                       Employee Profile:{' '}
                       {stats.formsStatus.hasEmployeeForm ? (
-                        <span className="font-medium">found ({stats.formsStatus.employeeFormName})</span>
+                        <span className="font-medium text-gray-800">
+                          found ({stats.formsStatus.employeeFormName})
+                        </span>
                       ) : (
-                        <span className="font-medium text-red-700">missing</span>
+                        <span className="font-medium text-red-600">missing</span>
                       )}
                     </li>
                     <li>
                       Check-In:{' '}
                       {stats.formsStatus.hasCheckInForm ? (
-                        <span className="font-medium">found ({stats.formsStatus.checkInFormName})</span>
+                        <span className="font-medium text-gray-800">
+                          found ({stats.formsStatus.checkInFormName})
+                        </span>
                       ) : (
-                        <span className="font-medium text-red-700">missing</span>
+                        <span className="font-medium text-red-600">missing</span>
                       )}
                     </li>
                     <li>
                       Check-Out:{' '}
                       {stats.formsStatus.hasCheckOutForm ? (
-                        <span className="font-medium">found ({stats.formsStatus.checkOutFormName})</span>
+                        <span className="font-medium text-gray-800">
+                          found ({stats.formsStatus.checkOutFormName})
+                        </span>
                       ) : (
-                        <span className="text-amber-800">optional</span>
+                        <span className="text-gray-500">optional</span>
                       )}
                     </li>
                   </ul>
                   <Link
                     href="/payroll/configure"
-                    className="inline-flex items-center gap-1 font-medium text-amber-900 underline-offset-2 hover:underline"
+                    className="inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                    style={{ color: ACCENT }}
                   >
                     Configure custom mappings <ArrowRight className="h-3 w-3" />
                   </Link>
@@ -533,23 +569,27 @@ export default function PayrollPage() {
           )}
 
         {diagnoseReport && (
-          <Card className="border-border">
+          <Card className="border border-black/10 bg-white shadow-none">
             <CardHeader
               className="cursor-pointer select-none"
               onClick={() => setDiagnoseOpen((v) => !v)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Stethoscope className="h-5 w-5 text-primary" />
-                  <CardTitle className="text-base">Payroll Diagnostic Report</CardTitle>
+                  <Stethoscope className="h-5 w-5" style={{ color: ACCENT }} />
+                  <CardTitle className="text-base text-gray-900">
+                    Payroll Diagnostic Report
+                  </CardTitle>
                 </div>
                 {diagnoseOpen ? (
-                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  <ChevronUp className="h-4 w-4 text-gray-400" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
                 )}
               </div>
-              <CardDescription>What the engine actually finds in your forms</CardDescription>
+              <CardDescription className="text-gray-500">
+                What the engine actually finds in your forms
+              </CardDescription>
             </CardHeader>
             {diagnoseOpen && (
               <CardContent className="space-y-4 text-sm">
@@ -559,38 +599,55 @@ export default function PayrollPage() {
                     key === 'employee' ? 'Employee Profile' : key === 'checkIn' ? 'Check-In' : 'Check-Out';
                   if (!sec.found) {
                     return (
-                      <div key={key} className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-                        <p className="font-semibold text-amber-900">{label}: form not found</p>
+                      <div
+                        key={key}
+                        className="rounded-md border border-dashed border-black/15 bg-gray-50 p-3"
+                      >
+                        <p className="font-semibold text-gray-700">
+                          {label}: form not found
+                        </p>
                       </div>
                     );
                   }
                   const reasons = sec.reasons || {};
                   const ok = reasons.ok ?? 0;
                   return (
-                    <div key={key} className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+                    <div
+                      key={key}
+                      className="rounded-md border border-black/10 bg-gray-50 p-3 space-y-2"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-semibold text-foreground">{label}</p>
-                        <div className="flex flex-wrap gap-2 text-xs">
-                          <Badge variant="secondary">Raw rows: {sec.rawCount}</Badge>
-                          <Badge variant={ok > 0 ? 'default' : 'destructive'}>
+                        <p className="font-semibold text-gray-900">{label}</p>
+                        <div className="flex flex-wrap gap-1.5 text-xs">
+                          <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                            Raw rows: {sec.rawCount}
+                          </span>
+                          <span
+                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+                            style={{
+                              backgroundColor: ok > 0 ? `${ACCENT}14` : 'rgba(0,0,0,0.04)',
+                              color: ok > 0 ? ACCENT : '#6b7280',
+                              borderColor: 'rgba(0,0,0,0.08)',
+                            }}
+                          >
                             Usable: {ok}
-                          </Badge>
+                          </span>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500 sm:grid-cols-3">
                         {Object.entries(reasons).map(([k, v]) => (
                           <div key={k} className="flex justify-between">
                             <span>{k}</span>
-                            <span className="tabular-nums text-foreground">{String(v)}</span>
+                            <span className="tabular-nums text-gray-800">{String(v)}</span>
                           </div>
                         ))}
                       </div>
                       {sec.sample && sec.sample.length > 0 && (
                         <details className="text-xs">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                          <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
                             Sample rows ({sec.sample.length})
                           </summary>
-                          <pre className="mt-1 max-h-48 overflow-auto rounded bg-background p-2 text-[11px]">
+                          <pre className="mt-1 max-h-48 overflow-auto rounded bg-white border border-black/10 p-2 text-[11px] text-gray-700">
                             {JSON.stringify(sec.sample, null, 2)}
                           </pre>
                         </details>
@@ -609,7 +666,6 @@ export default function PayrollPage() {
             value={`₹${formatINR(stats?.totalPayrollExpense ?? 0)}`}
             hint={`vs ${monthLabel}`}
             icon={IndianRupee}
-            accent="emerald"
             delta={deltas.payroll}
             loading={loading}
           />
@@ -618,7 +674,6 @@ export default function PayrollPage() {
             value={`${stats?.processedPayrolls ?? 0} / ${stats?.totalEmployees ?? 0}`}
             hint={`${stats?.pendingPayslips ?? 0} pending`}
             icon={Users}
-            accent="blue"
             delta={deltas.employees}
             loading={loading}
           />
@@ -627,7 +682,6 @@ export default function PayrollPage() {
             value={`₹${formatINR(stats?.averageSalary ?? 0)}`}
             hint="Per employee"
             icon={TrendingUp}
-            accent="violet"
             delta={deltas.average}
             loading={loading}
           />
@@ -636,27 +690,38 @@ export default function PayrollPage() {
             value={formatINR(stats?.totalWorkingHours ?? 0)}
             hint={`₹${formatINR(stats?.totalDeductions ?? 0)} deducted`}
             icon={Clock}
-            accent="amber"
             delta={deltas.hours}
             loading={loading}
           />
         </section>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
-            <TabsTrigger value="overview" className="gap-1">
+          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-white border border-black/10 p-1 rounded-md">
+            <TabsTrigger
+              value="overview"
+              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+            >
               <CheckCircle2 className="h-4 w-4" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="run" className="gap-1">
+            <TabsTrigger
+              value="run"
+              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+            >
               <Sparkles className="h-4 w-4" />
               Run Payroll
             </TabsTrigger>
-            <TabsTrigger value="records" className="gap-1">
+            <TabsTrigger
+              value="records"
+              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+            >
               <FileText className="h-4 w-4" />
               Records
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="gap-1">
+            <TabsTrigger
+              value="analytics"
+              className="gap-1 text-gray-600 data-[state=active]:bg-[#5a4d96]/10 data-[state=active]:text-[#5a4d96] data-[state=active]:shadow-none"
+            >
               <TrendingUp className="h-4 w-4" />
               Analytics
             </TabsTrigger>
@@ -664,13 +729,15 @@ export default function PayrollPage() {
 
           <TabsContent value="overview" className="mt-4 space-y-4">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Card className="lg:col-span-2 border-border">
+              <Card className="lg:col-span-2 border border-black/10 bg-white shadow-none">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Building2 className="h-5 w-5 text-primary" />
+                  <CardTitle className="flex items-center gap-2 text-gray-900 text-base">
+                    <Building2 className="h-5 w-5" style={{ color: ACCENT }} />
                     Department Breakdown
                   </CardTitle>
-                  <CardDescription>Net payroll by department for {monthLabel}</CardDescription>
+                  <CardDescription className="text-gray-500">
+                    Net payroll by department for {monthLabel}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {loading ? (
@@ -678,20 +745,20 @@ export default function PayrollPage() {
                       {Array.from({ length: 4 }).map((_, i) => (
                         <div key={i} className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <Skeleton className="h-4 w-24" />
-                            <Skeleton className="h-4 w-16" />
+                            <Skeleton className="h-4 w-24 bg-black/5" />
+                            <Skeleton className="h-4 w-16 bg-black/5" />
                           </div>
-                          <Skeleton className="h-2 w-full" />
+                          <Skeleton className="h-2 w-full bg-black/5" />
                         </div>
                       ))}
                     </div>
                   ) : departmentBreakdown.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <Building2 className="h-10 w-10 text-muted-foreground/40" />
-                      <p className="mt-3 text-sm font-medium text-foreground">
+                      <Building2 className="h-10 w-10 text-gray-300" />
+                      <p className="mt-3 text-sm font-medium text-gray-700">
                         No payroll data yet
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-gray-500">
                         Click <span className="font-medium">Auto-Generate</span> to start
                       </p>
                     </div>
@@ -703,24 +770,28 @@ export default function PayrollPage() {
                         return (
                           <div key={d.name} className="space-y-1.5">
                             <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium text-foreground flex items-center gap-2">
+                              <span className="font-medium text-gray-800 flex items-center gap-2">
                                 <span
                                   className="inline-block h-2 w-2 rounded-full"
-                                  style={{ backgroundColor: COMPOSITION_COLORS[i % COMPOSITION_COLORS.length] }}
+                                  style={{
+                                    backgroundColor:
+                                      COMPOSITION_COLORS[i % COMPOSITION_COLORS.length],
+                                  }}
                                 />
                                 {d.name}
-                                <span className="text-xs text-muted-foreground">({d.count})</span>
+                                <span className="text-xs text-gray-500">({d.count})</span>
                               </span>
-                              <span className="tabular-nums font-semibold text-foreground">
+                              <span className="tabular-nums font-semibold text-gray-900">
                                 ₹{formatINR(d.total)}
                               </span>
                             </div>
-                            <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <div className="h-1.5 overflow-hidden rounded-full bg-black/5">
                               <div
                                 className="h-full rounded-full transition-all duration-500"
                                 style={{
                                   width: `${pct}%`,
-                                  background: `linear-gradient(90deg, ${COMPOSITION_COLORS[i % COMPOSITION_COLORS.length]}, ${COMPOSITION_COLORS[i % COMPOSITION_COLORS.length]}aa)`,
+                                  backgroundColor:
+                                    COMPOSITION_COLORS[i % COMPOSITION_COLORS.length],
                                 }}
                               />
                             </div>
@@ -732,21 +803,23 @@ export default function PayrollPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-border">
+              <Card className="border border-black/10 bg-white shadow-none">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Wallet className="h-5 w-5 text-primary" />
+                  <CardTitle className="flex items-center gap-2 text-gray-900 text-base">
+                    <Wallet className="h-5 w-5" style={{ color: ACCENT }} />
                     Cost Composition
                   </CardTitle>
-                  <CardDescription>How the payroll splits</CardDescription>
+                  <CardDescription className="text-gray-500">
+                    How the payroll splits
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {loading ? (
-                    <Skeleton className="h-56 w-full rounded-full" />
+                    <Skeleton className="h-56 w-full rounded-full bg-black/5" />
                   ) : compositionData.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <Wallet className="h-10 w-10 text-muted-foreground/40" />
-                      <p className="mt-3 text-xs text-muted-foreground">No data</p>
+                      <Wallet className="h-10 w-10 text-gray-300" />
+                      <p className="mt-3 text-xs text-gray-500">No data</p>
                     </div>
                   ) : (
                     <div className="h-56">
@@ -767,8 +840,8 @@ export default function PayrollPage() {
                           <Tooltip
                             formatter={(v: any) => `₹${formatINR(Number(v))}`}
                             contentStyle={{
-                              backgroundColor: 'hsl(var(--background))',
-                              border: '1px solid hsl(var(--border))',
+                              backgroundColor: '#ffffff',
+                              border: '1px solid rgba(0,0,0,0.1)',
                               borderRadius: '6px',
                               fontSize: '12px',
                             }}
@@ -787,13 +860,20 @@ export default function PayrollPage() {
               </Card>
             </div>
 
-            <Card className="border-border">
+            <Card className="border border-black/10 bg-white shadow-none">
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="text-base">Top Earners</CardTitle>
-                  <CardDescription>Highest net salaries this month</CardDescription>
+                  <CardTitle className="text-base text-gray-900">Top Earners</CardTitle>
+                  <CardDescription className="text-gray-500">
+                    Highest net salaries this month
+                  </CardDescription>
                 </div>
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => setActiveTab('records')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1 text-gray-600 hover:bg-black/5 hover:text-gray-900"
+                  onClick={() => setActiveTab('records')}
+                >
                   See all
                   <ArrowRight className="h-3 w-3" />
                 </Button>
@@ -802,13 +882,15 @@ export default function PayrollPage() {
                 {loading ? (
                   <div className="space-y-3">
                     {Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-14" />
+                      <Skeleton key={i} className="h-14 bg-black/5" />
                     ))}
                   </div>
                 ) : payrolls.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-6 text-center">No records yet</p>
+                  <p className="text-sm text-gray-500 py-6 text-center">
+                    No records yet
+                  </p>
                 ) : (
-                  <div className="divide-y divide-border">
+                  <div className="divide-y divide-black/5">
                     {[...payrolls]
                       .sort((a, b) => b.netSalary - a.netSalary)
                       .slice(0, 5)
@@ -816,23 +898,26 @@ export default function PayrollPage() {
                         <button
                           key={p.employeeId + p.email}
                           onClick={() => setSelected(p)}
-                          className="w-full flex items-center justify-between gap-3 py-3 hover:bg-muted/50 px-2 rounded-md transition-colors text-left"
+                          className="w-full flex items-center justify-between gap-3 py-3 px-2 rounded-md hover:bg-black/[0.03] transition-colors text-left"
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-xs font-semibold text-primary">
+                            <div
+                              className="h-9 w-9 shrink-0 rounded-md flex items-center justify-center text-xs font-semibold text-white ring-1 ring-black/5"
+                              style={{ backgroundColor: ACCENT }}
+                            >
                               {initialsOf(p.employeeName)}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold text-foreground truncate">
+                              <p className="text-sm font-semibold text-gray-900 truncate">
                                 {p.employeeName}
                               </p>
-                              <p className="text-xs text-muted-foreground truncate">
+                              <p className="text-xs text-gray-500 truncate">
                                 {p.designation || '—'} · {p.department || 'Unassigned'}
                               </p>
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="text-sm font-bold tabular-nums text-foreground">
+                            <p className="text-sm font-bold tabular-nums text-gray-900">
                               ₹{formatINR(p.netSalary)}
                             </p>
                             <StatusPill status={p.status} />
@@ -850,29 +935,31 @@ export default function PayrollPage() {
           </TabsContent>
 
           <TabsContent value="records" className="mt-4">
-            <Card className="border-border">
+            <Card className="border border-black/10 bg-white shadow-none">
               <CardHeader>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <CardTitle>Payroll Records — {monthLabel}</CardTitle>
-                    <CardDescription>
+                    <CardTitle className="text-gray-900 text-base">
+                      Payroll Records — {monthLabel}
+                    </CardTitle>
+                    <CardDescription className="text-gray-500">
                       {filteredPayrolls.length} of {payrolls.length} record
                       {payrolls.length === 1 ? '' : 's'}
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                       <Input
                         type="search"
                         placeholder="Search name, email, dept…"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="h-9 pl-8 w-56"
+                        className="h-9 pl-8 w-56 bg-white border-black/10 focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/40"
                       />
                     </div>
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="h-9 w-36">
+                      <SelectTrigger className="h-9 w-36 bg-white border-black/10">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -888,24 +975,29 @@ export default function PayrollPage() {
                 {loading ? (
                   <div className="space-y-2 p-4">
                     {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-14" />
+                      <Skeleton key={i} className="h-14 bg-black/5" />
                     ))}
                   </div>
                 ) : filteredPayrolls.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <FileText className="h-10 w-10 text-muted-foreground/40" />
-                    <p className="mt-3 text-sm font-medium text-foreground">
+                    <FileText className="h-10 w-10 text-gray-300" />
+                    <p className="mt-3 text-sm font-medium text-gray-700">
                       {payrolls.length === 0 ? 'No records yet' : 'No matches'}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-gray-500">
                       {payrolls.length === 0
                         ? 'Generate payroll to populate this table'
                         : 'Try a different search or status filter'}
                     </p>
                     {payrolls.length === 0 && (
-                      <Button onClick={generate} disabled={generating} className="mt-4 gap-2">
+                      <Button
+                        onClick={generate}
+                        disabled={generating}
+                        className="mt-4 gap-2 text-white"
+                        style={{ backgroundColor: ACCENT }}
+                      >
                         <Sparkles className="h-4 w-4" />
-                        {generating ? 'Generating...' : 'Generate Now'}
+                        {generating ? 'Generating…' : 'Generate Now'}
                       </Button>
                     )}
                   </div>
@@ -913,7 +1005,7 @@ export default function PayrollPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        <tr className="border-b border-black/10 bg-gray-50 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                           <th className="px-4 py-3">Employee</th>
                           <th className="px-3 py-3">Department</th>
                           <th className="px-3 py-3 text-center">Days</th>
@@ -925,7 +1017,7 @@ export default function PayrollPage() {
                           <th className="px-3 py-3 text-center">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border">
+                      <tbody className="divide-y divide-black/5">
                         {filteredPayrolls.map((p, idx) => {
                           const totalDed =
                             p.deductions.pf +
@@ -935,38 +1027,43 @@ export default function PayrollPage() {
                           return (
                             <tr
                               key={`${p.employeeId}-${p.email}-${idx}`}
-                              className="hover:bg-muted/40 transition-colors cursor-pointer"
+                              className="hover:bg-black/[0.03] transition-colors cursor-pointer"
                               onClick={() => setSelected(p)}
                             >
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-3">
-                                  <div className="h-8 w-8 shrink-0 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-xs font-semibold text-primary">
+                                  <div
+                                    className="h-8 w-8 shrink-0 rounded-md flex items-center justify-center text-xs font-semibold text-white ring-1 ring-black/5"
+                                    style={{ backgroundColor: ACCENT }}
+                                  >
                                     {initialsOf(p.employeeName)}
                                   </div>
                                   <div className="min-w-0">
-                                    <p className="font-semibold text-foreground truncate">
+                                    <p className="font-semibold text-gray-900 truncate">
                                       {p.employeeName}
                                     </p>
-                                    <p className="text-xs text-muted-foreground truncate">
+                                    <p className="text-xs text-gray-500 truncate">
                                       {p.email || p.employeeId}
                                     </p>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-3 text-muted-foreground">
+                              <td className="px-3 py-3 text-gray-600">
                                 {p.department || '—'}
                               </td>
-                              <td className="px-3 py-3 text-center tabular-nums">{p.workingDays}</td>
-                              <td className="px-3 py-3 text-center tabular-nums">
+                              <td className="px-3 py-3 text-center tabular-nums text-gray-700">
+                                {p.workingDays}
+                              </td>
+                              <td className="px-3 py-3 text-center tabular-nums text-gray-700">
                                 {p.workingHours.toFixed(1)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums">
+                              <td className="px-3 py-3 text-right tabular-nums text-gray-700">
                                 ₹{formatINR(p.grossSalary)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
+                              <td className="px-3 py-3 text-right tabular-nums text-gray-500">
                                 ₹{formatINR(totalDed)}
                               </td>
-                              <td className="px-3 py-3 text-right tabular-nums font-bold text-foreground">
+                              <td className="px-3 py-3 text-right tabular-nums font-bold text-gray-900">
                                 ₹{formatINR(p.netSalary)}
                               </td>
                               <td className="px-3 py-3 text-center">
@@ -980,7 +1077,7 @@ export default function PayrollPage() {
                                     e.stopPropagation();
                                     setSelected(p);
                                   }}
-                                  className="gap-1 h-8"
+                                  className="gap-1 h-8 text-gray-600 hover:bg-black/5 hover:text-gray-900"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                   View
@@ -1001,11 +1098,13 @@ export default function PayrollPage() {
             {payrolls.length > 0 ? (
               <PayrollAnalytics payrolls={payrolls} month={month} />
             ) : (
-              <Card className="border-border">
+              <Card className="border border-black/10 bg-white shadow-none">
                 <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                  <TrendingUp className="h-10 w-10 text-muted-foreground/40" />
-                  <p className="mt-3 text-sm font-medium text-foreground">No analytics yet</p>
-                  <p className="text-xs text-muted-foreground">
+                  <TrendingUp className="h-10 w-10 text-gray-300" />
+                  <p className="mt-3 text-sm font-medium text-gray-700">
+                    No analytics yet
+                  </p>
+                  <p className="text-xs text-gray-500">
                     Generate payroll to view insights and charts
                   </p>
                 </CardContent>
@@ -1016,17 +1115,22 @@ export default function PayrollPage() {
 
         {/* Employee detail drawer */}
         <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-          <SheetContent className="sm:max-w-lg overflow-y-auto">
+          <SheetContent className="sm:max-w-lg overflow-y-auto bg-white">
             {selected && (
               <>
                 <SheetHeader className="space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center text-base font-bold text-primary">
+                    <div
+                      className="h-12 w-12 rounded-md flex items-center justify-center text-base font-semibold text-white ring-1 ring-black/5"
+                      style={{ backgroundColor: ACCENT }}
+                    >
                       {initialsOf(selected.employeeName)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <SheetTitle className="truncate">{selected.employeeName}</SheetTitle>
-                      <SheetDescription className="flex items-center gap-2 text-xs">
+                      <SheetTitle className="truncate text-gray-900">
+                        {selected.employeeName}
+                      </SheetTitle>
+                      <SheetDescription className="flex items-center gap-2 text-xs text-gray-500">
                         <Briefcase className="h-3 w-3" />
                         {selected.designation || '—'} · {selected.department || 'Unassigned'}
                       </SheetDescription>
@@ -1034,7 +1138,7 @@ export default function PayrollPage() {
                     <StatusPill status={selected.status} />
                   </div>
                   {selected.email && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
                       <Mail className="h-3 w-3" />
                       {selected.email}
                     </div>
@@ -1042,24 +1146,29 @@ export default function PayrollPage() {
                 </SheetHeader>
 
                 <div className="mt-6 space-y-5">
-                  <div className="rounded-lg border border-border bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Net Salary</p>
-                    <p className="text-3xl font-bold text-foreground tabular-nums mt-1">
+                  <div
+                    className="rounded-md border border-black/10 p-4"
+                    style={{ backgroundColor: `${ACCENT}0d` }}
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                      Net Salary
+                    </p>
+                    <p className="text-3xl font-bold text-gray-900 tabular-nums mt-1">
                       ₹{formatINR(selected.netSalary)}
                     </p>
-                    <p className="text-xs text-muted-foreground">for {monthLabel}</p>
+                    <p className="text-xs text-gray-500">for {monthLabel}</p>
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
                       Earnings
                     </p>
-                    <div className="rounded-lg border border-border divide-y divide-border">
+                    <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
                       <Row label="Base Salary (CTC)" value={`₹${formatINR(selected.baseSalary)}`} />
                       <Row
                         label="Hourly Rate"
                         value={`₹${selected.hourlyRate.toFixed(2)}`}
-                        sub={`based on 22 days × 8h`}
+                        sub="based on 22 days × 8h"
                       />
                       <Row
                         label="Working Days"
@@ -1075,10 +1184,10 @@ export default function PayrollPage() {
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
                       Deductions
                     </p>
-                    <div className="rounded-lg border border-border divide-y divide-border">
+                    <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
                       <Row
                         label="Provident Fund"
                         value={`₹${formatINR(selected.deductions.pf)}`}
@@ -1114,7 +1223,7 @@ export default function PayrollPage() {
                   <div className="flex flex-col gap-2 sm:flex-row sm:gap-3 pt-2">
                     <Button
                       variant="outline"
-                      className="flex-1 gap-2"
+                      className="flex-1 gap-2 border-black/10 bg-white hover:bg-black/5 text-gray-700"
                       onClick={() => setShowPayslip(true)}
                     >
                       <FileText className="h-4 w-4" />
@@ -1151,17 +1260,28 @@ function Row({
   emphasis?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-3 px-3 py-2.5 ${emphasis ? 'bg-muted/30' : ''}`}>
+    <div
+      className={cn(
+        'flex items-center justify-between gap-3 px-3 py-2.5',
+        emphasis && 'bg-gray-50',
+      )}
+    >
       <div className="min-w-0">
-        <p className={`text-sm ${emphasis ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+        <p
+          className={cn(
+            'text-sm',
+            emphasis ? 'font-semibold text-gray-900' : 'text-gray-600',
+          )}
+        >
           {label}
         </p>
-        {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="text-[10px] text-gray-500">{sub}</p>}
       </div>
       <p
-        className={`tabular-nums shrink-0 ${
-          emphasis ? 'text-base font-bold text-foreground' : 'text-sm font-semibold text-foreground'
-        }`}
+        className={cn(
+          'tabular-nums shrink-0',
+          emphasis ? 'text-base font-bold text-gray-900' : 'text-sm font-semibold text-gray-900',
+        )}
       >
         {value}
       </p>

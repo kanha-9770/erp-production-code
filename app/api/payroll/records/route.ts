@@ -1,11 +1,22 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
+import { getEmployeesFromDB } from "@/lib/utils/payroll-store";
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
-    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
     const { searchParams } = new URL(request.url);
     const month = Number.parseInt(searchParams.get("month") || "0");
@@ -18,8 +29,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Pull THIS org's active config — never another tenant's.
     const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, organizationId: authUser.organizationId },
       orderBy: { createdAt: "desc" },
     });
 
@@ -57,9 +69,13 @@ export async function GET(request: NextRequest) {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
 
+    // Defence in depth: only consider forms that actually live under THIS
+    // org's modules. A stale config that referenced another tenant's formId
+    // would otherwise leak records.
     const forms = await prisma.form.findMany({
       where: {
         id: { in: allFormIds },
+        module: { organizationId: authUser.organizationId },
       },
       include: {
         tableMapping: true,
@@ -73,12 +89,10 @@ export async function GET(request: NextRequest) {
 
       if (!tableName) continue;
 
-      // Extract table number from storage_table (e.g., "form_records_1" -> 1)
       const tableNumber = tableName.match(/\d+$/)?.[0];
 
       if (!tableNumber) continue;
 
-      // Query the appropriate FormRecord table
       const tablePrismaKey = `formRecord${tableNumber}` as keyof typeof prisma;
 
       if (tablePrismaKey in prisma) {
@@ -158,7 +172,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[v0] Error fetching payroll records:", error);
+    console.error("[payroll] records GET error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch payroll records" },
       { status: 500 }
@@ -169,17 +183,17 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
-    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
-    const userWithRoles = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
-    });
-    const isAdmin = userWithRoles?.unitAssignments.some(
-      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
-    ) ?? false;
-
-    if (!isAdmin) {
+    if (!(await isUserAdmin(authUser.id, authUser.organizationId))) {
       return NextResponse.json(
         { success: false, error: "Unauthorized - Admin access required" },
         { status: 403 }
@@ -205,10 +219,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate net salary
+    // The employee being targeted must exist in THIS org's roster.
+    // PayrollRecord lacks an organization_id column, so this runtime check is
+    // the boundary that prevents an admin from writing into a peer tenant.
+    const orgEmployees = await getEmployeesFromDB(authUser.organizationId);
+    const target = String(employeeId).toLowerCase();
+    const owned = orgEmployees.some(
+      (e) => String(e.employeeId).toLowerCase() === target ||
+             (e.email && String(e.email).toLowerCase() === target),
+    );
+    if (!owned) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found in your organization" },
+        { status: 404 }
+      );
+    }
+
     const netSalary = (grossSalary || 0) - (deductions || 0);
 
-    // Check if record exists
     const existingRecord = await prisma.payrollRecord.findUnique({
       where: {
         employeeId_month_year: {
@@ -222,7 +250,6 @@ export async function POST(request: NextRequest) {
     let payrollRecord;
 
     if (existingRecord) {
-      // Update existing record
       payrollRecord = await prisma.payrollRecord.update({
         where: {
           employeeId_month_year: {
@@ -244,7 +271,6 @@ export async function POST(request: NextRequest) {
         },
       });
     } else {
-      // Create new record
       payrollRecord = await prisma.payrollRecord.create({
         data: {
           employeeId,
@@ -269,7 +295,7 @@ export async function POST(request: NextRequest) {
       message: "Payroll record saved successfully",
     });
   } catch (error) {
-    console.error("[v0] Error saving payroll record:", error);
+    console.error("[payroll] records POST error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to save payroll record" },
       { status: 500 }

@@ -8,11 +8,19 @@ export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 },
+      );
+    }
 
-    // Fetch all published forms with their module information
+    // Only return published forms whose module belongs to the caller's org.
+    // Without this filter the configure page used to show every tenant's forms.
     const forms = await prisma.form.findMany({
       where: {
         isPublished: true,
+        module: { organizationId: authUser.organizationId },
       },
       include: {
         module: {

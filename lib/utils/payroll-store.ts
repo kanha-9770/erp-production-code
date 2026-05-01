@@ -1,5 +1,23 @@
 import { prisma } from '@/lib/prisma';
 
+// =============================================================================
+// MULTI-TENANCY CONTRACT
+// =============================================================================
+// Every exported async function takes `organizationId` as a REQUIRED first
+// parameter. All DB lookups are constrained by this org so the payroll
+// surface cannot leak data across tenants.
+//
+// Scoping strategy:
+//   - PayrollConfiguration:   filter by `organizationId`.
+//   - Form lookups:           filter by `module.organizationId`.
+//   - FormRecord reads:       always go through a form whose org we have
+//                             already verified, so records inherit scoping
+//                             via `formId` (sharded form_records_X tables
+//                             don't have an organizationId column).
+//   - In-memory record cache: keyed by `${orgId}|${month}` so cached
+//                             calculations from one org never serve another.
+// =============================================================================
+
 export interface SampleEmployee {
   employeeId: string;
   employeeName: string;
@@ -52,9 +70,13 @@ declare global {
 const store = globalThis.__payrollStore ?? { records: new Map<string, PayrollRecord[]>() };
 if (!globalThis.__payrollStore) globalThis.__payrollStore = store;
 
-const EMPLOYEE_FORM_NAMES = ['Employee Profile', 'Employee Profiles', 'Employees', 'Employee'];
-const CHECK_IN_FORM_NAMES = ['Check-In', 'Check In', 'CheckIn', 'Attendance Check-In', 'Check-in'];
-const CHECK_OUT_FORM_NAMES = ['Check-Out', 'Check Out', 'CheckOut', 'Attendance Check-Out', 'Check-out'];
+// In-memory cache key: never just the month — always (org, month) so a
+// calculation cached for Org A is invisible to Org B.
+const cacheKey = (organizationId: string, month: string) => `${organizationId}|${month}`;
+
+const EMPLOYEE_FORM_NAMES = ['Employee Master', 'Employee Profile', 'Employee Profiles', 'Employees', 'Employee'];
+const CHECK_IN_FORM_NAMES = ['Check In', 'Check-In', 'CheckIn', 'Attendance Check-In', 'Check-in'];
+const CHECK_OUT_FORM_NAMES = ['Check Out', 'Check-Out', 'CheckOut', 'Attendance Check-Out', 'Check-out'];
 
 const SETUP_META_KEY = 'payroll-v2';
 
@@ -65,10 +87,10 @@ interface PayrollSetupShape {
   checkOut: { formId: string | null; fields: Record<string, string | null> };
 }
 
-async function loadSetup(): Promise<PayrollSetupShape | null> {
+async function loadSetup(organizationId: string): Promise<PayrollSetupShape | null> {
   try {
     const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, organizationId },
       orderBy: { createdAt: 'desc' },
     });
     const m: any = config?.attendanceFieldMappings;
@@ -87,10 +109,10 @@ async function loadSetup(): Promise<PayrollSetupShape | null> {
   }
 }
 
-async function getFieldLabelMap(formId: string): Promise<Record<string, string>> {
+async function getFieldLabelMap(formId: string, organizationId: string): Promise<Record<string, string>> {
   try {
-    const form = await prisma.form.findUnique({
-      where: { id: formId },
+    const form = await prisma.form.findFirst({
+      where: { id: formId, module: { organizationId } },
       include: { sections: { include: { fields: true } } },
     });
     if (!form) return {};
@@ -204,13 +226,14 @@ function toTimeStr(v: any): string | null {
   return null;
 }
 
-export async function diagnose(month: string): Promise<any> {
-  const setup = await loadSetup();
-  const employeeForm = await resolveFromConfigOrName(setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
-  const checkInForm = await resolveFromConfigOrName(setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
-  const checkOutForm = await resolveFromConfigOrName(setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
+export async function diagnose(organizationId: string, month: string): Promise<any> {
+  const setup = await loadSetup(organizationId);
+  const employeeForm = await resolveFromConfigOrName(organizationId, setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
+  const checkInForm = await resolveFromConfigOrName(organizationId, setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
+  const checkOutForm = await resolveFromConfigOrName(organizationId, setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
 
   const result: any = {
+    organizationId,
     hasSavedSetup: !!setup,
     month,
     employee: { found: !!employeeForm, formId: employeeForm?.id, rawCount: 0, parsedCount: 0, sample: [], reasons: {} },
@@ -336,19 +359,37 @@ export async function diagnose(month: string): Promise<any> {
   return result;
 }
 
-async function findFormByNames(names: string[]): Promise<{ id: string; storageTable: string | null } | null> {
+async function findFormByNames(
+  organizationId: string,
+  names: string[],
+): Promise<{ id: string; storageTable: string | null; organizationId: string } | null> {
+  // Filter through module.organizationId so two orgs that share a form name
+  // ("Employee Master", "Check In", …) don't see each other's forms.
   const form = await prisma.form.findFirst({
-    where: { name: { in: names, mode: 'insensitive' } },
+    where: {
+      name: { in: names, mode: 'insensitive' },
+      module: { organizationId },
+    },
     include: { tableMapping: true },
   });
   if (!form) return null;
-  return { id: form.id, storageTable: form.tableMapping?.storageTable ?? null };
+  return {
+    id: form.id,
+    storageTable: form.tableMapping?.storageTable ?? null,
+    organizationId,
+  };
 }
 
 async function readRecords(
-  formInfo: { id: string; storageTable: string | null },
+  formInfo: { id: string; storageTable: string | null; organizationId: string },
   where: any = {},
 ): Promise<any[]> {
+  // Two-layer scoping:
+  //   1. formId must match the form we already verified belongs to org.
+  //   2. As defence-in-depth, on tables that carry an organization_id column
+  //      (the unified form_records and form_records_14), we *also* filter
+  //      explicitly. That way, even if a stray record were ever written with
+  //      the wrong formId / org pairing, this function refuses to return it.
   const baseWhere = { formId: formInfo.id, ...where };
 
   if (formInfo.storageTable) {
@@ -357,9 +398,17 @@ async function readRecords(
       const key = `formRecord${num}` as keyof typeof prisma;
       if (key in prisma) {
         try {
-          let rows = await (prisma[key] as any).findMany({ where: baseWhere });
+          // Only form_records_14 carries an organization_id column on the
+          // sharded side. The other shards rely on formId scoping.
+          const sharedWhere =
+            num === '14' ? { ...baseWhere, organizationId: formInfo.organizationId } : baseWhere;
+          let rows = await (prisma[key] as any).findMany({ where: sharedWhere });
           if (rows.length === 0 && Object.keys(where).length > 0) {
-            rows = await (prisma[key] as any).findMany({ where: { formId: formInfo.id } });
+            const fallbackWhere =
+              num === '14'
+                ? { formId: formInfo.id, organizationId: formInfo.organizationId }
+                : { formId: formInfo.id };
+            rows = await (prisma[key] as any).findMany({ where: fallbackWhere });
           }
           if (rows.length > 0) return rows;
         } catch (err) {
@@ -370,13 +419,14 @@ async function readRecords(
   }
 
   try {
+    // The unified form_records table HAS an organization_id column — use it.
     let rows = await prisma.formRecord.findMany({
-      where: baseWhere,
+      where: { ...baseWhere, organizationId: formInfo.organizationId },
       include: { user: { select: { email: true, username: true } } },
     });
     if (rows.length === 0 && Object.keys(where).length > 0) {
       rows = await prisma.formRecord.findMany({
-        where: { formId: formInfo.id },
+        where: { formId: formInfo.id, organizationId: formInfo.organizationId },
         include: { user: { select: { email: true, username: true } } },
       });
     }
@@ -393,22 +443,31 @@ function inMonth(dateStr: string | null, month: string): boolean {
 }
 
 async function resolveFromConfigOrName(
+  organizationId: string,
   configured: { formId: string | null } | null,
   fallbackNames: string[],
-): Promise<{ id: string; storageTable: string | null; labels: Record<string, string> } | null> {
+): Promise<{ id: string; storageTable: string | null; organizationId: string; labels: Record<string, string> } | null> {
   if (configured?.formId) {
-    const form = await prisma.form.findUnique({
-      where: { id: configured.formId },
+    // Verify the configured formId belongs to THIS org, not someone else's
+    // (defends against a stale config saved before tenant scoping landed).
+    const form = await prisma.form.findFirst({
+      where: { id: configured.formId, module: { organizationId } },
       include: { tableMapping: true },
     });
     if (form) {
-      const labels = await getFieldLabelMap(form.id);
-      return { id: form.id, storageTable: form.tableMapping?.storageTable ?? null, labels };
+      const labels = await getFieldLabelMap(form.id, organizationId);
+      return {
+        id: form.id,
+        storageTable: form.tableMapping?.storageTable ?? null,
+        organizationId,
+        labels,
+      };
     }
+    // Configured form doesn't belong to this org → fall through to name-based discovery
   }
-  const found = await findFormByNames(fallbackNames);
+  const found = await findFormByNames(organizationId, fallbackNames);
   if (!found) return null;
-  const labels = await getFieldLabelMap(found.id);
+  const labels = await getFieldLabelMap(found.id, organizationId);
   return { ...found, labels };
 }
 
@@ -436,9 +495,9 @@ function pickWithMapping(
   return pickValue(data, fallbackNames);
 }
 
-export async function getEmployeesFromDB(): Promise<SampleEmployee[]> {
-  const setup = await loadSetup();
-  const formInfo = await resolveFromConfigOrName(setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
+export async function getEmployeesFromDB(organizationId: string): Promise<SampleEmployee[]> {
+  const setup = await loadSetup(organizationId);
+  const formInfo = await resolveFromConfigOrName(organizationId, setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
   if (!formInfo) return [];
 
   const fields = setup?.employee.fields ?? {};
@@ -540,10 +599,10 @@ export async function getEmployeesFromDB(): Promise<SampleEmployee[]> {
   return employees;
 }
 
-export async function getAttendanceFromDB(month: string): Promise<SampleAttendance[]> {
-  const setup = await loadSetup();
-  const checkInForm = await resolveFromConfigOrName(setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
-  const checkOutForm = await resolveFromConfigOrName(setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
+export async function getAttendanceFromDB(organizationId: string, month: string): Promise<SampleAttendance[]> {
+  const setup = await loadSetup(organizationId);
+  const checkInForm = await resolveFromConfigOrName(organizationId, setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
+  const checkOutForm = await resolveFromConfigOrName(organizationId, setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
 
   if (!checkInForm) return [];
 
@@ -670,7 +729,7 @@ export async function getAttendanceFromDB(month: string): Promise<SampleAttendan
   return Array.from(dailyMap.values()).filter((r) => r.checkInTime || r.checkOutTime);
 }
 
-export async function getEmployeeFormsStatus(): Promise<{
+export async function getEmployeeFormsStatus(organizationId: string): Promise<{
   hasEmployeeForm: boolean;
   hasCheckInForm: boolean;
   hasCheckOutForm: boolean;
@@ -679,25 +738,38 @@ export async function getEmployeeFormsStatus(): Promise<{
   checkInFormName?: string;
   checkOutFormName?: string;
 }> {
-  const setup = await loadSetup();
+  const setup = await loadSetup(organizationId);
 
   const lookupName = async (formId: string | null | undefined) => {
     if (!formId) return null;
-    const f = await prisma.form.findUnique({ where: { id: formId }, select: { name: true } });
+    // Verify the form belongs to this org before disclosing its name.
+    const f = await prisma.form.findFirst({
+      where: { id: formId, module: { organizationId } },
+      select: { name: true },
+    });
     return f?.name ?? null;
   };
 
   const [empByName, ciByName, coByName, empConfigName, ciConfigName, coConfigName] = await Promise.all([
     prisma.form.findFirst({
-      where: { name: { in: EMPLOYEE_FORM_NAMES, mode: 'insensitive' } },
+      where: {
+        name: { in: EMPLOYEE_FORM_NAMES, mode: 'insensitive' },
+        module: { organizationId },
+      },
       select: { name: true },
     }),
     prisma.form.findFirst({
-      where: { name: { in: CHECK_IN_FORM_NAMES, mode: 'insensitive' } },
+      where: {
+        name: { in: CHECK_IN_FORM_NAMES, mode: 'insensitive' },
+        module: { organizationId },
+      },
       select: { name: true },
     }),
     prisma.form.findFirst({
-      where: { name: { in: CHECK_OUT_FORM_NAMES, mode: 'insensitive' } },
+      where: {
+        name: { in: CHECK_OUT_FORM_NAMES, mode: 'insensitive' },
+        module: { organizationId },
+      },
       select: { name: true },
     }),
     lookupName(setup?.employee.formId),
@@ -720,24 +792,42 @@ export async function getEmployeeFormsStatus(): Promise<{
   };
 }
 
-export function setPayrollRecords(month: string, records: PayrollRecord[]): void {
-  store.records.set(month, records);
+// ---- in-memory record cache (per-org, per-month) ---------------------------
+
+export function setPayrollRecords(organizationId: string, month: string, records: PayrollRecord[]): void {
+  store.records.set(cacheKey(organizationId, month), records);
 }
 
-export function getPayrollRecords(month?: string): PayrollRecord[] {
-  if (month) return store.records.get(month) ?? [];
+export function getPayrollRecords(organizationId: string, month?: string): PayrollRecord[] {
+  if (month) return store.records.get(cacheKey(organizationId, month)) ?? [];
+  // No month: return everything cached for THIS org only — never spill rows
+  // belonging to a different org.
+  const prefix = `${organizationId}|`;
   const all: PayrollRecord[] = [];
-  store.records.forEach((list) => all.push(...list));
+  store.records.forEach((list, key) => {
+    if (key.startsWith(prefix)) all.push(...list);
+  });
   return all;
 }
 
-export function clearPayrollRecords(month?: string): void {
-  if (month) store.records.delete(month);
-  else store.records.clear();
+export function clearPayrollRecords(organizationId: string, month?: string): void {
+  if (month) {
+    store.records.delete(cacheKey(organizationId, month));
+    return;
+  }
+  const prefix = `${organizationId}|`;
+  for (const key of Array.from(store.records.keys())) {
+    if (key.startsWith(prefix)) store.records.delete(key);
+  }
 }
 
-export function getStoredMonths(): string[] {
-  return Array.from(store.records.keys()).sort().reverse();
+export function getStoredMonths(organizationId: string): string[] {
+  const prefix = `${organizationId}|`;
+  return Array.from(store.records.keys())
+    .filter((k) => k.startsWith(prefix))
+    .map((k) => k.slice(prefix.length))
+    .sort()
+    .reverse();
 }
 
 export function getSampleEmployees(): SampleEmployee[] {

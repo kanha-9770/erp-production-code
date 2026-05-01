@@ -1,21 +1,31 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 
-// GET - Fetch current payroll configuration
+export const dynamic = 'force-dynamic';
+
+// GET - Fetch the caller's organization's active payroll configuration
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
-    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
     const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, organizationId: authUser.organizationId },
       orderBy: { createdAt: "desc" },
     });
 
     return NextResponse.json({ success: true, config });
   } catch (error) {
-    console.error("[v0] Error fetching payroll config:", error);
+    console.error("[payroll] config GET error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch configuration" },
       { status: 500 }
@@ -23,21 +33,21 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Save payroll configuration (Admin only)
+// POST - Save payroll configuration (Admin only) — pinned to the caller's org
 export async function POST(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
-    if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    if (!authUser) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    if (!authUser.organizationId) {
+      return NextResponse.json(
+        { success: false, error: "User is not a member of any organization" },
+        { status: 403 }
+      );
+    }
 
-    const userWithRoles = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: { unitAssignments: { include: { role: { select: { isAdmin: true, name: true } } } } },
-    });
-    const isAdmin = userWithRoles?.unitAssignments.some(
-      (ua: any) => ua.role?.isAdmin || ua.role?.name?.toLowerCase().includes("admin")
-    ) ?? false;
-
-    if (!isAdmin) {
+    if (!(await isUserAdmin(authUser.id, authUser.organizationId))) {
       return NextResponse.json(
         {
           success: false,
@@ -48,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { formIds, fieldMappings, organizationId } = body;
+    const { formIds, fieldMappings } = body;
 
     if (!formIds || !Array.isArray(formIds) || formIds.length === 0) {
       return NextResponse.json(
@@ -77,8 +87,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Every selected form must belong to the caller's org.
+    const ownedCount = await prisma.form.count({
+      where: { id: { in: formIds }, module: { organizationId: authUser.organizationId } },
+    });
+    if (ownedCount !== formIds.length) {
+      return NextResponse.json(
+        { success: false, error: "One or more selected forms do not belong to your organization" },
+        { status: 403 }
+      );
+    }
+
+    // Deactivate ONLY this org's previous active configs.
     await prisma.payrollConfiguration.updateMany({
-      where: { isActive: true },
+      where: { isActive: true, organizationId: authUser.organizationId },
       data: { isActive: false },
     });
 
@@ -88,14 +110,15 @@ export async function POST(request: NextRequest) {
         leaveFormIds: formIds,
         attendanceFieldMappings: fieldMappings,
         leaveFieldMappings: fieldMappings,
-        organizationId,
+        // Org pinned from session, NOT from client body.
+        organizationId: authUser.organizationId,
         isActive: true,
       },
     });
 
     return NextResponse.json({ success: true, config });
   } catch (error) {
-    console.error("[v0] Error saving payroll config:", error);
+    console.error("[payroll] config POST error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to save configuration" },
       { status: 500 }
