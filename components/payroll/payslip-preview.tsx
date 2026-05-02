@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, Download, Printer } from 'lucide-react';
 import { useRef } from 'react';
 
@@ -61,9 +62,36 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto border-border bg-card">
-        <CardHeader className="flex flex-row items-center justify-between sticky top-0 bg-card border-b border-border">
+    // Use Radix primitives directly (instead of the shadcn wrapper) so we
+    // can avoid the wrapper's hard-coded duplicate close button. The portal
+    // gives this dialog its own stacking context — it now sits above the
+    // parent Sheet drawer instead of behind it.
+    <DialogPrimitive.Root open={!!payroll} onOpenChange={(open) => !open && onClose?.()}>
+      <DialogPrimitive.Portal>
+        {/* Sheet's overlay/content live at z-50. The payslip is a child
+            modal that must visually sit above the parent drawer, so we
+            pin everything here at z-[100]. Inline style is a defensive
+            backup in case a Tailwind JIT cache miss strips the class. */}
+        <DialogPrimitive.Overlay
+          style={{ zIndex: 100 }}
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+        />
+        <DialogPrimitive.Content
+          style={{ zIndex: 100 }}
+          className="fixed left-[50%] top-[50%] z-[100] w-full max-w-2xl max-h-[90vh] translate-x-[-50%] translate-y-[-50%] overflow-y-auto rounded-lg shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          onInteractOutside={(e) => {
+            // Stop the click from bubbling to the underlying Sheet's overlay,
+            // which would otherwise close the drawer sitting behind us.
+            e.preventDefault();
+            onClose?.();
+          }}
+        >
+          {/* sr-only title — Radix Dialog needs a labelled title for a11y. */}
+          <DialogPrimitive.Title className="sr-only">
+            Payslip for {payroll.employeeName} — {processingMonth}
+          </DialogPrimitive.Title>
+        <Card className="w-full max-h-[90vh] overflow-y-auto border-border bg-card">
+          <CardHeader className="flex flex-row items-center justify-between sticky top-0 bg-card border-b border-border z-10">
           <div>
             <CardTitle>Payslip - {processingMonth}</CardTitle>
             <CardDescription>{payroll.employeeName}</CardDescription>
@@ -174,7 +202,9 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
             </div>
           </div>
         </CardContent>
-      </Card>
-    </div>
+        </Card>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

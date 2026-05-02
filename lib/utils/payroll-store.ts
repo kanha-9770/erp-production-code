@@ -26,6 +26,8 @@ export interface SampleEmployee {
   department: string;
   totalSalary: number;
   matchKeys: string[];
+  dateOfJoining: string | null;
+  dateOfLeaving: string | null;
 }
 
 export interface SampleAttendance {
@@ -35,6 +37,32 @@ export interface SampleAttendance {
   checkInTime: string;
   checkOutTime: string;
 }
+
+export interface SampleLeave {
+  matchKey: string;
+  email: string;
+  leaveType: string; // raw string from the form, matched against LeaveRule.name
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  isHalfDay: boolean;
+  days: number | null; // optional override; ignored when start/end are present
+  status: 'approved' | 'pending' | 'rejected' | 'unknown';
+}
+
+export interface SampleHoliday {
+  date: string; // YYYY-MM-DD
+  name: string;
+}
+
+export interface PayrollPolicy {
+  weeklyOffDays: number[]; // 0=Sun … 6=Sat
+  payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
+}
+
+const DEFAULT_POLICY: PayrollPolicy = {
+  weeklyOffDays: [0],
+  payableBasis: 'monthDays',
+};
 
 export interface PayrollRecord {
   employeeId: string;
@@ -58,6 +86,22 @@ export interface PayrollRecord {
   designation?: string;
   department?: string;
   generatedAt?: string;
+  // Day-level breakdown produced by the per-day classifier. Filled even when
+  // leave/holiday forms are not configured so the UI can render zeros instead
+  // of `undefined` everywhere.
+  breakdown: {
+    daysInMonth: number;
+    payableDays: number; // present + paid leave + holiday + weekly off
+    presentDays: number; // days with check-in (full days)
+    halfDays: number; // half-day attendance (4–6h) AND half-day leaves
+    paidLeaveDays: number;
+    unpaidLeaveDays: number; // LOP after applying deduction%
+    holidayDays: number;
+    weeklyOffDays: number;
+    absentDays: number; // unmarked absence — straight LOP
+    outOfServiceDays: number; // before joining or after leaving
+    leaveByType: Record<string, number>; // sum of days per LeaveRule.name (or "Unmatched")
+  };
 }
 
 declare global {
@@ -77,6 +121,21 @@ const cacheKey = (organizationId: string, month: string) => `${organizationId}|$
 const EMPLOYEE_FORM_NAMES = ['Employee Master', 'Employee Profile', 'Employee Profiles', 'Employees', 'Employee'];
 const CHECK_IN_FORM_NAMES = ['Check In', 'Check-In', 'CheckIn', 'Attendance Check-In', 'Check-in'];
 const CHECK_OUT_FORM_NAMES = ['Check Out', 'Check-Out', 'CheckOut', 'Attendance Check-Out', 'Check-out'];
+const LEAVE_FORM_NAMES = [
+  'Leave Application',
+  'Leave Request',
+  'Leave Requests',
+  'Leave Form',
+  'Leaves',
+  'Apply Leave',
+];
+const HOLIDAY_FORM_NAMES = [
+  'Holiday Calendar',
+  'Holidays',
+  'Holiday List',
+  'Public Holidays',
+  'Company Holidays',
+];
 
 // =============================================================================
 // FIELD-LOOKUP FALLBACK NAMES
@@ -201,6 +260,94 @@ const CHECKOUT_TIME_FALLBACKS = [
   'Time',
   'Time Out',
 ];
+const DOJ_FALLBACKS = [
+  'dateOfJoining',
+  'date_of_joining',
+  'doj',
+  'Date of Joining',
+  'Joining Date',
+  'DOJ',
+];
+const DOL_FALLBACKS = [
+  'dateOfLeaving',
+  'date_of_leaving',
+  'dol',
+  'Date of Leaving',
+  'Leaving Date',
+  'Last Working Day',
+  'DOL',
+];
+const LEAVE_TYPE_FALLBACKS = [
+  'leaveType',
+  'leave_type',
+  'type',
+  'Leave Type',
+  'Type of Leave',
+  'Leave Category',
+  'Leave Reason',
+];
+const LEAVE_START_FALLBACKS = [
+  'startDate',
+  'start_date',
+  'fromDate',
+  'from_date',
+  'From Date',
+  'Start Date',
+  'From',
+  'Leave From',
+];
+const LEAVE_END_FALLBACKS = [
+  'endDate',
+  'end_date',
+  'toDate',
+  'to_date',
+  'To Date',
+  'End Date',
+  'To',
+  'Leave To',
+];
+const LEAVE_DAYS_FALLBACKS = [
+  'days',
+  'numberOfDays',
+  'no_of_days',
+  'duration',
+  'Days',
+  'No of Days',
+  'Number of Days',
+  'Duration',
+];
+const LEAVE_HALF_DAY_FALLBACKS = [
+  'halfDay',
+  'half_day',
+  'isHalfDay',
+  'Half Day',
+  'Half-Day',
+];
+const LEAVE_STATUS_FALLBACKS = [
+  'status',
+  'approvalStatus',
+  'approval_status',
+  'state',
+  'Status',
+  'Approval Status',
+  'Approved',
+];
+const HOLIDAY_DATE_FALLBACKS = [
+  'date',
+  'holidayDate',
+  'holiday_date',
+  'Date',
+  'Holiday Date',
+];
+const HOLIDAY_NAME_FALLBACKS = [
+  'name',
+  'holidayName',
+  'description',
+  'Name',
+  'Holiday',
+  'Holiday Name',
+  'Description',
+];
 
 const SETUP_META_KEY = 'payroll-v2';
 
@@ -209,6 +356,9 @@ interface PayrollSetupShape {
   employee: { formId: string | null; fields: Record<string, string | null> };
   checkIn: { formId: string | null; fields: Record<string, string | null> };
   checkOut: { formId: string | null; fields: Record<string, string | null> };
+  leave: { formId: string | null; fields: Record<string, string | null> };
+  holiday: { formId: string | null; fields: Record<string, string | null> };
+  policy: PayrollPolicy;
 }
 
 async function loadSetup(organizationId: string): Promise<PayrollSetupShape | null> {
@@ -219,11 +369,24 @@ async function loadSetup(organizationId: string): Promise<PayrollSetupShape | nu
     });
     const m: any = config?.attendanceFieldMappings;
     if (m && typeof m === 'object' && m._meta === SETUP_META_KEY) {
+      const policyRaw = m.policy ?? {};
+      const weeklyOffDays = Array.isArray(policyRaw.weeklyOffDays)
+        ? policyRaw.weeklyOffDays
+            .map((n: any) => Number(n))
+            .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6)
+        : DEFAULT_POLICY.weeklyOffDays;
+      const payableBasis: PayrollPolicy['payableBasis'] =
+        policyRaw.payableBasis === 'fixed26' || policyRaw.payableBasis === 'fixed30'
+          ? policyRaw.payableBasis
+          : 'monthDays';
       return {
         defaultBaseSalary: typeof m.defaultBaseSalary === 'number' ? m.defaultBaseSalary : null,
         employee: m.employee ?? { formId: null, fields: {} },
         checkIn: m.checkIn ?? { formId: null, fields: {} },
         checkOut: m.checkOut ?? { formId: null, fields: {} },
+        leave: m.leave ?? { formId: null, fields: {} },
+        holiday: m.holiday ?? { formId: null, fields: {} },
+        policy: { weeklyOffDays, payableBasis },
       };
     }
     return null;
@@ -231,6 +394,11 @@ async function loadSetup(organizationId: string): Promise<PayrollSetupShape | nu
     console.warn('[payroll] failed to load setup:', err);
     return null;
   }
+}
+
+export async function getPayrollPolicy(organizationId: string): Promise<PayrollPolicy> {
+  const setup = await loadSetup(organizationId);
+  return setup?.policy ?? DEFAULT_POLICY;
 }
 
 async function getFieldLabelMap(formId: string, organizationId: string): Promise<Record<string, string>> {
@@ -695,6 +863,12 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       pickWithMapping(data, fields.designation, formInfo.labels, DESIGNATION_FALLBACKS) || '';
     const department =
       pickWithMapping(data, fields.department, formInfo.labels, DEPARTMENT_FALLBACKS) || '';
+    const dateOfJoining = toDateStr(
+      pickWithMapping(data, fields.dateOfJoining, formInfo.labels, DOJ_FALLBACKS),
+    );
+    const dateOfLeaving = toDateStr(
+      pickWithMapping(data, fields.dateOfLeaving, formInfo.labels, DOL_FALLBACKS),
+    );
 
     employees.push({
       employeeId: String(employeeId),
@@ -704,10 +878,164 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       department: String(department || ''),
       totalSalary,
       matchKeys,
+      dateOfJoining,
+      dateOfLeaving,
     });
   }
 
   return employees;
+}
+
+// ---- leave / holiday fetchers ---------------------------------------------
+
+function normaliseStatus(raw: any): SampleLeave['status'] {
+  if (raw === undefined || raw === null || raw === '') return 'unknown';
+  if (typeof raw === 'boolean') return raw ? 'approved' : 'rejected';
+  const s = String(raw).trim().toLowerCase();
+  if (['approved', 'approve', 'yes', 'true', '1', 'accepted', 'sanctioned', 'ok'].includes(s)) {
+    return 'approved';
+  }
+  if (['rejected', 'reject', 'declined', 'no', 'false', '0', 'denied', 'cancelled', 'canceled'].includes(s)) {
+    return 'rejected';
+  }
+  if (['pending', 'open', 'submitted', 'in review', 'in_review', 'awaiting'].includes(s)) {
+    return 'pending';
+  }
+  return 'unknown';
+}
+
+function isTruthyHalfDay(raw: any): boolean {
+  if (raw === undefined || raw === null || raw === '') return false;
+  if (typeof raw === 'boolean') return raw;
+  const s = String(raw).trim().toLowerCase();
+  return ['true', 'yes', '1', 'half', 'half-day', 'half day', 'on'].includes(s);
+}
+
+export async function getLeavesFromDB(
+  organizationId: string,
+  month: string,
+): Promise<SampleLeave[]> {
+  const setup = await loadSetup(organizationId);
+  // Leave form is optional; loadSetup() returns the form info inside `leave`.
+  // Without a configured form, we silently return [] so existing tenants keep
+  // working — the calculator will fall back to "no approved leaves".
+  const formInfo = await resolveFromConfigOrName(
+    organizationId,
+    setup?.leave ?? null,
+    LEAVE_FORM_NAMES,
+  );
+  if (!formInfo) return [];
+
+  const fields = setup?.leave.fields ?? {};
+  const rows = await readRecords(formInfo);
+  const leaves: SampleLeave[] = [];
+
+  // Build the inclusive month window so we can clip leaves that span multiple
+  // months — only the in-month portion participates in this run's payroll.
+  const [yStr, mStr] = month.split('-');
+  const yearN = Number(yStr);
+  const monthN = Number(mStr);
+  const monthStart = `${month}-01`;
+  const lastDay = new Date(yearN, monthN, 0).getDate();
+  const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+  for (const row of rows) {
+    const data = flattenRecordData(row.recordData, formInfo.labels);
+    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+
+    const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, EMAIL_FALLBACKS);
+    const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, EMP_ID_FALLBACKS);
+    const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
+    const empId = rawEmpId ? String(rawEmpId).toLowerCase() : null;
+    const matchKey = email
+      ? `email:${email}`
+      : empId
+        ? `empId:${empId}`
+        : userEmail
+          ? `email:${userEmail}`
+          : null;
+    if (!matchKey) continue;
+
+    const startRaw = pickWithMapping(data, fields.startDate, formInfo.labels, LEAVE_START_FALLBACKS);
+    const endRaw = pickWithMapping(data, fields.endDate, formInfo.labels, LEAVE_END_FALLBACKS);
+    const start = toDateStr(startRaw);
+    if (!start) continue;
+    const end = toDateStr(endRaw) ?? start;
+
+    // Cheap month overlap test before doing any further work — most rows will
+    // belong to other months, so bail early.
+    if (end < monthStart || start > monthEnd) continue;
+
+    const leaveTypeRaw = pickWithMapping(data, fields.leaveType, formInfo.labels, LEAVE_TYPE_FALLBACKS);
+    const leaveType = leaveTypeRaw ? String(leaveTypeRaw).trim() : '';
+
+    // If the admin DID map a status field, we filter strictly. If they DIDN'T
+    // map one, we trust the form workflow's existing gate (e.g. only approved
+    // leaves get submitted) and treat every row as approved. This matches how
+    // the rest of the payroll engine treats unmapped optional fields.
+    const statusFieldMapped = !!fields.status;
+    const status = statusFieldMapped
+      ? normaliseStatus(pickWithMapping(data, fields.status, formInfo.labels, LEAVE_STATUS_FALLBACKS))
+      : 'approved';
+    if (statusFieldMapped && status !== 'approved') continue;
+
+    const halfDayRaw = pickWithMapping(data, fields.halfDay, formInfo.labels, LEAVE_HALF_DAY_FALLBACKS);
+    const isHalfDay = isTruthyHalfDay(halfDayRaw);
+
+    const daysRaw = pickWithMapping(data, fields.days, formInfo.labels, LEAVE_DAYS_FALLBACKS);
+    const days = daysRaw === undefined || daysRaw === null || daysRaw === ''
+      ? null
+      : toNumber(daysRaw, NaN);
+
+    leaves.push({
+      matchKey,
+      email: email ?? '',
+      leaveType,
+      startDate: start,
+      endDate: end,
+      isHalfDay,
+      days: Number.isFinite(days as number) ? (days as number) : null,
+      status,
+    });
+  }
+
+  return leaves;
+}
+
+export async function getHolidaysFromDB(
+  organizationId: string,
+  month: string,
+): Promise<SampleHoliday[]> {
+  const setup = await loadSetup(organizationId);
+  const formInfo = await resolveFromConfigOrName(
+    organizationId,
+    setup?.holiday ?? null,
+    HOLIDAY_FORM_NAMES,
+  );
+  if (!formInfo) return [];
+
+  const fields = setup?.holiday.fields ?? {};
+  const rows = await readRecords(formInfo);
+  const holidays: SampleHoliday[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const data = flattenRecordData(row.recordData, formInfo.labels);
+    const dateValue = pickWithMapping(data, fields.date, formInfo.labels, HOLIDAY_DATE_FALLBACKS) ?? row.date;
+    const dateStr = toDateStr(dateValue);
+    if (!dateStr) continue;
+    if (!inMonth(dateStr, month)) continue;
+    if (seen.has(dateStr)) continue; // de-dupe duplicate rows for the same date
+    seen.add(dateStr);
+
+    const nameRaw = pickWithMapping(data, fields.name, formInfo.labels, HOLIDAY_NAME_FALLBACKS);
+    holidays.push({
+      date: dateStr,
+      name: nameRaw ? String(nameRaw) : '',
+    });
+  }
+
+  return holidays;
 }
 
 export async function getAttendanceFromDB(organizationId: string, month: string): Promise<SampleAttendance[]> {

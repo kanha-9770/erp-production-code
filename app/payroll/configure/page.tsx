@@ -23,6 +23,9 @@ import {
   LogOut,
   AlertCircle,
   RefreshCw,
+  CalendarOff,
+  CalendarDays,
+  Briefcase,
 } from 'lucide-react';
 
 interface FormOption {
@@ -49,6 +52,8 @@ interface Setup {
       salary: string | null;
       designation: string | null;
       department: string | null;
+      dateOfJoining: string | null;
+      dateOfLeaving: string | null;
     };
   };
   checkIn: {
@@ -69,17 +74,75 @@ interface Setup {
       checkOutTime: string | null;
     };
   };
+  leave: {
+    formId: string | null;
+    fields: {
+      email: string | null;
+      employeeId: string | null;
+      leaveType: string | null;
+      startDate: string | null;
+      endDate: string | null;
+      days: string | null;
+      halfDay: string | null;
+      status: string | null;
+    };
+  };
+  holiday: {
+    formId: string | null;
+    fields: {
+      date: string | null;
+      name: string | null;
+    };
+  };
+  policy: {
+    weeklyOffDays: number[];
+    payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
+  };
 }
 
 const EMPTY_SETUP: Setup = {
   defaultBaseSalary: null,
   employee: {
     formId: null,
-    fields: { email: null, employeeId: null, name: null, salary: null, designation: null, department: null },
+    fields: {
+      email: null,
+      employeeId: null,
+      name: null,
+      salary: null,
+      designation: null,
+      department: null,
+      dateOfJoining: null,
+      dateOfLeaving: null,
+    },
   },
   checkIn: { formId: null, fields: { email: null, employeeId: null, date: null, checkInTime: null } },
   checkOut: { formId: null, fields: { email: null, employeeId: null, date: null, checkOutTime: null } },
+  leave: {
+    formId: null,
+    fields: {
+      email: null,
+      employeeId: null,
+      leaveType: null,
+      startDate: null,
+      endDate: null,
+      days: null,
+      halfDay: null,
+      status: null,
+    },
+  },
+  holiday: { formId: null, fields: { date: null, name: null } },
+  policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
+
+const WEEKDAYS = [
+  { v: 0, label: 'Sun' },
+  { v: 1, label: 'Mon' },
+  { v: 2, label: 'Tue' },
+  { v: 3, label: 'Wed' },
+  { v: 4, label: 'Thu' },
+  { v: 5, label: 'Fri' },
+  { v: 6, label: 'Sat' },
+];
 
 const NONE = '__none__';
 
@@ -136,6 +199,8 @@ export default function PayrollConfigurePage() {
   const [employeeFields, setEmployeeFields] = useState<FieldOption[]>([]);
   const [checkInFields, setCheckInFields] = useState<FieldOption[]>([]);
   const [checkOutFields, setCheckOutFields] = useState<FieldOption[]>([]);
+  const [leaveFields, setLeaveFields] = useState<FieldOption[]>([]);
+  const [holidayFields, setHolidayFields] = useState<FieldOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +233,8 @@ export default function PayrollConfigurePage() {
         loaded.employee.formId ? fetchFields(loaded.employee.formId, 'employee') : Promise.resolve(),
         loaded.checkIn.formId ? fetchFields(loaded.checkIn.formId, 'checkIn') : Promise.resolve(),
         loaded.checkOut.formId ? fetchFields(loaded.checkOut.formId, 'checkOut') : Promise.resolve(),
+        loaded.leave?.formId ? fetchFields(loaded.leave.formId, 'leave') : Promise.resolve(),
+        loaded.holiday?.formId ? fetchFields(loaded.holiday.formId, 'holiday') : Promise.resolve(),
       ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load configuration');
@@ -181,10 +248,9 @@ export default function PayrollConfigurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  const fetchFields = async (
-    formId: string,
-    section: 'employee' | 'checkIn' | 'checkOut',
-  ): Promise<void> => {
+  type Section = 'employee' | 'checkIn' | 'checkOut' | 'leave' | 'holiday';
+
+  const fetchFields = async (formId: string, section: Section): Promise<void> => {
     try {
       const res = await fetch(`/api/payroll/form-fields?formId=${formId}`, { cache: 'no-store' });
       const json = await res.json();
@@ -193,42 +259,53 @@ export default function PayrollConfigurePage() {
       if (section === 'employee') setEmployeeFields(fields);
       if (section === 'checkIn') setCheckInFields(fields);
       if (section === 'checkOut') setCheckOutFields(fields);
+      if (section === 'leave') setLeaveFields(fields);
+      if (section === 'holiday') setHolidayFields(fields);
     } catch (e) {
       console.error('[payroll-configure] fetchFields error', e);
     }
   };
 
-  const handleFormSelect = async (
-    section: 'employee' | 'checkIn' | 'checkOut',
-    formId: string | null,
-  ) => {
+  const handleFormSelect = async (section: Section, formId: string | null) => {
     setSetup((prev) => {
       const blankFields =
         section === 'employee'
-          ? { email: null, employeeId: null, name: null, salary: null, designation: null, department: null }
+          ? EMPTY_SETUP.employee.fields
           : section === 'checkIn'
-            ? { email: null, employeeId: null, date: null, checkInTime: null }
-            : { email: null, employeeId: null, date: null, checkOutTime: null };
-      return { ...prev, [section]: { formId, fields: blankFields as any } };
+            ? EMPTY_SETUP.checkIn.fields
+            : section === 'checkOut'
+              ? EMPTY_SETUP.checkOut.fields
+              : section === 'leave'
+                ? EMPTY_SETUP.leave.fields
+                : EMPTY_SETUP.holiday.fields;
+      return { ...prev, [section]: { formId, fields: { ...blankFields } as any } };
     });
     if (section === 'employee') setEmployeeFields([]);
     if (section === 'checkIn') setCheckInFields([]);
     if (section === 'checkOut') setCheckOutFields([]);
+    if (section === 'leave') setLeaveFields([]);
+    if (section === 'holiday') setHolidayFields([]);
     if (formId) await fetchFields(formId, section);
   };
 
-  const updateMapping = (
-    section: 'employee' | 'checkIn' | 'checkOut',
-    field: string,
-    value: string | null,
-  ) => {
+  const updateMapping = (section: Section, field: string, value: string | null) => {
     setSetup((prev) => ({
       ...prev,
       [section]: {
-        ...prev[section],
-        fields: { ...prev[section].fields, [field]: value },
+        ...(prev[section] as any),
+        fields: { ...(prev[section] as any).fields, [field]: value },
       },
     }));
+  };
+
+  const toggleWeeklyOff = (day: number) => {
+    setSetup((prev) => {
+      const has = prev.policy.weeklyOffDays.includes(day);
+      const next = has
+        ? prev.policy.weeklyOffDays.filter((d) => d !== day)
+        : [...prev.policy.weeklyOffDays, day].sort((a, b) => a - b);
+      return { ...prev, policy: { ...prev.policy, weeklyOffDays: next } };
+    });
   };
 
   const save = async () => {
@@ -276,7 +353,7 @@ export default function PayrollConfigurePage() {
     section,
     selectedId,
   }: {
-    section: 'employee' | 'checkIn' | 'checkOut';
+    section: Section;
     selectedId: string | null;
   }) => (
     <Select
@@ -430,6 +507,20 @@ export default function PayrollConfigurePage() {
                   value={setup.employee.fields.department}
                   onChange={(v) => updateMapping('employee', 'department', v)}
                 />
+                <FieldMappingRow
+                  label="Date of Joining"
+                  description="Optional — enables pro-rata for new joiners"
+                  fields={employeeFields}
+                  value={setup.employee.fields.dateOfJoining}
+                  onChange={(v) => updateMapping('employee', 'dateOfJoining', v)}
+                />
+                <FieldMappingRow
+                  label="Date of Leaving"
+                  description="Optional — enables pro-rata for exits / F&F"
+                  fields={employeeFields}
+                  value={setup.employee.fields.dateOfLeaving}
+                  onChange={(v) => updateMapping('employee', 'dateOfLeaving', v)}
+                />
 
                 <div className="grid grid-cols-1 gap-2 border-t border-border pt-3 sm:grid-cols-[200px_1fr] sm:items-center">
                   <div>
@@ -563,6 +654,206 @@ export default function PayrollConfigurePage() {
                 />
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarOff className="h-5 w-5 text-primary" />
+              4. Leave Application Form{' '}
+              <Badge variant="outline" className="ml-2 text-xs">
+                Optional
+              </Badge>
+            </CardTitle>
+            <CardDescription>
+              The form where employees submit leave requests. Leave Type values are matched
+              (case-insensitive) against rules under <strong>Leave Rules</strong> to decide
+              paid vs. unpaid and any deduction percentage.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Form</label>
+              <FormPicker section="leave" selectedId={setup.leave.formId} />
+            </div>
+
+            {setup.leave.formId && (
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Map fields
+                </p>
+                <FieldMappingRow
+                  label="Start Date"
+                  description="First day of the leave"
+                  required
+                  fields={leaveFields}
+                  value={setup.leave.fields.startDate}
+                  onChange={(v) => updateMapping('leave', 'startDate', v)}
+                />
+                <FieldMappingRow
+                  label="End Date"
+                  description="Last day of the leave (defaults to start date if blank on a row)"
+                  fields={leaveFields}
+                  value={setup.leave.fields.endDate}
+                  onChange={(v) => updateMapping('leave', 'endDate', v)}
+                />
+                <FieldMappingRow
+                  label="Leave Type"
+                  description="Free-text or dropdown that names the rule (e.g. 'Sick Leave', 'Casual Leave')"
+                  required
+                  fields={leaveFields}
+                  value={setup.leave.fields.leaveType}
+                  onChange={(v) => updateMapping('leave', 'leaveType', v)}
+                />
+                <FieldMappingRow
+                  label="Status"
+                  description="If mapped, only rows marked 'approved' / 'yes' / 'true' are counted"
+                  fields={leaveFields}
+                  value={setup.leave.fields.status}
+                  onChange={(v) => updateMapping('leave', 'status', v)}
+                />
+                <FieldMappingRow
+                  label="Half Day"
+                  description="Optional boolean — counts the leave as 0.5 days"
+                  fields={leaveFields}
+                  value={setup.leave.fields.halfDay}
+                  onChange={(v) => updateMapping('leave', 'halfDay', v)}
+                />
+                <FieldMappingRow
+                  label="Days"
+                  description="Optional override; ignored if start/end dates are present"
+                  fields={leaveFields}
+                  value={setup.leave.fields.days}
+                  onChange={(v) => updateMapping('leave', 'days', v)}
+                />
+                <FieldMappingRow
+                  label="Email"
+                  description="Used to match the employee — falls back to the submitter user"
+                  fields={leaveFields}
+                  value={setup.leave.fields.email}
+                  onChange={(v) => updateMapping('leave', 'email', v)}
+                />
+                <FieldMappingRow
+                  label="Employee ID"
+                  fields={leaveFields}
+                  value={setup.leave.fields.employeeId}
+                  onChange={(v) => updateMapping('leave', 'employeeId', v)}
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              5. Holiday Calendar Form{' '}
+              <Badge variant="outline" className="ml-2 text-xs">
+                Optional
+              </Badge>
+            </CardTitle>
+            <CardDescription>
+              One row per company holiday. Listed days are paid for everyone and are not
+              counted against leave or attendance.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Form</label>
+              <FormPicker section="holiday" selectedId={setup.holiday.formId} />
+            </div>
+
+            {setup.holiday.formId && (
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Map fields
+                </p>
+                <FieldMappingRow
+                  label="Date"
+                  description="The holiday date"
+                  required
+                  fields={holidayFields}
+                  value={setup.holiday.fields.date}
+                  onChange={(v) => updateMapping('holiday', 'date', v)}
+                />
+                <FieldMappingRow
+                  label="Name"
+                  description="Optional — surfaced in the payslip breakdown"
+                  fields={holidayFields}
+                  value={setup.holiday.fields.name}
+                  onChange={(v) => updateMapping('holiday', 'name', v)}
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Briefcase className="h-5 w-5 text-primary" />
+              6. Working Days Policy
+            </CardTitle>
+            <CardDescription>
+              Tells the calculator which days are paid weekly offs and how to convert a
+              monthly salary into a daily rate.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Weekly off days</p>
+              <p className="text-xs text-muted-foreground">
+                Selected days are paid even without a check-in. Default: Sunday.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {WEEKDAYS.map((d) => {
+                  const active = setup.policy.weeklyOffDays.includes(d.v);
+                  return (
+                    <button
+                      key={d.v}
+                      type="button"
+                      onClick={() => toggleWeeklyOff(d.v)}
+                      className={`h-9 min-w-[3rem] rounded-md border px-3 text-sm font-medium transition-colors ${
+                        active
+                          ? 'border-primary/30 bg-primary/10 text-primary'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 border-t border-border pt-3 sm:grid-cols-[200px_1fr] sm:items-center">
+              <div>
+                <p className="text-sm font-medium text-foreground">Daily rate basis</p>
+                <p className="text-xs text-muted-foreground">
+                  Divisor used to convert monthly salary into a per-day rate
+                </p>
+              </div>
+              <Select
+                value={setup.policy.payableBasis}
+                onValueChange={(v) =>
+                  setSetup((p) => ({
+                    ...p,
+                    policy: { ...p.policy, payableBasis: v as Setup['policy']['payableBasis'] },
+                  }))
+                }
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthDays">Actual days in the month (28–31)</SelectItem>
+                  <SelectItem value="fixed26">Fixed 26 days</SelectItem>
+                  <SelectItem value="fixed30">Fixed 30 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardContent>
         </Card>
 

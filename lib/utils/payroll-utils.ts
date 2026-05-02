@@ -1,15 +1,22 @@
 import {
   getAttendanceFromDB,
   getEmployeesFromDB,
+  getHolidaysFromDB,
+  getLeavesFromDB,
+  getPayrollPolicy,
   PayrollRecord,
+  PayrollPolicy,
   SampleAttendance,
   SampleEmployee,
+  SampleHoliday,
+  SampleLeave,
 } from './payroll-store';
+import { prisma } from '@/lib/prisma';
 
 interface PayrollCalculation extends PayrollRecord {}
 
-const STANDARD_WORKING_DAYS = 22;
 const STANDARD_HOURS_PER_DAY = 8;
+const HALF_DAY_MIN_HOURS = 4; // <4h logged → counted as half-day; 0h → absent
 const PF_PERCENT = 12;
 const TAX_PERCENT = 5;
 const INSURANCE_FIXED = 500;
@@ -30,20 +37,318 @@ export function calculateWorkingHours(checkInTime: string, checkOutTime?: string
   return Math.max(0, diffMinutes / 60 - LUNCH_BREAK_HOURS);
 }
 
+// ---- LeaveRule policy book -------------------------------------------------
+// LeaveRule rows are global (not org-scoped in the schema), so we pull every
+// active rule once per payroll run and expose a name → rule lookup. The seed
+// uses human names like "Sick Leave" / "Casual Leave" — we match on those.
+
+interface ResolvedLeaveRule {
+  id: string;
+  name: string; // for display in breakdown
+  isPaid: boolean;
+  deductionPercentage: number; // 0..100, applied only when isPaid=false
+  category: 'FULL_DAY' | 'HALF_DAY' | 'SHORT_LEAVE' | 'HOURLY';
+  hoursEquivalent: number | null;
+}
+
+const LOP_FALLBACK: ResolvedLeaveRule = {
+  id: '__lop_fallback__',
+  name: 'Unmatched (treated as LOP)',
+  isPaid: false,
+  deductionPercentage: 100,
+  category: 'FULL_DAY',
+  hoursEquivalent: null,
+};
+
+async function loadLeaveRules(): Promise<Map<string, ResolvedLeaveRule>> {
+  const rows = await prisma.leaveRule.findMany({
+    where: { isActive: true },
+    include: { leaveType: { select: { category: true } } },
+  });
+  const map = new Map<string, ResolvedLeaveRule>();
+  for (const r of rows) {
+    const resolved: ResolvedLeaveRule = {
+      id: r.id,
+      name: r.name,
+      isPaid: r.isPaid,
+      deductionPercentage: Number(r.deductionPercentage ?? 100),
+      category: r.leaveType.category,
+      hoursEquivalent:
+        r.hoursEquivalent !== null && r.hoursEquivalent !== undefined
+          ? Number(r.hoursEquivalent)
+          : null,
+    };
+    // Index by lower-cased name so "sick leave" / "Sick Leave" / "SICK LEAVE"
+    // all resolve to the same rule.
+    map.set(r.name.trim().toLowerCase(), resolved);
+  }
+  return map;
+}
+
+function resolveLeaveRule(
+  raw: string,
+  rules: Map<string, ResolvedLeaveRule>,
+): ResolvedLeaveRule {
+  if (!raw) return LOP_FALLBACK;
+  const direct = rules.get(raw.trim().toLowerCase());
+  if (direct) return direct;
+  // Tolerant fallback: try removing "leave" suffix / extra whitespace before
+  // giving up. "sick" matches "sick leave" if the form happens to store the
+  // shorter form.
+  const trimmed = raw.trim().toLowerCase().replace(/\s+/g, ' ');
+  for (const [key, val] of rules.entries()) {
+    if (key.startsWith(trimmed) || trimmed.startsWith(key)) return val;
+  }
+  return LOP_FALLBACK;
+}
+
+// ---- date helpers ----------------------------------------------------------
+
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function eachDayOfMonth(year: number, monthIndexZero: number): string[] {
+  const last = new Date(year, monthIndexZero + 1, 0).getDate();
+  const out: string[] = [];
+  for (let d = 1; d <= last; d++) {
+    out.push(`${year}-${String(monthIndexZero + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+function payableDivisor(policy: PayrollPolicy, daysInMonth: number): number {
+  if (policy.payableBasis === 'fixed26') return 26;
+  if (policy.payableBasis === 'fixed30') return 30;
+  return daysInMonth;
+}
+
+// ---- per-employee calculator ----------------------------------------------
+
+interface DayClassification {
+  // Non-overlapping classification — exactly one of these contributes the
+  // day's payable fraction. The rest stay 0. Keeps the breakdown auditable.
+  present: number;
+  half: number;
+  paidLeave: number;
+  unpaidLeaveLOP: number; // amount of pay LOST today (e.g. 0.5 for 50% deduction)
+  unpaidLeaveDays: number; // raw days marked as unpaid leave (for breakdown)
+  holiday: number;
+  weeklyOff: number;
+  absent: number;
+  outOfService: number;
+  leaveTypeName?: string; // for grouping in breakdown
+  hours: number; // attendance hours that landed today
+}
+
+function classifyDay(
+  dateStr: string,
+  weekday: number,
+  policy: PayrollPolicy,
+  employee: SampleEmployee,
+  holidaySet: Set<string>,
+  attendanceByDate: Map<string, SampleAttendance>,
+  leaveByDate: Map<string, { leave: SampleLeave; rule: ResolvedLeaveRule }>,
+): DayClassification {
+  const z: DayClassification = {
+    present: 0,
+    half: 0,
+    paidLeave: 0,
+    unpaidLeaveLOP: 0,
+    unpaidLeaveDays: 0,
+    holiday: 0,
+    weeklyOff: 0,
+    absent: 0,
+    outOfService: 0,
+    hours: 0,
+  };
+
+  // Out-of-service trumps everything else: a day before joining or after
+  // leaving is silently dropped — neither paid nor counted as LOP.
+  if (employee.dateOfJoining && dateStr < employee.dateOfJoining) {
+    z.outOfService = 1;
+    return z;
+  }
+  if (employee.dateOfLeaving && dateStr > employee.dateOfLeaving) {
+    z.outOfService = 1;
+    return z;
+  }
+
+  // Holiday wins over weekend — a public holiday on a Sunday is still a
+  // holiday for breakdown purposes; payable contribution is the same (1).
+  const isHoliday = holidaySet.has(dateStr);
+  const isWeeklyOff = policy.weeklyOffDays.includes(weekday);
+
+  // Check-in beats leave: if the employee actually showed up, that's the
+  // truth of the day, regardless of any approved leave on file.
+  const att = attendanceByDate.get(dateStr);
+  if (att) {
+    const hours = calculateWorkingHours(att.checkInTime, att.checkOutTime || undefined);
+    z.hours = hours;
+    // Hours-based half-day inference. If only check-in is recorded,
+    // calculateWorkingHours returns DEFAULT_DAY_HOURS so a missing checkout
+    // doesn't accidentally collapse to a half-day.
+    if (hours > 0 && hours < HALF_DAY_MIN_HOURS) {
+      z.half = 0.5;
+    } else if (hours >= HALF_DAY_MIN_HOURS && hours < STANDARD_HOURS_PER_DAY * 0.85) {
+      // 4–6.8h logged → still treat as half-day to discourage gaming the clock
+      z.half = 0.5;
+    } else {
+      z.present = 1;
+    }
+    return z;
+  }
+
+  // No check-in. Holiday and weekly-off are paid by company policy.
+  if (isHoliday) {
+    z.holiday = 1;
+    return z;
+  }
+  if (isWeeklyOff) {
+    z.weeklyOff = 1;
+    return z;
+  }
+
+  // Approved leave applies next.
+  const leaveHit = leaveByDate.get(dateStr);
+  if (leaveHit) {
+    const { leave, rule } = leaveHit;
+    z.leaveTypeName = rule.name;
+    const halfDay = leave.isHalfDay || rule.category === 'HALF_DAY';
+    const dayValue = halfDay ? 0.5 : 1;
+
+    if (rule.isPaid) {
+      z.paidLeave = dayValue;
+      // The other half of a half-day paid leave still has to be classified —
+      // but the only honest answer without check-in data is "absent". We mark
+      // half a day as LOP so the math stays balanced.
+      if (halfDay) {
+        z.unpaidLeaveLOP = 0.5;
+        z.unpaidLeaveDays = 0.5;
+        z.leaveTypeName = rule.name;
+      }
+    } else {
+      const ded = Math.min(100, Math.max(0, rule.deductionPercentage)) / 100;
+      z.unpaidLeaveLOP = dayValue * ded;
+      z.unpaidLeaveDays = dayValue;
+      // For partial-deduction (e.g. 50%) leaves the remainder is paid time:
+      z.paidLeave = dayValue - z.unpaidLeaveLOP;
+      if (halfDay) {
+        // The other half-day with no attendance is pure absence → LOP.
+        z.unpaidLeaveLOP += 0.5;
+        z.absent = 0.5;
+      }
+    }
+    return z;
+  }
+
+  // Nothing on file — straight LOP for a working day.
+  z.absent = 1;
+  return z;
+}
+
 function calculateForEmployee(
   employee: SampleEmployee,
   attendance: SampleAttendance[],
+  employeeLeaves: SampleLeave[],
+  holidays: SampleHoliday[],
+  rules: Map<string, ResolvedLeaveRule>,
+  policy: PayrollPolicy,
   month: string,
 ): PayrollCalculation {
-  const baseSalary = employee.totalSalary;
-  const workingDays = attendance.length;
-  const totalWorkingHours = attendance.reduce(
-    (sum, a) => sum + calculateWorkingHours(a.checkInTime, a.checkOutTime),
-    0,
-  );
+  const [yStr, mStr] = month.split('-');
+  const year = Number(yStr);
+  const monthIndex = Number(mStr) - 1;
+  const days = eachDayOfMonth(year, monthIndex);
+  const daysInMonth = days.length;
 
-  const hourlyRate = baseSalary / (STANDARD_WORKING_DAYS * STANDARD_HOURS_PER_DAY);
-  const grossSalary = hourlyRate * totalWorkingHours;
+  // Pre-index attendance and approved leaves by date for O(1) day lookups.
+  const attByDate = new Map<string, SampleAttendance>();
+  for (const a of attendance) attByDate.set(a.date, a);
+
+  const leaveByDate = new Map<string, { leave: SampleLeave; rule: ResolvedLeaveRule }>();
+  for (const l of employeeLeaves) {
+    const rule = resolveLeaveRule(l.leaveType, rules);
+    // Walk the inclusive range, clip to the requested month.
+    const rangeStart = l.startDate > `${month}-01` ? l.startDate : `${month}-01`;
+    const lastOfMonth = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+    const rangeEnd = l.endDate < lastOfMonth ? l.endDate : lastOfMonth;
+    const startDate = new Date(`${rangeStart}T00:00:00`);
+    const endDate = new Date(`${rangeEnd}T00:00:00`);
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const key = ymd(d);
+      // First-write wins. If two leaves overlap a day, we honour the earlier
+      // submitted one (whichever this loop hits first); changing this to
+      // "most paid wins" would game the system.
+      if (!leaveByDate.has(key)) leaveByDate.set(key, { leave: l, rule });
+    }
+  }
+
+  const holidaySet = new Set(holidays.map((h) => h.date));
+
+  const breakdown: PayrollCalculation['breakdown'] = {
+    daysInMonth,
+    payableDays: 0,
+    presentDays: 0,
+    halfDays: 0,
+    paidLeaveDays: 0,
+    unpaidLeaveDays: 0,
+    holidayDays: 0,
+    weeklyOffDays: 0,
+    absentDays: 0,
+    outOfServiceDays: 0,
+    leaveByType: {},
+  };
+  let totalLOP = 0; // pay-equivalent days lost
+  let totalHours = 0;
+
+  for (const dateStr of days) {
+    const weekday = new Date(`${dateStr}T00:00:00`).getDay();
+    const c = classifyDay(
+      dateStr,
+      weekday,
+      policy,
+      employee,
+      holidaySet,
+      attByDate,
+      leaveByDate,
+    );
+    breakdown.presentDays += c.present;
+    breakdown.halfDays += c.half;
+    breakdown.paidLeaveDays += c.paidLeave;
+    breakdown.unpaidLeaveDays += c.unpaidLeaveDays;
+    breakdown.holidayDays += c.holiday;
+    breakdown.weeklyOffDays += c.weeklyOff;
+    breakdown.absentDays += c.absent;
+    breakdown.outOfServiceDays += c.outOfService;
+    if (c.leaveTypeName) {
+      breakdown.leaveByType[c.leaveTypeName] =
+        (breakdown.leaveByType[c.leaveTypeName] ?? 0) + (c.paidLeave + c.unpaidLeaveDays);
+    }
+    totalLOP += c.unpaidLeaveLOP + c.absent;
+    totalHours += c.hours;
+  }
+
+  // Days that count toward the salary. Each present day = 1, each half-day
+  // contributes 0.5, paid leave/holiday/weekly off contribute their face
+  // value. Out-of-service days are excluded entirely (pro-rata for joiners).
+  breakdown.payableDays =
+    breakdown.presentDays +
+    breakdown.halfDays * 0.5 +
+    breakdown.paidLeaveDays +
+    breakdown.holidayDays +
+    breakdown.weeklyOffDays;
+
+  const baseSalary = employee.totalSalary;
+  const divisor = payableDivisor(policy, daysInMonth);
+  const perDay = divisor > 0 ? baseSalary / divisor : 0;
+  const hourlyRate = perDay / STANDARD_HOURS_PER_DAY;
+  // Gross is the value of payable time. We DON'T multiply by hours — that
+  // would double-count overtime/undertime, which is a separate concern.
+  const grossSalary = perDay * breakdown.payableDays;
 
   const pf = Math.floor((grossSalary * PF_PERCENT) / 100);
   const taxableIncome = grossSalary - pf;
@@ -59,18 +364,19 @@ function calculateForEmployee(
     employeeName: employee.employeeName,
     email: employee.email,
     totalSalary: baseSalary,
-    workingDays,
-    workingHours: Math.round(totalWorkingHours * 10) / 10,
+    workingDays: Math.round(breakdown.payableDays * 10) / 10,
+    workingHours: Math.round(totalHours * 10) / 10,
     baseSalary,
     hourlyRate: Math.round(hourlyRate * 100) / 100,
     grossSalary: Math.round(grossSalary),
     deductions: { pf, tax, insurance, other },
     netSalary,
-    status: workingDays > 0 ? 'processed' : 'pending',
+    status: breakdown.payableDays > 0 ? 'processed' : 'pending',
     month,
     designation: employee.designation,
     department: employee.department,
     generatedAt: new Date().toISOString(),
+    breakdown,
   };
 }
 
@@ -79,30 +385,56 @@ export async function calculatePayroll(
   month: string,
 ): Promise<PayrollCalculation[]> {
   const targetMonth = month || new Date().toISOString().slice(0, 7);
-  const [employees, attendance] = await Promise.all([
+  // Run all the IO concurrently — each fetcher is independent. The leave-rule
+  // lookup is global so it doesn't need an org filter.
+  const [employees, attendance, leaves, holidays, policy, rules] = await Promise.all([
     getEmployeesFromDB(organizationId),
     getAttendanceFromDB(organizationId, targetMonth),
+    getLeavesFromDB(organizationId, targetMonth),
+    getHolidaysFromDB(organizationId, targetMonth),
+    getPayrollPolicy(organizationId),
+    loadLeaveRules(),
   ]);
 
-  const byKey = new Map<string, SampleAttendance[]>();
-  attendance.forEach((a) => {
-    if (!byKey.has(a.matchKey)) byKey.set(a.matchKey, []);
-    byKey.get(a.matchKey)!.push(a);
-  });
+  // Index attendance and leaves by the same matchKey scheme employees expose,
+  // so the per-employee join is a quick lookup instead of a full scan.
+  const attByKey = new Map<string, SampleAttendance[]>();
+  for (const a of attendance) {
+    if (!attByKey.has(a.matchKey)) attByKey.set(a.matchKey, []);
+    attByKey.get(a.matchKey)!.push(a);
+  }
+  const leaveByKey = new Map<string, SampleLeave[]>();
+  for (const l of leaves) {
+    if (!leaveByKey.has(l.matchKey)) leaveByKey.set(l.matchKey, []);
+    leaveByKey.get(l.matchKey)!.push(l);
+  }
 
   return employees.map((emp) => {
-    const merged: SampleAttendance[] = [];
-    const seenDates = new Set<string>();
+    const empAtt: SampleAttendance[] = [];
+    const seenAttDates = new Set<string>();
+    const empLeaves: SampleLeave[] = [];
+    const seenLeaveIds = new Set<SampleLeave>();
+
     for (const key of emp.matchKeys) {
-      const list = byKey.get(key);
-      if (!list) continue;
-      for (const a of list) {
-        if (seenDates.has(a.date)) continue;
-        seenDates.add(a.date);
-        merged.push(a);
+      const aList = attByKey.get(key);
+      if (aList) {
+        for (const a of aList) {
+          if (seenAttDates.has(a.date)) continue;
+          seenAttDates.add(a.date);
+          empAtt.push(a);
+        }
+      }
+      const lList = leaveByKey.get(key);
+      if (lList) {
+        for (const l of lList) {
+          if (seenLeaveIds.has(l)) continue;
+          seenLeaveIds.add(l);
+          empLeaves.push(l);
+        }
       }
     }
-    return calculateForEmployee(emp, merged, targetMonth);
+
+    return calculateForEmployee(emp, empAtt, empLeaves, holidays, rules, policy, targetMonth);
   });
 }
 
@@ -168,6 +500,7 @@ export function calculateDailyPayroll(
   dailyAttendance: DailyAttendance[],
   employeeProfile?: { totalSalary?: number },
 ): DailyPayroll[] {
+  const STANDARD_WORKING_DAYS = 22;
   return dailyAttendance.map((a) => {
     const monthlyBase = employeeProfile?.totalSalary || 33333;
     const hourlyRate = monthlyBase / (STANDARD_WORKING_DAYS * STANDARD_HOURS_PER_DAY);
@@ -205,8 +538,17 @@ PAYSLIP - ${new Date().toLocaleDateString()}
 =====================================
 Employee: ${payroll.employeeName}
 Email: ${payroll.email}
-Working Days: ${payroll.workingDays}
+Payable Days: ${payroll.workingDays} of ${payroll.breakdown.daysInMonth}
 Working Hours: ${payroll.workingHours}
+
+ATTENDANCE BREAKDOWN:
+Present: ${payroll.breakdown.presentDays}
+Half-day: ${payroll.breakdown.halfDays}
+Paid Leave: ${payroll.breakdown.paidLeaveDays}
+Unpaid Leave (LOP): ${payroll.breakdown.unpaidLeaveDays}
+Holidays: ${payroll.breakdown.holidayDays}
+Weekly Off: ${payroll.breakdown.weeklyOffDays}
+Absent (LOP): ${payroll.breakdown.absentDays}
 
 EARNINGS:
 Basic Salary: Rs.${payroll.baseSalary}

@@ -61,6 +61,20 @@ import PayrollAnalytics from '@/components/payroll/payroll-analytics';
 import PayslipPreview from '@/components/payroll/payslip-preview';
 import { cn } from '@/lib/utils';
 
+interface PayrollBreakdown {
+  daysInMonth: number;
+  payableDays: number;
+  presentDays: number;
+  halfDays: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
+  holidayDays: number;
+  weeklyOffDays: number;
+  absentDays: number;
+  outOfServiceDays: number;
+  leaveByType: Record<string, number>;
+}
+
 interface PayrollRecord {
   employeeId: string;
   employeeName: string;
@@ -78,6 +92,9 @@ interface PayrollRecord {
   designation?: string;
   department?: string;
   generatedAt?: string;
+  // Optional: present on records produced by the per-day classifier (post leave/holiday integration).
+  // Older cached records may omit it, so all UI consumers must guard for undefined.
+  breakdown?: PayrollBreakdown;
 }
 
 interface FormsStatus {
@@ -103,6 +120,14 @@ interface Stats {
 
 const formatINR = (n: number) =>
   new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);
+
+// Render fractional day counts compactly: 0 stays "0", whole numbers drop
+// the decimal, halves render as "1.5". Used in dense table cells where
+// "1.0" would look noisier than "1".
+const fmtDays = (n: number): string => {
+  if (!Number.isFinite(n) || n === 0) return '0';
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+};
 
 function previousMonth(month: string): string {
   const [y, m] = month.split('-').map(Number);
@@ -1194,6 +1219,22 @@ export default function PayrollPage() {
                           <th className="hidden md:table-cell px-3 py-3">Department</th>
                           <th className="hidden lg:table-cell px-3 py-3 text-center">Days</th>
                           <th className="hidden lg:table-cell px-3 py-3 text-center">Hours</th>
+                          {/* Compact attendance-mix column. Header uses
+                              colour-coded letters so the row data stays
+                              dense. Hidden below xl since the drawer is
+                              the canonical place for the full breakdown. */}
+                          <th
+                            className="hidden xl:table-cell px-3 py-3 text-center"
+                            title="Paid Leave / Holiday / Loss of Pay"
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              <span style={{ color: ACCENT }}>L</span>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-emerald-700">H</span>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-red-600">LOP</span>
+                            </span>
+                          </th>
                           <th className="hidden md:table-cell px-3 py-3 text-right">Gross</th>
                           <th className="hidden md:table-cell px-3 py-3 text-right">Deductions</th>
                           <th className="px-3 py-3 text-right">Net</th>
@@ -1254,6 +1295,38 @@ export default function PayrollPage() {
                               <td className="hidden lg:table-cell px-3 py-3 text-center tabular-nums text-gray-700">
                                 {p.workingHours.toFixed(1)}
                               </td>
+                              <td className="hidden xl:table-cell px-3 py-3 text-center tabular-nums">
+                                {p.breakdown ? (
+                                  <span className="inline-flex items-center gap-1 text-[12px]">
+                                    <span
+                                      style={{ color: ACCENT }}
+                                      title={`${p.breakdown.paidLeaveDays} day(s) paid leave`}
+                                    >
+                                      {fmtDays(p.breakdown.paidLeaveDays)}
+                                    </span>
+                                    <span className="text-gray-300">·</span>
+                                    <span
+                                      className="text-emerald-700"
+                                      title={`${p.breakdown.holidayDays} holiday(s)`}
+                                    >
+                                      {fmtDays(p.breakdown.holidayDays)}
+                                    </span>
+                                    <span className="text-gray-300">·</span>
+                                    <span
+                                      className={
+                                        p.breakdown.unpaidLeaveDays + p.breakdown.absentDays > 0
+                                          ? 'text-red-600'
+                                          : 'text-gray-400'
+                                      }
+                                      title={`${p.breakdown.unpaidLeaveDays} unpaid leave + ${p.breakdown.absentDays} absent`}
+                                    >
+                                      {fmtDays(p.breakdown.unpaidLeaveDays + p.breakdown.absentDays)}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300">—</span>
+                                )}
+                              </td>
                               <td className="hidden md:table-cell px-3 py-3 text-right tabular-nums text-gray-700">
                                 ₹{formatINR(p.grossSalary)}
                               </td>
@@ -1311,8 +1384,19 @@ export default function PayrollPage() {
           </TabsContent>
         </Tabs>
 
-        {/* Employee detail drawer */}
-        <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        {/* Employee detail drawer.
+            We deliberately keep `selected` set when opening the Payslip and
+            instead derive the Sheet's `open` from `!showPayslip` — that way
+            the drawer slides out before the Payslip fades in (no overlapping
+            modals fighting for z-index) and re-appears as soon as the
+            Payslip is dismissed. The onOpenChange guard prevents the Sheet's
+            own close-driven cleanup from racing with that transition. */}
+        <Sheet
+          open={!!selected && !showPayslip}
+          onOpenChange={(open) => {
+            if (!open && !showPayslip) setSelected(null);
+          }}
+        >
           <SheetContent className="w-full sm:max-w-lg overflow-y-auto sidebar-scroll bg-white px-4 sm:px-6">
             {selected && (
               <>
@@ -1373,8 +1457,12 @@ export default function PayrollPage() {
                         sub="based on 22 days × 8h"
                       />
                       <Row
-                        label="Working Days"
-                        value={`${selected.workingDays}`}
+                        label="Payable Days"
+                        value={
+                          selected.breakdown
+                            ? `${fmtDays(selected.breakdown.payableDays)} of ${selected.breakdown.daysInMonth}`
+                            : `${selected.workingDays}`
+                        }
                         sub={`${selected.workingHours.toFixed(1)} hours total`}
                       />
                       <Row
@@ -1384,6 +1472,72 @@ export default function PayrollPage() {
                       />
                     </div>
                   </div>
+
+                  {/* Attendance breakdown — only renders when the current
+                      record was produced by the per-day classifier. Older
+                      cached records have no breakdown so we don't surface
+                      half-built data. */}
+                  {selected.breakdown && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
+                        Attendance Breakdown
+                      </p>
+                      <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
+                        <Row
+                          label="Present"
+                          value={fmtDays(selected.breakdown.presentDays)}
+                          sub="full-day check-ins"
+                        />
+                        <Row
+                          label="Half-day"
+                          value={fmtDays(selected.breakdown.halfDays)}
+                          sub="partial attendance"
+                        />
+                        <Row
+                          label="Paid Leave"
+                          value={fmtDays(selected.breakdown.paidLeaveDays)}
+                          sub={
+                            (() => {
+                              // Filter to only paid types for the sub-line.
+                              // Best-effort: we list the names tracked by the
+                              // calculator that contributed any days.
+                              const types = Object.entries(selected.breakdown!.leaveByType ?? {})
+                                .filter(([, v]) => v > 0)
+                                .map(([k]) => k);
+                              return types.length > 0 ? types.join(', ') : 'no leaves applied';
+                            })()
+                          }
+                        />
+                        <Row
+                          label="Holidays"
+                          value={fmtDays(selected.breakdown.holidayDays)}
+                          sub="company calendar"
+                        />
+                        <Row
+                          label="Weekly Off"
+                          value={fmtDays(selected.breakdown.weeklyOffDays)}
+                          sub="paid as per policy"
+                        />
+                        <Row
+                          label="Unpaid Leave (LOP)"
+                          value={fmtDays(selected.breakdown.unpaidLeaveDays)}
+                          sub="leave without pay"
+                        />
+                        <Row
+                          label="Absent (LOP)"
+                          value={fmtDays(selected.breakdown.absentDays)}
+                          sub="no record on file"
+                        />
+                        {selected.breakdown.outOfServiceDays > 0 && (
+                          <Row
+                            label="Out of Service"
+                            value={fmtDays(selected.breakdown.outOfServiceDays)}
+                            sub="before joining / after exit"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">

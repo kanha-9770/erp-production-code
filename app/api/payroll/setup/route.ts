@@ -4,6 +4,10 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 
+// Bumping the meta key would orphan any v2 config and silently revert tenants
+// to the empty setup, so we keep the v2 key and treat the new leave/holiday/
+// policy blocks as optional additive sections. extractSetup merges with the
+// EMPTY defaults so a v2-saved record still loads cleanly.
 const META_KEY = 'payroll-v2';
 
 export interface PayrollSetup {
@@ -17,6 +21,8 @@ export interface PayrollSetup {
       salary: string | null;
       designation: string | null;
       department: string | null;
+      dateOfJoining: string | null;
+      dateOfLeaving: string | null;
     };
   };
   checkIn: {
@@ -37,20 +43,79 @@ export interface PayrollSetup {
       checkOutTime: string | null;
     };
   };
+  leave: {
+    formId: string | null;
+    fields: {
+      email: string | null;
+      employeeId: string | null;
+      leaveType: string | null;
+      startDate: string | null;
+      endDate: string | null;
+      days: string | null;
+      halfDay: string | null;
+      status: string | null;
+    };
+  };
+  holiday: {
+    formId: string | null;
+    fields: {
+      date: string | null;
+      name: string | null;
+    };
+  };
+  policy: {
+    weeklyOffDays: number[]; // 0=Sun, 1=Mon, ..., 6=Sat. Default [0].
+    payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
+  };
 }
 
 const EMPTY_SETUP: PayrollSetup = {
   defaultBaseSalary: null,
   employee: {
     formId: null,
-    fields: { email: null, employeeId: null, name: null, salary: null, designation: null, department: null },
+    fields: {
+      email: null,
+      employeeId: null,
+      name: null,
+      salary: null,
+      designation: null,
+      department: null,
+      dateOfJoining: null,
+      dateOfLeaving: null,
+    },
   },
   checkIn: { formId: null, fields: { email: null, employeeId: null, date: null, checkInTime: null } },
   checkOut: { formId: null, fields: { email: null, employeeId: null, date: null, checkOutTime: null } },
+  leave: {
+    formId: null,
+    fields: {
+      email: null,
+      employeeId: null,
+      leaveType: null,
+      startDate: null,
+      endDate: null,
+      days: null,
+      halfDay: null,
+      status: null,
+    },
+  },
+  holiday: { formId: null, fields: { date: null, name: null } },
+  policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
 
 function extractSetup(mappings: any): PayrollSetup {
   if (mappings && typeof mappings === 'object' && mappings._meta === META_KEY) {
+    const policyRaw = mappings.policy ?? {};
+    const weeklyOffDays = Array.isArray(policyRaw.weeklyOffDays)
+      ? policyRaw.weeklyOffDays
+          .map((n: any) => Number(n))
+          .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6)
+      : EMPTY_SETUP.policy.weeklyOffDays;
+    const payableBasis: PayrollSetup['policy']['payableBasis'] =
+      policyRaw.payableBasis === 'fixed26' || policyRaw.payableBasis === 'fixed30'
+        ? policyRaw.payableBasis
+        : 'monthDays';
+
     return {
       defaultBaseSalary:
         typeof mappings.defaultBaseSalary === 'number' ? mappings.defaultBaseSalary : null,
@@ -66,6 +131,15 @@ function extractSetup(mappings: any): PayrollSetup {
         formId: mappings.checkOut?.formId ?? null,
         fields: { ...EMPTY_SETUP.checkOut.fields, ...(mappings.checkOut?.fields || {}) },
       },
+      leave: {
+        formId: mappings.leave?.formId ?? null,
+        fields: { ...EMPTY_SETUP.leave.fields, ...(mappings.leave?.fields || {}) },
+      },
+      holiday: {
+        formId: mappings.holiday?.formId ?? null,
+        fields: { ...EMPTY_SETUP.holiday.fields, ...(mappings.holiday?.fields || {}) },
+      },
+      policy: { weeklyOffDays, payableBasis },
     };
   }
   return EMPTY_SETUP;
@@ -166,14 +240,19 @@ export async function POST(request: NextRequest) {
     // Defence-in-depth: every form referenced in the setup must belong to the
     // caller's org. Stops a malicious or stale client from binding the org's
     // config to forms owned by a different tenant.
-    const formIds = [setup.employee.formId, setup.checkIn.formId, setup.checkOut.formId].filter(
-      (x): x is string => Boolean(x),
-    );
-    if (formIds.length > 0) {
+    const attendanceFormIds = [
+      setup.employee.formId,
+      setup.checkIn.formId,
+      setup.checkOut.formId,
+      setup.holiday.formId,
+    ].filter((x): x is string => Boolean(x));
+    const leaveFormIds = [setup.leave.formId].filter((x): x is string => Boolean(x));
+    const allFormIds = [...attendanceFormIds, ...leaveFormIds];
+    if (allFormIds.length > 0) {
       const ownedCount = await prisma.form.count({
-        where: { id: { in: formIds }, module: { organizationId: authUser.organizationId } },
+        where: { id: { in: allFormIds }, module: { organizationId: authUser.organizationId } },
       });
-      if (ownedCount !== formIds.length) {
+      if (ownedCount !== allFormIds.length) {
         return NextResponse.json(
           { success: false, error: 'One or more selected forms do not belong to your organization' },
           { status: 403 },
@@ -194,8 +273,12 @@ export async function POST(request: NextRequest) {
 
     const config = await prisma.payrollConfiguration.create({
       data: {
-        attendanceFormIds: formIds,
-        leaveFormIds: [],
+        // attendanceFormIds carries everything *except* the leave-application
+        // form so a quick column scan still reveals the full set of forms the
+        // engine touches. leaveFormIds is the dedicated home for the leave
+        // form. Both are denormalised — the source of truth is `mappings`.
+        attendanceFormIds,
+        leaveFormIds,
         attendanceFieldMappings: mappings as any,
         leaveFieldMappings: {},
         // Pin to the SESSION'S org. The previous version trusted body.organizationId
