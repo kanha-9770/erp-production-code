@@ -397,8 +397,88 @@ async function loadSetup(organizationId: string): Promise<PayrollSetupShape | nu
 }
 
 export async function getPayrollPolicy(organizationId: string): Promise<PayrollPolicy> {
+  // Preferred source: explicit policy saved via the payroll setup wizard
+  // (PayrollConfiguration.attendanceFieldMappings._meta = "payroll-v2").
   const setup = await loadSetup(organizationId);
-  return setup?.policy ?? DEFAULT_POLICY;
+  if (setup?.policy) return setup.policy;
+
+  // Fallback source: the new AttendanceConfiguration. This is the same
+  // table the punch widget reads, so attendance and payroll always agree
+  // about weekly-offs and pay-day basis even when the setup wizard hasn't
+  // been touched.
+  try {
+    const cfg = await (prisma as any).attendanceConfiguration.findFirst({
+      where: { organizationId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (cfg) {
+      const weeklyOffDays = Array.isArray(cfg.weeklyOffDays)
+        ? cfg.weeklyOffDays
+            .map((n: any) => Number(n))
+            .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 6)
+        : DEFAULT_POLICY.weeklyOffDays;
+      const payableBasis: PayrollPolicy['payableBasis'] =
+        cfg.payableBasis === 'fixed26' || cfg.payableBasis === 'fixed30'
+          ? cfg.payableBasis
+          : 'monthDays';
+      return { weeklyOffDays, payableBasis };
+    }
+  } catch (err) {
+    // AttendanceConfiguration table may not exist yet on a freshly cloned
+    // checkout that hasn't migrated. Silently fall through to defaults.
+    console.warn('[payroll] attendance-config lookup failed:', err);
+  }
+
+  return DEFAULT_POLICY;
+}
+
+// Reads the new typed Attendance table for this org's users in the given
+// month and returns the same SampleAttendance shape getAttendanceFromDB
+// produces from forms. The merger in getAttendanceFromDB calls this and
+// lets native records override form-based ones for the same (user, date) —
+// native rows have authoritative server timestamps, so they win.
+async function getNativeAttendanceForMonth(
+  organizationId: string,
+  month: string,
+): Promise<SampleAttendance[]> {
+  try {
+    const [yStr, mStr] = month.split('-');
+    const yearN = Number(yStr);
+    const monthN = Number(mStr);
+    if (!Number.isInteger(yearN) || !Number.isInteger(monthN)) return [];
+    const lastDay = new Date(yearN, monthN, 0).getDate();
+    const monthStart = `${month}-01`;
+    const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+    const rows = await prisma.attendance.findMany({
+      where: {
+        date: { gte: monthStart, lte: monthEnd },
+        user: { organizationId },
+      },
+      include: {
+        user: { select: { id: true, email: true, username: true } },
+      },
+    });
+
+    const out: SampleAttendance[] = [];
+    for (const row of rows) {
+      const email = row.user?.email
+        ? String(row.user.email).toLowerCase()
+        : null;
+      if (!email) continue;
+      out.push({
+        email,
+        matchKey: `email:${email}`,
+        date: row.date,
+        checkInTime: row.checkInTime ?? '',
+        checkOutTime: row.checkOutTime ?? '',
+      });
+    }
+    return out;
+  } catch (err) {
+    console.warn('[payroll] native attendance lookup failed:', err);
+    return [];
+  }
 }
 
 async function getFieldLabelMap(formId: string, organizationId: string): Promise<Record<string, string>> {
@@ -1043,12 +1123,13 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
   const checkInForm = await resolveFromConfigOrName(organizationId, setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
   const checkOutForm = await resolveFromConfigOrName(organizationId, setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
 
-  if (!checkInForm) return [];
-
+  // Removed the historical "no check-in form configured → return []" early
+  // exit. The native Attendance table is now a valid source on its own, so
+  // even orgs without an attendance form get their widget punches into payroll.
   const checkInFields = setup?.checkIn.fields ?? {};
   const checkOutFields = setup?.checkOut.fields ?? {};
 
-  const checkInRows = await readRecords(checkInForm);
+  const checkInRows = checkInForm ? await readRecords(checkInForm) : [];
   const checkOutRows = checkOutForm ? await readRecords(checkOutForm) : [];
 
   const dailyMap = new Map<string, SampleAttendance>();
@@ -1069,40 +1150,42 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
     return null;
   };
 
-  for (const row of checkInRows) {
-    const data = flattenRecordData(row.recordData, checkInForm.labels);
-    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
-    const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
+  if (checkInForm) {
+    for (const row of checkInRows) {
+      const data = flattenRecordData(row.recordData, checkInForm.labels);
+      const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+      const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
 
-    const dateValue =
-      pickWithMapping(
+      const dateValue =
+        pickWithMapping(
+          data,
+          checkInFields.date,
+          checkInForm.labels,
+          CHECKIN_DATE_FALLBACKS,
+        ) ?? row.date;
+      const checkInTime = pickWithMapping(
         data,
-        checkInFields.date,
+        checkInFields.checkInTime,
         checkInForm.labels,
-        CHECKIN_DATE_FALLBACKS,
-      ) ?? row.date;
-    const checkInTime = pickWithMapping(
-      data,
-      checkInFields.checkInTime,
-      checkInForm.labels,
-      CHECKIN_TIME_FALLBACKS,
-    );
+        CHECKIN_TIME_FALLBACKS,
+      );
 
-    const dateStr = toDateStr(dateValue);
-    const inTime = toTimeStr(checkInTime);
+      const dateStr = toDateStr(dateValue);
+      const inTime = toTimeStr(checkInTime);
 
-    if (!id || !dateStr || !inTime) continue;
-    if (!inMonth(dateStr, month)) continue;
+      if (!id || !dateStr || !inTime) continue;
+      if (!inMonth(dateStr, month)) continue;
 
-    const key = `${id.matchKey}_${dateStr}`;
-    if (!dailyMap.has(key)) {
-      dailyMap.set(key, {
-        email: id.email,
-        matchKey: id.matchKey,
-        date: dateStr,
-        checkInTime: inTime,
-        checkOutTime: '',
-      });
+      const key = `${id.matchKey}_${dateStr}`;
+      if (!dailyMap.has(key)) {
+        dailyMap.set(key, {
+          email: id.email,
+          matchKey: id.matchKey,
+          date: dateStr,
+          checkInTime: inTime,
+          checkOutTime: '',
+        });
+      }
     }
   }
 
@@ -1148,7 +1231,7 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
     }
   }
 
-  for (const row of checkInRows) {
+  if (checkInForm) for (const row of checkInRows) {
     const data = flattenRecordData(row.recordData, checkInForm.labels);
     const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
     const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
@@ -1171,6 +1254,28 @@ export async function getAttendanceFromDB(organizationId: string, month: string)
     if (existing && !existing.checkOutTime) {
       existing.checkOutTime = outTime;
     }
+  }
+
+  // Merge in native Attendance table rows. The widget at /api/attendance/punch
+  // writes here. We let native rows OVERRIDE form-based rows for the same
+  // (user, date) because native has real server-stamped timestamps while the
+  // form path often has hand-typed strings.
+  const nativeRows = await getNativeAttendanceForMonth(organizationId, month);
+  for (const n of nativeRows) {
+    const key = `${n.matchKey}_${n.date}`;
+    const prior = dailyMap.get(key);
+    if (!prior) {
+      dailyMap.set(key, n);
+      continue;
+    }
+    // Prefer non-empty native fields; fall back to whatever the form had.
+    dailyMap.set(key, {
+      email: n.email || prior.email,
+      matchKey: n.matchKey,
+      date: n.date,
+      checkInTime: n.checkInTime || prior.checkInTime,
+      checkOutTime: n.checkOutTime || prior.checkOutTime,
+    });
   }
 
   return Array.from(dailyMap.values()).filter((r) => r.checkInTime || r.checkOutTime);

@@ -27,6 +27,9 @@ import {
   Activity,
   Sparkles,
   Wallet,
+  Clock,
+  History,
+  Edit3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -53,6 +56,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { useGetUserQuery } from "@/lib/api/auth";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { AttendanceWidget } from "@/components/attendance/attendance-widget";
 
 import { useOptimisticModules } from "@/hooks/useOptimisticModules";
 import { usePermissionContext } from "@/context/PermissionContext";
@@ -160,6 +164,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   const [payrollAnchorModuleId, setPayrollAnchorModuleId] = useState<string | null>(null);
   const canAccessPayroll = canAccess("/payroll");
 
+  // Same idea for Attendance — admins pick the anchor in
+  // AttendanceConfiguration. Anchor empty / config 401 → no sidebar entry.
+  const [attendanceAnchorModuleId, setAttendanceAnchorModuleId] = useState<string | null>(null);
+  const canAccessAttendance = canAccess("/attendance");
+
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [moduleData, setModuleData] = useState({
@@ -224,6 +233,29 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     };
   }, [canAccessPayroll]);
 
+  // Attendance anchor — the module under which we render the synthetic
+  // /attendance link. Admin sets this on /settings/attendance-config. Same
+  // silent-failure semantics as the payroll fetch above.
+  useEffect(() => {
+    if (!canAccessAttendance) {
+      setAttendanceAnchorModuleId(null);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/attendance-config", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.success) return;
+        setAttendanceAnchorModuleId(j.config?.attendanceModuleId ?? null);
+      })
+      .catch(() => {
+        /* sidebar still works without the anchor */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canAccessAttendance]);
+
   const generatePath = (module: FormModule): string => {
     const slug = module.name
       .toLowerCase()
@@ -244,11 +276,17 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     });
   };
 
-  // Synthetic system-route nodes (e.g. Payroll) carry their target path on
-  // a `system_route` property. They are leaves — never expand, never have
-  // children — and route to a fixed URL instead of /<slug>/<id>.
+  // Synthetic system-route nodes (e.g. Payroll, My Attendance) carry their
+  // target path on a `system_route` property. They are leaves — never
+  // expand — and route to a fixed URL instead of /<slug>/<id>.
   const isSystemRouteNode = (module: FormModule): boolean =>
     module.module_type === "system-route";
+
+  // System-folder nodes are synthetic parents (e.g. the "Attendance"
+  // group). They carry their own children but no link of their own;
+  // clicking just toggles expansion.
+  const isSystemFolderNode = (module: FormModule): boolean =>
+    module.module_type === "system-folder";
 
   const getSystemRoute = (module: FormModule): string | null =>
     (module as any).system_route ?? null;
@@ -260,6 +298,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       if (!route) return false;
       return pathname === route || pathname.startsWith(`${route}/`);
     }
+    if (isSystemFolderNode(module)) {
+      // Folder is "active" when any of its children would be active.
+      // We don't recurse deeper than 1 level — synthetic folders are flat.
+      return (module.children ?? []).some((c) => isModuleActive(c));
+    }
     const target = `${generatePath(module)}/${module.id}`;
     return pathname === target || pathname.startsWith(`${target}/`);
   };
@@ -269,6 +312,10 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       const route = getSystemRoute(module);
       if (route) router.push(route);
       onMobileClose?.();
+      return;
+    }
+    if (isSystemFolderNode(module)) {
+      if (module.children?.length) toggleModule(module.id);
       return;
     }
     const hasChildren = !!module.children?.length;
@@ -291,10 +338,25 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const renderModule = (module: FormModule, depth = 0) => {
     const isSystemRoute = isSystemRouteNode(module);
-    const IconComponent = isSystemRoute
-      ? Wallet
-      : getModuleIcon(undefined, module.module_type);
-    // System-route nodes are always leaves.
+    const isSystemFolder = isSystemFolderNode(module);
+    // System nodes pick an icon by id so each one looks distinct.
+    // Adding a new system route → add a case here.
+    const IconComponent =
+      isSystemRoute || isSystemFolder
+        ? module.id === "__sys_attendance__"
+          ? Clock
+          : module.id === "__sys_attendance_mine__"
+            ? History
+            : module.id === "__sys_attendance_team__"
+              ? Users
+              : module.id === "__sys_attendance_reg__"
+                ? Edit3
+                : module.id === "__sys_attendance_cfg__"
+                  ? Settings
+                  : Wallet
+        : getModuleIcon(undefined, module.module_type);
+    // System-route nodes are always leaves; system-folder nodes can hold
+    // synthetic children (e.g. the four Attendance pages).
     const hasChildren = !isSystemRoute && !!module.children?.length;
     const isExpanded = expandedModules.has(module.id);
     const isActive = isModuleActive(module);
@@ -420,7 +482,19 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       anchorId = hrRoot?.id ?? null;
     }
 
-    // Inject the Payroll synthetic leaf as the last child of its anchor.
+    // Attendance anchor — admin-configurable on /settings/attendance-config.
+    // Falls back to the same HR-root heuristic as Payroll so a fresh tenant
+    // sees the link before they touch the config.
+    let attendanceAnchor: string | null = attendanceAnchorModuleId;
+    if (!attendanceAnchor) {
+      const hrRoot = filtered.find(
+        (m) => !m.parentId && /^hr$|^human resources?$/i.test(m.name),
+      );
+      attendanceAnchor = hrRoot?.id ?? null;
+    }
+
+    // Inject system-route leaves (Payroll, Attendance) as the last children
+    // of their respective anchors.
     const injectSystemRoutes = (items: ModuleNode[]): ModuleNode[] =>
       items.map((node) => {
         const kids =
@@ -445,11 +519,86 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
             ...({ system_route: "/payroll" } as any),
           } as ModuleNode);
         }
+        if (
+          canAccessAttendance &&
+          attendanceAnchor &&
+          node.id === attendanceAnchor
+        ) {
+          // Build the children list. Page-level guards still apply server-
+          // side for Team + Configuration; we hide them here for non-admins
+          // so the sidebar doesn't show dead-end links to regular users.
+          const attLevel = (node.level ?? 0) + 2;
+          const attendanceChildren: ModuleNode[] = [
+            {
+              id: "__sys_attendance_mine__",
+              name: "My Attendance",
+              parentId: "__sys_attendance__",
+              level: attLevel,
+              module_type: "system-route",
+              sort_order: 1,
+              children: [],
+              ...({ system_route: "/attendance" } as any),
+            } as ModuleNode,
+            {
+              id: "__sys_attendance_reg__",
+              name: "Regularizations",
+              parentId: "__sys_attendance__",
+              level: attLevel,
+              module_type: "system-route",
+              sort_order: 2,
+              children: [],
+              ...({ system_route: "/attendance/regularizations" } as any),
+            } as ModuleNode,
+          ];
+          if (isAdmin) {
+            attendanceChildren.push(
+              {
+                id: "__sys_attendance_team__",
+                name: "Team Attendance",
+                parentId: "__sys_attendance__",
+                level: attLevel,
+                module_type: "system-route",
+                sort_order: 3,
+                children: [],
+                ...({ system_route: "/attendance/team" } as any),
+              } as ModuleNode,
+              {
+                id: "__sys_attendance_cfg__",
+                name: "Configuration",
+                parentId: "__sys_attendance__",
+                level: attLevel,
+                module_type: "system-route",
+                sort_order: 4,
+                children: [],
+                ...({ system_route: "/settings/attendance-config" } as any),
+              } as ModuleNode,
+            );
+          }
+
+          kids.push({
+            id: "__sys_attendance__",
+            name: "Attendance",
+            parentId: node.id,
+            level: (node.level ?? 0) + 1,
+            module_type: "system-folder",
+            // One slot before payroll so the order reads HR > Attendance > Payroll.
+            sort_order: Number.MAX_SAFE_INTEGER - 1,
+            children: attendanceChildren,
+          } as ModuleNode);
+        }
         return { ...node, children: kids };
       });
 
     return injectSystemRoutes(filtered);
-  }, [modules, isAdmin, checkPermission, payrollAnchorModuleId, canAccessPayroll]);
+  }, [
+    modules,
+    isAdmin,
+    checkPermission,
+    payrollAnchorModuleId,
+    canAccessPayroll,
+    attendanceAnchorModuleId,
+    canAccessAttendance,
+  ]);
 
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;
@@ -819,6 +968,15 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
               </div>
             )}
           </div>
+
+          {/* Attendance widget — pinned just above the user area so the
+              live working timer is always in the user's peripheral vision.
+              Hides itself when the user is unauthenticated. */}
+          {!!userData?.user && (
+            <div className="border-t border-black/10 px-2 py-2">
+              <AttendanceWidget />
+            </div>
+          )}
 
           {/* User area */}
           {canAccess("/profile") && (

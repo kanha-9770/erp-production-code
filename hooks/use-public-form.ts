@@ -1901,10 +1901,26 @@ export function usePublicForm({
           setSubmitting(false);
           return;
         }
-        const response = await fetch("/api/attendance", {
+        // Cutover: route the form-based punch through the same endpoint
+        // the sidebar widget uses. The new endpoint identifies the user
+        // from the auth cookie (not the body) and accepts the
+        // Idempotency-Key header so a double-submit is safe. The legacy
+        // /api/attendance route still exists as a shim for any other caller.
+        const idemKeyIn = `form-ci-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const response = await fetch("/api/attendance/punch", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkin" }),
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idemKeyIn,
+          },
+          body: JSON.stringify({
+            type: "IN",
+            source: "WEB",
+            idempotencyKey: idemKeyIn,
+          }),
         });
         const data = await response.json();
         if (!data.success) throw new Error(data.error || "Check-In failed");
@@ -1922,10 +1938,21 @@ export function usePublicForm({
           setSubmitting(false);
           return;
         }
-        const response = await fetch("/api/attendance", {
+        const idemKeyOut = `form-co-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const response = await fetch("/api/attendance/punch", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "checkout" }),
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idemKeyOut,
+          },
+          body: JSON.stringify({
+            type: "OUT",
+            source: "WEB",
+            idempotencyKey: idemKeyOut,
+          }),
         });
         const data = await response.json();
         if (!data.success) throw new Error(data.error || "Check-Out failed");

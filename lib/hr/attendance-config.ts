@@ -1,0 +1,263 @@
+/**
+ * Typed accessor for AttendanceConfiguration.
+ *
+ * One row per org; missing row → safe defaults so a brand-new tenant works
+ * without any setup. The defaults here are also the values payroll-store
+ * falls back to, so attendance and payroll never disagree about working
+ * days, half-day thresholds, or payable basis.
+ */
+
+import { prisma } from '@/lib/prisma';
+
+export type GeofenceMode = 'OFF' | 'CAPTURE' | 'ENFORCE';
+export type PayableBasis = 'monthDays' | 'fixed26' | 'fixed30';
+export type FaceCaptureMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
+
+export interface AttendanceConfig {
+  id: string | null;
+  organizationId: string | null;
+  defaultShiftStart: string; // "HH:mm"
+  defaultShiftEnd: string;
+  graceMinutes: number;
+  halfDayMinHours: number;
+  fullDayMinHours: number;
+  overtimeAfterHours: number;
+  breakMinutes: number;
+  weeklyOffDays: number[]; // 0=Sun … 6=Sat
+  autoCheckoutAt: string | null;
+  geofenceMode: GeofenceMode;
+  geofenceLat: number | null;
+  geofenceLng: number | null;
+  geofenceRadiusM: number | null;
+  ipWhitelist: string[];
+  payableBasis: PayableBasis;
+  workflowModuleName: string | null;
+  enforceEmployeeActive: boolean;
+  minPunchGapSeconds: number;
+  faceCaptureMode: FaceCaptureMode;
+  facePhotoMaxKb: number;
+  attendanceModuleId: string | null;
+  notifyOnPunch: boolean;
+  attendanceApproverRoleIds: string[];
+  isActive: boolean;
+}
+
+export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
+  id: null,
+  organizationId: null,
+  defaultShiftStart: '09:00',
+  defaultShiftEnd: '18:00',
+  graceMinutes: 15,
+  halfDayMinHours: 4,
+  fullDayMinHours: 8,
+  overtimeAfterHours: 9,
+  breakMinutes: 60,
+  weeklyOffDays: [0],
+  autoCheckoutAt: null,
+  geofenceMode: 'OFF',
+  geofenceLat: null,
+  geofenceLng: null,
+  geofenceRadiusM: null,
+  ipWhitelist: [],
+  payableBasis: 'monthDays',
+  workflowModuleName: 'Attendance',
+  enforceEmployeeActive: false,
+  minPunchGapSeconds: 5,
+  faceCaptureMode: 'OFF',
+  facePhotoMaxKb: 800,
+  attendanceModuleId: null,
+  notifyOnPunch: true,
+  attendanceApproverRoleIds: [],
+  isActive: true,
+};
+
+function coerceWeeklyOff(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return DEFAULT_ATTENDANCE_CONFIG.weeklyOffDays;
+  const out = raw
+    .map((n) => Number(n))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  return out.length > 0 ? out : DEFAULT_ATTENDANCE_CONFIG.weeklyOffDays;
+}
+
+function coerceIpList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+}
+
+function coerceGeofenceMode(raw: unknown): GeofenceMode {
+  return raw === 'CAPTURE' || raw === 'ENFORCE' ? raw : 'OFF';
+}
+
+function coercePayableBasis(raw: unknown): PayableBasis {
+  return raw === 'fixed26' || raw === 'fixed30' ? raw : 'monthDays';
+}
+
+function coerceFaceCaptureMode(raw: unknown): FaceCaptureMode {
+  return raw === 'OPTIONAL' || raw === 'REQUIRED' ? raw : 'OFF';
+}
+
+function coerceRoleIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((v): v is string => typeof v === 'string')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+export async function getAttendanceConfig(
+  organizationId: string | null,
+): Promise<AttendanceConfig> {
+  if (!organizationId) {
+    return { ...DEFAULT_ATTENDANCE_CONFIG };
+  }
+
+  try {
+    const row = await (prisma as any).attendanceConfiguration.findFirst({
+      where: { organizationId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!row) {
+      return { ...DEFAULT_ATTENDANCE_CONFIG, organizationId };
+    }
+    return {
+      id: row.id,
+      organizationId: row.organizationId,
+      defaultShiftStart: row.defaultShiftStart ?? '09:00',
+      defaultShiftEnd: row.defaultShiftEnd ?? '18:00',
+      graceMinutes: row.graceMinutes ?? 15,
+      halfDayMinHours: Number(row.halfDayMinHours ?? 4),
+      fullDayMinHours: Number(row.fullDayMinHours ?? 8),
+      overtimeAfterHours: Number(row.overtimeAfterHours ?? 9),
+      breakMinutes: row.breakMinutes ?? 60,
+      weeklyOffDays: coerceWeeklyOff(row.weeklyOffDays),
+      autoCheckoutAt: row.autoCheckoutAt ?? null,
+      geofenceMode: coerceGeofenceMode(row.geofenceMode),
+      geofenceLat: row.geofenceLat ?? null,
+      geofenceLng: row.geofenceLng ?? null,
+      geofenceRadiusM: row.geofenceRadiusM ?? null,
+      ipWhitelist: coerceIpList(row.ipWhitelist),
+      payableBasis: coercePayableBasis(row.payableBasis),
+      workflowModuleName:
+        typeof row.workflowModuleName === 'string' && row.workflowModuleName.trim().length > 0
+          ? row.workflowModuleName.trim()
+          : null,
+      enforceEmployeeActive: !!row.enforceEmployeeActive,
+      minPunchGapSeconds: Number.isFinite(row.minPunchGapSeconds)
+        ? Math.max(0, Number(row.minPunchGapSeconds))
+        : 5,
+      faceCaptureMode: coerceFaceCaptureMode(row.faceCaptureMode),
+      facePhotoMaxKb: Number.isFinite(row.facePhotoMaxKb)
+        ? Math.max(50, Number(row.facePhotoMaxKb))
+        : 800,
+      attendanceModuleId:
+        typeof row.attendanceModuleId === 'string' && row.attendanceModuleId.length > 0
+          ? row.attendanceModuleId
+          : null,
+      notifyOnPunch: row.notifyOnPunch === undefined ? true : !!row.notifyOnPunch,
+      attendanceApproverRoleIds: coerceRoleIds(row.attendanceApproverRoleIds),
+      isActive: row.isActive ?? true,
+    };
+  } catch (err) {
+    console.warn('[attendance-config] load failed; using defaults:', err);
+    return { ...DEFAULT_ATTENDANCE_CONFIG, organizationId };
+  }
+}
+
+export interface AttendanceConfigUpdate {
+  defaultShiftStart?: string;
+  defaultShiftEnd?: string;
+  graceMinutes?: number;
+  halfDayMinHours?: number;
+  fullDayMinHours?: number;
+  overtimeAfterHours?: number;
+  breakMinutes?: number;
+  weeklyOffDays?: number[];
+  autoCheckoutAt?: string | null;
+  geofenceMode?: GeofenceMode;
+  geofenceLat?: number | null;
+  geofenceLng?: number | null;
+  geofenceRadiusM?: number | null;
+  ipWhitelist?: string[];
+  payableBasis?: PayableBasis;
+  workflowModuleName?: string | null;
+  enforceEmployeeActive?: boolean;
+  minPunchGapSeconds?: number;
+  faceCaptureMode?: FaceCaptureMode;
+  facePhotoMaxKb?: number;
+  attendanceModuleId?: string | null;
+  notifyOnPunch?: boolean;
+  attendanceApproverRoleIds?: string[];
+  isActive?: boolean;
+}
+
+// Extract the offending argument name from a Prisma "Unknown argument
+// `xyz`" validation message. Returns null if it isn't that kind of error.
+function unknownArgumentField(err: unknown): string | null {
+  const msg = String((err as any)?.message ?? err ?? '');
+  // Prisma 6 message shape:  "Unknown argument `myField`. Available …"
+  const m =
+    msg.match(/Unknown argument `([^`]+)`/) ??
+    msg.match(/Unknown arg\s+`([^`]+)`/) ??
+    null;
+  return m ? m[1] : null;
+}
+
+export async function upsertAttendanceConfig(
+  organizationId: string,
+  patch: AttendanceConfigUpdate,
+): Promise<AttendanceConfig> {
+  // Filter out undefined so we don't overwrite stored values with nulls.
+  const data: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) data[k] = v;
+  }
+
+  // Resilience against a stale Prisma client: if the running client was
+  // generated before the latest schema additions (typical when the dev
+  // server held the .dll lock during `prisma generate`), the upsert
+  // fails with `Unknown argument <field>`. We strip that field and retry
+  // until the call lands or we run out of fields to drop. The caller's
+  // save still partially succeeds; the dropped fields are logged so the
+  // admin sees what didn't persist.
+  const droppedFields: string[] = [];
+  // Cap iterations defensively — every retry must remove at least one
+  // field, so 32 is wildly more than enough for the schema's column count.
+  for (let attempt = 0; attempt < 32; attempt++) {
+    try {
+      await (prisma as any).attendanceConfiguration.upsert({
+        where: { organizationId },
+        update: data,
+        create: { organizationId, ...data },
+      });
+      if (droppedFields.length > 0) {
+        console.warn(
+          `[attendance-config] saved with ${droppedFields.length} field(s) dropped — Prisma client is stale: ${droppedFields.join(
+            ', ',
+          )}. Run \`npx prisma generate\` to enable them.`,
+        );
+      }
+      return getAttendanceConfig(organizationId);
+    } catch (err) {
+      const field = unknownArgumentField(err);
+      if (!field || !(field in data)) throw err;
+      delete data[field];
+      droppedFields.push(field);
+    }
+  }
+  // Shouldn't reach here — every retry removes a field, so we either
+  // succeed or the data object empties out and the bare upsert succeeds
+  // (creating just the organizationId row).
+  throw new Error('upsertAttendanceConfig: too many client/schema mismatches');
+}
+
+// HH:mm → minutes-since-midnight. Returns null for malformed input so
+// callers can decide whether to fall back to a default.
+export function parseHHmm(hhmm: string | null | undefined): number | null {
+  if (!hhmm) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}

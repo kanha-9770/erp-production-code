@@ -86,6 +86,15 @@ const settingsData: SettingCategory[] = [
     ],
   },
   {
+    title: "HR & Attendance",
+    items: [
+      { name: "My Attendance", href: "/attendance" },
+      { name: "Team Attendance", href: "/attendance/team" },
+      { name: "Regularizations", href: "/attendance/regularizations" },
+      { name: "Attendance Configuration", href: "/settings/attendance-config" },
+    ],
+  },
+  {
     title: "Experience Center",
     items: [
       { name: "Signals", href: "/settings/signals" },

@@ -1398,25 +1398,193 @@ model PayrollRecord {
 }
 
 model Attendance {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  user         User     @relation("UserAttendance", fields: [userId], references: [id], onDelete: Cascade)
+  id           String  @id @default(cuid())
+  userId       String  @map("user_id")
+  user         User    @relation("UserAttendance", fields: [userId], references: [id], onDelete: Cascade)
   date         String
-  checkedIn    Boolean  @default(false) @map("checked_in")
-  checkedOut   Boolean  @default(false) @map("checked_out")
-  checkInTime  String?  @map("check_in_time")
-  checkOutTime String?  @map("check_out_time")
-  ipAddress    String?  @map("ip_address")
+  checkedIn    Boolean @default(false) @map("checked_in")
+  checkedOut   Boolean @default(false) @map("checked_out")
+  checkInTime  String? @map("check_in_time")
+  checkOutTime String? @map("check_out_time")
+  ipAddress    String? @map("ip_address")
   notes        String?
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Advanced punch metadata. All nullable so existing rows remain valid.
+  // checkInAt / checkOutAt are the authoritative timestamps; the legacy
+  // checkInTime / checkOutTime strings are kept in sync by the punch
+  // service so existing payroll readers keep working without changes.
+  organizationId   String?   @map("organization_id")
+  checkInAt        DateTime? @map("check_in_at")
+  checkOutAt       DateTime? @map("check_out_at")
+  checkInLat       Float?    @map("check_in_lat")
+  checkInLng       Float?    @map("check_in_lng")
+  checkOutLat      Float?    @map("check_out_lat")
+  checkOutLng      Float?    @map("check_out_lng")
+  checkInIp        String?   @map("check_in_ip")
+  checkOutIp       String?   @map("check_out_ip")
+  checkInDevice    String?   @map("check_in_device")
+  checkOutDevice   String?   @map("check_out_device")
+  checkInSource    String?   @map("check_in_source") // WEB | MOBILE | BIOMETRIC | ADMIN
+  checkOutSource   String?   @map("check_out_source")
+  breakMinutes     Int       @default(0) @map("break_minutes")
+  lateMinutes      Int       @default(0) @map("late_minutes")
+  earlyOutMinutes  Int       @default(0) @map("early_out_minutes")
+  overtimeMinutes  Int       @default(0) @map("overtime_minutes")
+  isAutoCheckedOut Boolean   @default(false) @map("is_auto_checked_out")
+  status           String? // PRESENT | HALF | ABSENT | ON_LEAVE | HOLIDAY | WEEKLY_OFF | REGULARIZED
+  idempotencyKey   String?   @unique @map("idempotency_key")
+
+  // Face-capture proof — public URLs to the photo captured at each punch.
+  // Uploaded via /api/attendance/photo through the existing Hostinger
+  // uploader. Nullable because face capture is OFF by default and OPTIONAL
+  // mode lets users skip on devices without a camera.
+  checkInPhoto  String? @map("check_in_photo")
+  checkOutPhoto String? @map("check_out_photo")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([userId, date])
   @@index([userId])
   @@index([date])
   @@index([checkedIn])
   @@index([checkedOut])
+  @@index([organizationId])
+  @@index([checkInAt])
   @@map("attendance_records")
+}
+
+// One row per organization. Drives shift defaults, geofence, IP whitelist,
+// auto-checkout, and the working-day calendar that payroll consumes via
+// payroll-store.ts:getPayrollPolicy. Missing row → safe defaults.
+model AttendanceConfiguration {
+  id             String  @id @default(cuid())
+  organizationId String? @unique @map("organization_id")
+
+  // Shift defaults (HH:mm in the org's local timezone).
+  defaultShiftStart  String @default("09:00") @map("default_shift_start")
+  defaultShiftEnd    String @default("18:00") @map("default_shift_end")
+  graceMinutes       Int    @default(15) @map("grace_minutes")
+  halfDayMinHours    Float  @default(4) @map("half_day_min_hours")
+  fullDayMinHours    Float  @default(8) @map("full_day_min_hours")
+  overtimeAfterHours Float  @default(9) @map("overtime_after_hours")
+  breakMinutes       Int    @default(60) @map("break_minutes")
+
+  // Working week: 0 = Sun … 6 = Sat. Listed days are WEEKLY-OFF.
+  weeklyOffDays Json @default("[0]") @map("weekly_off_days")
+
+  // Auto-checkout (HH:mm). When the nightly worker fires, anyone still
+  // checked in is auto-checked-out at this wall time. Empty = disabled.
+  autoCheckoutAt String? @map("auto_checkout_at")
+
+  // Geofence enforcement.
+  //   OFF      = capture geo only, never block.
+  //   CAPTURE  = capture and warn, but allow.
+  //   ENFORCE  = reject punches outside the fence.
+  geofenceMode    String @default("OFF") @map("geofence_mode")
+  geofenceLat     Float? @map("geofence_lat")
+  geofenceLng     Float? @map("geofence_lng")
+  geofenceRadiusM Int?   @map("geofence_radius_m")
+
+  // IP whitelist. Empty array = no restriction. Any non-empty list means
+  // punches from outside these CIDRs are rejected.
+  ipWhitelist Json @default("[]") @map("ip_whitelist")
+
+  // Pay-link: which payable-day basis applies. Mirrors PayrollPolicy so the
+  // payroll engine can read this single config instead of re-deriving.
+  payableBasis String @default("monthDays") @map("payable_basis") // monthDays | fixed26 | fixed30
+
+  // Module name to fire workflow rules under on each successful punch.
+  // Empty/null disables workflow integration for attendance. Default
+  // "Attendance" matches the conventional FormModule name; admins can
+  // change it to "HR" or whatever module hosts their attendance form.
+  workflowModuleName String? @default("Attendance") @map("workflow_module_name")
+
+  // Safety: when true, recordPunch refuses to write for a user whose linked
+  // Employee row is INACTIVE / TERMINATED / RESIGNED. Off by default so a
+  // fresh tenant without Employee rows isn't locked out. Flip on once
+  // Employee data is populated.
+  enforceEmployeeActive Boolean @default(false) @map("enforce_employee_active")
+
+  // Safety: minimum seconds between consecutive punches by the same user.
+  // Set 0 to disable. Idempotent retries (same Idempotency-Key) bypass —
+  // this only catches fresh-key spamming.
+  minPunchGapSeconds Int @default(5) @map("min_punch_gap_seconds")
+
+  // Face capture: OFF disables the camera entirely; OPTIONAL captures when
+  // the device has one but never blocks a punch; REQUIRED gates the punch
+  // on a successful capture. Photos are stored as URLs on the Attendance
+  // row (checkInPhoto / checkOutPhoto).
+  faceCaptureMode String @default("OFF") @map("face_capture_mode") // OFF | OPTIONAL | REQUIRED
+
+  // Hard server-side cap on the uploaded photo size in kilobytes. The
+  // browser already downscales aggressively so 800 KB is generous; raise
+  // for high-resolution kiosks, lower for cheap data plans.
+  facePhotoMaxKb Int @default(800) @map("face_photo_max_kb")
+
+  // The FormModule under which the sidebar should nest the synthetic
+  // Attendance leaf. Mirrors PayrollConfiguration's anchor logic so the
+  // user sees Attendance live inside their HR module. Null = sidebar
+  // omits the link, but the /attendance pages remain reachable directly.
+  attendanceModuleId String? @map("attendance_module_id")
+
+  // Per-punch self-notification: when true, every successful check-in /
+  // check-out creates a Notification row addressed to the user with the
+  // late / overtime breakdown so the bell shows a daily trail.
+  notifyOnPunch Boolean @default(true) @map("notify_on_punch")
+
+  // Roles allowed to approve attendance regularizations + use the manual
+  // punch endpoint, in addition to admins. Stored as a JSON array of
+  // Role.id values. Empty array = admin-only (the historical default).
+  attendanceApproverRoleIds Json @default("[]") @map("attendance_approver_role_ids")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([isActive])
+  @@map("attendance_configurations")
+}
+
+// Regularization requests — the way users (or admins on their behalf) ask
+// to fix a missed / wrong punch on a past day. PENDING rows wait for an
+// admin decision; APPROVED rows have already been applied to the
+// underlying Attendance row by the service layer.
+//
+// User / org / attendance references are intentionally plain Strings (no
+// @relation) to match the prevailing pattern in this schema and to keep
+// the User model untouched.
+model AttendanceRegularization {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  userId         String  @map("user_id") // the user whose attendance is being amended
+  date           String // YYYY-MM-DD
+  attendanceId   String? @map("attendance_id") // null when no row existed for this day yet
+
+  // Snapshot of the row at request time so the reviewer sees what the
+  // requester saw, even if the underlying row changes before they review.
+  currentCheckInAt    DateTime? @map("current_check_in_at")
+  currentCheckOutAt   DateTime? @map("current_check_out_at")
+  requestedCheckInAt  DateTime? @map("requested_check_in_at")
+  requestedCheckOutAt DateTime? @map("requested_check_out_at")
+
+  reason String @db.Text
+  status String @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+
+  requestedById String    @map("requested_by_id") // self-request OR admin acting on behalf
+  reviewedById  String?   @map("reviewed_by_id")
+  reviewedAt    DateTime? @map("reviewed_at")
+  reviewNote    String?   @map("review_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([userId, date])
+  @@index([status])
+  @@index([requestedById])
+  @@map("attendance_regularizations")
 }
 
 model FormulaField {
@@ -1925,34 +2093,34 @@ model FunctionBinding {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Notification {
-  id              String       @id @default(cuid())
-  recipientId     String       @map("recipient_id")
-  recipient       User         @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  organizationId  String       @map("organization_id")
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  recipientId    String       @map("recipient_id")
+  recipient      User         @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   // Display content. Both rendered server-side from the rule's templates so the
   // bell can show them as-is without needing to re-resolve field values.
-  title           String
-  body            String?      @db.Text
+  title String
+  body  String? @db.Text
 
   // Origin metadata — useful for "View record" links and audit trails.
-  ruleId          String?      @map("rule_id")
-  ruleName        String?      @map("rule_name")
-  moduleName      String?      @map("module_name")
-  formId          String?      @map("form_id")
-  recordId        String?      @map("record_id")
-  link            String?      // optional deep link the bell can navigate to
+  ruleId     String? @map("rule_id")
+  ruleName   String? @map("rule_name")
+  moduleName String? @map("module_name")
+  formId     String? @map("form_id")
+  recordId   String? @map("record_id")
+  link       String? // optional deep link the bell can navigate to
 
   // Structured payload — currently `{ fields: [{ label, apiName, value }] }`
   // populated by the System Notification action so the bell's detail popup
   // can render the admin-selected fields as a clean table instead of an
   // appended text blob.
-  data            Json?
+  data Json?
 
-  isRead          Boolean      @default(false) @map("is_read")
-  readAt          DateTime?    @map("read_at")
-  createdAt       DateTime     @default(now()) @map("created_at")
+  isRead    Boolean   @default(false) @map("is_read")
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([recipientId, isRead, createdAt])
   @@index([organizationId, createdAt])
