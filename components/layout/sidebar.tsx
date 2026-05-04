@@ -70,6 +70,7 @@ interface FormModule {
   sort_order?: number;
   module_type?: string;
   children?: FormModule[];
+  forms?: { id: string; name: string; isPublished: boolean }[];
 }
 
 type ViewType =
@@ -271,6 +272,17 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       return;
     }
     const hasChildren = !!module.children?.length;
+    const hasForms = !!module.forms?.length;
+
+    // Modules with no forms are pure containers — the module page would
+    // render an empty record list, so we just toggle expand/collapse to
+    // reveal sub-modules instead. If there are no children either, the
+    // click is a no-op so users aren't dropped onto a dead screen.
+    if (!hasForms) {
+      if (hasChildren) toggleModule(module.id);
+      return;
+    }
+
     const basePath = generatePath(module);
     router.push(`${basePath}/${module.id}`);
     if (hasChildren) toggleModule(module.id);
@@ -349,13 +361,15 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       FormModule & { children: FormModule[] }
     >();
 
-    modules.forEach((m: FormModule) => {
+    const sourceModules = modules as unknown as FormModule[];
+
+    sourceModules.forEach((m) => {
       moduleMap.set(m.id, { ...m, children: m.children ?? [] });
     });
 
     const roots: (FormModule & { children: FormModule[] })[] = [];
 
-    modules.forEach((m: FormModule) => {
+    sourceModules.forEach((m) => {
       const node = moduleMap.get(m.id)!;
       if (m.parentId && moduleMap.has(m.parentId)) {
         moduleMap.get(m.parentId)!.children.push(node);

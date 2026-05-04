@@ -1,0 +1,1 @@
+- [ERP project state and audit](project_erp_state.md) — what's real vs toy vs missing; full audit at ERP_AUDIT_REPORT.md (2026-04-30, 27/100)
