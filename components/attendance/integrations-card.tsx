@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +20,11 @@ import {
   Sparkles,
   RefreshCcw,
   Link as LinkIcon,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 type Slot = "employee" | "checkIn" | "checkOut" | "leave" | "holiday";
 
@@ -116,6 +113,11 @@ export function IntegrationsCard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Collapse the whole card once both primary forms are linked. Admins
+  // rarely need to revisit this section after the initial setup, so we
+  // hide the bulk and show a compact one-liner. Click the header to
+  // expand again.
+  const [isExpanded, setIsExpanded] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,6 +138,13 @@ export function IntegrationsCard() {
       setShowAdvanced(
         !!(json.bindings.employee || json.bindings.checkIn || json.bindings.checkOut),
       );
+      // Auto-collapse the whole card once both primary bindings are set —
+      // unless the admin explicitly toggled it during this session.
+      setIsExpanded((prev) => {
+        if (prev !== null) return prev;
+        const bothLinked = !!json.bindings.holiday && !!json.bindings.leave;
+        return !bothLinked;
+      });
     } catch (e: any) {
       setError(e?.message ?? "Failed to load");
     } finally {
@@ -212,7 +221,7 @@ export function IntegrationsCard() {
   if (loading && !data) {
     return (
       <Card>
-        <CardContent className="flex items-center gap-2 py-12 justify-center text-sm text-gray-500">
+        <CardContent className="flex items-center gap-2 py-6 justify-center text-xs text-gray-500">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading linked forms…
         </CardContent>
@@ -222,7 +231,7 @@ export function IntegrationsCard() {
   if (error) {
     return (
       <Card>
-        <CardContent className="py-6 flex items-start gap-2 text-sm text-red-800">
+        <CardContent className="p-3.5 flex items-start gap-2 text-xs text-red-800">
           <AlertTriangle className="h-4 w-4 mt-0.5" />
           <div>
             <div className="font-semibold">Could not load linked forms</div>
@@ -245,9 +254,9 @@ export function IntegrationsCard() {
     const broken = !!data.broken[slot];
 
     return (
-      <div key={slot} className="space-y-1.5">
+      <div key={slot} className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <Label className="text-sm font-medium text-gray-700">
+          <Label className="text-xs font-medium text-gray-700">
             {meta.label}
           </Label>
           <div className="flex items-center gap-1.5">
@@ -326,20 +335,36 @@ export function IntegrationsCard() {
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <LinkIcon className="h-4 w-4 text-emerald-600" />
-          Linked forms (Attendance ↔ Payroll)
-        </CardTitle>
-        <CardDescription>
-          Pick the forms that already hold your holiday list and leave
-          applications. The same selections feed both the attendance widget
-          (Holiday / On-leave banner) and the payroll engine (paid days,
-          deductions). One source of truth — change here, both update.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
+    <Card className="rounded-lg border-gray-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((v) => !v)}
+        aria-expanded={!!isExpanded}
+        className={cn(
+          "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors",
+          isExpanded
+            ? "bg-gray-50/70 border-b border-gray-200/80"
+            : "hover:bg-gray-50/70",
+        )}
+      >
+        {isExpanded ? (
+          <ChevronDown className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+        )}
+        <LinkIcon className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+        <span className="text-[11px] uppercase tracking-[0.04em] font-semibold text-gray-700 flex-1 truncate">
+          Linked forms{" "}
+          <span className="hidden sm:inline text-gray-400 font-normal normal-case tracking-normal">
+            (Attendance ↔ Payroll)
+          </span>
+        </span>
+        {!isExpanded && (
+          <CompactStatus draft={draft} diagnostics={data.diagnostics} />
+        )}
+      </button>
+      {!isExpanded ? null : (
+      <CardContent className="p-3 space-y-2.5">
         {/* Diagnostic strip */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <DiagnosticTile
@@ -377,21 +402,26 @@ export function IntegrationsCard() {
         </div>
 
         {hasAnySuggestion && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
             <div className="flex items-start gap-1.5 text-blue-900">
-              <Sparkles className="h-3.5 w-3.5 mt-0.5" />
+              <Sparkles className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
               <span>
                 We found forms whose names match common holiday / leave
                 conventions. Apply the suggestions or pick manually below.
               </span>
             </div>
-            <Button size="sm" variant="outline" onClick={acceptSuggestions}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={acceptSuggestions}
+              className="self-start sm:self-auto whitespace-nowrap"
+            >
               Apply suggestions
             </Button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {renderPicker("holiday")}
           {renderPicker("leave")}
         </div>
@@ -399,7 +429,7 @@ export function IntegrationsCard() {
         <div>
           <button
             type="button"
-            className="text-xs text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
+            className="text-[11px] text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
             onClick={() => setShowAdvanced((v) => !v)}
           >
             {showAdvanced ? "Hide" : "Show"} payroll-only bindings (employee /
@@ -408,25 +438,27 @@ export function IntegrationsCard() {
         </div>
 
         {showAdvanced && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1.5 border-t border-gray-100">
             {renderPicker("employee")}
             {renderPicker("checkIn")}
             {renderPicker("checkOut")}
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-1.5 sm:gap-2 pt-1.5">
           <Button
             type="button"
             variant="outline"
+            size="sm"
             onClick={load}
             disabled={loading || saving}
           >
-            <RefreshCcw className="h-4 w-4 mr-1.5" />
+            <RefreshCcw className="h-3.5 w-3.5 mr-1.5" />
             Refresh
           </Button>
           <Button
             type="button"
+            size="sm"
             onClick={save}
             disabled={!isDirty || saving}
           >
@@ -435,11 +467,41 @@ export function IntegrationsCard() {
             ) : (
               <Save className="h-4 w-4 mr-1.5" />
             )}
-            Save linked forms
+            {saving ? "Saving…" : "Save linked forms"}
           </Button>
         </div>
       </CardContent>
+      )}
     </Card>
+  );
+}
+
+// Compact status pill shown when the card is collapsed. Tells the admin at
+// a glance whether the integration is configured + the live counts, so they
+// don't need to expand the card just to confirm it's working.
+function CompactStatus({
+  draft,
+  diagnostics,
+}: {
+  draft: Bindings;
+  diagnostics: Diagnostics;
+}) {
+  const both = !!draft.holiday && !!draft.leave;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        both
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+          : "border-amber-200 bg-amber-50 text-amber-800",
+      )}
+    >
+      <CheckCircle2 className="h-2.5 w-2.5" />
+      {both ? "Linked" : "Setup needed"}
+      <span className="text-gray-500 font-normal">
+        · {diagnostics.holidaysThisMonth}h · {diagnostics.leavesThisMonth}l
+      </span>
+    </span>
   );
 }
 
@@ -457,15 +519,15 @@ function DiagnosticTile({
   return (
     <div
       className={[
-        "rounded-md border px-3 py-2",
+        "rounded-md border px-2.5 py-1.5",
         ok ? "border-gray-200 bg-white" : "border-amber-200 bg-amber-50",
       ].join(" ")}
     >
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-gray-500">
+      <div className="text-base font-semibold tabular-nums leading-tight">{value}</div>
+      <div className="text-[9px] uppercase tracking-wide text-gray-500 mt-0.5">
         {label}
       </div>
-      <div className="text-[11px] text-gray-600 mt-1">{note}</div>
+      <div className="text-[10px] text-gray-600 mt-0.5 leading-snug">{note}</div>
     </div>
   );
 }

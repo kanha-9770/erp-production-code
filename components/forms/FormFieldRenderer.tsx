@@ -800,10 +800,18 @@ const FormulaCalculator: React.FC<FormulaCalculatorProps> = ({ form, formData, s
     return mapping;
   }, [form, formData]); // ← depends on formData → re-computes when data changes
 
-  // This runs immediately whenever formData changes
-  useMemo(() => {
+  // Recompute every formula field whenever input data, the form schema,
+  // or the formula list changes. Was previously a useMemo (anti-pattern —
+  // side effects during render are not guaranteed to run, especially in
+  // React 18 strict mode), causing formulas to silently stop updating in
+  // some scenarios. useEffect is the correct primitive for this.
+  useEffect(() => {
     if (!form || formulaFields.length === 0) {
-      setFormulaValues({});
+      // Only clear when we actually have something to clear; avoids an
+      // unnecessary state churn that would re-trigger every effect downstream.
+      setFormulaValues((prev) =>
+        Object.keys(prev).length === 0 ? prev : {},
+      );
       return;
     }
 
@@ -854,7 +862,7 @@ const FormulaCalculator: React.FC<FormulaCalculatorProps> = ({ form, formData, s
     });
 
     setFormulaValues(newFormulaValues);
-  }, [formulaFields, fieldLabelToValue, form, setFormulaValues]); // ← key dependencies
+  }, [formulaFields, fieldLabelToValue, form, setFormulaValues]);
 
   return null;
 };

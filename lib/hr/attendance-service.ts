@@ -81,6 +81,9 @@ export interface AttendanceStatus {
   isWeeklyOff: boolean;
   isOnLeave: boolean;
   leaveType: string | null;
+  // Half-day leaves don't fully block punching — the user can still check
+  // in for the other half. Widget reads this to leave the CTA active.
+  isHalfDayLeave: boolean;
   isAutoCheckedOut: boolean;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
@@ -223,18 +226,20 @@ async function getLeavesCached(
   }
 }
 
-// Find an approved leave covering `date` for this user. We match by user's
-// email since the leave form's identity column is email or empId, but the
-// User row we have here only carries email reliably.
+// Find an approved leave covering `date` for this user. Matches against
+// every known identity key the user has — email plus employee id — so a
+// leave filed by Employee ID (with no email column) still triggers the
+// ON_LEAVE banner in the widget. matchKey on a SampleLeave is one of:
+//   - "email:user@example.com"
+//   - "empId:emp123"
 function findLeaveForToday(
   leaves: SampleLeave[],
-  userEmail: string | null,
+  userMatchKeys: Set<string>,
   date: string,
 ): SampleLeave | null {
-  if (!userEmail) return null;
-  const normalized = userEmail.toLowerCase();
+  if (userMatchKeys.size === 0) return null;
   for (const l of leaves) {
-    if (l.email.toLowerCase() !== normalized) continue;
+    if (!userMatchKeys.has(l.matchKey)) continue;
     if (l.startDate <= date && date <= l.endDate) return l;
   }
   return null;
@@ -299,14 +304,22 @@ export async function getStatus(
   const date = todayKey(now);
   const month = date.slice(0, 7);
 
-  // Look up the user's email once — used for matching leave records and
-  // (later) for tenant-scoped team views. Falls back gracefully if the row
-  // is gone for some reason.
+  // Look up the user + linked employee once — both feed leave-matching:
+  // a leave filed against employee id (no email column) still has to
+  // trigger the ON_LEAVE banner for that user.
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { email: true },
+    select: { email: true, employee: { select: { id: true } } },
   });
   const userEmail = user?.email ?? null;
+  const employeeId = user?.employee?.id ?? null;
+
+  // Build the set of match-keys the leave reader uses:
+  //   - email-keyed leaves match "email:<lowercased email>"
+  //   - empId-keyed leaves match "empId:<lowercased empId>"
+  const userMatchKeys = new Set<string>();
+  if (userEmail) userMatchKeys.add(`email:${userEmail.toLowerCase()}`);
+  if (employeeId) userMatchKeys.add(`empId:${employeeId.toLowerCase()}`);
 
   let row = await prisma.attendance.findFirst({
     where: { userId, date },
@@ -317,6 +330,7 @@ export async function getStatus(
   let holidayName: string | null = null;
   let isOnLeave = false;
   let leaveType: string | null = null;
+  let isHalfDayLeave = false;
   if (organizationId) {
     const [holidays, leaves] = await Promise.all([
       getHolidaysCached(organizationId, month),
@@ -327,10 +341,11 @@ export async function getStatus(
       isHoliday = true;
       holidayName = hit.name || null;
     }
-    const leave = findLeaveForToday(leaves, userEmail, date);
+    const leave = findLeaveForToday(leaves, userMatchKeys, date);
     if (leave) {
       isOnLeave = true;
       leaveType = leave.leaveType || null;
+      isHalfDayLeave = !!leave.isHalfDay;
     }
   }
 
@@ -404,8 +419,13 @@ export async function getStatus(
   // Off-days don't block check-in entirely — admins / rotating staff still
   // need to clock in on holidays. We just won't *prompt* via the "Check In"
   // CTA in those states; the popover still allows a manual punch.
+  // Half-day leaves are special: the user still works the other half, so
+  // the CTA stays active even though the banner shows "On leave".
   const canCheckIn =
-    !checkedIn && !isHoliday && !isOnLeave && !isWeeklyOff;
+    !checkedIn &&
+    !isHoliday &&
+    !isWeeklyOff &&
+    (!isOnLeave || isHalfDayLeave);
 
   return {
     state,
@@ -430,6 +450,7 @@ export async function getStatus(
     isWeeklyOff,
     isOnLeave,
     leaveType,
+    isHalfDayLeave,
     isAutoCheckedOut: !!(row as any)?.isAutoCheckedOut,
     checkInPhoto: (row as any)?.checkInPhoto ?? null,
     checkOutPhoto: (row as any)?.checkOutPhoto ?? null,

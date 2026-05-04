@@ -54,6 +54,7 @@ interface AttendanceStatusPayload {
   isWeeklyOff: boolean;
   isOnLeave: boolean;
   leaveType: string | null;
+  isHalfDayLeave: boolean;
   isAutoCheckedOut: boolean;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
@@ -798,6 +799,11 @@ function headlineForState(status: AttendanceStatusPayload) {
         ? `Holiday: ${status.holidayName}`
         : "Holiday today";
     case "ON_LEAVE":
+      if (status.isHalfDayLeave) {
+        return status.leaveType
+          ? `Half-day leave (${status.leaveType})`
+          : "On half-day leave — you can still check in";
+      }
       return status.leaveType
         ? `On leave (${status.leaveType})`
         : "On approved leave";
