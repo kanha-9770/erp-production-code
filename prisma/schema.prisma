@@ -2287,4 +2287,3 @@ model TrashRetentionSetting {
 
   @@map("trash_retention_settings")
 }
-
