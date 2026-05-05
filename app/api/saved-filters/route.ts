@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 /**
  * GET /api/saved-filters?moduleId=xxx
@@ -201,13 +202,17 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    await prisma.savedFilter.delete({ where: { id } })
+    await moveToTrash("SavedFilter", id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DELETE /api/saved-filters]", error)
     return NextResponse.json(
-      { success: false, error: "Failed to delete saved filter" },
+      { success: false, error: error?.message || "Failed to delete saved filter" },
       { status: 500 }
     )
   }

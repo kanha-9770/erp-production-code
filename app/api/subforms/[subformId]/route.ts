@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 
 export async function GET(
   request: NextRequest,
@@ -141,59 +143,25 @@ export async function DELETE(
 ) {
   try {
     const { subformId } = params;
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
 
-    const existingSubform = await prisma.subform.findUnique({
-      where: { id: subformId },
-      include: {
-        fields: true,
-        childSubforms: {
-          include: {
-            fields: true,
-            childSubforms: {
-              include: {
-                fields: true,
-                childSubforms: { include: { fields: true, childSubforms: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-
+    const existingSubform = await prisma.subform.findUnique({ where: { id: subformId } });
     if (!existingSubform) {
-      console.error("[Subform API DELETE] Subform not found:", subformId);
-      return NextResponse.json(
-        { success: false, error: "Subform not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: "Subform not found" }, { status: 404 });
     }
 
-    const collectIds = (subform: any): { subformIds: string[], fieldIds: string[] } => {
-      const subformIds = [subform.id];
-      const fieldIds = subform.fields.map((f: any) => f.id);
-
-      for (const child of subform.childSubforms || []) {
-        const childIds = collectIds(child);
-        subformIds.push(...childIds.subformIds);
-        fieldIds.push(...childIds.fieldIds);
-      }
-
-      return { subformIds, fieldIds };
-    };
-
-    const { subformIds, fieldIds } = collectIds(existingSubform);
-
-    if (fieldIds.length > 0) {
-      await prisma.formField.deleteMany({ where: { id: { in: fieldIds } } });
-    }
-
-    await prisma.subform.deleteMany({ where: { id: { in: subformIds } } });
+    await moveToTrash("Subform", subformId, {
+      userId: user.id,
+      userName: user.email,
+      organizationId: user.organizationId,
+    });
 
     return NextResponse.json({
       success: true,
-      message: "Subform and all nested subforms/fields deleted successfully",
-      deletedSubformIds: subformIds,
-      deletedFieldIds: fieldIds,
+      message: "Subform moved to recycle bin",
     });
   } catch (error: any) {
     console.error("[Subform API DELETE] Error:", error);

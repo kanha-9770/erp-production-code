@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 // Recursively collect ALL fields from a form — sections, subforms, and any
 // nested child subforms. Each field is annotated with its origin (subform name
@@ -175,7 +177,13 @@ export async function PUT(request: NextRequest, { params }: { params: { formId: 
 }
 export async function DELETE(request: NextRequest, { params }: { params: { formId: string } }) {
   try {
-    await DatabaseService.deleteForm(params.formId)
+    const user = await getAuthenticatedUser(request)
+    if (!user) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
+    await moveToTrash("Form", params.formId, {
+      userId: user.id,
+      userName: user.email,
+      organizationId: user.organizationId,
+    })
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error("API: Error deleting form:", error)

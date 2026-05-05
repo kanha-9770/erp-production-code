@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database/database-service";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
@@ -128,16 +129,20 @@ export const FormBuilderHandlers = {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
       const { ipAddress, userAgent } = getRequestMeta(request);
-      await DatabaseService.deleteModule(moduleId);
+      await moveToTrash("FormModule", moduleId, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
+      });
 
       await logAudit({
         userId: user.id, organizationId: user.organizationId, performedBy: user.email,
-        action: "Deleted", module: "Form Modules",
-        details: `Deleted module "${mod.name}"`,
+        action: "Moved to Trash", module: "Form Modules",
+        details: `Moved module "${mod.name}" to recycle bin`,
         ipAddress, userAgent, recordId: moduleId, recordName: mod.name,
       });
 
-      return NextResponse.json({ success: true, message: "Module deleted successfully" });
+      return NextResponse.json({ success: true, message: "Module moved to recycle bin" });
     }, "deleteModule");
   },
 
@@ -190,11 +195,15 @@ export const FormBuilderHandlers = {
         return NextResponse.json({ error: "Module not found" }, { status: 404 });
 
       const { ipAddress, userAgent } = getRequestMeta(request);
-      await DatabaseService.deleteModule(moduleId);
+      await moveToTrash("FormModule", moduleId, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
+      });
 
       await logAudit({
         userId: user.id, organizationId: user.organizationId, performedBy: user.email,
-        action: "Deleted", details: `Deleted module "${module.name}"`,
+        action: "Moved to Trash", details: `Moved module "${module.name}" to recycle bin`,
         ipAddress, userAgent, recordId: moduleId, recordName: module.name,
       });
 
@@ -226,9 +235,14 @@ export const FormBuilderHandlers = {
   },
 
   // DELETE /api/forms/[formId]
-  async deleteForm(_request: NextRequest, formId: string): Promise<NextResponse> {
+  async deleteForm(request: NextRequest, formId: string): Promise<NextResponse> {
     return handle(async () => {
-      await DatabaseService.deleteForm(formId);
+      const user = await requireAuth(request);
+      await moveToTrash("Form", formId, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "deleteForm");
   },
@@ -265,10 +279,15 @@ export const FormBuilderHandlers = {
   },
 
   // DELETE /api/sections/[sectionId]
-  async deleteSection(_request: NextRequest, sectionId: string): Promise<NextResponse> {
+  async deleteSection(request: NextRequest, sectionId: string): Promise<NextResponse> {
     return handle(async () => {
-      await DatabaseService.deleteSectionWithCleanup(sectionId);
-      return NextResponse.json({ success: true, message: "Section and associated data deleted successfully" });
+      const user = await requireAuth(request);
+      await moveToTrash("FormSection", sectionId, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
+      });
+      return NextResponse.json({ success: true, message: "Section moved to recycle bin" });
     }, "deleteSection");
   },
 
@@ -314,9 +333,14 @@ export const FormBuilderHandlers = {
   },
 
   // DELETE /api/fields/[fieldId]
-  async deleteField(_request: NextRequest, fieldId: string): Promise<NextResponse> {
+  async deleteField(request: NextRequest, fieldId: string): Promise<NextResponse> {
     return handle(async () => {
-      await DatabaseService.deleteField(fieldId);
+      const user = await requireAuth(request);
+      await moveToTrash("FormField", fieldId, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "deleteField");
   },

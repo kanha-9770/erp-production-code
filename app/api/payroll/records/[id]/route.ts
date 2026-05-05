@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { getEmployeesFromDB } from "@/lib/utils/payroll-store";
+import { moveToTrash } from "@/lib/trash";
 
 // Confirm that an employeeId belongs to the caller's org. PayrollRecord has
 // no organization_id column, so we fall back to checking the org's employee
@@ -178,7 +179,9 @@ export async function DELETE(
       );
     }
 
-    await prisma.payrollRecord.delete({
+    // The trash helper keys off the primary `id`, so we look up the row's
+    // cuid first via the composite (employeeId, month, year) unique key.
+    const record = await prisma.payrollRecord.findUnique({
       where: {
         employeeId_month_year: {
           employeeId,
@@ -186,11 +189,24 @@ export async function DELETE(
           year: Number.parseInt(year),
         },
       },
+      select: { id: true },
+    });
+    if (!record) {
+      return NextResponse.json(
+        { success: false, error: "Payroll record not found" },
+        { status: 404 }
+      );
+    }
+
+    await moveToTrash("PayrollRecord", record.id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
     });
 
     return NextResponse.json({
       success: true,
-      message: "Payroll record deleted successfully",
+      message: "Payroll record moved to recycle bin",
     });
   } catch (error) {
     console.error("[payroll] records[id] DELETE error:", error);

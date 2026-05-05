@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 const VALID_EVENTS = new Set([
   "onFieldChange",
@@ -110,7 +111,11 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ success: false, error: "Binding not found" }, { status: 404 })
     }
 
-    await (prisma as any).functionBinding.delete({ where: { id: params.bindingId } })
+    await moveToTrash("FunctionBinding", params.bindingId, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    })
 
     // Recompute the function's `associated` flag — false if no bindings remain.
     const remaining = await (prisma as any).functionBinding.count({

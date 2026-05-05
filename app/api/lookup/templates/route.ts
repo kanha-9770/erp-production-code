@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 /**
  * GET /api/lookup/templates
@@ -131,13 +132,17 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    await prisma.lookupTemplate.delete({ where: { id } })
+    await moveToTrash("LookupTemplate", id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DELETE /api/lookup/templates]", error)
     return NextResponse.json(
-      { success: false, error: "Failed to delete template" },
+      { success: false, error: error?.message || "Failed to delete template" },
       { status: 500 }
     )
   }

@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authorizeOrgAdmin } from "@/lib/tenant";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 
 export async function GET(
   request: NextRequest,
@@ -185,37 +187,30 @@ export async function DELETE(
       );
     }
 
-    // 3. Perform recursive delete
+    // 3. Perform recursive delete via trash. Each unit becomes its own trash
+    // entry (children first so the parent FK still resolves at snapshot time).
+    const authUser = await getAuthenticatedUser(request);
     let deletedCount = 0;
 
-    const deleteUnitRecursively = async (
-      currentId: string,
-      depth = 0
-    ): Promise<void> => {
-      // Get children
+    const deleteUnitRecursively = async (currentId: string): Promise<void> => {
       const children = await prisma.organizationUnit.findMany({
         where: { parentId: currentId },
         select: { id: true },
       });
-
-      // Delete children first (depth-first)
       for (const child of children) {
-        await deleteUnitRecursively(child.id, depth + 1);
+        await deleteUnitRecursively(child.id);
       }
 
-      // Clean up relations
-      await prisma.unitRoleAssignment.deleteMany({
-        where: { unitId: currentId },
-      });
-      await prisma.userUnitAssignment.deleteMany({
-        where: { unitId: currentId },
-      });
+      // Drop dependent rows first to clear FK constraints. Restoring a unit
+      // brings the unit back, but role/user assignments need to be reapplied.
+      await prisma.unitRoleAssignment.deleteMany({ where: { unitId: currentId } });
+      await prisma.userUnitAssignment.deleteMany({ where: { unitId: currentId } });
 
-      // Delete the unit itself
-      await prisma.organizationUnit.delete({
-        where: { id: currentId },
+      await moveToTrash("OrganizationUnit", currentId, {
+        userId: authUser?.id ?? null,
+        userName: authUser?.email ?? null,
+        organizationId,
       });
-
       deletedCount++;
     };
 
@@ -223,7 +218,7 @@ export async function DELETE(
 
     return NextResponse.json({
       success: true,
-      message: "Unit and all descendants deleted successfully",
+      message: "Unit and all descendants moved to recycle bin",
       deletedCount,
     });
   } catch (error: any) {

@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server"
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma"
+import { moveToTrash } from "@/lib/trash"
 const extractValues = (staticData: any) => {
   if (!Array.isArray(staticData)) return []
   return staticData.map((item: any) => ({
@@ -464,12 +465,14 @@ export async function DELETE(req: NextRequest) {
     if (!await hasAccessToModule(userId, organizationId, lookup.sourceForm.module.id, isAdmin)) {
       return NextResponse.json({ error: "No access to this lookup's module" }, { status: 403 })
     }
-    await prisma.lookupSource.delete({
-      where: { id },
+    await moveToTrash("LookupSource", id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId,
     })
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Delete master data error:", error)
-    return NextResponse.json({ error: "Failed to delete" }, { status: 500 })
+    return NextResponse.json({ error: error?.message || "Failed to delete" }, { status: 500 })
   }
 }

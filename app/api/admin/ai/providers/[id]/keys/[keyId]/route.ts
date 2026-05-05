@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-helpers";
 import { invalidateProvider } from "@/lib/ai/key-rotator";
 import { preflight } from "@/lib/ai/preflight";
+import { moveToTrash } from "@/lib/trash";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +92,11 @@ export async function DELETE(
     const g = await guard(request, params.id, params.keyId);
     if ("error" in g) return g.error;
 
-    await prisma.aIProviderKey.delete({ where: { id: params.keyId } });
+    await moveToTrash("AIProviderKey", params.keyId, {
+      userId: g.user.id,
+      userName: g.user.email,
+      organizationId: g.user.organizationId,
+    });
     invalidateProvider(params.id);
     return apiSuccess({ id: params.keyId, deleted: true });
   } catch (err) {

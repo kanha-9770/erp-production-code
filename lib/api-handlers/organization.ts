@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { DatabaseRoles } from "@/lib/database/DatabaseRoles";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
@@ -80,8 +81,9 @@ export const OrganizationHandlers = {
   // ─────────────────────────────────────────────────────────────────────────
 
   // DELETE /api/roles/[id]  – cascade-deletes role and all descendants
-  async deleteRole(_request: NextRequest, roleId: string): Promise<NextResponse> {
+  async deleteRole(request: NextRequest, roleId: string): Promise<NextResponse> {
     return handle(async () => {
+      const user = await requireAuth(request);
       const role = await prisma.role.findUnique({
         where: { id: roleId },
         select: { id: true, name: true, organizationId: true, isAdmin: true },
@@ -93,22 +95,33 @@ export const OrganizationHandlers = {
       if (role.isAdmin)
         return NextResponse.json({ success: false, error: "Admin roles are protected and cannot be deleted" }, { status: 403 });
 
-      const result = await prisma.$transaction(async (tx) => {
-        const allRoleIds = await collectDescendants(tx, roleId);
-        if (allRoleIds.length === 0) throw new Error("No roles found to delete");
+      // Walk descendants first, then snapshot each role into TrashBin (leaves
+      // first so each snapshot's parentId still resolves) and hard-delete.
+      // Permission/assignment rows are NOT snapshotted — restoring a role
+      // brings the role back, but admins must reassign users and reapply
+      // permissions.
+      const allRoleIds = await prisma.$transaction((tx) => collectDescendants(tx, roleId));
+      if (allRoleIds.length === 0) throw new Error("No roles found to delete");
 
-        await tx.rolePermission.deleteMany({ where: { roleId: { in: allRoleIds } } });
-        await tx.unitRoleAssignment.deleteMany({ where: { roleId: { in: allRoleIds } } });
-        await tx.userUnitAssignment.deleteMany({ where: { roleId: { in: allRoleIds } } });
-        await tx.role.deleteMany({ where: { id: { in: allRoleIds } } });
+      // Drop dependent rows first to avoid FK violations during snapshot delete.
+      await prisma.rolePermission.deleteMany({ where: { roleId: { in: allRoleIds } } });
+      await prisma.unitRoleAssignment.deleteMany({ where: { roleId: { in: allRoleIds } } });
+      await prisma.userUnitAssignment.deleteMany({ where: { roleId: { in: allRoleIds } } });
 
-        return { deletedCount: allRoleIds.length };
-      });
+      // Order leaves-first by reversing depth-first traversal. collectDescendants
+      // returns parents before children, so reversing puts leaves at the front.
+      for (const id of [...allRoleIds].reverse()) {
+        await moveToTrash("Role", id, {
+          userId: user.id,
+          userName: user.email,
+          organizationId: user.organizationId,
+        });
+      }
 
       return NextResponse.json({
         success: true,
-        message: "Role and all descendants deleted successfully",
-        deletedCount: result.deletedCount,
+        message: "Role and all descendants moved to recycle bin",
+        deletedCount: allRoleIds.length,
       });
     }, "deleteRole").catch((e: any) => {
       // Map Prisma FK / not-found errors to clean HTTP responses

@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 export async function GET(
   request: NextRequest,
@@ -118,11 +120,16 @@ export async function DELETE(
       )
     }
 
-    await DatabaseService.deleteFormRecord(recordId)
+    const user = await getAuthenticatedUser(request)
+    await moveToTrash("FormRecord", recordId, {
+      userId: user?.id ?? null,
+      userName: user?.email ?? null,
+      organizationId: user?.organizationId ?? null,
+    })
 
     return NextResponse.json({
       success: true,
-      message: "Record deleted successfully",
+      message: "Record moved to recycle bin",
     })
   } catch (error: any) {
     return NextResponse.json(

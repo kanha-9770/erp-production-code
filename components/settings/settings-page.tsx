@@ -106,6 +106,7 @@ const settingsData: SettingCategory[] = [
     items: [
       { name: "Import", href: "/settings/import" },
       { name: "Export", href: "/settings/export" },
+      { name: "Recycle Bin", href: "/settings/trash" },
     ],
   },
   {
