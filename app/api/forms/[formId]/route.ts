@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
+import { moveToTrash } from "@/lib/trash";
 
 /**
  * Collect every fieldId in the form (sections + nested subforms). Used to
@@ -335,7 +336,15 @@ export async function DELETE(
   { params }: { params: { formId: string } }
 ) {
   try {
-    await DatabaseService.deleteForm(params.formId);
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+    await moveToTrash("Form", params.formId, {
+      userId: user.id,
+      userName: user.email,
+      organizationId: user.organizationId,
+    });
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("API: Error deleting form:", error);

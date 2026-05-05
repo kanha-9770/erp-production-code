@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { authorizeOrgAdmin } from "@/lib/tenant"
+import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 export async function GET(
   request: NextRequest,
@@ -117,27 +119,41 @@ export async function DELETE(
 ) {
   try {
     const unitId = params.id
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
+    }
 
-    // ✅ Use iterative deletion instead of deep recursion to avoid stack overflows
-    const queue = [unitId]
+    // Iteratively walk the unit subtree (post-order: deepest children first) so
+    // each unit's trash snapshot has no dangling FK to a parent that's already
+    // gone. Each leaf gets its own TrashBin row — restoring a parent does NOT
+    // restore children automatically; they appear as separate restorable items
+    // in the recycle bin.
+    const stack: string[] = [unitId]
+    const order: string[] = []
 
-    while (queue.length > 0) {
-      const currentId = queue.pop()!
+    while (stack.length > 0) {
+      const currentId = stack.pop()!
+      order.push(currentId)
       const children = await prisma.organizationUnit.findMany({
         where: { parentId: currentId },
         select: { id: true },
       })
+      stack.push(...children.map(c => c.id))
+    }
 
-      queue.push(...children.map(c => c.id))
-
-      await prisma.organizationUnit.delete({
-        where: { id: currentId },
+    // Delete in reverse discovery order = leaves first, root last.
+    for (const id of order.reverse()) {
+      await moveToTrash("OrganizationUnit", id, {
+        userId: user.id,
+        userName: user.email,
+        organizationId: user.organizationId,
       })
     }
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting unit:", error)
-    return NextResponse.json({ success: false, error: "Failed to delete unit" }, { status: 500 })
+    return NextResponse.json({ success: false, error: error?.message || "Failed to delete unit" }, { status: 500 })
   }
 }

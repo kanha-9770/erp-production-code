@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { moveToTrash } from "@/lib/trash";
 import bcrypt from "bcryptjs";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -313,9 +314,13 @@ export const UserManagementHandlers = {
       if (!user || user.organizationId !== authUser.organizationId)
         return NextResponse.json({ error: "User not found or not in organization" }, { status: 404 });
 
-      await prisma.user.delete({ where: { id: userId } });
+      await moveToTrash("User", userId, {
+        userId: authUser.id,
+        userName: authUser.email,
+        organizationId: authUser.organizationId,
+      });
 
-      return NextResponse.json({ message: "User deleted successfully" });
+      return NextResponse.json({ message: "User moved to recycle bin" });
     }, "deleteUser");
   },
 

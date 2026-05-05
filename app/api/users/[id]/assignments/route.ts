@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 export const dynamic = 'force-dynamic';
 
@@ -125,10 +126,20 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return NextResponse.json({ error: "Unit ID is required" }, { status: 400 });
     }
 
-    await prisma.userUnitAssignment.delete({
-      where: {
-        userId_unitId: { userId, unitId },
-      },
+    // UserUnitAssignment uses (userId, unitId) as the unique key but also
+    // has its own `id` cuid. Look it up first, then snapshot via the helper
+    // which keys off `id`.
+    const assignment = await prisma.userUnitAssignment.findUnique({
+      where: { userId_unitId: { userId, unitId } },
+      select: { id: true },
+    });
+    if (!assignment) {
+      return NextResponse.json({ success: false, error: "Assignment not found" }, { status: 404 });
+    }
+    await moveToTrash("UserUnitAssignment", assignment.id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: currentOrgId,
     });
 
     return NextResponse.json({ success: true });

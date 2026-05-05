@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 
 export async function GET(request: NextRequest) {
   try {
@@ -156,13 +157,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Rule not found" }, { status: 404 })
     }
 
-    await prisma.routePermission.delete({ where: { id } })
+    await moveToTrash("RoutePermission", id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DELETE /api/route-permissions]", error)
     return NextResponse.json(
-      { success: false, error: "Failed to delete route permission" },
+      { success: false, error: error?.message || "Failed to delete route permission" },
       { status: 500 }
     )
   }

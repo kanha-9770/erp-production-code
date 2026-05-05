@@ -8,6 +8,7 @@ import {
   notFound,
 } from "@/lib/api-helpers";
 import { preflight } from "@/lib/ai/preflight";
+import { moveToTrash } from "@/lib/trash";
 
 export const dynamic = "force-dynamic";
 
@@ -115,7 +116,11 @@ export async function DELETE(
     });
     if (!existing) return notFound("Conversation not found");
 
-    await prisma.chatConversation.delete({ where: { id: params.id } });
+    await moveToTrash("ChatConversation", params.id, {
+      userId: user.id,
+      userName: user.email,
+      organizationId: user.organizationId,
+    });
     return apiSuccess({ id: params.id, deleted: true });
   } catch (err) {
     console.error("[DELETE /api/chat/conversations/:id] error", err);

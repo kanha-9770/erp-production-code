@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
+import { moveToTrash } from '@/lib/trash';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,18 @@ export async function DELETE(
     );
   }
 
-  await (prisma as any).holiday.delete({ where: { id: params.id } });
-  return NextResponse.json({ success: true }, { headers: NO_STORE });
+  try {
+    await moveToTrash('Holiday', params.id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    });
+    return NextResponse.json({ success: true }, { headers: NO_STORE });
+  } catch (err: any) {
+    console.error('[DELETE /api/holidays/[id]]', err);
+    return NextResponse.json(
+      { success: false, error: err?.message || 'Failed to delete holiday' },
+      { status: 500, headers: NO_STORE },
+    );
+  }
 }

@@ -26,6 +26,7 @@ export const routePermissions: RoutePermissionRule[] = [
   { pattern: "/settings/roles", requireAdmin: true },
   { pattern: "/settings/users/**", requireAdmin: true },
   { pattern: "/settings/profiles", requireAdmin: true },
+  { pattern: "/settings/trash", requireAdmin: true },
 
   // Settings routes — require specific permissions
   { pattern: "/settings/audit-log", requiredPermissions: ["VIEW_AUDIT_LOG"] },

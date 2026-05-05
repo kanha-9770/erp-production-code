@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic"
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { moveToTrash } from "@/lib/trash"
 import {
   prepareInstantActionsForWrite,
   redactInstantActionsForRead,
@@ -271,13 +272,17 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    await prisma.workflowRule.delete({ where: { id } })
+    await moveToTrash("WorkflowRule", id, {
+      userId: authUser.id,
+      userName: authUser.email,
+      organizationId: authUser.organizationId,
+    })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DELETE /api/workflow-rules]", error)
     return NextResponse.json(
-      { success: false, error: "Failed to delete workflow rule" },
+      { success: false, error: error?.message || "Failed to delete workflow rule" },
       { status: 500 }
     )
   }

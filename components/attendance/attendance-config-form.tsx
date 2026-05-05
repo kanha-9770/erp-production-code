@@ -413,15 +413,15 @@ export function AttendanceConfigForm() {
   return (
     <form
       onSubmit={onSubmit}
-      className="flex-1 min-h-0 flex flex-col"
+      className="flex flex-col"
     >
       <Tabs
         defaultValue="shift"
-        className="flex-1 min-h-0 flex flex-col w-full"
+        className="flex flex-col w-full"
       >
         {/* Tab bar — pill-segmented look on a soft gray track. Horizontal
             scroll on narrow viewports keeps all four tabs reachable. */}
-        <div className="shrink-0">
+        <div>
           <TabsList className="h-auto p-1 gap-0.5 justify-start overflow-x-auto w-full max-w-full bg-gray-100/70 rounded-lg">
             <TabsTrigger
               value="shift"
@@ -451,7 +451,7 @@ export function AttendanceConfigForm() {
         </div>
 
         {/* ──────────────────────  Shift & policy  ────────────────────── */}
-        <TabsContent value="shift" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 flex-1 min-h-0 overflow-y-auto pr-1 pb-2 focus-visible:outline-none">
+        <TabsContent value="shift" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 focus-visible:outline-none">
           <Section
             title="Shift"
             hint="Late, overtime and half-day are measured against these"
@@ -643,7 +643,7 @@ export function AttendanceConfigForm() {
         </TabsContent>
 
         {/* ──────────────────────  Capture & security  ────────────────────── */}
-        <TabsContent value="capture" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 flex-1 min-h-0 overflow-y-auto pr-1 pb-2 focus-visible:outline-none">
+        <TabsContent value="capture" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 focus-visible:outline-none">
           <Section
             title="Face capture"
             hint="Photo proof per punch"
@@ -821,7 +821,7 @@ export function AttendanceConfigForm() {
         </TabsContent>
 
         {/* ──────────────────────  Approvals  ────────────────────── */}
-        <TabsContent value="approval" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 flex-1 min-h-0 overflow-y-auto pr-1 pb-2 focus-visible:outline-none">
+        <TabsContent value="approval" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 focus-visible:outline-none">
           <Section
             title="Approval roles"
             hint="Admins always approve. Add more roles to delegate."
@@ -897,7 +897,7 @@ export function AttendanceConfigForm() {
         </TabsContent>
 
         {/* ──────────────────────  Module & workflow  ────────────────────── */}
-        <TabsContent value="placement" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 flex-1 min-h-0 overflow-y-auto pr-1 pb-2 focus-visible:outline-none">
+        <TabsContent value="placement" className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 mt-2 focus-visible:outline-none">
           <Section
             title="Sidebar placement"
             hint="Where Attendance appears in the sidebar"
@@ -961,7 +961,7 @@ export function AttendanceConfigForm() {
           changes — clearer signal than a tiny pill. */}
       <div
         className={cn(
-          "shrink-0 mt-2.5 -mx-px px-3 py-2 rounded-lg border bg-white/95",
+          "mt-2.5 -mx-px px-3 py-2 rounded-lg border bg-white/95",
           "flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3",
           isDirty
             ? "border-amber-300 shadow-[0_0_0_1px_rgba(251,191,36,0.2)]"
