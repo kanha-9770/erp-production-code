@@ -515,13 +515,20 @@ export default function PayrollConfigurePage() {
     );
   };
 
+  // Check-In form binding is OPTIONAL — payroll can also read attendance from
+  // the native /attendance widget rows directly. We only require the Employee
+  // form (it's the only place salary lives) and that some salary source is
+  // resolvable (mapped column OR default fallback). If admins DO bind a check-
+  // in form, they should map date + time too (otherwise the form can't be
+  // parsed) — but with no form, the widget covers it without any mapping.
+  const checkInFormFullyMapped =
+    !setup.checkIn.formId ||
+    (!!setup.checkIn.fields.date && !!setup.checkIn.fields.checkInTime);
   const requirementsMet =
     !!setup.employee.formId &&
     (!!setup.employee.fields.salary || !!setup.defaultBaseSalary) &&
     (!!setup.employee.fields.email || !!setup.employee.fields.employeeId) &&
-    !!setup.checkIn.formId &&
-    !!setup.checkIn.fields.date &&
-    !!setup.checkIn.fields.checkInTime;
+    checkInFormFullyMapped;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/30">
@@ -734,16 +741,32 @@ export default function PayrollConfigurePage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <LogIn className="h-5 w-5 text-primary" />
-              2. Check-In Form
+              2. Check-In Form{' '}
+              <Badge variant="outline" className="ml-2 text-xs">
+                Optional
+              </Badge>
             </CardTitle>
             <CardDescription>
-              The form where employees record their daily check-in.
+              <span className="block">
+                Bind a custom form here only if your team records check-ins on a
+                form you built. If you skip this, payroll automatically reads
+                from the built-in <code className="text-xs">/attendance</code>{' '}
+                widget — no setup required.
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
               <LinkedFormDisplay selectedId={setup.checkIn.formId} />
+              {!setup.checkIn.formId && (
+                <p className="mt-2 text-xs text-muted-foreground flex items-start gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                  No form linked — payroll will use the static{' '}
+                  <code className="text-xs">attendance_records</code> table
+                  populated by the attendance widget.
+                </p>
+              )}
             </div>
 
             {setup.checkIn.formId && (
@@ -799,13 +822,23 @@ export default function PayrollConfigurePage() {
               </Badge>
             </CardTitle>
             <CardDescription>
-              Used to compute working hours. If skipped, an 8-hour day is assumed.
+              Used to compute working hours. Skip this and the built-in
+              attendance widget's check-out timestamps cover it; if neither is
+              available, an 8-hour day is assumed.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
               <LinkedFormDisplay selectedId={setup.checkOut.formId} />
+              {!setup.checkOut.formId && (
+                <p className="mt-2 text-xs text-muted-foreground flex items-start gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                  No form linked — payroll uses{' '}
+                  <code className="text-xs">attendance_records.check_out_at</code>{' '}
+                  from the attendance widget if available.
+                </p>
+              )}
             </div>
 
             {setup.checkOut.formId && (
@@ -1066,7 +1099,11 @@ export default function PayrollConfigurePage() {
                     : 'Required mappings missing'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Required: Employee form + Salary + (Email or Employee ID); Check-In form + Date + Check-In Time.
+                  Required: Employee form + Salary (or Default Base Salary) +
+                  (Email or Employee ID). Check-in/check-out forms are
+                  optional — payroll falls back to the{' '}
+                  <code className="text-xs">attendance_records</code> table
+                  populated by the built-in widget.
                 </p>
               </div>
             </div>

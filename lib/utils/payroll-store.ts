@@ -1402,6 +1402,14 @@ export async function getEmployeeFormsStatus(organizationId: string): Promise<{
   hasEmployeeForm: boolean;
   hasCheckInForm: boolean;
   hasCheckOutForm: boolean;
+  /** Native attendance source — `Attendance` table populated by the static
+   *  /attendance widget. When true, payroll can run without a check-in form
+   *  (the widget rows are the source of truth). */
+  hasNativeAttendance: boolean;
+  /** True when payroll has a usable check-in source — either a bound form OR
+   *  native widget rows. Use this for gating, not hasCheckInForm directly. */
+  hasAnyCheckInSource: boolean;
+  nativeAttendanceCount: number;
   hasSavedSetup: boolean;
   employeeFormName?: string;
   checkInFormName?: string;
@@ -1419,7 +1427,15 @@ export async function getEmployeeFormsStatus(organizationId: string): Promise<{
     return f?.name ?? null;
   };
 
-  const [empByName, ciByName, coByName, empConfigName, ciConfigName, coConfigName] = await Promise.all([
+  const [
+    empByName,
+    ciByName,
+    coByName,
+    empConfigName,
+    ciConfigName,
+    coConfigName,
+    nativeAttendanceCount,
+  ] = await Promise.all([
     prisma.form.findFirst({
       where: {
         name: { in: EMPLOYEE_FORM_NAMES, mode: 'insensitive' },
@@ -1444,16 +1460,27 @@ export async function getEmployeeFormsStatus(organizationId: string): Promise<{
     lookupName(setup?.employee.formId),
     lookupName(setup?.checkIn.formId),
     lookupName(setup?.checkOut.formId),
+    // Native attendance presence — any row from this org's users counts. We
+    // count instead of just findFirst so the diagnostics screen can show "47
+    // punches recorded" alongside the boolean.
+    prisma.attendance.count({
+      where: { user: { organizationId }, checkedIn: true },
+    }).catch(() => 0),
   ]);
 
   const employeeFormName = empConfigName ?? empByName?.name;
   const checkInFormName = ciConfigName ?? ciByName?.name;
   const checkOutFormName = coConfigName ?? coByName?.name;
+  const hasCheckInForm = !!checkInFormName;
+  const hasNativeAttendance = nativeAttendanceCount > 0;
 
   return {
     hasEmployeeForm: !!employeeFormName,
-    hasCheckInForm: !!checkInFormName,
+    hasCheckInForm,
     hasCheckOutForm: !!checkOutFormName,
+    hasNativeAttendance,
+    hasAnyCheckInSource: hasCheckInForm || hasNativeAttendance,
+    nativeAttendanceCount,
     hasSavedSetup: !!setup,
     employeeFormName,
     checkInFormName,

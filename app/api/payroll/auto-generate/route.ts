@@ -83,13 +83,23 @@ export async function POST(request: NextRequest) {
 
     const formsStatus = await getEmployeeFormsStatus(authUser.organizationId);
 
-    if (!formsStatus.hasEmployeeForm || !formsStatus.hasCheckInForm) {
+    // Gate: an Employee form is always required (we need salary + identity).
+    // Check-in is optional as a FORM — the static /attendance widget writes to
+    // the Attendance table directly, and payroll's data layer already merges
+    // those rows. Either source counts, so we only block when BOTH are missing.
+    if (!formsStatus.hasEmployeeForm || !formsStatus.hasAnyCheckInSource) {
       const missing: string[] = [];
-      if (!formsStatus.hasEmployeeForm) missing.push('Employee Profile');
-      if (!formsStatus.hasCheckInForm) missing.push('Check-In');
+      if (!formsStatus.hasEmployeeForm) {
+        missing.push('an Employee Profile form');
+      }
+      if (!formsStatus.hasAnyCheckInSource) {
+        missing.push(
+          'a check-in source (either bind a Check-In form in /settings/attendance-config OR have employees punch in via the widget at /attendance)',
+        );
+      }
       return NextResponse.json({
         success: false,
-        message: `Missing required HR forms: ${missing.join(', ')}. Please create these forms in your HR module first.`,
+        message: `Cannot run payroll yet — needs ${missing.join(' AND ')}.`,
         formsStatus,
         payrolls: [],
       });

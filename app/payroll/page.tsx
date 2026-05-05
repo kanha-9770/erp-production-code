@@ -97,14 +97,7 @@ interface PayrollRecord {
   breakdown?: PayrollBreakdown;
 }
 
-interface FormsStatus {
-  hasEmployeeForm: boolean;
-  hasCheckInForm: boolean;
-  hasCheckOutForm: boolean;
-  employeeFormName?: string;
-  checkInFormName?: string;
-  checkOutFormName?: string;
-}
+  
 
 interface Stats {
   totalEmployees: number;
@@ -378,12 +371,16 @@ export default function PayrollPage() {
       );
       lines.push(
         `  Check-In         : ${
-          fs.hasCheckInForm ? `found (${fs.checkInFormName ?? '—'})` : 'MISSING'
+          fs.hasCheckInForm
+            ? `form bound (${fs.checkInFormName ?? '—'})`
+            : fs.hasNativeAttendance
+              ? `widget rows (${fs.nativeAttendanceCount ?? 0} punches)`
+              : 'MISSING — bind a form OR have employees punch in via /attendance'
         }`,
       );
       lines.push(
         `  Check-Out        : ${
-          fs.hasCheckOutForm ? `found (${fs.checkOutFormName ?? '—'})` : 'optional, not configured'
+          fs.hasCheckOutForm ? `form bound (${fs.checkOutFormName ?? '—'})` : 'optional, not configured'
         }`,
       );
       lines.push(
@@ -680,13 +677,13 @@ export default function PayrollPage() {
 
         {stats?.formsStatus &&
           (!stats.formsStatus.hasEmployeeForm ||
-            !stats.formsStatus.hasCheckInForm ||
-            !stats.formsStatus.hasCheckOutForm) && (
+            !stats.formsStatus.hasAnyCheckInSource ||
+            (!stats.formsStatus.hasCheckOutForm && !stats.formsStatus.hasNativeAttendance)) && (
             <div className="rounded-md border border-black/10 bg-white px-4 py-3 text-sm">
               <div className="flex items-start gap-3">
                 <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
                 <div className="space-y-1 flex-1">
-                  <p className="font-semibold text-gray-900">HR forms detected</p>
+                  <p className="font-semibold text-gray-900">HR data sources</p>
                   <ul className="list-inside list-disc text-gray-600">
                     <li>
                       Employee Profile:{' '}
@@ -702,18 +699,26 @@ export default function PayrollPage() {
                       Check-In:{' '}
                       {stats.formsStatus.hasCheckInForm ? (
                         <span className="font-medium text-gray-800">
-                          found ({stats.formsStatus.checkInFormName})
+                          form bound ({stats.formsStatus.checkInFormName})
+                        </span>
+                      ) : stats.formsStatus.hasNativeAttendance ? (
+                        <span className="font-medium text-emerald-700">
+                          widget rows ({stats.formsStatus.nativeAttendanceCount ?? 0} punches)
                         </span>
                       ) : (
-                        <span className="font-medium text-red-600">missing</span>
+                        <span className="font-medium text-red-600">
+                          missing — bind a form or have employees punch in via /attendance
+                        </span>
                       )}
                     </li>
                     <li>
                       Check-Out:{' '}
                       {stats.formsStatus.hasCheckOutForm ? (
                         <span className="font-medium text-gray-800">
-                          found ({stats.formsStatus.checkOutFormName})
+                          form bound ({stats.formsStatus.checkOutFormName})
                         </span>
+                      ) : stats.formsStatus.hasNativeAttendance ? (
+                        <span className="text-gray-500">optional — widget covers this</span>
                       ) : (
                         <span className="text-gray-500">optional</span>
                       )}
