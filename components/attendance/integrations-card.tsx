@@ -58,6 +58,7 @@ interface IntegrationResponse {
   broken: Bindings;
   forms: FormSummary[];
   diagnostics: Diagnostics;
+  autoConfigured?: boolean;
   error?: string;
 }
 
@@ -365,6 +366,18 @@ export function IntegrationsCard() {
       </button>
       {!isExpanded ? null : (
       <CardContent className="p-3 space-y-2.5">
+        {data.autoConfigured && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex items-start gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <span>
+              <strong>Auto-configured.</strong> We detected forms with familiar
+              names and linked them automatically — payroll, attendance, and
+              leave management are now reading from the same forms. Adjust below if
+              we picked the wrong one.
+            </span>
+          </div>
+        )}
+
         {/* Diagnostic strip */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <DiagnosticTile

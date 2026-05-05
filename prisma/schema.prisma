@@ -2251,6 +2251,32 @@ model Holiday {
   @@map("holidays")
 }
 
+// Anchors a static page (URL listed in lib/static-pages.ts) under a dynamic
+// FormModule so the sidebar nests it there. Two row "kinds" share this table,
+// distinguished by the path value:
+//   - Page anchor:  `path` is one of the known static-page paths (e.g. "/leave").
+//   - Group anchor: `path` is `group:<GroupName>` (e.g. "group:Attendance"),
+//                   meaning ALL pages in that group inherit this module unless
+//                   a specific page anchor overrides.
+// `moduleId` references FormModule.id at the application layer; we don't add a
+// formal FK because page anchors should keep working if a module is renamed
+// at app-level (the API rejects orphaned ids on save). Resolution chain in
+// app/api/static-page-anchors/route.ts: page > group > attendance-config-derived.
+model StaticPageAnchor {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  path           String // page path or "group:<GroupName>"
+  moduleId       String   @map("module_id")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, path])
+  @@index([organizationId])
+  @@index([moduleId])
+  @@map("static_page_anchors")
+}
+
 // Recycle Bin — every soft-delete in the app drops a snapshot here. The
 // `snapshot` JSON is a self-contained tree (record + children) so a restore
 // can rebuild the original transactionally without depending on cascade
