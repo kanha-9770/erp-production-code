@@ -5,6 +5,7 @@ import { DatabaseRoles } from "./DatabaseRoles";
 import { UserPermission, RolePermission } from "@/lib/auth-middleware";
 import { prisma } from "@/lib/prisma";
 import { isUserAdmin } from "@/lib/api-helpers";
+import { getAnchorHostModuleIds } from "@/lib/hr/anchor-hosts";
 
 export class DatabaseService {
   // ────────────────────────────────────────────────────────────────
@@ -257,6 +258,20 @@ export class DatabaseService {
           ...roleBased.map((m) => m.id),
           ...userBased.map((m) => m.id),
         ]);
+
+        // Anchor-host modules: the static-page anchor system (manual + group +
+        // attendance-config-derived) attaches static pages like /leave to a
+        // FormModule. A user who has been granted a static-page route MUST
+        // see that host module in the sidebar so the leaf has a parent to
+        // render under — even with zero VIEW permissions on the module
+        // itself. The client-side filter (filterByPermission) drops any host
+        // whose anchored leaves all get gated out, so we don't risk leaking
+        // unrelated modules. This pulls FROM ALL hosts in the org, not just
+        // the user's accessible ones — leaf-level access decides visibility
+        // downstream.
+        const anchorHostIds = await getAnchorHostModuleIds(organizationId);
+        for (const id of anchorHostIds) directIdsSet.add(id);
+
         const directIds = Array.from(directIdsSet);
 
         if (directIds.length === 0) {
@@ -271,9 +286,9 @@ export class DatabaseService {
           SELECT DISTINCT fm.id, fm.parent_id
           FROM form_modules fm
           WHERE fm.id IN (
-            SELECT DISTINCT parent_id 
-            FROM form_modules 
-            WHERE id = ANY(${directIds}::text[]) 
+            SELECT DISTINCT parent_id
+            FROM form_modules
+            WHERE id = ANY(${directIds}::text[])
               AND parent_id IS NOT NULL
               AND organization_id = ${organizationId}
           )

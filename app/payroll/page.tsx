@@ -97,7 +97,7 @@ interface PayrollRecord {
   breakdown?: PayrollBreakdown;
 }
 
-    git commit
+
 
 interface Stats {
   totalEmployees: number;

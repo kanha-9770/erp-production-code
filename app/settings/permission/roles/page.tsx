@@ -2,14 +2,16 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { FormsSidebar } from "@/components/admin/forms-sidebar"
 import { FormsPermissionMatrix } from "@/components/admin/forms-permission-matrix"
 import { SectionsPermissionMatrix } from "@/components/admin/sections-permission-matrix"
 import { FieldsPermissionMatrix } from "@/components/admin/fields-permission-matrix"
 import { RoutePermissionMatrix } from "@/components/admin/route-permission-matrix"
+import { StaticPagesRolesMatrix } from "@/components/admin/static-pages-roles-matrix"
 import { useModules } from "@/hooks/use-modules"
 import type { FormSelection } from "@/types/permissions"
-import { GripVertical, Globe } from "lucide-react"
+import { GripVertical, Globe, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SIDEBAR_MIN = 220
@@ -23,6 +25,11 @@ export default function RolesPermissionsPage() {
   // static page clears the form selection (so the right side renders the
   // route matrix), and vice versa.
   const [routeSelection, setRouteSelection] = useState<string | null>(null)
+  // When true, the right pane shows the bulk Static Pages × Roles matrix
+  // instead of the form / per-page matrices. Default true so admins land on
+  // the bulk view (covers the most common workflow); a per-page click in the
+  // sidebar drops the flag to show the focused per-page matrix.
+  const [bulkPagesView, setBulkPagesView] = useState(true)
   const { modules, loading, error } = useModules()
 
   // The matrix component keeps this ref in sync with its unsaved-changes state.
@@ -45,6 +52,7 @@ export default function RolesPermissionsPage() {
     (formId: string, moduleId: string, submoduleId?: string) => {
       if (!guardSwitch()) return
       setRouteSelection(null)
+      setBulkPagesView(false)
       setFormSelection({ formId, moduleId, submoduleId: submoduleId ?? null })
     },
     [guardSwitch],
@@ -54,10 +62,18 @@ export default function RolesPermissionsPage() {
     (path: string) => {
       if (!guardSwitch()) return
       setFormSelection(null)
+      setBulkPagesView(false)
       setRouteSelection(path)
     },
     [guardSwitch],
   )
+
+  const handleShowBulkPages = useCallback(() => {
+    if (!guardSwitch()) return
+    setFormSelection(null)
+    setRouteSelection(null)
+    setBulkPagesView(true)
+  }, [guardSwitch])
 
   // ─── Resizable sidebar (lg+ only) ─────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null)
@@ -199,11 +215,33 @@ export default function RolesPermissionsPage() {
           </div>
         </div>
 
-        {/* Content — switches between the form-level matrices and the
-            route-level matrix based on what's selected in the sidebar.
-            One of `formSelection` or `routeSelection` is set at a time. */}
+        {/* Content — three modes:
+            1. bulkPagesView → all static pages × roles in one matrix (default).
+            2. routeSelection → focused per-page matrix (clicked from sidebar).
+            3. formSelection → form-level forms / sections / fields matrices.
+            Mode switches via the sidebar callbacks + the "Static pages bulk"
+            button above the right pane. */}
         <div className="min-w-0 flex-1 space-y-6 lg:pl-3">
-          {routeSelection ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant={bulkPagesView ? "default" : "outline"}
+              onClick={handleShowBulkPages}
+              className="gap-1.5"
+            >
+              <Layers className="h-4 w-4" />
+              All static pages × roles
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Default view — manages role access to every system page in one
+              save. Click a specific page or form in the sidebar for a focused
+              matrix.
+            </p>
+          </div>
+
+          {bulkPagesView ? (
+            <StaticPagesRolesMatrix />
+          ) : routeSelection ? (
             <RoutePermissionMatrix path={routeSelection} />
           ) : formSelection ? (
             <>

@@ -36,6 +36,8 @@ export interface StaticPage {
   /** Lucide icon NAME (string). Resolved by the sidebar via a switch — keeps
    *  this file decoupled from React. */
   icon?: string;
+  /** Required permissions for this page. */
+  requiredPermissions?: string[];
 }
 
 export type StaticPageGroup =

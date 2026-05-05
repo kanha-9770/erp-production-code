@@ -34,6 +34,36 @@ export const routePermissions: RoutePermissionRule[] = [
   { pattern: "/settings/import", requiredPermissions: ["IMPORT_DATA"] },
   { pattern: "/settings/masters", requiredPermissions: ["MANAGE_MASTERS"] },
   { pattern: "/settings/login-history", requiredPermissions: ["VIEW_LOGIN_HISTORY"] },
+  { pattern: "/settings/attendance-config", requiredPermissions: ["MANAGE_ATTENDANCE"] },
+  { pattern: "/settings/permission/**", requiredPermissions: ["MANAGE_PERMISSIONS"] },
+
+  // Attendance routes
+  { pattern: "/attendance", requiredPermissions: ["VIEW_ATTENDANCE"] },
+  { pattern: "/attendance/regularizations", requiredPermissions: ["MANAGE_ATTENDANCE"] },
+  { pattern: "/attendance/team", requiredPermissions: ["VIEW_TEAM_ATTENDANCE"] },
+
+  // Leave Management routes
+  { pattern: "/leave", requiredPermissions: ["VIEW_LEAVE"] },
+  { pattern: "/leave/approvals", requiredPermissions: ["APPROVE_LEAVE"] },
+  { pattern: "/leave/admin", requiredPermissions: ["MANAGE_LEAVE"] },
+
+  // Payroll routes
+  { pattern: "/payroll", requiredPermissions: ["VIEW_PAYROLL", "MANAGE_PAYROLL"] },
+  { pattern: "/payroll/configure", requiredPermissions: ["MANAGE_PAYROLL"] },
+
+  // HR & Employees routes
+  { pattern: "/employees", requiredPermissions: ["VIEW_EMPLOYEES"] },
+  { pattern: "/employees/manage", requiredPermissions: ["MANAGE_EMPLOYEES"] },
+
+  // Profile routes
+  { pattern: "/profile", requiredPermissions: ["VIEW_PROFILE"] },
+  { pattern: "/profile/update-profile", requiredPermissions: ["UPDATE_PROFILE"] },
+  { pattern: "/profile/security", requiredPermissions: ["MANAGE_SECURITY"] },
+
+  // AI & Tools routes
+  { pattern: "/functions", requiredPermissions: ["VIEW_FUNCTIONS"] },
+  { pattern: "/functions/editor/**", requiredPermissions: ["MANAGE_FUNCTIONS"] },
+  { pattern: "/settings/functions/**", requiredPermissions: ["MANAGE_FUNCTIONS"] },
 
   // Feature routes
   { pattern: "/payroll", requiredPermissions: ["VIEW_PAYROLL", "MANAGE_PAYROLL"] },
