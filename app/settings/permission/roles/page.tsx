@@ -6,9 +6,10 @@ import { FormsSidebar } from "@/components/admin/forms-sidebar"
 import { FormsPermissionMatrix } from "@/components/admin/forms-permission-matrix"
 import { SectionsPermissionMatrix } from "@/components/admin/sections-permission-matrix"
 import { FieldsPermissionMatrix } from "@/components/admin/fields-permission-matrix"
+import { RoutePermissionMatrix } from "@/components/admin/route-permission-matrix"
 import { useModules } from "@/hooks/use-modules"
 import type { FormSelection } from "@/types/permissions"
-import { GripVertical } from "lucide-react"
+import { GripVertical, Globe } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SIDEBAR_MIN = 220
@@ -18,23 +19,44 @@ const SIDEBAR_STORAGE_KEY = "roles-permissions:sidebar-width"
 
 export default function RolesPermissionsPage() {
   const [formSelection, setFormSelection] = useState<FormSelection | null>(null)
+  // Static-page selection runs in parallel with form selection. Picking a
+  // static page clears the form selection (so the right side renders the
+  // route matrix), and vice versa.
+  const [routeSelection, setRouteSelection] = useState<string | null>(null)
   const { modules, loading, error } = useModules()
 
   // The matrix component keeps this ref in sync with its unsaved-changes state.
   // We read it on form switch to warn before discarding edits.
   const unsavedChangesRef = useRef(false)
 
+  const guardSwitch = useCallback(() => {
+    if (
+      unsavedChangesRef.current &&
+      !window.confirm(
+        "You have unsaved permission changes. Switch and discard them?",
+      )
+    ) {
+      return false
+    }
+    return true
+  }, [])
+
   const handleFormSelect = useCallback(
     (formId: string, moduleId: string, submoduleId?: string) => {
-      if (
-        unsavedChangesRef.current &&
-        !window.confirm("You have unsaved permission changes. Switch form and discard them?")
-      ) {
-        return
-      }
+      if (!guardSwitch()) return
+      setRouteSelection(null)
       setFormSelection({ formId, moduleId, submoduleId: submoduleId ?? null })
     },
-    [],
+    [guardSwitch],
+  )
+
+  const handleRouteSelect = useCallback(
+    (path: string) => {
+      if (!guardSwitch()) return
+      setFormSelection(null)
+      setRouteSelection(path)
+    },
+    [guardSwitch],
   )
 
   // ─── Resizable sidebar (lg+ only) ─────────────────────────────────────────
@@ -132,6 +154,8 @@ export default function RolesPermissionsPage() {
             loading={loading}
             onFormSelect={handleFormSelect}
             selectedForm={formSelection?.formId ?? null}
+            selectedRoute={routeSelection}
+            onRouteSelect={handleRouteSelect}
           />
         </div>
 
@@ -175,19 +199,38 @@ export default function RolesPermissionsPage() {
           </div>
         </div>
 
-        {/* Content */}
+        {/* Content — switches between the form-level matrices and the
+            route-level matrix based on what's selected in the sidebar.
+            One of `formSelection` or `routeSelection` is set at a time. */}
         <div className="min-w-0 flex-1 space-y-6 lg:pl-3">
-          <FormsPermissionMatrix
-            modules={modules}
-            selectedForm={formSelection?.formId ?? null}
-            unsavedChangesRef={unsavedChangesRef}
-          />
-          <SectionsPermissionMatrix
-            selectedFormId={formSelection?.formId ?? null}
-          />
-          <FieldsPermissionMatrix
-            selectedFormId={formSelection?.formId ?? null}
-          />
+          {routeSelection ? (
+            <RoutePermissionMatrix path={routeSelection} />
+          ) : formSelection ? (
+            <>
+              <FormsPermissionMatrix
+                modules={modules}
+                selectedForm={formSelection.formId}
+                unsavedChangesRef={unsavedChangesRef}
+              />
+              <SectionsPermissionMatrix
+                selectedFormId={formSelection.formId}
+              />
+              <FieldsPermissionMatrix
+                selectedFormId={formSelection.formId}
+              />
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-16 text-center text-muted-foreground">
+                <Globe className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                <p className="text-sm font-medium">Pick a form or system page</p>
+                <p className="text-xs mt-1">
+                  Use the sidebar to choose which resource you want to permission. Static
+                  pages (like leaves, payroll, attendance) appear under <strong>System Pages</strong>.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
