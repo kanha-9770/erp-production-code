@@ -729,6 +729,39 @@ export async function recordPunch(
     );
   }
 
+  // Server-side leave guard: full-day approved leaves block IN punches. Half-
+  // day leaves are intentionally permitted (the user still works the other
+  // half). Skipped for OUT punches so an emergency cancel/checkout still
+  // works if the leave was approved mid-day. Source-of-truth is the same
+  // cached leaves reader used by getStatus, so the widget's `canCheckIn`
+  // flag and this guard never disagree.
+  if (input.type === 'IN' && input.organizationId) {
+    const monthKey = date.slice(0, 7);
+    const leavesToday = await getLeavesCached(input.organizationId, monthKey);
+    const matchKeys = new Set<string>();
+    if (actor.email) matchKeys.add(`email:${actor.email.toLowerCase()}`);
+    if (actor.employeeId) matchKeys.add(`empId:${actor.employeeId.toLowerCase()}`);
+    const onLeave = findLeaveForToday(leavesToday, matchKeys, date);
+    if (onLeave && !onLeave.isHalfDay) {
+      await safeAudit(
+        auditEmail,
+        input.userId,
+        input.organizationId,
+        `${auditAction} rejected (ON_APPROVED_LEAVE)`,
+        { date, code: 'ON_APPROVED_LEAVE', source, leaveType: onLeave.leaveType ?? null },
+        input.ip ?? null,
+        input.userAgent ?? null,
+        null,
+      );
+      const nice = onLeave.leaveType ? `${onLeave.leaveType} ` : '';
+      throw new AttendanceError(
+        'ON_APPROVED_LEAVE',
+        `You are on approved ${nice}leave today. Cancel the leave first if you need to clock in.`,
+        409,
+      );
+    }
+  }
+
   const existing = await prisma.attendance.findFirst({
     where: { userId: input.userId, date },
   });

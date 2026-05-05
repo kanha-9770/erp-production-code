@@ -2127,3 +2127,126 @@ model Notification {
   @@index([ruleId])
   @@map("notifications")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Leave Management — real, schema-backed leave requests, balances, and a
+// holiday calendar. Replaces the form-based "leaves are FormRecords" approach
+// while keeping the old reader as a fallback in payroll-store so existing
+// tenants don't break.
+//
+// User / org / leaveType references are plain Strings (no @relation) to match
+// the prevailing pattern (see AttendanceRegularization) and keep the User
+// model untouched. The service layer (lib/hr/leave-service.ts) does the joins.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum LeaveDuration {
+  FULL_DAY
+  HALF_DAY_FIRST // first half of the day (morning)
+  HALF_DAY_SECOND // second half of the day (afternoon)
+}
+
+model LeaveRequest {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @map("user_id") // applicant
+  leaveTypeId    String @map("leave_type_id")
+
+  // YYYY-MM-DD strings, inclusive on both ends. Matches Attendance.date so
+  // the leave/attendance/payroll readers can compare with simple string ops.
+  startDate String @map("start_date")
+  endDate   String @map("end_date")
+
+  duration  LeaveDuration @default(FULL_DAY)
+  totalDays Decimal       @map("total_days") // computed at apply time, excludes weekly-off + holidays
+
+  reason        String? @db.Text
+  attachmentUrl String? @map("attachment_url")
+
+  status       LeaveRequestStatus @default(PENDING)
+  appliedAt    DateTime           @default(now()) @map("applied_at")
+  decidedAt    DateTime?          @map("decided_at")
+  decidedById  String?            @map("decided_by_id")
+  decisionNote String?            @map("decision_note") @db.Text
+  cancelledAt  DateTime?          @map("cancelled_at")
+  cancelReason String?            @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([userId, status])
+  @@index([leaveTypeId])
+  @@index([startDate, endDate])
+  @@map("leave_requests")
+}
+
+// One row per (user, leaveType, year). Running counters; the source of truth
+// for "how many days do I have left this year".
+model LeaveBalance {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @map("user_id")
+  leaveTypeId    String @map("leave_type_id")
+  year           Int
+
+  allocated      Decimal @default(0) // base allocation (admin-set or accrual)
+  carriedForward Decimal @default(0) @map("carried_forward")
+  used           Decimal @default(0) // sum of APPROVED totalDays
+  pending        Decimal @default(0) // sum of PENDING totalDays (soft-hold)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([organizationId, year])
+  @@map("leave_balances")
+}
+
+// Audit trail for every balance mutation. Lets admins answer "why does this
+// employee have N leaves left?" by walking back through deltas.
+//   reason: 'INITIAL' | 'CARRY_FORWARD' | 'APPROVED' | 'CANCELLED' | 'REJECTED' | 'ADMIN_ADJUST'
+model LeaveAllocation {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @map("user_id")
+  leaveTypeId    String @map("leave_type_id")
+  year           Int
+
+  delta       Decimal // signed: +5 (grant), -1 (consume), -1.5 (consume), +1.5 (refund)
+  reason      String
+  referenceId String? @map("reference_id") // LeaveRequest.id when reason ties to a request
+  note        String? @db.Text
+  createdById String  @map("created_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, userId, year])
+  @@index([referenceId])
+  @@map("leave_allocations")
+}
+
+// Holiday calendar — replaces the "holidays live in a generic form" pattern.
+// Read by both the attendance widget (shows HOLIDAY badge + skips punch
+// requirement) and payroll (counts holidays as paid days). Form-based reader
+// remains as fallback in payroll-store.
+model Holiday {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  date           String // YYYY-MM-DD
+  name           String
+  isOptional     Boolean  @default(false) @map("is_optional")
+  createdById    String   @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, date])
+  @@index([organizationId])
+  @@map("holidays")
+}

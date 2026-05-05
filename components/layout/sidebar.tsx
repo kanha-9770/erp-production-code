@@ -30,6 +30,9 @@ import {
   Clock,
   History,
   Edit3,
+  CalendarDays,
+  Inbox,
+  CalendarHeart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -168,6 +171,11 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   // AttendanceConfiguration. Anchor empty / config 401 → no sidebar entry.
   const [attendanceAnchorModuleId, setAttendanceAnchorModuleId] = useState<string | null>(null);
   const canAccessAttendance = canAccess("/attendance");
+
+  // Leave management — anchored under the same HR root as Attendance/Payroll.
+  // Always visible to authenticated users; per-role gating happens server-side
+  // and via the page-level guards.
+  const canAccessLeave = canAccess("/leave");
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -353,7 +361,17 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                 ? Edit3
                 : module.id === "__sys_attendance_cfg__"
                   ? Settings
-                  : Wallet
+                  : module.id === "__sys_leave__"
+                    ? CalendarDays
+                    : module.id === "__sys_leave_mine__"
+                      ? CalendarDays
+                      : module.id === "__sys_leave_approvals__"
+                        ? Inbox
+                        : module.id === "__sys_leave_admin__"
+                          ? Wallet
+                          : module.id === "__sys_leave_holidays__"
+                            ? CalendarHeart
+                            : Wallet
         : getModuleIcon(undefined, module.module_type);
     // System-route nodes are always leaves; system-folder nodes can hold
     // synthetic children (e.g. the four Attendance pages).
@@ -493,6 +511,16 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       attendanceAnchor = hrRoot?.id ?? null;
     }
 
+    // Leave anchor — same HR-root as Attendance.
+    let leaveAnchor: string | null = null;
+    if (canAccessLeave) {
+      const hrRoot = filtered.find(
+        (m) => !m.parentId && /^hr$|^human resources?$/i.test(m.name),
+      );
+      // Reuse attendance anchor if admin set one (HR is shared across the three).
+      leaveAnchor = attendanceAnchor ?? hrRoot?.id ?? null;
+    }
+
     // Inject system-route leaves (Payroll, Attendance) as the last children
     // of their respective anchors.
     const injectSystemRoutes = (items: ModuleNode[]): ModuleNode[] =>
@@ -581,9 +609,72 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
             parentId: node.id,
             level: (node.level ?? 0) + 1,
             module_type: "system-folder",
-            // One slot before payroll so the order reads HR > Attendance > Payroll.
-            sort_order: Number.MAX_SAFE_INTEGER - 1,
+            // Order: HR > Attendance > Leave > Payroll.
+            sort_order: Number.MAX_SAFE_INTEGER - 2,
             children: attendanceChildren,
+          } as ModuleNode);
+        }
+        if (
+          canAccessLeave &&
+          leaveAnchor &&
+          node.id === leaveAnchor
+        ) {
+          const leaveLevel = (node.level ?? 0) + 2;
+          const leaveChildren: ModuleNode[] = [
+            {
+              id: "__sys_leave_mine__",
+              name: "My Leaves",
+              parentId: "__sys_leave__",
+              level: leaveLevel,
+              module_type: "system-route",
+              sort_order: 1,
+              children: [],
+              ...({ system_route: "/leave" } as any),
+            } as ModuleNode,
+            {
+              id: "__sys_leave_approvals__",
+              name: "Approvals",
+              parentId: "__sys_leave__",
+              level: leaveLevel,
+              module_type: "system-route",
+              sort_order: 2,
+              children: [],
+              ...({ system_route: "/leave/approvals" } as any),
+            } as ModuleNode,
+          ];
+          if (isAdmin) {
+            leaveChildren.push(
+              {
+                id: "__sys_leave_admin__",
+                name: "Allocations",
+                parentId: "__sys_leave__",
+                level: leaveLevel,
+                module_type: "system-route",
+                sort_order: 3,
+                children: [],
+                ...({ system_route: "/leave/admin" } as any),
+              } as ModuleNode,
+              {
+                id: "__sys_leave_holidays__",
+                name: "Holidays",
+                parentId: "__sys_leave__",
+                level: leaveLevel,
+                module_type: "system-route",
+                sort_order: 4,
+                children: [],
+                ...({ system_route: "/settings/holidays" } as any),
+              } as ModuleNode,
+            );
+          }
+          kids.push({
+            id: "__sys_leave__",
+            name: "Leaves",
+            parentId: node.id,
+            level: (node.level ?? 0) + 1,
+            module_type: "system-folder",
+            // Between Attendance (MAX-2) and Payroll (MAX).
+            sort_order: Number.MAX_SAFE_INTEGER - 1,
+            children: leaveChildren,
           } as ModuleNode);
         }
         return { ...node, children: kids };
@@ -598,6 +689,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     canAccessPayroll,
     attendanceAnchorModuleId,
     canAccessAttendance,
+    canAccessLeave,
   ]);
 
   // Real client-side search across the (already-filtered) tree.

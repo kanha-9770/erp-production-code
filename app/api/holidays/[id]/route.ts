@@ -1,0 +1,47 @@
+/**
+ * DELETE /api/holidays/[id] — admin-only delete.
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
+
+export const dynamic = 'force-dynamic';
+
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const authUser = await getAuthenticatedUser(_request);
+  if (!authUser) {
+    return NextResponse.json(
+      { success: false, error: 'Not authenticated' },
+      { status: 401, headers: NO_STORE },
+    );
+  }
+  if (!authUser.organizationId) {
+    return NextResponse.json(
+      { success: false, error: 'No organization' },
+      { status: 403, headers: NO_STORE },
+    );
+  }
+  if (!(await isUserAdmin(authUser.id, authUser.organizationId))) {
+    return NextResponse.json(
+      { success: false, error: 'Admin only' },
+      { status: 403, headers: NO_STORE },
+    );
+  }
+
+  const existing = await (prisma as any).holiday.findUnique({ where: { id: params.id } });
+  if (!existing || existing.organizationId !== authUser.organizationId) {
+    return NextResponse.json(
+      { success: false, error: 'Not found' },
+      { status: 404, headers: NO_STORE },
+    );
+  }
+
+  await (prisma as any).holiday.delete({ where: { id: params.id } });
+  return NextResponse.json({ success: true }, { headers: NO_STORE });
+}

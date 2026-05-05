@@ -991,10 +991,92 @@ function isTruthyHalfDay(raw: any): boolean {
   return ['true', 'yes', '1', 'half', 'half-day', 'half day', 'on'].includes(s);
 }
 
+/**
+ * Reads APPROVED leaves overlapping `month` from the schema-backed
+ * LeaveRequest table (the new source of truth introduced with the leave-
+ * management module). Joins users to produce the email-keyed matchKey the
+ * rest of the engine expects. Returns [] if the table is empty for the
+ * window, letting `getLeavesFromDB` fall back to the form-based reader so
+ * tenants that still use a form-builder leave form keep working.
+ */
+async function readApprovedLeavesFromTable(
+  organizationId: string,
+  month: string,
+): Promise<SampleLeave[]> {
+  const [yStr, mStr] = month.split('-');
+  const yearN = Number(yStr);
+  const monthN = Number(mStr);
+  const monthStart = `${month}-01`;
+  const lastDay = new Date(yearN, monthN, 0).getDate();
+  const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+  let rows: any[];
+  try {
+    rows = await (prisma as any).leaveRequest.findMany({
+      where: {
+        organizationId,
+        status: 'APPROVED',
+        startDate: { lte: monthEnd },
+        endDate: { gte: monthStart },
+      },
+    });
+  } catch {
+    // Table may not exist yet (migration not run). Treat as "no rows".
+    return [];
+  }
+  if (rows.length === 0) return [];
+
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const typeIds = Array.from(new Set(rows.map((r) => r.leaveTypeId)));
+  const [users, types] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, email: true, employee: { select: { id: true } } },
+    }),
+    (prisma as any).leaveType.findMany({
+      where: { id: { in: typeIds } },
+      select: { id: true, name: true },
+    }),
+  ]);
+  const userById = new Map(users.map((u: any) => [u.id, u]));
+  const typeById = new Map((types as any[]).map((t) => [t.id, t]));
+
+  const leaves: SampleLeave[] = [];
+  for (const r of rows) {
+    const u: any = userById.get(r.userId);
+    const t: any = typeById.get(r.leaveTypeId);
+    const email: string | null = u?.email ? String(u.email).toLowerCase() : null;
+    const empId: string | null = u?.employee?.id ? String(u.employee.id).toLowerCase() : null;
+    const matchKey = email ? `email:${email}` : empId ? `empId:${empId}` : null;
+    if (!matchKey) continue;
+
+    const isHalfDay = r.duration !== 'FULL_DAY';
+    const totalDays = r.totalDays != null ? Number(r.totalDays.toString?.() ?? r.totalDays) : null;
+
+    leaves.push({
+      matchKey,
+      email: email ?? '',
+      leaveType: t?.name ?? '',
+      startDate: r.startDate,
+      endDate: r.endDate,
+      isHalfDay,
+      days: Number.isFinite(totalDays as number) ? (totalDays as number) : null,
+      status: 'approved',
+    });
+  }
+  return leaves;
+}
+
 export async function getLeavesFromDB(
   organizationId: string,
   month: string,
 ): Promise<SampleLeave[]> {
+  // Source-of-truth preference: the new schema-backed LeaveRequest table.
+  // Falls through to the form-based reader only when the table has nothing
+  // for this month — keeps form-driven tenants working without surprise.
+  const tableLeaves = await readApprovedLeavesFromTable(organizationId, month);
+  if (tableLeaves.length > 0) return tableLeaves;
+
   const setup = await loadSetup(organizationId);
   // Leave form is optional; loadSetup() returns the form info inside `leave`.
   // Without a configured form, we silently return [] so existing tenants keep
@@ -1082,10 +1164,45 @@ export async function getLeavesFromDB(
   return leaves;
 }
 
+/**
+ * Reads holidays from the schema-backed Holiday table for the given month.
+ * Returns [] when the table has no rows for the window so getHolidaysFromDB
+ * can fall back to the form-based reader.
+ */
+async function readHolidaysFromTable(
+  organizationId: string,
+  month: string,
+): Promise<SampleHoliday[]> {
+  const [yStr, mStr] = month.split('-');
+  const yearN = Number(yStr);
+  const monthN = Number(mStr);
+  const monthStart = `${month}-01`;
+  const lastDay = new Date(yearN, monthN, 0).getDate();
+  const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+  let rows: any[];
+  try {
+    rows = await (prisma as any).holiday.findMany({
+      where: {
+        organizationId,
+        date: { gte: monthStart, lte: monthEnd },
+        isOptional: false,
+      },
+      orderBy: { date: 'asc' },
+    });
+  } catch {
+    return [];
+  }
+  return rows.map((r) => ({ date: r.date, name: r.name ?? '' }));
+}
+
 export async function getHolidaysFromDB(
   organizationId: string,
   month: string,
 ): Promise<SampleHoliday[]> {
+  const tableHolidays = await readHolidaysFromTable(organizationId, month);
+  if (tableHolidays.length > 0) return tableHolidays;
+
   const setup = await loadSetup(organizationId);
   const formInfo = await resolveFromConfigOrName(
     organizationId,
