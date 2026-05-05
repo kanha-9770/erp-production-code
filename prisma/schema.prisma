@@ -2251,70 +2251,40 @@ model Holiday {
   @@map("holidays")
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Static-page anchors — admin-configurable mapping of "static page path" →
-// "the dynamic FormModule under which the page should appear in the sidebar".
-//
-// Every tenant builds their own module hierarchy, so hard-coding the system
-// pages (Leave / Attendance / Payroll / Holidays / etc.) under a fixed module
-// doesn't fit tenants who organised differently. Admins set placement here;
-// the sidebar reads these mappings and injects each page as a child of the
-// configured module.
-//
-// `path` is the same string used as RoutePermission.pattern (e.g. "/leave/admin")
-// so role-permissioning and placement stay aligned. `moduleId` is a plain
-// String FK to FormModule (no @relation), matching the existing convention
-// for HR-side models in this schema.
-//
-// "No anchor row" means "don't show in sidebar" — the page is still URL-
-// accessible if the user has route permission, just not surfaced in the nav.
-// Admins must explicitly place the page to make it discoverable.
-// ─────────────────────────────────────────────────────────────────────────────
-model StaticPageAnchor {
+// Recycle Bin — every soft-delete in the app drops a snapshot here. The
+// `snapshot` JSON is a self-contained tree (record + children) so a restore
+// can rebuild the original transactionally without depending on cascade
+// records still living elsewhere. `resourceType` keys into the handler
+// registry in lib/trash/handlers.ts.
+model TrashBin {
   id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
-  path           String // must match an entry in lib/static-pages.ts
-  moduleId       String   @map("module_id") // FormModule.id; validated app-side
-  sortOrder      Int      @default(0) @map("sort_order")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  organizationId String?  @map("organization_id")
+  resourceType   String   @map("resource_type") // "Form" | "FormModule" | "Holiday" | ...
+  resourceId     String   @map("resource_id")   // original record id (for re-create)
+  resourceName   String?  @map("resource_name") // human-readable label for the trash list
+  snapshot       Json
+  deletedById    String?  @map("deleted_by_id")
+  deletedByName  String?  @map("deleted_by_name")
+  deletedAt      DateTime @default(now()) @map("deleted_at")
 
-  @@unique([organizationId, path])
-  @@index([organizationId])
-  @@index([moduleId])
-  @@map("static_page_anchors")
+  @@index([organizationId, deletedAt])
+  @@index([resourceType])
+  @@index([resourceId])
+  @@map("trash_bin")
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Static-page anchors — admin-configurable mapping of "static page path" →
-// "the dynamic FormModule under which the page should appear in the sidebar".
-//
-// Every tenant builds their own module hierarchy, so hard-coding the system
-// pages (Leave / Attendance / Payroll / Holidays / etc.) under a fixed module
-// doesn't fit tenants who organised differently. Admins set placement here;
-// the sidebar reads these mappings and injects each page as a child of the
-// configured module.
-//
-// `path` is the same string used as RoutePermission.pattern (e.g. "/leave/admin")
-// so role-permissioning and placement stay aligned. `moduleId` is a plain
-// String FK to FormModule (no @relation), matching the existing convention
-// for HR-side models in this schema.
-//
-// "No anchor row" means "don't show in sidebar" — the page is still URL-
-// accessible if the user has route permission, just not surfaced in the nav.
-// Admins must explicitly place the page to make it discoverable.
-// ─────────────────────────────────────────────────────────────────────────────
-model StaticPageAnchor {
+// Per-org retention policy for the recycle bin. Items in TrashBin older than
+// `retentionDays` get purged on the next read of /api/trash. Set to 0 to
+// disable auto-purge ("Never" — items live in trash until manually deleted).
+// 1:1 with Organization; created on first read with default 30 days.
+model TrashRetentionSetting {
   id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
-  path           String // must match an entry in lib/static-pages.ts
-  moduleId       String   @map("module_id") // FormModule.id; validated app-side
-  sortOrder      Int      @default(0) @map("sort_order")
-  createdAt      DateTime @default(now()) @map("created_at")
+  organizationId String   @unique @map("organization_id")
+  retentionDays  Int      @default(30) @map("retention_days")
+  updatedById    String?  @map("updated_by_id")
   updatedAt      DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  @@unique([organizationId, path])
-  @@index([organizationId])
-  @@index([moduleId])
-  @@map("static_page_anchors")
+  @@map("trash_retention_settings")
 }
+
