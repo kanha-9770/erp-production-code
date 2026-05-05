@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { readFile } from "fs/promises";
+import path from "path";
 import { prisma } from "@/lib/prisma";
 import {
   getAuthenticatedUser,
@@ -17,6 +19,141 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+interface AttachmentRef {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  kind?: string;
+}
+
+/**
+ * Inline a text-like attachment's content into the user prompt so the LLM
+ * can analyse it. For binary types (image/audio/video/zip/etc.) we only
+ * append a reference line — true multimodal handling lives at the provider
+ * layer and is not wired here.
+ */
+const TEXT_INLINE_BUDGET_BYTES = 16 * 1024; // per file
+const TOTAL_INLINE_BUDGET_BYTES = 48 * 1024; // across the whole message
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isTextLike(mime: string, name: string): boolean {
+  if (!mime) return false;
+  if (mime.startsWith("text/")) return true;
+  if (
+    mime === "application/json" ||
+    mime === "application/xml" ||
+    mime === "application/yaml" ||
+    mime === "application/x-yaml"
+  )
+    return true;
+  // Some browsers send application/octet-stream for code files; fall back to
+  // an extension sniff so we can still inline them.
+  if (
+    /\.(txt|md|csv|tsv|json|xml|yaml|yml|log|html|htm|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|sh|sql|env|conf|ini|toml)$/i.test(
+      name
+    )
+  )
+    return true;
+  return false;
+}
+
+function languageHint(name: string): string {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  if (!ext) return "";
+  if (["js", "jsx"].includes(ext)) return "javascript";
+  if (["ts", "tsx"].includes(ext)) return "typescript";
+  if (ext === "py") return "python";
+  if (ext === "rb") return "ruby";
+  if (ext === "md") return "markdown";
+  if (ext === "yml" || ext === "yaml") return "yaml";
+  if (ext === "csv" || ext === "tsv") return ext;
+  if (ext === "html" || ext === "htm") return "html";
+  return ext;
+}
+
+/**
+ * Reads the upload back from disk. We trust `userId` to scope the path so a
+ * forged URL pointing at another user's directory is silently dropped.
+ */
+async function readAttachmentText(
+  url: string,
+  userId: string,
+  maxBytes: number
+): Promise<string | null> {
+  // Expected shape: /uploads/chat/<userId>/<uuid>.<ext>
+  const expectedPrefix = `/uploads/chat/${userId}/`;
+  if (!url.startsWith(expectedPrefix)) return null;
+  // Strip the prefix and reject any path traversal.
+  const rel = url.slice(expectedPrefix.length);
+  if (rel.includes("..") || rel.includes("/") || rel.includes("\\")) return null;
+  try {
+    const full = path.join(process.cwd(), "public", "uploads", "chat", userId, rel);
+    const buf = await readFile(full);
+    const slice = buf.subarray(0, maxBytes);
+    return slice.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function enrichWithAttachments(
+  baseText: string,
+  attachments: AttachmentRef[],
+  userId: string
+): Promise<string> {
+  if (!attachments.length) return baseText;
+
+  const lines: string[] = [];
+  lines.push(baseText.trim());
+  lines.push("");
+  lines.push("---");
+  lines.push(`### Attached files (${attachments.length})`);
+  for (const a of attachments) {
+    lines.push(`- **${a.name}** — ${a.mimeType || "unknown"}, ${formatBytes(a.size)} (${a.url})`);
+  }
+  lines.push("");
+
+  let totalUsed = 0;
+  for (const a of attachments) {
+    if (!isTextLike(a.mimeType, a.name)) {
+      // Non-text: just leave the reference. Audio/video/image/binary go to
+      // the LLM as a URL + mime so it can describe what's there or call a
+      // future transcription tool.
+      continue;
+    }
+    if (totalUsed >= TOTAL_INLINE_BUDGET_BYTES) {
+      lines.push(`> Skipped inlining "${a.name}" — combined budget reached.`);
+      continue;
+    }
+    const remaining = TOTAL_INLINE_BUDGET_BYTES - totalUsed;
+    const budget = Math.min(TEXT_INLINE_BUDGET_BYTES, remaining);
+    const text = await readAttachmentText(a.url, userId, budget);
+    if (text == null) {
+      lines.push(`> Could not read "${a.name}" from disk.`);
+      continue;
+    }
+    const truncated = a.size > budget;
+    lines.push("");
+    lines.push(`#### ${a.name}`);
+    lines.push("```" + languageHint(a.name));
+    lines.push(text);
+    lines.push("```");
+    if (truncated) {
+      lines.push(`> Truncated at ${formatBytes(budget)} of ${formatBytes(a.size)}.`);
+    }
+    totalUsed += text.length;
+  }
+
+  return lines.join("\n");
+}
 
 /**
  * POST /api/chat
@@ -46,6 +183,7 @@ export async function POST(request: NextRequest) {
       stream?: boolean;
       providerId?: string;
       conversationId?: string;
+      attachments?: AttachmentRef[];
     };
     try {
       body = await request.json();
@@ -55,6 +193,22 @@ export async function POST(request: NextRequest) {
 
     if (!Array.isArray(body.messages) || body.messages.length === 0) {
       return apiError("messages array is required", 400);
+    }
+
+    // Inline attachment content into the last user message before anything
+    // else looks at it (persistence + LLM both see the enriched text).
+    const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+    if (attachments.length > 0) {
+      const lastIdx = body.messages.length - 1;
+      const last = body.messages[lastIdx];
+      if (last?.role === "user") {
+        const enriched = await enrichWithAttachments(
+          last.content ?? "",
+          attachments,
+          user.id
+        );
+        body.messages[lastIdx] = { ...last, content: enriched };
+      }
     }
 
     // If conversationId is provided, verify ownership (blocking, for security)

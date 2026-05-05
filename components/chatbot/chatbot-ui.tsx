@@ -28,6 +28,15 @@ import {
   Copy,
   Printer,
   FileDown,
+  Paperclip,
+  X as XIcon,
+  ImageIcon,
+  FileAudio,
+  FileVideo,
+  File as FileIcon,
+  FileSpreadsheet,
+  FileCode,
+  FileArchive,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -73,6 +82,8 @@ import type {
   ConversationDetail,
   LocalMessage,
   ToolEvent,
+  ChatAttachment,
+  AttachmentKind,
 } from "./types";
 
 const DEFAULT_SYSTEM_PROMPT = `You are an Advanced Analytics Assistant embedded in an ERP system. Act like a senior data analyst + business consultant, not a chatbot. Your responses render in a rich analytics UI with charts, KPI tiles, and an insights side panel — you MUST use those primitives, not describe them.
@@ -255,6 +266,15 @@ export default function ChatbotUI() {
   const [streaming, setStreaming] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [temperature, setTemperature] = useState("0.7");
+
+  // Attachment state — files staged for the next message. `uploading` is the
+  // count of files currently being uploaded so we can disable Send while at
+  // least one is in flight.
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>(
+    []
+  );
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Refs for streaming hot path (rAF-batched, avoids per-token re-render)
   const abortRef = useRef<AbortController | null>(null);
@@ -545,6 +565,66 @@ export default function ChatbotUI() {
     }
   }, []);
 
+  // ── File upload helpers ────────────────────────────────────────────────
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    // Soft per-pick guard — server enforces a hard cap too. Counting both
+    // already-staged and newly-picked files prevents the user from
+    // accumulating more than 8 across multiple picks.
+    if (pendingAttachments.length + files.length > 8) {
+      toast.error("Maximum 8 attachments per message.");
+      return;
+    }
+    setUploadingCount((n) => n + files.length);
+    try {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const res = await fetch("/api/chat/uploads", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error ?? `${res.status} ${res.statusText}`);
+      }
+      const uploaded = (json.files ?? []) as ChatAttachment[];
+      setPendingAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      toast.error(`Upload failed: ${(err as Error).message}`);
+    } finally {
+      setUploadingCount((n) => Math.max(0, n - files.length));
+    }
+  }, [pendingAttachments.length]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const onPickFiles = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const list = e.target.files;
+      if (!list || list.length === 0) return;
+      uploadFiles(Array.from(list));
+      // Reset so the same file can be re-picked if the user removes & re-adds
+      e.target.value = "";
+    },
+    [uploadFiles]
+  );
+
+  // Open the OS file picker scoped to a specific category. Mutating `accept`
+  // before triggering the click is enough — browsers honour the new value on
+  // the next dialog open. Falls back to "any" when no kind is given.
+  const openPicker = useCallback((accept?: string) => {
+    const el = fileInputRef.current;
+    if (!el) return;
+    el.accept = accept ?? "";
+    // Some browsers cache the previous file when accept changes; explicit
+    // reset prevents the picker from seeming to "do nothing" on re-open.
+    el.value = "";
+    el.click();
+  }, []);
+
   // ── Send / stream a message ─────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string, opts?: { regenerate?: boolean }) => {
@@ -557,7 +637,21 @@ export default function ChatbotUI() {
         toast.error("No active provider selected");
         return;
       }
-      if (!text.trim() && !opts?.regenerate) return;
+      // Snapshot attachments at send-time so a later setPendingAttachments
+      // call (e.g. user staging more files) doesn't race with this in-flight
+      // request. Cleared from the staging tray immediately below.
+      const sendAttachments = opts?.regenerate ? [] : pendingAttachments;
+      if (
+        !text.trim() &&
+        sendAttachments.length === 0 &&
+        !opts?.regenerate
+      )
+        return;
+
+      if (uploadingCount > 0) {
+        toast.error("Wait for uploads to finish.");
+        return;
+      }
 
       // Guard against oversized inputs. Most providers cap the context window
       // at ~128k tokens; accepting arbitrary paste sizes means the request
@@ -578,7 +672,10 @@ export default function ChatbotUI() {
       // any async work starts. The textarea's `disabled={streaming}` picks
       // this up on the next render (batched, but very soon).
       setStreaming(true);
-      if (!opts?.regenerate) setInput("");
+      if (!opts?.regenerate) {
+        setInput("");
+        setPendingAttachments([]);
+      }
 
       // Ensure a conversation exists — create optimistically if new
       let convId = activeConversationId;
@@ -667,6 +764,7 @@ export default function ChatbotUI() {
         id: genId(),
         role: "user",
         content: userText,
+        attachments: sendAttachments.length > 0 ? sendAttachments : undefined,
       };
       const assistantId = genId();
       const assistantPlaceholder: LocalMessage = {
@@ -751,6 +849,7 @@ export default function ChatbotUI() {
             temperature: Number.isFinite(tempNum) ? tempNum : undefined,
             stream: true,
             conversationId: convId,
+            attachments: sendAttachments.length > 0 ? sendAttachments : undefined,
           }),
         });
 
@@ -890,6 +989,8 @@ export default function ChatbotUI() {
       temperature,
       scheduleFlush,
       flushStreaming,
+      pendingAttachments,
+      uploadingCount,
     ]
   );
 
@@ -1302,6 +1403,37 @@ export default function ChatbotUI() {
         {/* Composer */}
         <form onSubmit={handleSubmit} className="bg-background px-4 pt-2 pb-4 shrink-0">
           <div className="max-w-3xl mx-auto">
+            {/* Hidden file input — driven by the attach menu. The `accept`
+                attribute is overwritten per-category before each open. */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              aria-label="Upload files"
+              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.txt,.md,.json,.xml,.yaml,.yml,.log,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.sh,.sql,.zip,.7z,.tar,.gz"
+              className="hidden"
+              onChange={onPickFiles}
+            />
+
+            {/* Attachment chips — staged but not yet sent */}
+            {(pendingAttachments.length > 0 || uploadingCount > 0) && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {pendingAttachments.map((a) => (
+                  <AttachmentChip
+                    key={a.id}
+                    attachment={a}
+                    onRemove={() => removeAttachment(a.id)}
+                  />
+                ))}
+                {uploadingCount > 0 && (
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-card/50 px-2.5 py-1.5 text-[12px] text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Uploading {uploadingCount} file{uploadingCount === 1 ? "" : "s"}…
+                  </div>
+                )}
+              </div>
+            )}
+
             <div
               className={cn(
                 "group relative flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 transition-all duration-200",
@@ -1309,6 +1441,108 @@ export default function ChatbotUI() {
                 (streaming || providers.length === 0) && "opacity-60"
               )}
             >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={
+                      streaming ||
+                      providers.length === 0 ||
+                      pendingAttachments.length >= 8
+                    }
+                    title="Attach files"
+                    className="shrink-0 h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="top" className="w-56">
+                  <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                    What would you like to upload?
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => openPicker("image/*")}>
+                    <ImageIcon className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Photos &amp; images</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      jpg · png · webp
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openPicker("video/*")}>
+                    <FileVideo className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Video</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      mp4 · webm · mov
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openPicker("audio/*")}>
+                    <FileAudio className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Audio</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      mp3 · wav · m4a
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      openPicker(
+                        ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.txt,.md"
+                      )
+                    }
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Documents</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      pdf · docx · xlsx
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      openPicker(
+                        ".csv,.tsv,.xls,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      )
+                    }
+                  >
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Spreadsheets</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      csv · xlsx
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      openPicker(
+                        "text/*,.json,.xml,.yaml,.yml,.log,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.sh,.sql"
+                      )
+                    }
+                  >
+                    <FileCode className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Code &amp; text</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      json · py · ts
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => openPicker(".zip,.7z,.tar,.gz")}
+                  >
+                    <FileArchive className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Archives</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      zip · 7z · tar
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => openPicker(undefined)}>
+                    <FileIcon className="h-4 w-4 mr-2" />
+                    <span className="flex-1">Any file</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">
+                      browse all
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Textarea
                 ref={textareaRef}
                 value={input}
@@ -1317,6 +1551,8 @@ export default function ChatbotUI() {
                 placeholder={
                   providers.length === 0
                     ? "Configure a provider first…"
+                    : pendingAttachments.length > 0
+                    ? "Add a message about your file(s)… (optional)"
                     : "Reply to Claude…"
                 }
                 rows={1}
@@ -1337,7 +1573,11 @@ export default function ChatbotUI() {
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={!input.trim() || providers.length === 0}
+                  disabled={
+                    (!input.trim() && pendingAttachments.length === 0) ||
+                    providers.length === 0 ||
+                    uploadingCount > 0
+                  }
                   title="Send (Enter)"
                   className={cn(
                     "shrink-0 h-8 w-8 rounded-lg transition-colors",
@@ -1400,3 +1640,79 @@ export default function ChatbotUI() {
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// AttachmentChip — small preview row item shown above the composer for each
+// staged file. Image kinds get a thumbnail; everything else gets an icon.
+// ─────────────────────────────────────────────────────────────────────────
+function attachmentIcon(kind: AttachmentKind) {
+  switch (kind) {
+    case "image":
+      return ImageIcon;
+    case "audio":
+      return FileAudio;
+    case "video":
+      return FileVideo;
+    case "spreadsheet":
+      return FileSpreadsheet;
+    case "code":
+      return FileCode;
+    case "archive":
+      return FileArchive;
+    case "document":
+      return FileText;
+    default:
+      return FileIcon;
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function AttachmentChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: ChatAttachment;
+  onRemove?: () => void;
+}) {
+  const Icon = attachmentIcon(attachment.kind);
+  const isImage = attachment.kind === "image";
+  return (
+    <div className="group/chip relative flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1.5 text-[12px] max-w-[260px]">
+      {isImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={attachment.url}
+          alt={attachment.name}
+          className="h-8 w-8 rounded object-cover shrink-0"
+        />
+      ) : (
+        <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0 text-muted-foreground">
+          <Icon className="h-4 w-4" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium">{attachment.name}</div>
+        <div className="text-[10.5px] text-muted-foreground/80">
+          {formatBytes(attachment.size)} · {attachment.kind}
+        </div>
+      </div>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${attachment.name}`}
+          className="shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <XIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export { AttachmentChip };

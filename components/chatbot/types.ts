@@ -40,6 +40,25 @@ export interface ToolEvent {
   timestamp: number;
 }
 
+export type AttachmentKind =
+  | "image"
+  | "audio"
+  | "video"
+  | "document"
+  | "spreadsheet"
+  | "code"
+  | "archive"
+  | "file";
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string; // public URL under /uploads/chat/...
+  kind: AttachmentKind;
+}
+
 export interface LocalMessage {
   id: string;
   role: "user" | "assistant";
@@ -49,4 +68,5 @@ export interface LocalMessage {
   providerName?: string;
   model?: string;
   toolEvents?: ToolEvent[];
+  attachments?: ChatAttachment[];
 }
