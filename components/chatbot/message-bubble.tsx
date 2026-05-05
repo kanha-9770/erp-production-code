@@ -14,10 +14,118 @@ import {
   Pencil,
   ThumbsUp,
   ThumbsDown,
+  FileText,
+  FileSpreadsheet,
+  FileCode,
+  FileArchive,
+  FileAudio,
+  FileVideo,
+  ImageIcon,
+  File as FileIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
-import type { LocalMessage, ToolEvent } from "./types";
+import type { LocalMessage, ToolEvent, ChatAttachment, AttachmentKind } from "./types";
+
+function attachmentIcon(kind: AttachmentKind) {
+  switch (kind) {
+    case "image":
+      return ImageIcon;
+    case "audio":
+      return FileAudio;
+    case "video":
+      return FileVideo;
+    case "spreadsheet":
+      return FileSpreadsheet;
+    case "code":
+      return FileCode;
+    case "archive":
+      return FileArchive;
+    case "document":
+      return FileText;
+    default:
+      return FileIcon;
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function MessageAttachments({ attachments }: { attachments: ChatAttachment[] }) {
+  return (
+    <div className="flex flex-wrap gap-2 mb-1.5 justify-end">
+      {attachments.map((a) => {
+        const Icon = attachmentIcon(a.kind);
+        const isImage = a.kind === "image";
+        const isVideo = a.kind === "video";
+        const isAudio = a.kind === "audio";
+        if (isImage) {
+          return (
+            <a
+              key={a.id}
+              href={a.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block max-w-[240px] rounded-lg overflow-hidden border border-border hover:border-primary/50 transition-colors"
+              title={`${a.name} · ${formatBytes(a.size)}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={a.url} alt={a.name} className="block max-h-[200px] object-contain" />
+            </a>
+          );
+        }
+        if (isVideo) {
+          return (
+            <video
+              key={a.id}
+              src={a.url}
+              controls
+              className="max-w-[280px] max-h-[200px] rounded-lg border border-border"
+              title={`${a.name} · ${formatBytes(a.size)}`}
+            />
+          );
+        }
+        if (isAudio) {
+          return (
+            <div
+              key={a.id}
+              className="flex flex-col gap-1 rounded-lg border border-border bg-card px-2.5 py-2 max-w-[280px]"
+            >
+              <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                <FileAudio className="h-3.5 w-3.5" />
+                <span className="truncate">{a.name}</span>
+              </div>
+              <audio src={a.url} controls className="w-full max-w-[260px]" />
+            </div>
+          );
+        }
+        return (
+          <a
+            key={a.id}
+            href={a.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12px] max-w-[260px] hover:border-primary/50 transition-colors"
+            title={`${a.name} · ${formatBytes(a.size)}`}
+          >
+            <div className="h-7 w-7 rounded bg-muted flex items-center justify-center shrink-0 text-muted-foreground">
+              <Icon className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{a.name}</div>
+              <div className="text-[10.5px] text-muted-foreground/80">
+                {formatBytes(a.size)} · {a.kind}
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
 
 interface Props {
   message: LocalMessage;
@@ -191,9 +299,16 @@ function MessageBubbleImpl({
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl bg-secondary text-foreground px-4 py-2.5 text-[14.5px] leading-relaxed break-words whitespace-pre-wrap">
-              {message.content}
-            </div>
+            <>
+              {message.attachments && message.attachments.length > 0 && (
+                <MessageAttachments attachments={message.attachments} />
+              )}
+              {message.content && (
+                <div className="rounded-2xl bg-secondary text-foreground px-4 py-2.5 text-[14.5px] leading-relaxed break-words whitespace-pre-wrap">
+                  {message.content}
+                </div>
+              )}
+            </>
           )}
           {!editing && (
             <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">

@@ -189,6 +189,75 @@ export function renderContextForSystemPrompt(ctx: UserContext): string {
     "Render the structure as nested markdown (headings per section, bullet or table per field) or a concise table with columns like Field · Type · Required · Notes. Prefer a table for flat field lists, a tree for module hierarchy. Don't dump raw JSON at the user."
   );
   lines.push("");
+  if (ctx.isAdmin) {
+    lines.push("## Building modules, forms, sections, fields, and subforms");
+    lines.push(
+      "Because the user is an administrator you can directly create, update, and delete the form-builder objects on their behalf. Use these tools naturally when the user asks you to add/rename/remove things — don't refer them back to the UI:"
+    );
+    lines.push(
+      "- 'create a module called X' / 'add a new module' → `create_module` (omit parentId for top-level, pass parentId for a sub-module)"
+    );
+    lines.push(
+      "- 'create a sub-module under X' → resolve the parent id via `list_modules` or `get_module_tree`, then `create_module` with `parentId`"
+    );
+    lines.push(
+      "- 'rename module X to Y' / 'change the description' / 'deactivate module' → `update_module`"
+    );
+    lines.push(
+      "- 'delete the X module' → `delete_module` (always confirm out loud first; cascade is irreversible)"
+    );
+    lines.push(
+      "- 'add a form called X to module Y' → `create_form`. The form gets a default empty section automatically — its id is returned as `defaultSectionId` so you can immediately add fields to it."
+    );
+    lines.push(
+      "- 'rename / publish / unpublish a form' → `update_form`"
+    );
+    lines.push(
+      "- 'delete the X form' → `delete_form` (confirm first)"
+    );
+    lines.push(
+      "- 'add a section to the X form' → `create_section`"
+    );
+    lines.push(
+      "- 'rename / hide / collapse a section' → `update_section`"
+    );
+    lines.push(
+      "- 'delete the X section' → `delete_section` (confirm first; record data in that section is wiped)"
+    );
+    lines.push(
+      "- 'add a field' / 'add an email field' / 'add a phone number column' → `create_field`. Resolve `sectionId` from `get_form_structure` first. Pick a sensible `type` (text, email, number, phone, date, select, radio, checkbox, textarea, file, lookup, formula, etc.). For select/radio/multiselect supply `options: [{label,value}]`. Pass `required: true` when the user says required/mandatory."
+    );
+    lines.push(
+      "- 'edit the label' / 'change field type' / 'make X required' / 'reorder fields' → `update_field` (resolve fieldId via `find_fields` or `get_form_structure`)"
+    );
+    lines.push(
+      "- 'delete the X field' / 'remove this field' → `delete_field` (confirm first; stored values are lost)"
+    );
+    lines.push(
+      "- 'add a repeating group' / 'add a subform' → `create_subform` (under a section, or nested under another subform via `parentSubformId`). Then add fields to it with `create_field` using `subformId`."
+    );
+    lines.push(
+      "- 'delete the X subform' → `delete_subform` (confirm first)"
+    );
+    lines.push("");
+    lines.push("Rules for write operations:");
+    lines.push(
+      "- ALWAYS verify the target exists before mutating. Resolve module/form/section/field ids by reading first (`list_modules`, `list_forms_in_module`, `get_form_structure`, `find_fields`) — never invent ids."
+    );
+    lines.push(
+      "- For any DELETE, restate what will be removed and ask the user to confirm before passing `confirm: true`. Even a single 'delete X' message should trigger one short confirmation turn unless the user has already explicitly said something like 'yes, delete it'."
+    );
+    lines.push(
+      "- For ambiguous requests ('add a name field' — to which form?), ask one short clarifying question first."
+    );
+    lines.push(
+      "- After a successful write, summarise what changed in one line and offer the obvious next step (e.g. after `create_form` → 'I created the form. Want me to add fields to it?')."
+    );
+    lines.push(
+      "- If a write tool returns `error`, surface the message verbatim and stop — don't retry blindly."
+    );
+    lines.push("");
+  }
   lines.push("## Handling meta / history questions");
   lines.push(
     "The user may ask about their own chat history with you. Always answer " +

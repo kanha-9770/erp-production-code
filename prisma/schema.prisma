@@ -2284,3 +2284,37 @@ model StaticPageAnchor {
   @@index([moduleId])
   @@map("static_page_anchors")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Static-page anchors — admin-configurable mapping of "static page path" →
+// "the dynamic FormModule under which the page should appear in the sidebar".
+//
+// Every tenant builds their own module hierarchy, so hard-coding the system
+// pages (Leave / Attendance / Payroll / Holidays / etc.) under a fixed module
+// doesn't fit tenants who organised differently. Admins set placement here;
+// the sidebar reads these mappings and injects each page as a child of the
+// configured module.
+//
+// `path` is the same string used as RoutePermission.pattern (e.g. "/leave/admin")
+// so role-permissioning and placement stay aligned. `moduleId` is a plain
+// String FK to FormModule (no @relation), matching the existing convention
+// for HR-side models in this schema.
+//
+// "No anchor row" means "don't show in sidebar" — the page is still URL-
+// accessible if the user has route permission, just not surfaced in the nav.
+// Admins must explicitly place the page to make it discoverable.
+// ─────────────────────────────────────────────────────────────────────────────
+model StaticPageAnchor {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  path           String // must match an entry in lib/static-pages.ts
+  moduleId       String   @map("module_id") // FormModule.id; validated app-side
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, path])
+  @@index([organizationId])
+  @@index([moduleId])
+  @@map("static_page_anchors")
+}
