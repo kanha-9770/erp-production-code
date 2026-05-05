@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Employee leave page — balance overview, apply form, my requests.
+ * Employee leave page — balance overview, calendar view, apply form, my requests.
  */
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
@@ -30,7 +29,25 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { CalendarDays, Plus, RefreshCw, AlertCircle, CheckCircle2, X, FileText } from 'lucide-react';
+import {
+  CalendarDays,
+  Plus,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  X,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
+import {
+  LeaveCalendar,
+  LeaveCalendarLegend,
+  type CalendarHoliday,
+  type CalendarLeave,
+  dateToYmd,
+} from '@/components/leave/leave-calendar';
+import { LeaveDateRangePicker } from '@/components/leave/leave-date-range-picker';
 
 type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type Duration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
@@ -73,6 +90,15 @@ const todayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Returns "YYYY-MM-DD" first and last day of the given month (anchorDate).
+function monthBounds(anchor: Date) {
+  const y = anchor.getFullYear();
+  const m = anchor.getMonth();
+  const first = new Date(y, m, 1);
+  const last = new Date(y, m + 1, 0);
+  return { from: dateToYmd(first), to: dateToYmd(last) };
+}
+
 export default function LeavePage() {
   const { toast } = useToast();
 
@@ -82,24 +108,52 @@ export default function LeavePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
 
+  // Calendar state — month being viewed + the month's calendar data.
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d;
+  });
+  const [calendarData, setCalendarData] = useState<{
+    weeklyOffDays: number[];
+    holidays: CalendarHoliday[];
+    leaves: CalendarLeave[];
+  }>({ weeklyOffDays: [0], holidays: [], leaves: [] });
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [bRes, rRes] = await Promise.all([
+      const { from, to } = monthBounds(calendarMonth);
+      const [bRes, rRes, cRes] = await Promise.all([
         fetch('/api/leaves/balance', { cache: 'no-store', credentials: 'include' }),
         fetch('/api/leaves?limit=200', { cache: 'no-store', credentials: 'include' }),
+        fetch(`/api/leaves/calendar?from=${from}&to=${to}&scope=mine`, {
+          cache: 'no-store',
+          credentials: 'include',
+        }),
       ]);
       const bJson = await bRes.json();
       const rJson = await rRes.json();
+      const cJson = await cRes.json();
       if (bJson.success) setBalances(bJson.balances ?? []);
       if (rJson.success) setRequests(rJson.requests ?? []);
-    } catch (e) {
+      if (cJson.success) {
+        setCalendarData({
+          weeklyOffDays: cJson.weeklyOffDays ?? [0],
+          holidays: cJson.holidays ?? [],
+          leaves: (cJson.leaves ?? []).map((l: any) => ({
+            ...l,
+            leaveType: l.leaveType?.name ?? null,
+          })),
+        });
+      }
+    } catch {
       toast({ title: 'Failed to load leave data', variant: 'destructive' });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast]);
+  }, [toast, calendarMonth]);
 
   useEffect(() => {
     refresh();
@@ -107,12 +161,34 @@ export default function LeavePage() {
 
   const today = todayStr();
   const upcoming = useMemo(
-    () => (requests ?? []).filter((r) => r.endDate >= today && (r.status === 'PENDING' || r.status === 'APPROVED')),
+    () =>
+      (requests ?? []).filter(
+        (r) => r.endDate >= today && (r.status === 'PENDING' || r.status === 'APPROVED'),
+      ),
     [requests, today],
   );
   const past = useMemo(
-    () => (requests ?? []).filter((r) => r.endDate < today || r.status === 'CANCELLED' || r.status === 'REJECTED'),
+    () =>
+      (requests ?? []).filter(
+        (r) => r.endDate < today || r.status === 'CANCELLED' || r.status === 'REJECTED',
+      ),
     [requests, today],
+  );
+
+  // Used by the Apply form to flag overlap; covers a wide window so picking
+  // a date 6 months out still detects an existing leave there.
+  const allMyActiveLeaves = useMemo<CalendarLeave[]>(
+    () =>
+      (requests ?? [])
+        .filter((r) => r.status === 'PENDING' || r.status === 'APPROVED')
+        .map((r) => ({
+          id: r.id,
+          startDate: r.startDate,
+          endDate: r.endDate,
+          status: r.status,
+          duration: r.duration,
+        })),
+    [requests],
   );
 
   return (
@@ -164,9 +240,13 @@ export default function LeavePage() {
                   <CardTitle className="text-sm font-medium flex items-center justify-between">
                     <span>{b.leaveType.name}</span>
                     {b.isPaid ? (
-                      <Badge variant="secondary" className="text-xs">Paid</Badge>
+                      <Badge variant="secondary" className="text-xs">
+                        Paid
+                      </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-xs">Unpaid</Badge>
+                      <Badge variant="outline" className="text-xs">
+                        Unpaid
+                      </Badge>
                     )}
                   </CardTitle>
                 </CardHeader>
@@ -174,7 +254,8 @@ export default function LeavePage() {
                   <div className="text-2xl font-bold">
                     {b.available.toFixed(1)}
                     <span className="text-sm font-normal text-muted-foreground">
-                      {' '}/ {total.toFixed(0)}
+                      {' '}
+                      / {total.toFixed(0)}
                     </span>
                   </div>
                   <Progress value={pct} className="h-1.5 mt-2" />
@@ -189,13 +270,24 @@ export default function LeavePage() {
         </div>
       )}
 
-      {/* Requests */}
-      <Tabs defaultValue="upcoming">
+      {/* Tabs */}
+      <Tabs defaultValue="calendar">
         <TabsList>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
           <TabsTrigger value="upcoming">Upcoming ({upcoming.length})</TabsTrigger>
           <TabsTrigger value="past">Past ({past.length})</TabsTrigger>
           <TabsTrigger value="all">All ({requests?.length ?? 0})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="calendar">
+          <CalendarTab
+            month={calendarMonth}
+            onMonthChange={setCalendarMonth}
+            data={calendarData}
+            loading={loading}
+          />
+        </TabsContent>
+
         <TabsContent value="upcoming">
           <RequestTable
             requests={upcoming}
@@ -229,12 +321,124 @@ export default function LeavePage() {
         open={applyOpen}
         onOpenChange={setApplyOpen}
         balances={balances ?? []}
+        holidays={calendarData.holidays}
+        weeklyOffDays={calendarData.weeklyOffDays}
+        existingLeaves={allMyActiveLeaves}
         onApplied={() => {
           setApplyOpen(false);
           refresh();
         }}
       />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CalendarTab({
+  month,
+  onMonthChange,
+  data,
+  loading,
+}: {
+  month: Date;
+  onMonthChange: (m: Date) => void;
+  data: { weeklyOffDays: number[]; holidays: CalendarHoliday[]; leaves: CalendarLeave[] };
+  loading: boolean;
+}) {
+  const monthLabel = month.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  const prev = () => {
+    const n = new Date(month);
+    n.setMonth(n.getMonth() - 1);
+    onMonthChange(n);
+  };
+  const next = () => {
+    const n = new Date(month);
+    n.setMonth(n.getMonth() + 1);
+    onMonthChange(n);
+  };
+
+  // Day-list summary for this month.
+  const monthEvents = useMemo(() => {
+    const events: Array<{ date: string; label: string; kind: 'HOLIDAY' | 'LEAVE' }> = [];
+    for (const h of data.holidays) {
+      events.push({ date: h.date, label: h.name, kind: 'HOLIDAY' });
+    }
+    for (const l of data.leaves) {
+      events.push({
+        date: l.startDate,
+        label: `${l.status} • ${l.leaveType ?? 'Leave'}${
+          l.startDate !== l.endDate ? ` (${l.startDate} → ${l.endDate})` : ''
+        }`,
+        kind: 'LEAVE',
+      });
+    }
+    return events.sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [data]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">{monthLabel}</CardTitle>
+          <div className="flex items-center gap-2">
+            <LeaveCalendarLegend />
+            <div className="flex">
+              <Button size="icon" variant="outline" onClick={prev}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="outline" onClick={next} className="ml-1">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-72" />
+        ) : (
+          <div className="grid gap-6 md:grid-cols-[auto_1fr]">
+            <div>
+              <LeaveCalendar
+                month={month}
+                onMonthChange={onMonthChange}
+                holidays={data.holidays}
+                weeklyOffDays={data.weeklyOffDays}
+                leaves={data.leaves}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm font-medium mb-2">Events this month</div>
+              {monthEvents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No holidays or leaves in {monthLabel}.
+                </p>
+              ) : (
+                <ul className="space-y-1.5 text-sm">
+                  {monthEvents.map((e, i) => (
+                    <li key={`${e.date}-${i}`} className="flex items-start gap-2">
+                      <Badge
+                        variant={e.kind === 'HOLIDAY' ? 'destructive' : 'secondary'}
+                        className="text-[10px] mt-0.5 shrink-0"
+                      >
+                        {e.kind}
+                      </Badge>
+                      <div>
+                        <div className="font-mono text-xs text-muted-foreground">{e.date}</div>
+                        <div>{e.label}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -259,7 +463,8 @@ function RequestTable({
   const [busyId, setBusyId] = useState<string | null>(null);
   const today = todayStr();
 
-  const typeName = (id: string) => balances.find((b) => b.leaveType.id === id)?.leaveType.name ?? '—';
+  const typeName = (id: string) =>
+    balances.find((b) => b.leaveType.id === id)?.leaveType.name ?? '—';
 
   const cancel = async (id: string) => {
     if (!confirm('Cancel this leave request?')) return;
@@ -369,25 +574,33 @@ function durationLabel(d: Duration) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Apply form
+// Apply form — uses the date-range picker with overlap detection.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ApplyLeaveSheet({
   open,
   onOpenChange,
   balances,
+  holidays,
+  weeklyOffDays,
+  existingLeaves,
   onApplied,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   balances: BalanceRow[];
+  holidays: CalendarHoliday[];
+  weeklyOffDays: number[];
+  existingLeaves: CalendarLeave[];
   onApplied: () => void;
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [leaveTypeId, setLeaveTypeId] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [range, setRange] = useState<{ startDate: string | null; endDate: string | null }>({
+    startDate: null,
+    endDate: null,
+  });
   const [duration, setDuration] = useState<Duration>('FULL_DAY');
   const [reason, setReason] = useState('');
 
@@ -395,29 +608,45 @@ function ApplyLeaveSheet({
   useEffect(() => {
     if (open) {
       setLeaveTypeId(balances[0]?.leaveType.id ?? '');
-      setStartDate('');
-      setEndDate('');
+      setRange({ startDate: null, endDate: null });
       setDuration('FULL_DAY');
       setReason('');
     }
   }, [open, balances]);
 
-  // If user picks a half-day, force endDate=startDate.
+  // If user picks half-day, lock to single date.
   useEffect(() => {
-    if (duration !== 'FULL_DAY') {
-      setEndDate(startDate);
+    if (duration !== 'FULL_DAY' && range.startDate) {
+      if (range.endDate !== range.startDate) {
+        setRange((r) => ({ startDate: r.startDate, endDate: r.startDate }));
+      }
     }
-  }, [duration, startDate]);
+  }, [duration, range.startDate, range.endDate]);
 
   const balance = balances.find((b) => b.leaveType.id === leaveTypeId);
+
+  // Overlap check repeated client-side so the submit button reflects state.
+  const hasOverlap = useMemo(() => {
+    if (!range.startDate || !range.endDate) return false;
+    return existingLeaves.some(
+      (l) =>
+        (l.status === 'PENDING' || l.status === 'APPROVED') &&
+        l.startDate <= range.endDate! &&
+        l.endDate >= range.startDate!,
+    );
+  }, [range, existingLeaves]);
 
   const submit = async () => {
     if (!leaveTypeId) {
       toast({ title: 'Pick a leave type', variant: 'destructive' });
       return;
     }
-    if (!startDate || !endDate) {
-      toast({ title: 'Pick start and end date', variant: 'destructive' });
+    if (!range.startDate || !range.endDate) {
+      toast({ title: 'Pick dates', variant: 'destructive' });
+      return;
+    }
+    if (hasOverlap) {
+      toast({ title: 'Range overlaps an existing leave', variant: 'destructive' });
       return;
     }
     setSubmitting(true);
@@ -428,18 +657,15 @@ function ApplyLeaveSheet({
         credentials: 'include',
         body: JSON.stringify({
           leaveTypeId,
-          startDate,
-          endDate,
+          startDate: range.startDate,
+          endDate: range.endDate,
           duration,
           reason: reason || null,
         }),
       });
       const j = await res.json();
       if (!res.ok || !j.success) throw new Error(j.error || 'Apply failed');
-      toast({
-        title: 'Leave applied',
-        description: 'Waiting for approval.',
-      });
+      toast({ title: 'Leave applied', description: 'Waiting for approval.' });
       onApplied();
     } catch (e: any) {
       toast({
@@ -499,21 +725,17 @@ function ApplyLeaveSheet({
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Start Date</Label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>End Date</Label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                disabled={duration !== 'FULL_DAY'}
-                min={startDate || undefined}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label>{duration === 'FULL_DAY' ? 'Date Range' : 'Date'}</Label>
+            <LeaveDateRangePicker
+              value={range}
+              onChange={setRange}
+              holidays={holidays}
+              weeklyOffDays={weeklyOffDays}
+              existingLeaves={existingLeaves}
+              singleDateOnly={duration !== 'FULL_DAY'}
+              placeholder={duration === 'FULL_DAY' ? 'Pick start and end' : 'Pick a date'}
+            />
           </div>
 
           <div className="space-y-2">
@@ -530,7 +752,7 @@ function ApplyLeaveSheet({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={submitting}>
+          <Button onClick={submit} disabled={submitting || hasOverlap}>
             {submitting ? (
               <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
             ) : (

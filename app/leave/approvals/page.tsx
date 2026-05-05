@@ -2,16 +2,23 @@
 
 /**
  * Approver inbox — pending leave requests in the org awaiting decision.
- * Visible only to admins / approvers; non-approvers get a 403-style screen.
+ * Visible to admins / approvers; non-approvers get a 403-style screen.
+ *
+ * Two views:
+ *   • List      → traditional pending-request cards (default)
+ *   • Calendar  → org-wide month grid showing every request (any status) so
+ *                 approvers can spot conflicts (e.g. two engineers off the
+ *                 same week) before approving a third.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -20,12 +27,48 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { CheckCircle2, XCircle, Inbox, RefreshCw, Clock, Mail, Building2, ShieldAlert } from 'lucide-react';
+import {
+  CheckCircle2,
+  XCircle,
+  Inbox,
+  RefreshCw,
+  Clock,
+  Mail,
+  Building2,
+  ShieldAlert,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+} from 'lucide-react';
+import {
+  LeaveCalendar,
+  LeaveCalendarLegend,
+  type CalendarHoliday,
+  type CalendarLeave,
+  dateToYmd,
+} from '@/components/leave/leave-calendar';
 
 type Duration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
+type Status = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
-interface PendingRequest {
+interface UserLite {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  department: string | null;
+  avatar: string | null;
+}
+
+interface Request {
   id: string;
   userId: string;
   startDate: string;
@@ -33,50 +76,82 @@ interface PendingRequest {
   duration: Duration;
   totalDays: number;
   reason: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  status: Status;
   appliedAt: string;
-  user: {
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    department: string | null;
-    avatar: string | null;
-  } | null;
+  user: UserLite | null;
   leaveType: { id: string; name: string; code: string; color: string | null } | null;
+}
+
+function monthBounds(d: Date) {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const first = new Date(y, m, 1);
+  const last = new Date(y, m + 1, 0);
+  return { from: dateToYmd(first), to: dateToYmd(last) };
 }
 
 export default function ApprovalsPage() {
   const { toast } = useToast();
-  const [requests, setRequests] = useState<PendingRequest[] | null>(null);
+  const [pending, setPending] = useState<Request[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [forbidden, setForbidden] = useState(false);
-  const [rejectFor, setRejectFor] = useState<PendingRequest | null>(null);
+
+  // Calendar view state — org-wide leaves for the visible month.
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d;
+  });
+  const [calendarData, setCalendarData] = useState<{
+    weeklyOffDays: number[];
+    holidays: CalendarHoliday[];
+    leaves: Array<CalendarLeave & { user?: UserLite | null }>;
+  }>({ weeklyOffDays: [0], holidays: [], leaves: [] });
+
+  const [rejectFor, setRejectFor] = useState<Request | null>(null);
   const [rejectNote, setRejectNote] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch('/api/leaves?status=PENDING&withDetails=1', {
-        cache: 'no-store',
-        credentials: 'include',
-      });
-      if (res.status === 401 || res.status === 403) {
+      const { from, to } = monthBounds(calendarMonth);
+      const [pendingRes, calRes] = await Promise.all([
+        fetch('/api/leaves?status=PENDING&withDetails=1', {
+          cache: 'no-store',
+          credentials: 'include',
+        }),
+        fetch(
+          `/api/leaves/calendar?scope=org&withDetails=1&from=${from}&to=${to}`,
+          { cache: 'no-store', credentials: 'include' },
+        ),
+      ]);
+      if (pendingRes.status === 401 || pendingRes.status === 403) {
         setForbidden(true);
-        setRequests([]);
+        setPending([]);
         return;
       }
-      const j = await res.json();
-      if (j.success) setRequests(j.requests ?? []);
+      const pj = await pendingRes.json();
+      const cj = await calRes.json();
+      if (pj.success) setPending(pj.requests ?? []);
+      if (cj.success) {
+        setCalendarData({
+          weeklyOffDays: cj.weeklyOffDays ?? [0],
+          holidays: cj.holidays ?? [],
+          leaves: (cj.leaves ?? []).map((l: any) => ({
+            ...l,
+            leaveType: l.leaveType?.name ?? null,
+          })),
+        });
+      }
     } catch {
       toast({ title: 'Failed to load approvals', variant: 'destructive' });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast]);
+  }, [toast, calendarMonth]);
 
   useEffect(() => {
     refresh();
@@ -93,13 +168,13 @@ export default function ApprovalsPage() {
       });
       const j = await res.json();
       if (!res.ok || !j.success) throw new Error(j.error || 'Failed');
-      toast({
-        title: decision === 'APPROVED' ? 'Leave approved' : 'Leave rejected',
-      });
-      // Optimistic remove from the list
-      setRequests((prev) => (prev ?? []).filter((r) => r.id !== id));
+      toast({ title: decision === 'APPROVED' ? 'Leave approved' : 'Leave rejected' });
+      // Optimistically remove from the pending list and refetch calendar so
+      // the calendar reflects the new APPROVED/REJECTED state.
+      setPending((prev) => (prev ?? []).filter((r) => r.id !== id));
       setRejectFor(null);
       setRejectNote('');
+      refresh();
     } catch (e: any) {
       toast({ title: 'Action failed', description: e?.message, variant: 'destructive' });
     } finally {
@@ -116,7 +191,10 @@ export default function ApprovalsPage() {
             <p className="text-lg font-medium">Approver access required</p>
             <p className="text-sm text-muted-foreground mt-1">
               Ask an admin to add you to the attendance-approver role pool, or visit{' '}
-              <a className="underline" href="/leave">My Leaves</a>.
+              <a className="underline" href="/leave">
+                My Leaves
+              </a>
+              .
             </p>
           </CardContent>
         </Card>
@@ -141,117 +219,76 @@ export default function ApprovalsPage() {
         </Button>
       </div>
 
-      {loading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-      ) : (requests ?? []).length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-500" />
-            <p className="text-lg font-medium">Inbox zero</p>
-            <p className="text-sm">No pending leave requests.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {requests!.map((r) => (
-            <Card key={r.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between flex-wrap gap-3">
-                  <div>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      {r.user?.firstName || r.user?.lastName
-                        ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
-                        : r.user?.email ?? 'Unknown user'}
-                      <Badge variant="outline" className="text-xs">
-                        {r.leaveType?.name ?? '—'}
-                      </Badge>
-                    </CardTitle>
-                    <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Mail className="h-3 w-3" /> {r.user?.email ?? '—'}
-                      </span>
-                      {r.user?.department && (
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3 w-3" /> {r.user.department}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(r.appliedAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId === r.id}
-                      onClick={() => {
-                        setRejectFor(r);
-                        setRejectNote('');
-                      }}
-                    >
-                      <XCircle className="h-4 w-4 mr-1 text-destructive" />
-                      Reject
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={busyId === r.id}
-                      onClick={() => decide(r.id, 'APPROVED')}
-                    >
-                      <CheckCircle2 className="h-4 w-4 mr-1" />
-                      Approve
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <div className="text-muted-foreground text-xs">Start</div>
-                    <div className="font-medium">{r.startDate}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground text-xs">End</div>
-                    <div className="font-medium">{r.endDate}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground text-xs">Days</div>
-                    <div className="font-medium">{r.totalDays.toFixed(1)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground text-xs">Duration</div>
-                    <div className="font-medium">
-                      {r.duration === 'FULL_DAY'
-                        ? 'Full Day'
-                        : r.duration === 'HALF_DAY_FIRST'
-                          ? '½ — 1st half'
-                          : '½ — 2nd half'}
-                    </div>
-                  </div>
-                </div>
-                {r.reason && (
-                  <div className="mt-3 p-3 bg-muted/50 rounded text-sm">
-                    <div className="text-xs text-muted-foreground mb-1">Reason</div>
-                    {r.reason}
-                  </div>
-                )}
+      <Tabs defaultValue="list">
+        <TabsList>
+          <TabsTrigger value="list">
+            <Inbox className="h-4 w-4 mr-2" />
+            Pending ({pending?.length ?? 0})
+          </TabsTrigger>
+          <TabsTrigger value="calendar">
+            <CalendarDays className="h-4 w-4 mr-2" />
+            Calendar
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list">
+          {loading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-32" />
+              ))}
+            </div>
+          ) : (pending ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="py-16 text-center text-muted-foreground">
+                <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-500" />
+                <p className="text-lg font-medium">Inbox zero</p>
+                <p className="text-sm">No pending leave requests.</p>
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
+          ) : (
+            <div className="space-y-3">
+              {pending!.map((r) => (
+                <PendingCard
+                  key={r.id}
+                  request={r}
+                  busy={busyId === r.id}
+                  onApprove={() => decide(r.id, 'APPROVED')}
+                  onRejectClick={() => {
+                    setRejectFor(r);
+                    setRejectNote('');
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="calendar">
+          <ApproverCalendar
+            month={calendarMonth}
+            onMonthChange={setCalendarMonth}
+            data={calendarData}
+            loading={loading}
+            onApprove={(id) => decide(id, 'APPROVED')}
+            onReject={(id) => {
+              const target = (pending ?? []).find((r) => r.id === id);
+              if (target) {
+                setRejectFor(target);
+                setRejectNote('');
+              }
+            }}
+          />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={!!rejectFor} onOpenChange={(v) => !v && setRejectFor(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reject leave request</DialogTitle>
             <DialogDescription>
-              Optionally tell {rejectFor?.user?.firstName || rejectFor?.user?.email || 'the applicant'} why.
+              Optionally tell{' '}
+              {rejectFor?.user?.firstName || rejectFor?.user?.email || 'the applicant'} why.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -279,5 +316,318 @@ export default function ApprovalsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// List view card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PendingCard({
+  request,
+  busy,
+  onApprove,
+  onRejectClick,
+}: {
+  request: Request;
+  busy: boolean;
+  onApprove: () => void;
+  onRejectClick: () => void;
+}) {
+  const r = request;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              {r.user?.firstName || r.user?.lastName
+                ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
+                : r.user?.email ?? 'Unknown user'}
+              <Badge variant="outline" className="text-xs">
+                {r.leaveType?.name ?? '—'}
+              </Badge>
+            </CardTitle>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3" /> {r.user?.email ?? '—'}
+              </span>
+              {r.user?.department && (
+                <span className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3" /> {r.user.department}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {new Date(r.appliedAt).toLocaleDateString()}
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={onRejectClick}>
+              <XCircle className="h-4 w-4 mr-1 text-destructive" />
+              Reject
+            </Button>
+            <Button size="sm" disabled={busy} onClick={onApprove}>
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              Approve
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+          <Stat label="Start" value={r.startDate} />
+          <Stat label="End" value={r.endDate} />
+          <Stat label="Days" value={r.totalDays.toFixed(1)} />
+          <Stat
+            label="Duration"
+            value={
+              r.duration === 'FULL_DAY'
+                ? 'Full Day'
+                : r.duration === 'HALF_DAY_FIRST'
+                  ? '½ — 1st half'
+                  : '½ — 2nd half'
+            }
+          />
+        </div>
+        {r.reason && (
+          <div className="mt-3 p-3 bg-muted/50 rounded text-sm">
+            <div className="text-xs text-muted-foreground mb-1">Reason</div>
+            {r.reason}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-muted-foreground text-xs">{label}</div>
+      <div className="font-medium">{value}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar view — org-wide month grid + per-user leave list for the month.
+// Highlights conflicts: rows ordered by user, dates color-coded by status.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ApproverCalendar({
+  month,
+  onMonthChange,
+  data,
+  loading,
+  onApprove,
+  onReject,
+}: {
+  month: Date;
+  onMonthChange: (m: Date) => void;
+  data: {
+    weeklyOffDays: number[];
+    holidays: CalendarHoliday[];
+    leaves: Array<CalendarLeave & { user?: UserLite | null }>;
+  };
+  loading: boolean;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+}) {
+  const [filterStatus, setFilterStatus] = useState<Status | 'ALL'>('ALL');
+  const monthLabel = month.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+
+  const prev = () => {
+    const n = new Date(month);
+    n.setMonth(n.getMonth() - 1);
+    onMonthChange(n);
+  };
+  const next = () => {
+    const n = new Date(month);
+    n.setMonth(n.getMonth() + 1);
+    onMonthChange(n);
+  };
+
+  const filteredLeaves = useMemo(
+    () =>
+      data.leaves.filter(
+        (l) => filterStatus === 'ALL' || l.status === filterStatus,
+      ),
+    [data.leaves, filterStatus],
+  );
+
+  // Group leaves by user for the side panel.
+  const byUser = useMemo(() => {
+    const map = new Map<
+      string,
+      { user: UserLite | null; leaves: typeof filteredLeaves }
+    >();
+    for (const l of filteredLeaves) {
+      const key = l.user?.id ?? 'unknown';
+      const cur = map.get(key) ?? { user: l.user ?? null, leaves: [] };
+      cur.leaves.push(l);
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      (a.user?.firstName ?? a.user?.email ?? '').localeCompare(
+        b.user?.firstName ?? b.user?.email ?? '',
+      ),
+    );
+  }, [filteredLeaves]);
+
+  // Conflict detection: any date with 2+ APPROVED or PENDING leaves.
+  const conflictDates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of data.leaves) {
+      if (l.status !== 'APPROVED' && l.status !== 'PENDING') continue;
+      // expand inclusive range
+      const cur = new Date(l.startDate.split('-').map(Number) as any);
+      const [sy, sm, sd] = l.startDate.split('-').map(Number);
+      const [ey, em, ed] = l.endDate.split('-').map(Number);
+      const start = new Date(sy, sm - 1, sd);
+      const end = new Date(ey, em - 1, ed);
+      const it = new Date(start);
+      while (it <= end) {
+        const ymd = dateToYmd(it);
+        counts.set(ymd, (counts.get(ymd) ?? 0) + 1);
+        it.setDate(it.getDate() + 1);
+      }
+      void cur;
+    }
+    return new Set(Array.from(counts.entries()).filter(([, n]) => n >= 2).map(([d]) => d));
+  }, [data.leaves]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <CardTitle className="text-base">{monthLabel}</CardTitle>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
+              <SelectTrigger className="w-[140px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All statuses</SelectItem>
+                <SelectItem value="PENDING">Pending only</SelectItem>
+                <SelectItem value="APPROVED">Approved only</SelectItem>
+                <SelectItem value="REJECTED">Rejected</SelectItem>
+                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <LeaveCalendarLegend />
+            <div className="flex">
+              <Button size="icon" variant="outline" onClick={prev}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="outline" onClick={next} className="ml-1">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-72" />
+        ) : (
+          <div className="grid gap-6 md:grid-cols-[auto_1fr]">
+            <div>
+              <LeaveCalendar
+                month={month}
+                onMonthChange={onMonthChange}
+                holidays={data.holidays}
+                weeklyOffDays={data.weeklyOffDays}
+                leaves={filteredLeaves}
+              />
+              {conflictDates.size > 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  ⚠ {conflictDates.size} date{conflictDates.size === 1 ? '' : 's'} with 2+
+                  overlapping leaves
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-medium">Team leaves this month</div>
+              {byUser.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No leaves match the current filter.
+                </p>
+              ) : (
+                byUser.map((u) => (
+                  <div
+                    key={u.user?.id ?? 'unknown'}
+                    className="border rounded-md p-3 space-y-2"
+                  >
+                    <div className="text-sm font-medium">
+                      {u.user?.firstName || u.user?.lastName
+                        ? `${u.user?.firstName ?? ''} ${u.user?.lastName ?? ''}`.trim()
+                        : u.user?.email ?? 'Unknown'}
+                      {u.user?.department && (
+                        <span className="text-muted-foreground font-normal">
+                          {' '}· {u.user.department}
+                        </span>
+                      )}
+                    </div>
+                    <ul className="space-y-1.5 text-sm">
+                      {u.leaves
+                        .sort((a, b) => (a.startDate < b.startDate ? -1 : 1))
+                        .map((l) => (
+                          <li key={l.id} className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Badge
+                                variant={
+                                  l.status === 'APPROVED'
+                                    ? 'default'
+                                    : l.status === 'PENDING'
+                                      ? 'secondary'
+                                      : l.status === 'REJECTED'
+                                        ? 'destructive'
+                                        : 'outline'
+                                }
+                                className="text-[10px] shrink-0"
+                              >
+                                {l.status}
+                              </Badge>
+                              <span className="truncate">
+                                {l.startDate}
+                                {l.startDate !== l.endDate ? ` → ${l.endDate}` : ''}{' '}
+                                <span className="text-muted-foreground">
+                                  · {l.leaveType ?? 'Leave'}
+                                </span>
+                              </span>
+                            </div>
+                            {l.status === 'PENDING' && (
+                              <div className="flex gap-1 shrink-0">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2"
+                                  onClick={() => onReject(l.id)}
+                                >
+                                  Reject
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="h-6 px-2"
+                                  onClick={() => onApprove(l.id)}
+                                >
+                                  Approve
+                                </Button>
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
