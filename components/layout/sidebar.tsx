@@ -63,11 +63,7 @@ import { AttendanceWidget } from "@/components/attendance/attendance-widget";
 import { useOptimisticModules } from "@/hooks/useOptimisticModules";
 import { usePermissionContext } from "@/context/PermissionContext";
 import { useRouteAccess } from "@/hooks/use-route-access";
-import {
-  STATIC_PAGES,
-  staticPagesByGroup,
-  type StaticPage,
-} from "@/lib/static-pages";
+import { STATIC_PAGES, type StaticPage } from "@/lib/static-pages";
 
 interface FormModule {
   id: string;
@@ -138,85 +134,75 @@ interface CrmSidebarProps {
 const ACCENT = "#5a4d96";
 const ACCENT_HOVER = "#6b5da8";
 
-// ─── System group builder ─────────────────────────────────────────────────
-// Composes the synthetic top-level "System" tree from lib/static-pages.ts.
-// Used at module-tree-build time to render Leave / Attendance / Payroll /
-// Settings system routes without any dependency on a form-builder module
-// hierarchy. Defined outside the component so the referential identity of
-// the function is stable across renders.
-
-const SYSTEM_GROUP_ID = "__sys_root__";
+// ─── Static-page injection ────────────────────────────────────────────────
+// Static pages (Leave / Attendance / Payroll / Holidays / etc.) are anchored
+// under tenant-configured dynamic modules. The mapping is loaded from
+// /api/static-page-anchors and applied at tree-build time as synthetic
+// `system-route` leaves attached to each anchor module.
+//
+// Pages with no anchor are simply absent from the sidebar — they remain URL-
+// accessible to anyone the route-permission system grants. Admins set
+// placement at /settings/permission/static-pages.
+//
+// Defined outside the component so the function's referential identity is
+// stable across renders.
 
 function syntheticIdFor(prefix: string, key: string) {
-  // Keep IDs stable so React reconciles correctly across renders.
   return `__sys__${prefix}__${key.replace(/[^a-z0-9]+/gi, "_")}`;
 }
 
-interface BuildSystemGroupArgs {
-  isAdmin: boolean;
-  canAccess: (path: string) => boolean;
+export interface AnchorRecord {
+  path: string;
+  moduleId: string;
+  sortOrder: number;
 }
 
-function buildSystemGroup({ isAdmin, canAccess }: BuildSystemGroupArgs): any | null {
-  const groups = staticPagesByGroup();
+/**
+ * Builds a `Map<moduleId, leafNode[]>` of system-route leaves that should be
+ * injected as children of each anchor module. Filters by the per-leaf
+ * canAccess gate and the registry's adminOnly hint so non-admins don't see
+ * dead-ends.
+ */
+function buildAnchorChildrenMap(args: {
+  anchors: AnchorRecord[];
+  isAdmin: boolean;
+  canAccess: (path: string) => boolean;
+}): Map<string, any[]> {
+  const { anchors, isAdmin, canAccess } = args;
+  const byPath = new Map<string, StaticPage>();
+  for (const p of STATIC_PAGES) byPath.set(p.path, p);
 
-  type SystemNode = {
-    id: string;
-    name: string;
-    parentId: string | null;
-    level: number;
-    sort_order: number;
-    module_type: "system-folder" | "system-route";
-    children: SystemNode[];
-    system_route?: string;
-    system_icon?: string;
-  };
-
-  const folderChildren: SystemNode[] = [];
-
-  groups.forEach((g, gi) => {
-    const visiblePages = g.pages.filter((p: StaticPage) => {
-      if (p.adminOnly && !isAdmin) return false;
-      if (!canAccess(p.path)) return false;
-      return true;
-    });
-    if (visiblePages.length === 0) return;
-
-    const groupId = syntheticIdFor("group", g.group);
-    const pageNodes: SystemNode[] = visiblePages.map((p, pi) => ({
-      id: syntheticIdFor("page", p.path),
-      name: p.label,
-      parentId: groupId,
-      level: 2,
-      sort_order: pi,
-      module_type: "system-route",
-      children: [],
-      system_route: p.path,
-      system_icon: p.icon,
-    }));
-
-    folderChildren.push({
-      id: groupId,
-      name: g.group,
-      parentId: SYSTEM_GROUP_ID,
-      level: 1,
-      sort_order: gi,
-      module_type: "system-folder",
-      children: pageNodes,
-    });
+  const result = new Map<string, any[]>();
+  // Stable order: respect the admin-configured sortOrder when set, otherwise
+  // fall back to the registry order (StaticPage's order in STATIC_PAGES).
+  const ordered = [...anchors].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return a.path.localeCompare(b.path);
   });
 
-  if (folderChildren.length === 0) return null;
+  for (const a of ordered) {
+    const meta = byPath.get(a.path);
+    if (!meta) continue; // anchor references a path that's no longer in the registry
+    if (meta.adminOnly && !isAdmin) continue;
+    if (!canAccess(meta.path)) continue;
 
-  return {
-    id: SYSTEM_GROUP_ID,
-    name: "System",
-    parentId: null,
-    level: 0,
-    sort_order: -1, // sits ABOVE user modules in the sidebar
-    module_type: "system-folder",
-    children: folderChildren,
-  } as any;
+    const node = {
+      id: syntheticIdFor("page", meta.path),
+      name: meta.label,
+      parentId: a.moduleId,
+      level: 1, // depth is recomputed by the renderer based on parent
+      sort_order: a.sortOrder,
+      module_type: "system-route" as const,
+      children: [],
+      system_route: meta.path,
+      system_icon: meta.icon,
+    };
+
+    const list = result.get(a.moduleId) ?? [];
+    list.push(node);
+    result.set(a.moduleId, list);
+  }
+  return result;
 }
 
 // Resolve a Lucide component for a static-page icon name. Centralised so
@@ -285,6 +271,35 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     description: "",
     parentId: "",
   });
+
+  // Static-page anchors — admin-configured "page → module" mapping. Refetched
+  // when the user changes (admin flag affects adminOnly pages) AND on every
+  // navigation, so leaving the static-pages config page or the attendance
+  // integrations card picks up the new anchor set without a hard reload. The
+  // server also auto-derives anchors from attendance config form bindings, so
+  // a fresh fetch here surfaces those without admin involvement.
+  const [staticAnchors, setStaticAnchors] = useState<AnchorRecord[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/static-page-anchors", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.success) return;
+        setStaticAnchors(
+          (j.anchors ?? []).map((a: any) => ({
+            path: a.path,
+            moduleId: a.moduleId,
+            sortOrder: a.sortOrder ?? 0,
+          })),
+        );
+      })
+      .catch(() => {
+        /* silent — sidebar stays functional without anchors */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userData?.user?.id, isAdmin, pathname]);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
@@ -426,17 +441,14 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     //   1. If the synthetic node carries a `system_icon` (the registry's icon
     //      name), use the centralised mapper. New pages register an icon name
     //      in lib/static-pages.ts and don't need a switch case here.
-    //   2. The top-level "System" folder always uses the folder icon.
-    //   3. Group sub-folders (e.g. "Leave Management") use folder too.
-    //   4. Form-builder modules fall through to getModuleIcon().
+    //   2. Other synthetic folders/routes fall back to the folder icon.
+    //   3. Form-builder modules fall through to getModuleIcon().
     const systemIconName = (module as any).system_icon as string | undefined;
     const IconComponent =
       isSystemRoute && systemIconName
         ? staticPageIcon(systemIconName)
         : isSystemRoute || isSystemFolder
-          ? module.id === SYSTEM_GROUP_ID
-            ? Sparkles
-            : Folder
+          ? Folder
           : getModuleIcon(undefined, module.module_type);
     const hasChildren = !isSystemRoute && !!module.children?.length;
     const isExpanded = expandedModules.has(module.id);
@@ -570,10 +582,35 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         }));
     };
 
+    // Inject admin-configured static-page leaves under their anchor modules.
+    // Done BEFORE filtering so the per-leaf canAccess gate can keep a host
+    // module visible (via the "any child has access" branch) even when the
+    // user has no VIEW permission on the module itself.
+    const anchorChildrenByModule = buildAnchorChildrenMap({
+      anchors: staticAnchors,
+      isAdmin,
+      canAccess,
+    });
+
+    const injectAnchorLeaves = (items: ModuleNode[]): ModuleNode[] =>
+      items.map((node) => {
+        const recursedChildren = injectAnchorLeaves(node.children);
+        const extra = anchorChildrenByModule.get(node.id);
+        const children = extra
+          ? [...recursedChildren, ...(extra as unknown as ModuleNode[])]
+          : recursedChildren;
+        return { ...node, children };
+      });
+
     const filterByPermission = (items: ModuleNode[]): ModuleNode[] => {
       if (isAdmin) return items;
       return items
         .map((mod) => {
+          // Synthetic system-route leaves are gated by the route-permission
+          // resolver — passing canAccess at injection time is enough; the
+          // VIEW-permission check below doesn't apply to them.
+          if (mod.module_type === "system-route") return mod;
+
           const filteredChildren = filterByPermission(mod.children);
           const hasAccess = checkPermission("VIEW", mod.id);
           if (hasAccess || filteredChildren.length > 0) {
@@ -584,20 +621,10 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         .filter(Boolean) as ModuleNode[];
     };
 
-    const filtered = filterByPermission(sortModules(roots as ModuleNode[]));
-
-    // System pages (Leave, Attendance, Payroll, etc.) are NOT nested inside a
-    // form-builder module any more. They render as a fixed top-level "System"
-    // group built from the lib/static-pages registry, gated per-leaf by
-    // canAccess(path) + the page's adminOnly hint. Decoupling them from a
-    // module anchor means tenants without an "HR" module — or whose modules
-    // get filtered away by permission — still see system pages they're
-    // entitled to. Per-leaf URL gating is handled by the route-permission
-    // resolver so this stays in sync with /settings/permission/roles.
-    const systemGroup = buildSystemGroup({ isAdmin, canAccess });
-
-    return systemGroup ? [systemGroup, ...filtered] : filtered;
-  }, [modules, isAdmin, checkPermission, canAccess]);
+    const sorted = sortModules(roots as ModuleNode[]);
+    const withAnchors = injectAnchorLeaves(sorted);
+    return filterByPermission(withAnchors);
+  }, [modules, isAdmin, checkPermission, canAccess, staticAnchors]);
 
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;

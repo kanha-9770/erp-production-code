@@ -162,11 +162,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const config = await prisma.payrollConfiguration.findFirst({
+  let config = await prisma.payrollConfiguration.findFirst({
     where: { organizationId: authUser.organizationId, isActive: true },
     orderBy: { createdAt: 'desc' },
   });
-  const setup = readSetup(config?.attendanceFieldMappings);
+  let setup = readSetup(config?.attendanceFieldMappings);
 
   const forms = await listOrgForms(authUser.organizationId);
 
@@ -175,13 +175,85 @@ export async function GET(request: NextRequest) {
   const ownedIds = new Set(forms.map((f) => f.id));
   const enforce = (id: string | null) => (id && ownedIds.has(id) ? id : null);
 
-  const bindings: BindingsShape = {
+  let bindings: BindingsShape = {
     employee: enforce(setup.employee.formId),
     checkIn: enforce(setup.checkIn.formId),
     checkOut: enforce(setup.checkOut.formId),
     leave: enforce(setup.leave.formId),
     holiday: enforce(setup.holiday.formId),
   };
+
+  // Auto-bootstrap: when nothing is bound yet AND the org has forms with
+  // recognisable names ("Check In", "Holiday Calendar", etc.), persist the
+  // name-based suggestions so payroll / leave / attendance all start working
+  // without admin intervention. Skipped if at least one slot is already
+  // bound — auto-bootstrap is for the empty-state only, not retroactive
+  // overwriting of admin choices.
+  let autoConfigured = false;
+  const allEmpty =
+    !bindings.employee &&
+    !bindings.checkIn &&
+    !bindings.checkOut &&
+    !bindings.leave &&
+    !bindings.holiday;
+
+  if (allEmpty) {
+    const auto: BindingsShape = {
+      employee: suggest(forms, 'employee'),
+      checkIn: suggest(forms, 'checkIn'),
+      checkOut: suggest(forms, 'checkOut'),
+      leave: suggest(forms, 'leave'),
+      holiday: suggest(forms, 'holiday'),
+    };
+    const anySuggestion =
+      auto.employee || auto.checkIn || auto.checkOut || auto.leave || auto.holiday;
+
+    if (anySuggestion) {
+      // Mutate the in-memory setup so the rest of this handler returns
+      // post-bootstrap bindings on the same request.
+      (['employee', 'checkIn', 'checkOut', 'leave', 'holiday'] as Slot[]).forEach((slot) => {
+        if (auto[slot]) setup[slot] = { ...setup[slot], formId: auto[slot] };
+      });
+
+      const attendanceFormIds = [
+        setup.employee.formId,
+        setup.checkIn.formId,
+        setup.checkOut.formId,
+        setup.holiday.formId,
+      ].filter((x): x is string => Boolean(x));
+      const leaveFormIds = [setup.leave.formId].filter((x): x is string => Boolean(x));
+
+      if (config) {
+        config = await prisma.payrollConfiguration.update({
+          where: { id: config.id },
+          data: {
+            attendanceFormIds,
+            leaveFormIds,
+            attendanceFieldMappings: setup as any,
+          },
+        });
+      } else {
+        config = await prisma.payrollConfiguration.create({
+          data: {
+            organizationId: authUser.organizationId,
+            isActive: true,
+            attendanceFormIds,
+            leaveFormIds,
+            attendanceFieldMappings: setup as any,
+            leaveFieldMappings: {},
+          },
+        });
+      }
+      bindings = {
+        employee: enforce(setup.employee.formId),
+        checkIn: enforce(setup.checkIn.formId),
+        checkOut: enforce(setup.checkOut.formId),
+        leave: enforce(setup.leave.formId),
+        holiday: enforce(setup.holiday.formId),
+      };
+      autoConfigured = true;
+    }
+  }
 
   const broken: BindingsShape = {
     employee: setup.employee.formId && !bindings.employee ? setup.employee.formId : null,
@@ -218,6 +290,7 @@ export async function GET(request: NextRequest) {
     suggestions,
     broken,
     forms,
+    autoConfigured,
     diagnostics: {
       month,
       holidaysThisMonth: holidays.length,

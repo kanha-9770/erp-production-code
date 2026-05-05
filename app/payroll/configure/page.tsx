@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +26,10 @@ import {
   CalendarOff,
   CalendarDays,
   Briefcase,
+  Link as LinkIcon,
+  ExternalLink,
+  Sparkles,
+  Wand2,
 } from 'lucide-react';
 
 interface FormOption {
@@ -191,6 +195,89 @@ function FieldMappingRow({
   );
 }
 
+// Heuristic "name → key" match used by the auto-fill buttons. The first hint
+// that matches (case-insensitive substring) wins. Centralised so adding a new
+// section field = one entry here, not a new branch in the auto-fill code.
+const FIELD_NAME_HINTS: Record<string, string[]> = {
+  // Employee
+  email: ['email', 'e-mail', 'mail'],
+  employeeId: ['employee id', 'emp id', 'empid', 'employee code', 'staff id'],
+  name: ['name', 'full name', 'employee name'],
+  salary: ['salary', 'ctc', 'monthly salary', 'base salary', 'gross'],
+  designation: ['designation', 'role', 'job title', 'position'],
+  department: ['department', 'dept', 'division'],
+  dateOfJoining: ['date of joining', 'doj', 'joining date', 'hire date', 'start date'],
+  dateOfLeaving: ['date of leaving', 'dol', 'leaving date', 'exit date', 'end date'],
+  // Check-in / Check-out
+  date: ['date', 'attendance date', 'punch date', 'day'],
+  checkInTime: ['check in', 'check-in', 'checkin', 'in time', 'login', 'punch in'],
+  checkOutTime: ['check out', 'check-out', 'checkout', 'out time', 'logout', 'punch out'],
+  // Leave
+  startDate: ['start date', 'from date', 'leave start', 'from'],
+  endDate: ['end date', 'to date', 'leave end', 'till', 'to'],
+  leaveType: ['leave type', 'type of leave', 'category', 'leave category'],
+  status: ['status', 'approval', 'state', 'approved'],
+  halfDay: ['half day', 'half-day', 'halfday', 'is half'],
+  days: ['days', 'no of days', 'no. of days', 'duration'],
+};
+
+function suggestFieldId(fields: FieldOption[], key: string): string | null {
+  const hints = FIELD_NAME_HINTS[key] ?? [key.toLowerCase()];
+  // Exact match first, then substring.
+  for (const hint of hints) {
+    const exact = fields.find((f) => f.label.trim().toLowerCase() === hint);
+    if (exact) return exact.id;
+  }
+  for (const hint of hints) {
+    const fuzzy = fields.find((f) => f.label.toLowerCase().includes(hint));
+    if (fuzzy) return fuzzy.id;
+  }
+  return null;
+}
+
+type Section = 'employee' | 'checkIn' | 'checkOut' | 'leave' | 'holiday';
+
+function AutoFillButton({
+  section,
+  onAutoFill,
+  fieldsLoaded,
+}: {
+  section: Section;
+  onAutoFill: (section: Section) => number;
+  fieldsLoaded: boolean;
+}) {
+  const [feedback, setFeedback] = useState<string | null>(null);
+  return (
+    <div className="flex items-center gap-2">
+      {feedback && (
+        <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+          {feedback}
+        </span>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!fieldsLoaded}
+        onClick={() => {
+          const filled = onAutoFill(section);
+          setFeedback(
+            filled > 0
+              ? `Auto-filled ${filled} field${filled === 1 ? '' : 's'}`
+              : 'Nothing to fill — already mapped or no name match',
+          );
+          setTimeout(() => setFeedback(null), 3500);
+        }}
+        className="h-7 gap-1.5 text-xs"
+        title="Match field names to slots automatically. Won't overwrite values you've already set."
+      >
+        <Wand2 className="h-3 w-3" />
+        Auto-fill
+      </Button>
+    </div>
+  );
+}
+
 export default function PayrollConfigurePage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -205,6 +292,10 @@ export default function PayrollConfigurePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Set when the integrations endpoint auto-detected and bootstrapped form
+  // bindings on this load. Surfaces an emerald "auto-configured" banner so
+  // admins know where the values came from.
+  const [autoConfigured, setAutoConfigured] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -214,18 +305,37 @@ export default function PayrollConfigurePage() {
     setLoading(true);
     setError(null);
     try {
-      const [formsRes, setupRes] = await Promise.all([
+      // Hit integrations FIRST. The GET handler there auto-detects forms with
+      // recognisable names ("Check In", "Holiday Calendar", ...) and persists
+      // them as bindings on first read — so by the time we load the payroll
+      // setup below, the form ids are already in place. This means visiting
+      // /payroll/configure for the first time is enough to start payroll
+      // working; admins don't need to also visit /settings/attendance-config.
+      const integrationsPromise = fetch('/api/attendance/integrations', {
+        cache: 'no-store',
+        credentials: 'include',
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+
+      // Forms list is independent of the integrations bootstrap so we fetch
+      // it in parallel.
+      const [formsRes, integrationsJson] = await Promise.all([
         fetch('/api/payroll/forms', { cache: 'no-store' }),
-        fetch('/api/payroll/setup', { cache: 'no-store' }),
+        integrationsPromise,
       ]);
       const formsJson = await formsRes.json();
-      const setupJson = await setupRes.json();
 
       if (!formsRes.ok || !formsJson.success) {
         throw new Error(formsJson.error || 'Failed to load forms');
       }
-
       setForms(formsJson.forms ?? []);
+      setAutoConfigured(!!integrationsJson?.autoConfigured);
+
+      // Now load the payroll setup — the integrations bootstrap may have just
+      // written into the same `attendanceFieldMappings` row this reads from.
+      const setupRes = await fetch('/api/payroll/setup', { cache: 'no-store' });
+      const setupJson = await setupRes.json();
       const loaded: Setup = setupJson.setup ?? EMPTY_SETUP;
       setSetup(loaded);
 
@@ -248,8 +358,6 @@ export default function PayrollConfigurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  type Section = 'employee' | 'checkIn' | 'checkOut' | 'leave' | 'holiday';
-
   const fetchFields = async (formId: string, section: Section): Promise<void> => {
     try {
       const res = await fetch(`/api/payroll/form-fields?formId=${formId}`, { cache: 'no-store' });
@@ -266,28 +374,6 @@ export default function PayrollConfigurePage() {
     }
   };
 
-  const handleFormSelect = async (section: Section, formId: string | null) => {
-    setSetup((prev) => {
-      const blankFields =
-        section === 'employee'
-          ? EMPTY_SETUP.employee.fields
-          : section === 'checkIn'
-            ? EMPTY_SETUP.checkIn.fields
-            : section === 'checkOut'
-              ? EMPTY_SETUP.checkOut.fields
-              : section === 'leave'
-                ? EMPTY_SETUP.leave.fields
-                : EMPTY_SETUP.holiday.fields;
-      return { ...prev, [section]: { formId, fields: { ...blankFields } as any } };
-    });
-    if (section === 'employee') setEmployeeFields([]);
-    if (section === 'checkIn') setCheckInFields([]);
-    if (section === 'checkOut') setCheckOutFields([]);
-    if (section === 'leave') setLeaveFields([]);
-    if (section === 'holiday') setHolidayFields([]);
-    if (formId) await fetchFields(formId, section);
-  };
-
   const updateMapping = (section: Section, field: string, value: string | null) => {
     setSetup((prev) => ({
       ...prev,
@@ -296,6 +382,43 @@ export default function PayrollConfigurePage() {
         fields: { ...(prev[section] as any).fields, [field]: value },
       },
     }));
+  };
+
+  // Auto-fill a section's field mappings by name-matching the form's fields
+  // against FIELD_NAME_HINTS. Only fills slots that are currently empty so we
+  // don't trample explicit admin choices. Returns the count of newly filled
+  // slots so the UI can give a "filled N of M" toast.
+  const autoFillSection = (section: Section): number => {
+    const fieldList =
+      section === 'employee'
+        ? employeeFields
+        : section === 'checkIn'
+          ? checkInFields
+          : section === 'checkOut'
+            ? checkOutFields
+            : section === 'leave'
+              ? leaveFields
+              : holidayFields;
+    if (fieldList.length === 0) return 0;
+
+    let filled = 0;
+    setSetup((prev) => {
+      const sectionState = prev[section] as any;
+      const currentFields = { ...sectionState.fields };
+      for (const key of Object.keys(currentFields)) {
+        if (currentFields[key]) continue; // never overwrite a manual choice
+        const guess = suggestFieldId(fieldList, key);
+        if (guess) {
+          currentFields[key] = guess;
+          filled++;
+        }
+      }
+      return {
+        ...prev,
+        [section]: { ...sectionState, fields: currentFields },
+      };
+    });
+    return filled;
   };
 
   const toggleWeeklyOff = (day: number) => {
@@ -328,16 +451,6 @@ export default function PayrollConfigurePage() {
     }
   };
 
-  const formsByModule = useMemo(() => {
-    const map = new Map<string, FormOption[]>();
-    forms.forEach((f) => {
-      const k = f.module?.name ?? 'Other';
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(f);
-    });
-    return Array.from(map.entries());
-  }, [forms]);
-
   if (!mounted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -349,37 +462,58 @@ export default function PayrollConfigurePage() {
     );
   }
 
-  const FormPicker = ({
-    section,
-    selectedId,
-  }: {
-    section: Section;
-    selectedId: string | null;
-  }) => (
-    <Select
-      value={selectedId ?? NONE}
-      onValueChange={(v) => handleFormSelect(section, v === NONE ? null : v)}
-    >
-      <SelectTrigger className="h-10">
-        <SelectValue placeholder="-- select a form --" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={NONE}>-- select a form --</SelectItem>
-        {formsByModule.map(([moduleName, list]) => (
-          <div key={moduleName}>
-            <div className="px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">
-              {moduleName}
-            </div>
-            {list.map((f) => (
-              <SelectItem key={f.id} value={f.id}>
-                {f.name}
-              </SelectItem>
-            ))}
+  /**
+   * Read-only display for forms that are linked centrally via Attendance
+   * Configuration. The form choice itself is no longer editable on this page —
+   * admins configure once at /settings/attendance-config and payroll, leave
+   * management, and the attendance widget all read from the same record.
+   * Field mappings remain editable here because they depend on which form
+   * the admin picked.
+   */
+  const LinkedFormDisplay = ({ selectedId }: { selectedId: string | null }) => {
+    const form = forms.find((f) => f.id === selectedId);
+    if (!selectedId || !form) {
+      return (
+        <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertCircle className="h-4 w-4" />
+            Not linked yet — configure centrally for payroll, leave, and attendance to share it.
           </div>
-        ))}
-      </SelectContent>
-    </Select>
-  );
+          <Link
+            href="/settings/attendance-config"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+          >
+            Link a form <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-md border border-border bg-muted/20 px-3 py-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <LinkIcon className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+            <span className="truncate">{form.name}</span>
+            <Badge
+              variant="outline"
+              className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+            >
+              Linked
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Set in Attendance Configuration · {form.module.name}
+          </p>
+        </div>
+        <Link
+          href="/settings/attendance-config"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0"
+        >
+          Change <ExternalLink className="h-3 w-3" />
+        </Link>
+      </div>
+    );
+  };
 
   const requirementsMet =
     !!setup.employee.formId &&
@@ -434,6 +568,51 @@ export default function PayrollConfigurePage() {
           </div>
         </header>
 
+        {autoConfigured && (
+          <div className="rounded-md border border-emerald-300 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-100 flex items-start gap-2">
+            <Sparkles className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600" />
+            <div className="space-y-1">
+              <p>
+                <strong>Auto-configured.</strong> We detected forms with
+                familiar names (Check In, Holiday Calendar, ...) in your
+                workspace and bound them to the matching attendance slots.
+                You can review the mappings below or change them in{' '}
+                <Link
+                  href="/settings/attendance-config"
+                  className="underline font-medium hover:text-emerald-700"
+                >
+                  Attendance Configuration
+                </Link>
+                .
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20 px-4 py-3 text-sm text-blue-900 dark:text-blue-100 flex items-start gap-2">
+          <LinkIcon className="h-4 w-4 mt-0.5 shrink-0 text-blue-600" />
+          <div className="space-y-1">
+            <p>
+              <strong>Form bindings are shared.</strong> Employee, check-in,
+              check-out, leave, and holiday forms are configured once in{' '}
+              <Link
+                href="/settings/attendance-config"
+                className="underline font-medium hover:text-blue-700"
+              >
+                Attendance Configuration
+              </Link>
+              . Payroll, the attendance widget, and leave management all read
+              from the same row — no duplicate setup needed here.
+            </p>
+            <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
+              Field mappings (which column = date, check-in time, etc.) stay
+              editable below since they depend on the form's specific schema.
+              Use the <strong>Auto-fill</strong> button on each section to
+              match field names automatically.
+            </p>
+          </div>
+        </div>
+
         {error && (
           <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -460,14 +639,17 @@ export default function PayrollConfigurePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
-              <FormPicker section="employee" selectedId={setup.employee.formId} />
+              <LinkedFormDisplay selectedId={setup.employee.formId} />
             </div>
 
             {setup.employee.formId && (
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Map fields
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Map fields
+                  </p>
+                  <AutoFillButton section="employee" onAutoFill={autoFillSection} fieldsLoaded={employeeFields.length > 0} />
+                </div>
                 <FieldMappingRow
                   label="Salary (CTC)"
                   description="Monthly base salary; falls back to default below if blank"
@@ -561,14 +743,17 @@ export default function PayrollConfigurePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
-              <FormPicker section="checkIn" selectedId={setup.checkIn.formId} />
+              <LinkedFormDisplay selectedId={setup.checkIn.formId} />
             </div>
 
             {setup.checkIn.formId && (
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Map fields
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Map fields
+                  </p>
+                  <AutoFillButton section="checkIn" onAutoFill={autoFillSection} fieldsLoaded={checkInFields.length > 0} />
+                </div>
                 <FieldMappingRow
                   label="Date"
                   description="The attendance date"
@@ -620,14 +805,17 @@ export default function PayrollConfigurePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
-              <FormPicker section="checkOut" selectedId={setup.checkOut.formId} />
+              <LinkedFormDisplay selectedId={setup.checkOut.formId} />
             </div>
 
             {setup.checkOut.formId && (
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Map fields
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Map fields
+                  </p>
+                  <AutoFillButton section="checkOut" onAutoFill={autoFillSection} fieldsLoaded={checkOutFields.length > 0} />
+                </div>
                 <FieldMappingRow
                   label="Date"
                   fields={checkOutFields}
@@ -675,14 +863,17 @@ export default function PayrollConfigurePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
-              <FormPicker section="leave" selectedId={setup.leave.formId} />
+              <LinkedFormDisplay selectedId={setup.leave.formId} />
             </div>
 
             {setup.leave.formId && (
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Map fields
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Map fields
+                  </p>
+                  <AutoFillButton section="leave" onAutoFill={autoFillSection} fieldsLoaded={leaveFields.length > 0} />
+                </div>
                 <FieldMappingRow
                   label="Start Date"
                   description="First day of the leave"
@@ -762,14 +953,17 @@ export default function PayrollConfigurePage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Form</label>
-              <FormPicker section="holiday" selectedId={setup.holiday.formId} />
+              <LinkedFormDisplay selectedId={setup.holiday.formId} />
             </div>
 
             {setup.holiday.formId && (
               <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Map fields
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Map fields
+                  </p>
+                  <AutoFillButton section="holiday" onAutoFill={autoFillSection} fieldsLoaded={holidayFields.length > 0} />
+                </div>
                 <FieldMappingRow
                   label="Date"
                   description="The holiday date"
