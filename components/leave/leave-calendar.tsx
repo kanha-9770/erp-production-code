@@ -214,17 +214,20 @@ export function LeaveCalendar({
   );
 
   // Compose props by selectionMode without `any` so TS can verify the union.
+  // Cells use min(11vw, 2.5rem) so a single month fits a 360px viewport with
+  // breathing room while staying tap-friendly. Multi-month layouts on tablet+
+  // get the 2.5rem max so they don't sprawl.
   const baseProps = {
-    className: cn('p-3', className),
+    className: cn('p-2 sm:p-3', className),
     showOutsideDays: false,
     numberOfMonths,
     modifiers,
     modifiersClassNames,
     disabled: allDisabled,
     classNames: {
-      months: 'flex flex-col sm:flex-row gap-4',
-      month: 'space-y-3',
-      caption: 'flex justify-center pt-1 relative items-center',
+      months: 'flex flex-col sm:flex-row gap-3 sm:gap-4',
+      month: 'space-y-2 sm:space-y-3',
+      caption: 'flex justify-center pt-1 relative items-center h-8',
       caption_label: 'text-sm font-semibold',
       nav: 'space-x-1 flex items-center',
       nav_button: cn(
@@ -235,19 +238,20 @@ export function LeaveCalendar({
       nav_button_next: 'absolute right-1',
       table: 'w-full border-collapse',
       head_row: 'flex',
-      head_cell: 'text-muted-foreground rounded-md w-10 font-medium text-[0.7rem] uppercase tracking-wider',
+      head_cell:
+        'text-muted-foreground rounded-md w-9 sm:w-10 font-medium text-[0.65rem] sm:text-[0.7rem] uppercase tracking-wider',
       row: 'flex w-full mt-1',
-      cell: 'h-10 w-10 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20',
+      cell: 'h-9 w-9 sm:h-10 sm:w-10 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20',
       day: cn(
         buttonVariants({ variant: 'ghost' }),
-        'h-10 w-10 p-0 font-normal aria-selected:opacity-100 rounded-md',
+        'relative h-9 w-9 sm:h-10 sm:w-10 p-0 font-normal aria-selected:opacity-100 rounded-md transition-colors',
       ),
       day_range_end: 'day-range-end',
       day_selected:
         'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground',
       day_today: 'ring-2 ring-primary/40 ring-inset',
       day_outside: 'text-muted-foreground/50',
-      day_disabled: 'text-muted-foreground/50 cursor-not-allowed',
+      day_disabled: 'text-muted-foreground/50 cursor-not-allowed line-through opacity-60',
       day_range_middle: 'aria-selected:bg-primary/15 aria-selected:text-foreground rounded-none',
     },
     components: {
@@ -286,66 +290,77 @@ export function LeaveCalendar({
  * Per-modifier styling. Kept inline so the calendar component is self-
  * contained — drop-in usable from any page without touching globals.css.
  *
- * Color scheme:
- *   • Holiday   → red dot underline + faint red bg
- *   • Weekly-off→ slate background, slightly muted text
- *   • Approved  → green underline bar
- *   • Pending   → amber underline bar
- *   • Rejected  → diagonal strikethrough
+ * Color scheme — status uses a single 4px dot below the date so the cell
+ * stays clean and unambiguous. Holiday/weekly-off use restrained text colors
+ * instead of background washes (which clash with selection bg).
+ *
+ *   • Holiday   → red text + small red dot
+ *   • Weekly-off→ muted text (no fill — fill fights selected state)
+ *   • Approved  → green dot
+ *   • Pending   → amber dot
+ *   • Rejected  → strikethrough
  */
 function CalendarStyles() {
   return (
     <style jsx global>{`
       .rdp-holiday {
-        background-color: rgb(254 226 226 / 0.6);
-        color: rgb(153 27 27);
+        color: rgb(185 28 28);
         font-weight: 600;
       }
       .dark .rdp-holiday {
-        background-color: rgb(127 29 29 / 0.4);
-        color: rgb(254 202 202);
+        color: rgb(252 165 165);
       }
-      .rdp-holiday-optional {
-        background-color: rgb(254 226 226 / 0.3);
-        color: rgb(153 27 27);
-      }
-      .rdp-weekly-off {
-        background-color: rgb(241 245 249);
-        color: rgb(100 116 139);
-      }
-      .dark .rdp-weekly-off {
-        background-color: rgb(30 41 59 / 0.6);
-        color: rgb(148 163 184);
-      }
-      .rdp-leave-approved {
-        position: relative;
-      }
-      .rdp-leave-approved::after {
+      .rdp-holiday::before,
+      .rdp-holiday-optional::before {
         content: '';
         position: absolute;
-        left: 18%;
-        right: 18%;
-        bottom: 4px;
-        height: 3px;
-        background: rgb(34 197 94);
-        border-radius: 2px;
+        top: 4px;
+        right: 4px;
+        width: 4px;
+        height: 4px;
+        border-radius: 9999px;
+        background: rgb(220 38 38);
       }
-      .rdp-leave-pending {
-        position: relative;
+      .rdp-holiday-optional {
+        color: rgb(185 28 28);
       }
+      .rdp-holiday-optional::before {
+        background: rgb(248 113 113);
+      }
+      .rdp-weekly-off:not([aria-selected='true']) {
+        color: rgb(100 116 139);
+      }
+      .dark .rdp-weekly-off:not([aria-selected='true']) {
+        color: rgb(148 163 184);
+      }
+      .rdp-leave-approved::after,
       .rdp-leave-pending::after {
         content: '';
         position: absolute;
-        left: 18%;
-        right: 18%;
-        bottom: 4px;
-        height: 3px;
+        bottom: 3px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 4px;
+        height: 4px;
+        border-radius: 9999px;
+      }
+      .rdp-leave-approved::after {
+        background: rgb(34 197 94);
+      }
+      .rdp-leave-pending::after {
         background: rgb(245 158 11);
-        border-radius: 2px;
       }
       .rdp-leave-rejected {
         text-decoration: line-through;
-        opacity: 0.55;
+        opacity: 0.5;
+      }
+      /* When the cell is selected (range or single), invert dot colors so
+         they're visible against the primary background. */
+      [aria-selected='true'] .rdp-leave-approved::after,
+      [aria-selected='true'] .rdp-leave-pending::after,
+      [aria-selected='true'] .rdp-holiday::before,
+      [aria-selected='true'] .rdp-holiday-optional::before {
+        background: rgb(255 255 255 / 0.85);
       }
     `}</style>
   );
@@ -365,43 +380,32 @@ export function LeaveCalendarLegend({
   showHolidays?: boolean;
 }) {
   return (
-    <div className={cn('flex flex-wrap gap-3 text-xs', className)}>
+    <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]', className)}>
       {showHolidays && (
         <>
-          <LegendSwatch className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200">
-            Holiday
-          </LegendSwatch>
-          <LegendSwatch className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            Weekly off
-          </LegendSwatch>
+          <LegendDot color="bg-red-500">Holiday</LegendDot>
+          <LegendText className="text-slate-500">Wknd</LegendText>
         </>
       )}
       {showLeaves && (
         <>
-          <LegendBar color="bg-green-500">Approved</LegendBar>
-          <LegendBar color="bg-amber-500">Pending</LegendBar>
+          <LegendDot color="bg-emerald-500">Approved</LegendDot>
+          <LegendDot color="bg-amber-500">Pending</LegendDot>
         </>
       )}
     </div>
   );
 }
 
-function LegendSwatch({ children, className }: { children: React.ReactNode; className: string }) {
+function LegendDot({ children, color }: { children: React.ReactNode; color: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={cn('inline-block h-3 w-5 rounded', className)} />
+      <span className={cn('inline-block h-1.5 w-1.5 rounded-full', color)} />
       <span className="text-muted-foreground">{children}</span>
     </span>
   );
 }
 
-function LegendBar({ children, color }: { children: React.ReactNode; color: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="relative inline-block h-3 w-5 rounded bg-muted">
-        <span className={cn('absolute bottom-0.5 left-1/4 right-1/4 h-1 rounded', color)} />
-      </span>
-      <span className="text-muted-foreground">{children}</span>
-    </span>
-  );
+function LegendText({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <span className={cn('text-muted-foreground', className)}>{children}</span>;
 }

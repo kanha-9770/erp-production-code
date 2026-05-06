@@ -70,6 +70,11 @@ export interface BalanceRow {
   pending: number;
   available: number;
   isPaid: boolean;
+  // Constraints from the active LeaveRule (if any) — surfaced so the apply
+  // form can enforce them client-side instead of round-tripping to a 400.
+  minNoticeDays: number | null;
+  maxConsecutiveDays: number | null;
+  requiresApproval: boolean;
 }
 
 export interface LeaveRuleLite {
@@ -562,6 +567,7 @@ export async function getBalance(
     const carriedForward = toNumber(b?.carriedForward);
     const used = toNumber(b?.used);
     const pending = toNumber(b?.pending);
+    const rule = lt.leaveRules?.[0];
     return {
       leaveType: {
         id: lt.id,
@@ -577,7 +583,16 @@ export async function getBalance(
       used,
       pending,
       available: allocated + carriedForward - used - pending,
-      isPaid: !!lt.leaveRules?.[0]?.isPaid,
+      isPaid: !!rule?.isPaid,
+      minNoticeDays:
+        rule?.minNoticeDays != null && Number.isFinite(Number(rule.minNoticeDays))
+          ? Number(rule.minNoticeDays)
+          : null,
+      maxConsecutiveDays:
+        rule?.maxConsecutiveDays != null && Number.isFinite(Number(rule.maxConsecutiveDays))
+          ? Number(rule.maxConsecutiveDays)
+          : null,
+      requiresApproval: rule ? rule.requiresApproval !== false : true,
     };
   });
 }
