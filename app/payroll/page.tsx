@@ -97,6 +97,7 @@ interface PayrollRecord {
   breakdown?: PayrollBreakdown;
 }
 
+
 interface Stats {
   totalEmployees: number;
   processedPayrolls: number;
