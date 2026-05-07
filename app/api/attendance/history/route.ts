@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
-import { todayKey } from '@/lib/hr/attendance-service';
+import { distanceMeters, todayKey } from '@/lib/hr/attendance-service';
+import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,42 @@ export async function GET(request: NextRequest) {
     orderBy: { date: 'desc' },
   });
 
+  // Per-org geofence centre, so each historical row can be flagged as
+  // inside/outside the office radius. We deliberately ignore
+  // `geofenceMode` — visibility is decoupled from enforcement so admins
+  // can see out-of-radius punches even when mode is still OFF.
+  const cfg = await getAttendanceConfig(authUser.organizationId);
+  const fenceActive =
+    cfg.geofenceLat != null &&
+    cfg.geofenceLng != null &&
+    cfg.geofenceRadiusM != null;
+  const fenceCentre = fenceActive
+    ? { lat: cfg.geofenceLat as number, lng: cfg.geofenceLng as number }
+    : null;
+  const fenceRadius = fenceActive ? (cfg.geofenceRadiusM as number) : null;
+  function annotateGeo(
+    lat: number | null,
+    lng: number | null,
+    punched: boolean,
+  ) {
+    if (!fenceCentre || !fenceRadius) {
+      return { distanceM: null, outsideRadius: null, locationMissing: false };
+    }
+    if (lat == null || lng == null) {
+      return {
+        distanceM: null,
+        outsideRadius: null,
+        locationMissing: punched,
+      };
+    }
+    const d = distanceMeters({ lat, lng }, fenceCentre);
+    return {
+      distanceM: Math.round(d),
+      outsideRadius: d > fenceRadius,
+      locationMissing: false,
+    };
+  }
+
   // Summary stats keep the page snappy without a follow-up call.
   let presentDays = 0;
   let lateDays = 0;
@@ -87,30 +124,54 @@ export async function GET(request: NextRequest) {
         totalWorkedMinutes,
         totalOvertimeMinutes,
       },
-      records: records.map((r) => ({
-        id: r.id,
-        date: r.date,
-        checkedIn: r.checkedIn,
-        checkedOut: r.checkedOut,
-        checkInAt: (r as any).checkInAt ?? null,
-        checkOutAt: (r as any).checkOutAt ?? null,
-        checkInTime: r.checkInTime,
-        checkOutTime: r.checkOutTime,
-        lateMinutes: (r as any).lateMinutes ?? 0,
-        earlyOutMinutes: (r as any).earlyOutMinutes ?? 0,
-        overtimeMinutes: (r as any).overtimeMinutes ?? 0,
-        isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
-        status: (r as any).status ?? null,
-        checkInPhoto: (r as any).checkInPhoto ?? null,
-        checkOutPhoto: (r as any).checkOutPhoto ?? null,
-        checkInLat: (r as any).checkInLat ?? null,
-        checkInLng: (r as any).checkInLng ?? null,
-        checkOutLat: (r as any).checkOutLat ?? null,
-        checkOutLng: (r as any).checkOutLng ?? null,
-        checkInSource: (r as any).checkInSource ?? null,
-        checkOutSource: (r as any).checkOutSource ?? null,
-        ipAddress: r.ipAddress ?? null,
-      })),
+      geofence: {
+        mode: cfg.geofenceMode,
+        lat: cfg.geofenceLat,
+        lng: cfg.geofenceLng,
+        radiusM: cfg.geofenceRadiusM,
+      },
+      records: records.map((r) => {
+        const inGeo = annotateGeo(
+          (r as any).checkInLat ?? null,
+          (r as any).checkInLng ?? null,
+          !!r.checkedIn,
+        );
+        const outGeo = annotateGeo(
+          (r as any).checkOutLat ?? null,
+          (r as any).checkOutLng ?? null,
+          !!r.checkedOut,
+        );
+        return {
+          id: r.id,
+          date: r.date,
+          checkedIn: r.checkedIn,
+          checkedOut: r.checkedOut,
+          checkInAt: (r as any).checkInAt ?? null,
+          checkOutAt: (r as any).checkOutAt ?? null,
+          checkInTime: r.checkInTime,
+          checkOutTime: r.checkOutTime,
+          lateMinutes: (r as any).lateMinutes ?? 0,
+          earlyOutMinutes: (r as any).earlyOutMinutes ?? 0,
+          overtimeMinutes: (r as any).overtimeMinutes ?? 0,
+          isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
+          status: (r as any).status ?? null,
+          checkInPhoto: (r as any).checkInPhoto ?? null,
+          checkOutPhoto: (r as any).checkOutPhoto ?? null,
+          checkInLat: (r as any).checkInLat ?? null,
+          checkInLng: (r as any).checkInLng ?? null,
+          checkOutLat: (r as any).checkOutLat ?? null,
+          checkOutLng: (r as any).checkOutLng ?? null,
+          checkInSource: (r as any).checkInSource ?? null,
+          checkOutSource: (r as any).checkOutSource ?? null,
+          ipAddress: r.ipAddress ?? null,
+          checkInDistanceM: inGeo.distanceM,
+          checkInOutsideRadius: inGeo.outsideRadius,
+          checkInLocationMissing: inGeo.locationMissing,
+          checkOutDistanceM: outGeo.distanceM,
+          checkOutOutsideRadius: outGeo.outsideRadius,
+          checkOutLocationMissing: outGeo.locationMissing,
+        };
+      }),
     },
     {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },

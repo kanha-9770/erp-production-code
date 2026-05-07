@@ -8,7 +8,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, MapPin, ImageOff, Clock } from "lucide-react";
+import {
+  ExternalLink,
+  MapPin,
+  ImageOff,
+  Clock,
+  AlertTriangle,
+} from "lucide-react";
 import {
   formatDateLong,
   formatHM,
@@ -43,6 +49,17 @@ export interface AttendanceRecord {
   checkInSource: string | null;
   checkOutSource: string | null;
   ipAddress?: string | null;
+  // Server-computed geofence flags. `null` for outsideRadius means the org
+  // has no geofence configured; `true` means the user punched outside the
+  // configured radius. `locationMissing` is true when the geofence IS
+  // configured but the punch carries no GPS at all (denied permission, on
+  // an insecure origin, etc.) — a hint that the user dodged the check.
+  checkInDistanceM?: number | null;
+  checkInOutsideRadius?: boolean | null;
+  checkInLocationMissing?: boolean | null;
+  checkOutDistanceM?: number | null;
+  checkOutOutsideRadius?: boolean | null;
+  checkOutLocationMissing?: boolean | null;
 }
 
 interface Props {
@@ -57,13 +74,29 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
         {record && (
           <>
             <SheetHeader>
-              <SheetTitle className="flex items-center gap-2">
+              <SheetTitle className="flex items-center gap-2 flex-wrap">
                 {formatDateLong(record.date)}
                 {record.isAutoCheckedOut && (
                   <Badge variant="outline" className="ml-2 text-[10px] uppercase">
                     auto checkout
                   </Badge>
                 )}
+                {(record.checkInOutsideRadius ||
+                  record.checkOutOutsideRadius) && (
+                  <Badge className="ml-2 text-[10px] uppercase bg-red-100 text-red-800 border-red-200 hover:bg-red-100">
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Out of radius
+                  </Badge>
+                )}
+                {!record.checkInOutsideRadius &&
+                  !record.checkOutOutsideRadius &&
+                  (record.checkInLocationMissing ||
+                    record.checkOutLocationMissing) && (
+                    <Badge className="ml-2 text-[10px] uppercase bg-amber-100 text-amber-900 border-amber-200 hover:bg-amber-100">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      No location
+                    </Badge>
+                  )}
               </SheetTitle>
               {(record.userName || record.userEmail) && (
                 <SheetDescription>
@@ -102,6 +135,9 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 source={record.checkInSource}
                 ipAddress={record.ipAddress ?? null}
                 accent="emerald"
+                distanceM={record.checkInDistanceM ?? null}
+                outsideRadius={record.checkInOutsideRadius ?? null}
+                locationMissing={record.checkInLocationMissing ?? null}
               />
               <PunchPanel
                 title="Check-Out"
@@ -112,6 +148,9 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 source={record.checkOutSource}
                 ipAddress={null}
                 accent="red"
+                distanceM={record.checkOutDistanceM ?? null}
+                outsideRadius={record.checkOutOutsideRadius ?? null}
+                locationMissing={record.checkOutLocationMissing ?? null}
               />
             </div>
           </>
@@ -159,6 +198,9 @@ function PunchPanel({
   source,
   ipAddress,
   accent,
+  distanceM,
+  outsideRadius,
+  locationMissing,
 }: {
   title: string;
   time: string | null;
@@ -168,6 +210,9 @@ function PunchPanel({
   source: string | null;
   ipAddress: string | null;
   accent: "emerald" | "red";
+  distanceM: number | null;
+  outsideRadius: boolean | null;
+  locationMissing: boolean | null;
 }) {
   const accentClass =
     accent === "emerald"
@@ -222,6 +267,35 @@ function PunchPanel({
         </a>
       ) : (
         <div className="text-xs text-gray-500">No location captured</div>
+      )}
+      {locationMissing && (
+        <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+          <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+          <span>
+            <span className="font-semibold">No location captured</span>
+            <span className="block text-amber-800">
+              The user punched without sharing GPS — geofence check could not run.
+            </span>
+          </span>
+        </div>
+      )}
+      {outsideRadius === true && (
+        <div className="flex items-start gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-800">
+          <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+          <span>
+            <span className="font-semibold">Outside the office radius</span>
+            {distanceM != null && (
+              <span className="block text-red-700">
+                {distanceM}m from the configured centre
+              </span>
+            )}
+          </span>
+        </div>
+      )}
+      {outsideRadius === false && distanceM != null && (
+        <div className="text-[11px] text-emerald-700">
+          Within radius · {distanceM}m from centre
+        </div>
       )}
       {ipAddress && (
         <div className="text-[11px] text-gray-500 break-all">IP {ipAddress}</div>

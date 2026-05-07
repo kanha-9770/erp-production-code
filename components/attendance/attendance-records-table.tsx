@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Camera, MapPin, Edit3 } from "lucide-react";
+import { Camera, MapPin, Edit3, AlertTriangle } from "lucide-react";
 import {
   formatDateLong,
   formatHM,
@@ -161,7 +161,32 @@ export function AttendanceRecordsTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  {hasGeo ? (
+                  {r.checkInOutsideRadius || r.checkOutOutsideRadius ? (
+                    <Badge
+                      variant="outline"
+                      className="bg-red-50 text-red-800 border-red-200 text-[10px] uppercase whitespace-nowrap"
+                      title={
+                        r.checkInOutsideRadius && r.checkInDistanceM != null
+                          ? `Check-in ${r.checkInDistanceM}m from office`
+                          : r.checkOutOutsideRadius &&
+                              r.checkOutDistanceM != null
+                            ? `Check-out ${r.checkOutDistanceM}m from office`
+                            : "Punch outside the configured radius"
+                      }
+                    >
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      Out of radius
+                    </Badge>
+                  ) : r.checkInLocationMissing || r.checkOutLocationMissing ? (
+                    <Badge
+                      variant="outline"
+                      className="bg-amber-50 text-amber-900 border-amber-200 text-[10px] uppercase whitespace-nowrap"
+                      title="The user punched without sharing GPS — geofence check did not run"
+                    >
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      No location
+                    </Badge>
+                  ) : hasGeo ? (
                     <MapPin className="h-3.5 w-3.5 text-blue-600" />
                   ) : (
                     <span className="text-xs text-gray-400">—</span>

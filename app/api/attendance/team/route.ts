@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { canApproveAttendance } from '@/lib/hr/attendance-permissions';
-import { todayKey } from '@/lib/hr/attendance-service';
+import { distanceMeters, todayKey } from '@/lib/hr/attendance-service';
+import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,11 +99,59 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'desc' }, { userId: 'asc' }],
   });
 
+  // Per-org geofence centre. Used to flag punches that landed outside the
+  // configured radius so admins can spot off-site check-ins at a glance.
+  // We deliberately ignore `geofenceMode` here: as soon as the admin has
+  // filled in lat/lng/radius they expect to see who's punching out of
+  // range, even if mode is still OFF (the default). Switching to ENFORCE
+  // is a separate decision that's only about *blocking* — visibility
+  // shouldn't depend on it.
+  const cfg = await getAttendanceConfig(authUser.organizationId);
+  const fenceActive =
+    cfg.geofenceLat != null &&
+    cfg.geofenceLng != null &&
+    cfg.geofenceRadiusM != null;
+  const fenceCentre = fenceActive
+    ? { lat: cfg.geofenceLat as number, lng: cfg.geofenceLng as number }
+    : null;
+  const fenceRadius = fenceActive ? (cfg.geofenceRadiusM as number) : null;
+
+  function annotateGeo(
+    lat: number | null,
+    lng: number | null,
+    punched: boolean,
+  ) {
+    if (!fenceCentre || !fenceRadius) {
+      return { distanceM: null, outsideRadius: null, locationMissing: false };
+    }
+    if (lat == null || lng == null) {
+      // The geofence is configured but the punch carries no GPS — flag it
+      // so admins notice that the user bypassed the location check.
+      return {
+        distanceM: null,
+        outsideRadius: null,
+        locationMissing: punched,
+      };
+    }
+    const d = distanceMeters({ lat, lng }, fenceCentre);
+    return {
+      distanceM: Math.round(d),
+      outsideRadius: d > fenceRadius,
+      locationMissing: false,
+    };
+  }
+
   return NextResponse.json(
     {
       success: true,
       from,
       to,
+      geofence: {
+        mode: cfg.geofenceMode,
+        lat: cfg.geofenceLat,
+        lng: cfg.geofenceLng,
+        radiusM: cfg.geofenceRadiusM,
+      },
       users: users.map((u) => ({
         id: u.id,
         email: u.email,
@@ -115,30 +164,48 @@ export async function GET(request: NextRequest) {
         designation: u.employee?.designation ?? null,
         employeeId: u.employee?.id ?? null,
       })),
-      records: records.map((r) => ({
-        id: r.id,
-        userId: r.userId,
-        date: r.date,
-        checkedIn: r.checkedIn,
-        checkedOut: r.checkedOut,
-        checkInAt: (r as any).checkInAt ?? null,
-        checkOutAt: (r as any).checkOutAt ?? null,
-        checkInTime: r.checkInTime,
-        checkOutTime: r.checkOutTime,
-        lateMinutes: (r as any).lateMinutes ?? 0,
-        earlyOutMinutes: (r as any).earlyOutMinutes ?? 0,
-        overtimeMinutes: (r as any).overtimeMinutes ?? 0,
-        isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
-        status: (r as any).status ?? null,
-        checkInPhoto: (r as any).checkInPhoto ?? null,
-        checkOutPhoto: (r as any).checkOutPhoto ?? null,
-        checkInLat: (r as any).checkInLat ?? null,
-        checkInLng: (r as any).checkInLng ?? null,
-        checkOutLat: (r as any).checkOutLat ?? null,
-        checkOutLng: (r as any).checkOutLng ?? null,
-        checkInSource: (r as any).checkInSource ?? null,
-        checkOutSource: (r as any).checkOutSource ?? null,
-      })),
+      records: records.map((r) => {
+        const inGeo = annotateGeo(
+          (r as any).checkInLat ?? null,
+          (r as any).checkInLng ?? null,
+          !!r.checkedIn,
+        );
+        const outGeo = annotateGeo(
+          (r as any).checkOutLat ?? null,
+          (r as any).checkOutLng ?? null,
+          !!r.checkedOut,
+        );
+        return {
+          id: r.id,
+          userId: r.userId,
+          date: r.date,
+          checkedIn: r.checkedIn,
+          checkedOut: r.checkedOut,
+          checkInAt: (r as any).checkInAt ?? null,
+          checkOutAt: (r as any).checkOutAt ?? null,
+          checkInTime: r.checkInTime,
+          checkOutTime: r.checkOutTime,
+          lateMinutes: (r as any).lateMinutes ?? 0,
+          earlyOutMinutes: (r as any).earlyOutMinutes ?? 0,
+          overtimeMinutes: (r as any).overtimeMinutes ?? 0,
+          isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
+          status: (r as any).status ?? null,
+          checkInPhoto: (r as any).checkInPhoto ?? null,
+          checkOutPhoto: (r as any).checkOutPhoto ?? null,
+          checkInLat: (r as any).checkInLat ?? null,
+          checkInLng: (r as any).checkInLng ?? null,
+          checkOutLat: (r as any).checkOutLat ?? null,
+          checkOutLng: (r as any).checkOutLng ?? null,
+          checkInSource: (r as any).checkInSource ?? null,
+          checkOutSource: (r as any).checkOutSource ?? null,
+          checkInDistanceM: inGeo.distanceM,
+          checkInOutsideRadius: inGeo.outsideRadius,
+          checkInLocationMissing: inGeo.locationMissing,
+          checkOutDistanceM: outGeo.distanceM,
+          checkOutOutsideRadius: outGeo.outsideRadius,
+          checkOutLocationMissing: outGeo.locationMissing,
+        };
+      }),
     },
     {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
