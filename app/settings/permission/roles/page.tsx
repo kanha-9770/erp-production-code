@@ -232,11 +232,6 @@ export default function RolesPermissionsPage() {
               <Layers className="h-4 w-4" />
               All static pages × roles
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Default view — manages role access to every system page in one
-              save. Click a specific page or form in the sidebar for a focused
-              matrix.
-            </p>
           </div>
 
           {bulkPagesView ? (
@@ -259,13 +254,9 @@ export default function RolesPermissionsPage() {
             </>
           ) : (
             <Card>
-              <CardContent className="py-16 text-center text-muted-foreground">
+              <CardContent className="py-12 text-center text-muted-foreground">
                 <Globe className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                <p className="text-sm font-medium">Pick a form or system page</p>
-                <p className="text-xs mt-1">
-                  Use the sidebar to choose which resource you want to permission. Static
-                  pages (like leaves, payroll, attendance) appear under <strong>System Pages</strong>.
-                </p>
+                <p className="text-sm font-medium">Pick a form or system page from the sidebar</p>
               </CardContent>
             </Card>
           )}
