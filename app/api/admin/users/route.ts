@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         unitAssignments: {
           include: {
-            unit: { select: { name: true } },
+            unit: { select: { id: true, name: true } },
             role: { select: { id: true, name: true, isAdmin: true } },
           },
         },
@@ -62,8 +62,8 @@ export async function GET(request: NextRequest) {
       const unitsAndRoles = (u.unitAssignments || [])
         .filter((ua) => ua.unit && ua.role)
         .map((ua) => ({
-          unit: { name: ua.unit!.name },
-          role: { name: ua.role!.name, isAdmin: ua.role!.isAdmin || false },
+          unit: { id: ua.unit!.id, name: ua.unit!.name },
+          role: { id: ua.role!.id, name: ua.role!.name, isAdmin: ua.role!.isAdmin || false },
         }))
       return {
         ...u,

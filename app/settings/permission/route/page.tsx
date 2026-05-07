@@ -26,6 +26,7 @@ import {
   UserCircle,
   ChevronUp,
   Info,
+  ArrowLeft,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -121,26 +122,31 @@ export default function RoutePermissionsPage() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="h-[calc(100vh-140px)] flex flex-col">
+      <div className="h-[calc(100vh-80px)] md:h-[calc(100vh-140px)] flex flex-col">
         {/* Top bar */}
-        <div className="flex items-center justify-between py-4 px-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-3 px-3 md:py-4 md:px-6">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Route Permissions</h2>
+            <h2 className="text-base md:text-lg font-semibold tracking-tight">Route Permissions</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Manage page-level access for roles and users
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Info className="h-3.5 w-3.5" />
+          <div className="flex items-center gap-1.5 text-[11px] md:text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5 shrink-0" />
             <span>Admin role always has full access</span>
           </div>
         </div>
 
         {/* Main content */}
-        <div className="flex-1 flex gap-0 border overflow-hidden bg-background min-h-0">
+        <div className="flex-1 flex flex-col md:flex-row gap-0 md:border overflow-hidden bg-background min-h-0">
           {/* ── Left: Route list ──────────────────────────────────────────── */}
-          <div className="w-[280px] shrink-0 border-r flex flex-col bg-muted/30">
-            <div className="py-4 px-6 space-y-2">
+          <div
+            className={cn(
+              "md:w-[280px] md:shrink-0 md:border-r md:border-t-0 border-t flex-col bg-muted/30 min-h-0",
+              selectedRouteId ? "hidden md:flex" : "flex flex-1 md:flex-none"
+            )}
+          >
+            <div className="py-3 px-3 md:py-4 md:px-6 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
                   Routes
@@ -155,7 +161,7 @@ export default function RoutePermissionsPage() {
                   placeholder="Search..."
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
-                  className="pl-7 h-7 text-xs bg-background"
+                  className="pl-7 h-9 md:h-7 text-sm md:text-xs bg-background"
                 />
               </div>
             </div>
@@ -183,9 +189,17 @@ export default function RoutePermissionsPage() {
           </div>
 
           {/* ── Right: Access panel ──────────────────────────────────────── */}
-          <div className="flex-1 flex flex-col min-h-0">
+          <div
+            className={cn(
+              "flex-1 flex-col min-h-0",
+              selectedRouteId ? "flex" : "hidden md:flex"
+            )}
+          >
             {selectedRoute ? (
-              <AccessPanel route={selectedRoute} />
+              <AccessPanel
+                route={selectedRoute}
+                onBack={() => setSelectedRouteId(null)}
+              />
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center space-y-2">
@@ -218,7 +232,7 @@ function RouteGroupItem({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 w-full px-6 py-1.5 text-left hover:bg-muted/60 transition-colors"
+        className="flex items-center gap-1.5 w-full px-3 md:px-6 py-2 md:py-1.5 text-left hover:bg-muted/60 transition-colors"
       >
         {open ? (
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -241,7 +255,7 @@ function RouteGroupItem({
                 key={route.id}
                 onClick={() => onSelect(route.id)}
                 className={cn(
-                  "flex items-center gap-2 w-full pl-10 pr-6 py-[5px] text-left transition-all",
+                  "flex items-center gap-2 w-full pl-7 md:pl-10 pr-3 md:pr-6 py-2 md:py-[5px] text-left transition-all",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted/80 text-foreground/80"
@@ -251,7 +265,7 @@ function RouteGroupItem({
                   "h-1.5 w-1.5 rounded-full shrink-0",
                   granted > 0 ? "bg-emerald-500" : "bg-orange-400"
                 )} />
-                <span className="font-mono text-[11px] truncate flex-1">
+                <span className="font-mono text-xs md:text-[11px] truncate flex-1">
                   {route.pattern}
                 </span>
                 {granted > 0 && (
@@ -273,7 +287,7 @@ function RouteGroupItem({
 
 // ─── Access Panel (right side) ──────────────────────────────────────────────
 
-function AccessPanel({ route }: { route: RouteRule }) {
+function AccessPanel({ route, onBack }: { route: RouteRule; onBack?: () => void }) {
   const [expandedRoles, setExpandedRoles] = useState<Set<string>>(new Set())
   const [changes, setChanges] = useState<Map<ChangeKey, boolean>>(new Map())
   const [saving, setSaving] = useState(false)
@@ -395,29 +409,42 @@ function AccessPanel({ route }: { route: RouteRule }) {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
-      <div className="px-5 py-3 border-b flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <code className="text-sm font-semibold truncate">{route.pattern}</code>
-            {grantedCount > 0 ? (
-              <Badge variant="default" className="shrink-0 text-[10px] h-5 bg-emerald-600 hover:bg-emerald-600">
-                <ShieldCheck className="h-3 w-3 mr-1" />
-                {grantedCount} role{grantedCount !== 1 ? "s" : ""}
-              </Badge>
-            ) : (
-              <Badge variant="destructive" className="shrink-0 text-[10px] h-5">
-                <ShieldX className="h-3 w-3 mr-1" />
-                No access
-              </Badge>
+      <div className="px-3 md:px-5 py-3 border-b flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-4">
+        <div className="min-w-0 flex items-start gap-2">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="md:hidden h-8 w-8 p-0 shrink-0 -ml-1"
+              onClick={onBack}
+              aria-label="Back to routes"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="text-sm font-semibold truncate max-w-full">{route.pattern}</code>
+              {grantedCount > 0 ? (
+                <Badge variant="default" className="shrink-0 text-[10px] h-5 bg-emerald-600 hover:bg-emerald-600">
+                  <ShieldCheck className="h-3 w-3 mr-1" />
+                  {grantedCount} role{grantedCount !== 1 ? "s" : ""}
+                </Badge>
+              ) : (
+                <Badge variant="destructive" className="shrink-0 text-[10px] h-5">
+                  <ShieldX className="h-3 w-3 mr-1" />
+                  No access
+                </Badge>
+              )}
+            </div>
+            {route.description && (
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 md:truncate">{route.description}</p>
             )}
           </div>
-          {route.description && (
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">{route.description}</p>
-          )}
         </div>
 
         {/* Save actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center justify-end gap-2 shrink-0 flex-wrap">
           {hasChanges && (
             <>
               <Badge variant="outline" className="text-[10px] h-5 border-amber-300 text-amber-600 bg-amber-50 dark:bg-amber-950/30">
@@ -426,7 +453,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs px-2"
+                className="h-8 md:h-7 text-xs px-2"
                 disabled={saving}
                 onClick={() => setChanges(new Map())}
               >
@@ -437,7 +464,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
           )}
           <Button
             size="sm"
-            className="h-7 text-xs px-3"
+            className="h-8 md:h-7 text-xs px-3"
             disabled={!hasChanges || saving}
             onClick={handleSave}
           >
@@ -468,7 +495,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
                   {/* Role row */}
                   <div
                     className={cn(
-                      "flex items-center gap-3 px-5 py-3 transition-colors",
+                      "flex items-center gap-2 md:gap-3 px-3 md:px-5 py-2.5 md:py-3 transition-colors",
                       isChanged && "bg-amber-50/80 dark:bg-amber-950/20"
                     )}
                   >
@@ -492,22 +519,22 @@ function AccessPanel({ route }: { route: RouteRule }) {
 
                     {/* Role info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{role.name}</span>
-                        <span className="text-[10px] text-muted-foreground">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium truncate">{role.name}</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
                           {usersInRole.length} user{usersInRole.length !== 1 ? "s" : ""}
                         </span>
                         {isChanged && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
                         )}
                       </div>
                     </div>
 
-                    {/* Status indicator */}
+                    {/* Status indicator — hidden on tiny screens to save space; the Switch carries the same info */}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div className={cn(
-                          "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                          "hidden sm:block text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0",
                           roleGranted
                             ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
                             : "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
@@ -534,7 +561,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
                   {isExpanded && (
                     <div className="bg-muted/30 border-t">
                       {usersInRole.length === 0 ? (
-                        <p className="text-xs text-muted-foreground pl-14 py-3 italic">
+                        <p className="text-xs text-muted-foreground pl-10 md:pl-14 py-3 italic">
                           No users in this role
                         </p>
                       ) : (
@@ -545,7 +572,7 @@ function AccessPanel({ route }: { route: RouteRule }) {
                             <div
                               key={user.id}
                               className={cn(
-                                "flex items-center gap-3 pl-14 pr-5 py-2.5",
+                                "flex items-center gap-2 md:gap-3 pl-10 md:pl-14 pr-3 md:pr-5 py-2.5",
                                 idx < usersInRole.length - 1 && "border-b border-muted/50",
                                 userChanged && "bg-amber-50/60 dark:bg-amber-950/15"
                               )}
@@ -582,8 +609,8 @@ function AccessPanel({ route }: { route: RouteRule }) {
       </ScrollArea>
 
       {/* Footer */}
-      <div className="px-5 py-2 border-t bg-muted/20">
-        <p className="text-[10px] text-muted-foreground">
+      <div className="px-3 md:px-5 py-2 border-t bg-muted/20">
+        <p className="text-[10px] text-muted-foreground leading-snug">
           Changes apply to your session instantly. Other users will be updated automatically within 15 seconds.
         </p>
       </div>

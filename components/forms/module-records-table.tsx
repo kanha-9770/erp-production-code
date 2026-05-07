@@ -192,6 +192,20 @@ export default function ModuleRecordsTable({
         }
         return value.map((v) => v.label || (typeof v === 'object' ? JSON.stringify(v) : v)).join(", ")
       }
+      // Address object: keys may be lower- or upper-case (line1/LINE1, city/CITY).
+      // If any of the standard parts are present, render as a readable comma-
+      // separated string instead of raw JSON.
+      const addrKeys = ["line1", "line2", "city", "state", "postal", "country"]
+      const lowered = Object.keys(value).reduce<Record<string, any>>((acc, k) => {
+        acc[k.toLowerCase()] = value[k]
+        return acc
+      }, {})
+      if (addrKeys.some((k) => lowered[k])) {
+        const parts = addrKeys
+          .map((k) => (lowered[k] != null ? String(lowered[k]).trim() : ""))
+          .filter(Boolean)
+        return parts.join(", ")
+      }
       return JSON.stringify(value)
     }
     return String(value)
@@ -320,6 +334,22 @@ if (typeof value === "object" && value !== null) {
         ))}
       </div>
     )
+  }
+
+  // Address-shaped object (keys may be lower- or upper-case): render as a
+  // human-readable comma-separated string instead of raw JSON.
+  {
+    const addrKeys = ["line1", "line2", "city", "state", "postal", "country"]
+    const lowered = Object.keys(value).reduce<Record<string, any>>((acc, k) => {
+      acc[k.toLowerCase()] = (value as any)[k]
+      return acc
+    }, {})
+    if (addrKeys.some((k) => lowered[k])) {
+      const parts = addrKeys
+        .map((k) => (lowered[k] != null ? String(lowered[k]).trim() : ""))
+        .filter(Boolean)
+      return <span>{parts.join(", ")}</span>
+    }
   }
 
   return <span>{JSON.stringify(value)}</span>

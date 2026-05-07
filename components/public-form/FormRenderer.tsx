@@ -1,5 +1,5 @@
 // components/public-form/FormRenderer.tsx
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -29,6 +29,129 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Slider } from "../ui/slider";
+
+// "Same as Current Address" toggle wrapper for a Permanent Address (address-type) field.
+// When enabled, mirrors Current Address sub-values into Permanent Address and disables
+// the sub-inputs. Toggling off lets the user enter a different address.
+const ADDRESS_KEYS = ["line1", "line2", "city", "state", "postal", "country"];
+
+const PermanentAddressFieldWithSyncToggle: React.FC<{
+  currentAddr: Record<string, string>;
+  permanentAddr: Record<string, string>;
+  onChange: (addr: Record<string, string>) => void;
+  subfields: any[];
+  validationRequired: boolean;
+  disabled: boolean;
+  countries: string[];
+  fieldId: string;
+  error?: string;
+}> = ({
+  currentAddr,
+  permanentAddr,
+  onChange,
+  subfields,
+  validationRequired,
+  disabled,
+  countries,
+  fieldId,
+  error,
+}) => {
+  const [synced, setSynced] = useState<boolean>(() => {
+    if (!currentAddr || ADDRESS_KEYS.every((k) => !currentAddr[k])) return false;
+    return ADDRESS_KEYS.every(
+      (k) => (currentAddr[k] || "") === (permanentAddr?.[k] || ""),
+    );
+  });
+
+  useEffect(() => {
+    if (!synced) return;
+    const inSync = ADDRESS_KEYS.every(
+      (k) => (currentAddr?.[k] || "") === (permanentAddr?.[k] || ""),
+    );
+    if (!inSync) onChange({ ...currentAddr });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [synced, currentAddr]);
+
+  const handleSubChange = (subKey: string, subVal: string) => {
+    onChange({ ...permanentAddr, [subKey]: subVal });
+  };
+
+  const fieldsDisabled = disabled || synced;
+  const toggleId = `${fieldId}-same-as-current`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50/60 px-3 py-2 text-sm">
+        <Switch
+          id={toggleId}
+          checked={synced}
+          onCheckedChange={(checked) => {
+            setSynced(checked);
+            if (checked) onChange({ ...currentAddr });
+          }}
+          disabled={disabled}
+        />
+        <Label htmlFor={toggleId} className="cursor-pointer select-none text-blue-900">
+          Same as Current Address
+        </Label>
+      </div>
+      <div className="space-y-4 p-4 border border-gray-200 rounded-md bg-gray-50/60">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {subfields.map((sub: any) => {
+            if (!sub) return null;
+            const subVal = permanentAddr?.[sub.key] || "";
+            const isRequired = sub.required && validationRequired;
+            if (sub.type === "select") {
+              return (
+                <div key={sub.key} className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    {sub.label}
+                    {isRequired && <span className="text-red-500 ml-1">*</span>}
+                  </Label>
+                  <Select
+                    value={subVal}
+                    onValueChange={(v) => handleSubChange(sub.key, v)}
+                    disabled={fieldsDisabled}
+                  >
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder={sub.placeholder || "Select country"} />
+                    </SelectTrigger>
+                    <SelectContent className="z-50" position="popper">
+                      {countries.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            }
+            return (
+              <div key={sub.key} className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  {sub.label}
+                  {isRequired && <span className="text-red-500 ml-1">*</span>}
+                </Label>
+                <Input
+                  placeholder={sub.placeholder}
+                  value={subVal}
+                  onChange={(e) => handleSubChange(sub.key, e.target.value)}
+                  disabled={fieldsDisabled}
+                  className="bg-white"
+                />
+              </div>
+            );
+          })}
+        </div>
+        {error && (
+          <p className="text-sm text-red-500 flex items-center gap-1 mt-2">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface FormRendererProps {
   field: FormField;
@@ -766,6 +889,16 @@ export function FormRenderer({
         const newAddress = { ...addressValue, [subKey]: subVal };
         handleFieldChange(field.id, newAddress);
       };
+      // If this is a "Permanent Address" field and the form has a sibling
+      // "Current Address" address-type field, render the sync toggle wrapper.
+      const isPermanentAddress = /permanent\s*address/i.test(field.label || "");
+      const currentAddrField = isPermanentAddress && allFields
+        ? allFields.find(
+            (f) =>
+              (f.type || "").toLowerCase() === "address" &&
+              /current\s*address/i.test(f.label || ""),
+          )
+        : undefined;
       const countries = [
         "Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia",
         "Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados",
@@ -796,6 +929,22 @@ export function FormRenderer({
         "Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen",
         "Zambia","Zimbabwe",
       ].sort();
+      if (isPermanentAddress && currentAddrField && formData) {
+        const currentAddr = (formData[currentAddrField.id] as Record<string, string>) || {};
+        return (
+          <PermanentAddressFieldWithSyncToggle
+            currentAddr={currentAddr}
+            permanentAddr={addressValue}
+            onChange={(addr) => handleFieldChange(field.id, addr)}
+            subfields={subfields}
+            validationRequired={Boolean(field.validation?.required)}
+            disabled={submitting || submitted || isFieldReadOnly()}
+            countries={countries}
+            fieldId={field.id}
+            error={error}
+          />
+        );
+      }
       return (
         <div className="space-y-4 p-4 border border-gray-200 rounded-md bg-gray-50/60">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

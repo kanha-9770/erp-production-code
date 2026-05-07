@@ -160,6 +160,30 @@ export const formatFieldValue = (fieldType: string, value: any): string => {
     case "select":
       return String(value);
 
+    case "address":
+      if (typeof value === "object" && value !== null) {
+        // Address values may use either lowercase keys (line1, city, …) or
+        // uppercase (LINE1, CITY, …) depending on the data source. Look up
+        // each part case-insensitively and join with commas.
+        const addr = value as Record<string, any>;
+        const lookup = (k: string): string => {
+          const match = Object.keys(addr).find(
+            (key) => key.toLowerCase() === k.toLowerCase(),
+          );
+          return match ? String(addr[match] ?? "").trim() : "";
+        };
+        const parts = [
+          lookup("line1"),
+          lookup("line2"),
+          lookup("city"),
+          lookup("state"),
+          lookup("postal"),
+          lookup("country"),
+        ].filter(Boolean);
+        return parts.join(", ");
+      }
+      return String(value);
+
     default:
       if (typeof value === "object" && value !== null)
         return JSON.stringify(value).substring(0, 50) + "...";

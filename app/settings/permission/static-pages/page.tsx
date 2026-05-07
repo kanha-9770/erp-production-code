@@ -263,21 +263,21 @@ export default function StaticPagesAnchorPage() {
     : groups
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Anchor className="h-8 w-8 text-primary" />
+    <div className="container mx-auto p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6 pb-24 sm:pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-2 sm:gap-3">
+            <Anchor className="h-5 w-5 sm:h-7 sm:w-7 md:h-8 md:w-8 text-primary shrink-0" />
             Static Page Placement
           </h1>
-          <p className="text-muted-foreground mt-1 max-w-3xl">
+          <p className="text-muted-foreground mt-1 max-w-3xl text-sm sm:text-base">
             Anchor each system page (Leaves, Attendance, Payroll, Holidays...) under a
             dynamic module so it shows up in the sidebar there. Set the{" "}
             <strong>group anchor</strong> at the top of each section to point an entire
             group at one module in one click — pages inherit it. Use the per-page
             override only when one page should land somewhere different.
           </p>
-          <p className="text-xs text-muted-foreground mt-2">
+          <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
             Resolution order:{" "}
             <span className="font-medium">per-page override</span> →{" "}
             <span className="font-medium">group anchor</span> →{" "}
@@ -285,11 +285,12 @@ export default function StaticPagesAnchorPage() {
               <Sparkles className="h-3 w-3 text-emerald-600" />
               auto
             </span>{" "}
-            (from <code className="text-xs">/settings/attendance-config</code>) →{" "}
+            (from <code className="text-[10px] sm:text-xs break-all">/settings/attendance-config</code>) →{" "}
             <span className="font-medium">hidden</span>.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        {/* Desktop / tablet action buttons */}
+        <div className="hidden sm:flex gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={reset} disabled={!isDirty || saving}>
             <Undo2 className="h-4 w-4 mr-1" />
             Reset
@@ -301,13 +302,13 @@ export default function StaticPagesAnchorPage() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
+      <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Search pages..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-9 h-9"
+          className="pl-9 h-10 sm:h-9 sm:max-w-md"
         />
       </div>
 
@@ -342,7 +343,7 @@ export default function StaticPagesAnchorPage() {
 
             return (
               <Card key={group.group}>
-                <CardHeader className="pb-3 space-y-3">
+                <CardHeader className="pb-3 space-y-3 px-3 sm:px-6 pt-4 sm:pt-6">
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div>
                       <CardTitle className="text-base">{group.group}</CardTitle>
@@ -359,9 +360,9 @@ export default function StaticPagesAnchorPage() {
                         : "border-muted bg-muted/30")
                     }
                   >
-                    <div className="flex items-center gap-2 text-xs font-medium">
-                      <Layers className="h-3.5 w-3.5 text-primary" />
-                      Anchor entire {group.group} group to:
+                    <div className="flex items-center gap-2 text-xs font-medium flex-wrap">
+                      <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span>Anchor entire {group.group} group to:</span>
                       {isGroupDirty && (
                         <span className="text-[10px] text-amber-600 dark:text-amber-400">
                           Unsaved
@@ -373,7 +374,7 @@ export default function StaticPagesAnchorPage() {
                         value={groupModule ?? NO_GROUP}
                         onValueChange={(v) => setGroupAnchor(group.group, v)}
                       >
-                        <SelectTrigger className="h-9 text-sm w-[280px]">
+                        <SelectTrigger className="h-10 sm:h-9 text-sm w-full sm:w-[280px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -406,7 +407,8 @@ export default function StaticPagesAnchorPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <table className="w-full">
+                  {/* Desktop / tablet table */}
+                  <table className="w-full hidden md:table">
                     <thead className="border-y bg-muted/30 text-xs uppercase text-muted-foreground">
                       <tr>
                         <th className="text-left p-3 w-[35%]">Page</th>
@@ -448,12 +450,71 @@ export default function StaticPagesAnchorPage() {
                       })}
                     </tbody>
                   </table>
+
+                  {/* Mobile stacked card list */}
+                  <ul className="md:hidden divide-y border-t">
+                    {group.pages.map((page) => {
+                      const manual = pageAnchors.get(page.path) ?? null
+                      const groupVal = groupAnchors.get(group.group) ?? null
+                      const auto = autoAnchors.get(page.path) ?? null
+                      const resolvedModuleId = manual ?? groupVal ?? auto ?? null
+                      const source: "manual" | "group" | "auto" | "hidden" = manual
+                        ? "manual"
+                        : groupVal
+                          ? "group"
+                          : auto
+                            ? "auto"
+                            : "hidden"
+                      const resolvedName = resolvedModuleId
+                        ? moduleNameById.get(resolvedModuleId) ?? "(unknown)"
+                        : null
+                      const rowDirty = dirty.pageDirty.has(page.path)
+
+                      return (
+                        <PageCard
+                          key={page.path}
+                          page={page}
+                          manualValue={manual}
+                          flatModules={flatModules}
+                          isDirty={rowDirty}
+                          onChange={setPageAnchor}
+                          source={source}
+                          resolvedName={resolvedName}
+                        />
+                      )
+                    })}
+                  </ul>
                 </CardContent>
               </Card>
             )
           })}
         </div>
       )}
+
+      {/* Mobile sticky action bar — keeps Save/Reset always reachable */}
+      <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t bg-background/95 backdrop-blur p-3 flex gap-2 shadow-lg">
+        <Button
+          variant="outline"
+          className="flex-1 h-10"
+          onClick={reset}
+          disabled={!isDirty || saving}
+        >
+          <Undo2 className="h-4 w-4 mr-1" />
+          Reset
+        </Button>
+        <Button
+          className="flex-1 h-10"
+          onClick={save}
+          disabled={!isDirty || saving}
+        >
+          {saving ? (
+            <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4 mr-1" />
+          )}
+          Save{isDirty ? ` (${dirty.total})` : ""}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -571,5 +632,108 @@ function SourceBadge({ source }: { source: "manual" | "group" | "auto" }) {
       <Sparkles className="h-3 w-3 mr-1" />
       Auto
     </Badge>
+  )
+}
+
+function PageCard({
+  page,
+  manualValue,
+  flatModules,
+  isDirty,
+  onChange,
+  source,
+  resolvedName,
+}: {
+  page: StaticPage
+  manualValue: string | null
+  flatModules: FlatModule[]
+  isDirty: boolean
+  onChange: (path: string, moduleId: string) => void
+  source: "manual" | "group" | "auto" | "hidden"
+  resolvedName: string | null
+}) {
+  return (
+    <li
+      className={
+        "p-3 space-y-2.5 " +
+        (isDirty ? "bg-amber-50/40 dark:bg-amber-900/10" : "")
+      }
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+            <span className="truncate">{page.label}</span>
+            {page.adminOnly && (
+              <Badge
+                variant="outline"
+                className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-400 shrink-0"
+              >
+                <Lock className="h-3 w-3 mr-1" />
+                Admin
+              </Badge>
+            )}
+          </div>
+          {page.description && (
+            <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+              {page.description}
+            </div>
+          )}
+          <code className="inline-block mt-1.5 text-[10px] bg-muted px-1.5 py-0.5 rounded break-all">
+            {page.path}
+          </code>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+          Per-page override
+        </label>
+        <Select
+          value={manualValue ?? INHERIT}
+          onValueChange={(v) => onChange(page.path, v)}
+        >
+          <SelectTrigger className="h-10 text-sm w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={INHERIT}>
+              <span className="text-muted-foreground">Inherit (group / auto)</span>
+            </SelectItem>
+            {flatModules.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                <span style={{ paddingLeft: m.depth * 12 }} className="block">
+                  {m.depth > 0 ? "↳ " : ""}
+                  {m.label}
+                </span>
+                {m.depth > 0 && (
+                  <span className="text-[10px] text-muted-foreground ml-1">
+                    ({m.path})
+                  </span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap text-xs pt-0.5">
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium mr-1">
+          Resolved →
+        </span>
+        {source === "hidden" ? (
+          <span className="text-muted-foreground italic">Hidden — not in sidebar</span>
+        ) : (
+          <>
+            <SourceBadge source={source} />
+            <span className="text-foreground/80 truncate">{resolvedName}</span>
+          </>
+        )}
+        {isDirty && (
+          <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-auto">
+            Unsaved
+          </span>
+        )}
+      </div>
+    </li>
   )
 }

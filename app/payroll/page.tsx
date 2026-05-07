@@ -96,9 +96,6 @@ interface PayrollRecord {
   // Older cached records may omit it, so all UI consumers must guard for undefined.
   breakdown?: PayrollBreakdown;
 }
-
-
-
 interface Stats {
   totalEmployees: number;
   processedPayrolls: number;

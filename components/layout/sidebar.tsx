@@ -368,6 +368,15 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   const getSystemRoute = (module: FormModule): string | null =>
     (module as any).system_route ?? null;
 
+  // The Payroll parent module is a pure container: clicking it should
+  // only expand/collapse its children, never push to the records page.
+  // Matched by name (case-insensitive) so both "Payroll" and "PayRoll"
+  // qualify; the system-route child of the same name is handled earlier
+  // in handleModuleClick and is unaffected.
+  const isPayrollContainer = (module: FormModule): boolean =>
+    !isSystemRouteNode(module) &&
+    (module.name ?? "").trim().toLowerCase() === "payroll";
+
   const isModuleActive = (module: FormModule): boolean => {
     if (!pathname) return false;
     if (isSystemRouteNode(module)) {
@@ -392,6 +401,12 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       return;
     }
     if (isSystemFolderNode(module)) {
+      if (module.children?.length) toggleModule(module.id);
+      return;
+    }
+    // Payroll-only: clicking the Payroll parent never opens its records
+    // page — it just toggles the children list.
+    if (isPayrollContainer(module)) {
       if (module.children?.length) toggleModule(module.id);
       return;
     }
