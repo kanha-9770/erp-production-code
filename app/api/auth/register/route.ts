@@ -4,9 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { sendOTPEmail } from "@/lib/email";
 import { generateOTP, hashPassword } from "@/lib/auth";
 import { RegisterSchema } from "@/lib/utils/validations";
+import { getRequestMeta } from "@/lib/api-helpers";
+import { checkIpRate, rateLimitResponse } from "@/lib/auth/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
+    const { ipAddress } = getRequestMeta(request);
+
+    // IP throttle on register too — same IP repeatedly creating accounts is a
+    // signup flood, not a real user.
+    const ipGate = checkIpRate(ipAddress, "register");
+    if (!ipGate.allowed) return rateLimitResponse(ipGate);
+
     const body = await request.json();
     const { name, email, password } = RegisterSchema.parse(body);
 

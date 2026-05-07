@@ -7,6 +7,12 @@ import { sendOTPEmail } from "@/lib/email"
 import { LoginSchema } from "@/lib/utils/validations"
 import { getRequestMeta, logAudit } from "@/lib/api-helpers"
 import { computeRouteMeta } from "@/lib/auth/route-meta"
+import {
+  checkIpRate,
+  clearIpFailures,
+  checkAccountLockout,
+  rateLimitResponse,
+} from "@/lib/auth/rate-limit"
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +20,10 @@ export async function POST(request: NextRequest) {
 
     // Capture early for consistent logging
     const { ipAddress, userAgent } = getRequestMeta(request)
+
+    // Layer 1: per-IP rate limit. Stops obvious brute force before any work.
+    const ipGate = checkIpRate(ipAddress, "login")
+    if (!ipGate.allowed) return rateLimitResponse(ipGate)
 
     // Validate input
     const validation = LoginSchema.safeParse(body)
@@ -46,6 +56,20 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, password } = validation.data
+
+    // Layer 2: per-account lockout. Counts recent Failed rows in LoginHistory.
+    const acctGate = await checkAccountLockout({ email })
+    if (!acctGate.allowed) {
+      await logAudit({
+        performedBy: email,
+        action: "Login Blocked",
+        module: "Authentication",
+        details: `Account locked: ${acctGate.message}`,
+        ipAddress,
+        userAgent,
+      })
+      return rateLimitResponse(acctGate)
+    }
 
     // Find user — include organizationId for audit logging
     const user = await prisma.user.findUnique({
@@ -293,6 +317,9 @@ export async function POST(request: NextRequest) {
       where: { id: user.id },
       data: { login_attempts: 0 },
     })
+
+    // Honest user — drop the per-IP counter so a typo earlier doesn't carry over.
+    clearIpFailures(ipAddress, "login")
 
     // Create session
     const session = await createSession(user.id, ipAddress, userAgent)

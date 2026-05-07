@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { moveToTrash } from '@/lib/trash';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,9 @@ export async function DELETE(
       userName: authUser.email,
       organizationId: authUser.organizationId,
     });
+    // Removing a holiday flips that date back into a working day, so the
+    // payroll classification changes. Drop the cached payroll for the org.
+    invalidatePayrollCache(authUser.organizationId);
     return NextResponse.json({ success: true }, { headers: NO_STORE });
   } catch (err: any) {
     console.error('[DELETE /api/holidays/[id]]', err);

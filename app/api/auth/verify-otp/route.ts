@@ -4,14 +4,34 @@ import { prisma } from "@/lib/prisma"
 import { createSession } from "@/lib/auth"
 import { VerifyOTPSchema } from "@/lib/utils/validations"
 import { computeRouteMeta } from "@/lib/auth/route-meta"
+import { getRequestMeta } from "@/lib/api-helpers"
+import {
+  checkIpRate,
+  checkAccountLockout,
+  clearIpFailures,
+  rateLimitResponse,
+} from "@/lib/auth/rate-limit"
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
+    const { ipAddress } = getRequestMeta(request)
+
+    // Per-IP throttle for OTP verification — guards against 6-digit guess attacks.
+    const ipGate = checkIpRate(ipAddress, "verify-otp")
+    if (!ipGate.allowed) return rateLimitResponse(ipGate)
+
     // Validate input
     const { otp } = VerifyOTPSchema.parse(body)
     const { userId, type: typeParam = "registration" } = body
+
+    // Per-account lockout — same threshold as login. We treat repeated bad OTPs
+    // as bad-faith access attempts on the account.
+    if (userId) {
+      const acctGate = await checkAccountLockout({ userId })
+      if (!acctGate.allowed) return rateLimitResponse(acctGate)
+    }
 
     // Convert string type to enum
     let type: "REGISTRATION" | "LOGIN" | "PASSWORD_RESET"
@@ -60,8 +80,30 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      // Record the bad OTP as a failed login so the lockout layer can see it.
+      // Without this, OTP attempts would be invisible to checkAccountLockout.
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      })
+      if (u) {
+        await prisma.loginHistory.create({
+          data: {
+            userId,
+            email: u.email,
+            ipAddress,
+            userAgent: request.headers.get("user-agent") || "unknown",
+            status: "Failed",
+            reason: `Invalid OTP (${type})`,
+          },
+        }).catch(() => null)
+      }
+
       return NextResponse.json({ error: "Invalid or expired verification code" }, { status: 400 })
     }
+
+    // OTP accepted — clear the per-IP fail counter for this endpoint.
+    clearIpFailures(ipAddress, "verify-otp")
 
     // Mark OTP as used
     await prisma.oTPCode.update({

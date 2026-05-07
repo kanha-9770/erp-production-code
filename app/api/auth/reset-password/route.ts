@@ -3,11 +3,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, createSession } from '@/lib/auth'
 import { z } from 'zod'
+import { assertStrongPassword } from '@/lib/auth/password-policy'
+import { getRequestMeta } from '@/lib/api-helpers'
+import {
+  checkIpRate,
+  checkAccountLockout,
+  rateLimitResponse,
+} from '@/lib/auth/rate-limit'
 
 const ResetPasswordSchema = z.object({
   userId: z.string(),
   otp: z.string().length(6, 'OTP must be 6 digits'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z.string().min(10, 'Password must be at least 10 characters'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",
@@ -16,8 +23,27 @@ const ResetPasswordSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const { ipAddress } = getRequestMeta(request)
+
+    const ipGate = checkIpRate(ipAddress, 'reset-password')
+    if (!ipGate.allowed) return rateLimitResponse(ipGate)
+
     const body = await request.json()
     const { userId, otp, password } = ResetPasswordSchema.parse(body)
+
+    // Reject weak passwords with a structured error before doing any DB work.
+    try {
+      assertStrongPassword(password)
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: e.message, code: 'WEAK_PASSWORD', details: e.errors },
+        { status: 400 },
+      )
+    }
+
+    // Account-level lockout — prevents OTP-guess campaigns on a known userId.
+    const acctGate = await checkAccountLockout({ userId })
+    if (!acctGate.allowed) return rateLimitResponse(acctGate)
 
     // Find the OTP
     const otpRecord = await prisma.oTPCode.findFirst({

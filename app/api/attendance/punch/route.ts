@@ -6,6 +6,7 @@ import {
   type PunchType,
   type PunchSource,
 } from '@/lib/hr/attendance-service';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,6 +96,17 @@ export async function POST(request: NextRequest) {
       idempotencyKey,
       photoUrl,
     });
+
+    // The punch changed the day's attendance row, which means the cached
+    // payroll for this user's org is now stale. Invalidate so the next
+    // /api/payroll or /api/payroll/stats fetch recomputes from live data.
+    // We wipe the whole org because a single punch can shift this month's
+    // present/half-day counts and there's no measurable cost to recomputing
+    // adjacent months on the next read. Idempotent retries skip the
+    // invalidation since they didn't actually change state.
+    if (!deduplicated && authUser.organizationId) {
+      invalidatePayrollCache(authUser.organizationId);
+    }
 
     return NextResponse.json(
       { success: true, status, deduplicated },

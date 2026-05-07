@@ -5,6 +5,8 @@ import { prisma } from '@/lib/prisma'
 import { sendOTPEmail } from '@/lib/email'
 import { generateOTP } from '@/lib/auth'
 import { z } from 'zod'
+import { getRequestMeta } from '@/lib/api-helpers'
+import { checkIpRate, rateLimitResponse } from '@/lib/auth/rate-limit'
 
 // ✅ Schema for just an email
 const EmailSchema = z.object({
@@ -13,6 +15,12 @@ const EmailSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const { ipAddress } = getRequestMeta(request)
+
+    // Throttle: prevents email-bomb attacks against arbitrary inboxes.
+    const ipGate = checkIpRate(ipAddress, 'forgot-password')
+    if (!ipGate.allowed) return rateLimitResponse(ipGate)
+
     // Parse and validate email only
     const { email } = EmailSchema.parse(await request.json())
 

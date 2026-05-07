@@ -7,6 +7,7 @@ import {
   cancelRegularization,
   rejectRegularization,
 } from '@/lib/hr/attendance-regularization';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,6 +95,13 @@ export async function POST(
     } else {
       await rejectRegularization(reviewInput);
     }
+    // An approved regularization rewrites the Attendance row's check-in
+    // / check-out timestamps, which directly changes the day's classification
+    // (present / half-day / absent). Drop the cached payroll for the org so
+    // the next read picks up the new attendance state. Reject also drops
+    // the cache because a previously-approved regularization being reversed
+    // would otherwise leave stale data in the cache.
+    invalidatePayrollCache(authUser.organizationId);
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof RegularizationError) {

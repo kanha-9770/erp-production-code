@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -287,6 +288,11 @@ export async function POST(request: NextRequest) {
         isActive: true,
       },
     });
+
+    // Changing field mappings or the attendance/leave/holiday forms
+    // changes which rows the engine reads. Drop any cached payroll for
+    // the org so the next read recomputes against the new mapping.
+    invalidatePayrollCache(authUser.organizationId);
 
     return NextResponse.json({ success: true, config });
   } catch (error) {
