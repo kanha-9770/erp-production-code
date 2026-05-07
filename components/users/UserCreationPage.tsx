@@ -144,6 +144,8 @@ const UserCreationPage: React.FC = () => {
     status: "active",
     password: "",
     confirmPassword: "",
+    roleId: "",
+    unitId: "",
   });
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [showEditConfirmPassword, setShowEditConfirmPassword] = useState(false);
@@ -159,6 +161,7 @@ const UserCreationPage: React.FC = () => {
 
   const startEditUser = (u: AdminUser) => {
     setEditingExistingUser(u);
+    const firstAssignment = u.unitsAndRoles?.[0] || u.unitAssignments?.[0];
     setEditUserForm({
       first_name: u.first_name || "",
       last_name: u.last_name || "",
@@ -170,6 +173,8 @@ const UserCreationPage: React.FC = () => {
       status: u.status || "active",
       password: "",
       confirmPassword: "",
+      roleId: firstAssignment?.role?.id || "",
+      unitId: firstAssignment?.unit?.id || "",
     });
     // Close drawer & exit conflicting modes so the right panel is visible
     setShowUserListDrawer(false);
@@ -190,6 +195,8 @@ const UserCreationPage: React.FC = () => {
       status: "active",
       password: "",
       confirmPassword: "",
+      roleId: "",
+      unitId: "",
     });
     setShowEditPassword(false);
     setShowEditConfirmPassword(false);
@@ -219,6 +226,11 @@ const UserCreationPage: React.FC = () => {
       }
     }
 
+    if (editUserForm.roleId && !editUserForm.unitId) {
+      toast({ title: "Validation Error", description: "Select a unit to assign with the role", variant: "destructive" });
+      return;
+    }
+
     const body: Record<string, any> = {
       first_name: editUserForm.first_name.trim(),
       last_name: editUserForm.last_name.trim(),
@@ -231,6 +243,10 @@ const UserCreationPage: React.FC = () => {
         employeeEngagementTeamName:
           editUserForm.employeeEngagementTeamName.trim() || null,
       },
+      ...(editUserForm.roleId && editUserForm.unitId && {
+        roleId: editUserForm.roleId,
+        unitId: editUserForm.unitId,
+      }),
     };
     if (pw) body.password = pw;
 
@@ -972,6 +988,50 @@ const UserCreationPage: React.FC = () => {
                       placeholder="Pulled from employee record — editable"
                     />
                   </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                        <Shield className="w-4 h-4" />
+                        Role
+                      </label>
+                      <select
+                        value={editUserForm.roleId}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, roleId: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">No role</option>
+                        {flatRoles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {"—".repeat(r.level)} {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                        <Building2 className="w-4 h-4" />
+                        Unit
+                      </label>
+                      <select
+                        value={editUserForm.unitId}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, unitId: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">No unit</option>
+                        {flatUnits.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {"—".repeat(u.level)} {u.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {editUserForm.roleId && !editUserForm.unitId && (
+                    <p className="text-xs text-amber-600 -mt-3">
+                      Select a unit to apply this role assignment.
+                    </p>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
