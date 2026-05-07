@@ -251,12 +251,6 @@ export function RoutePermissionMatrix({ path }: RoutePermissionMatrixProps) {
               </code>
               <span className="text-muted-foreground">·</span>
               <span>{meta.group}</span>
-              {meta.description && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <span>{meta.description}</span>
-                </>
-              )}
             </CardDescription>
           </div>
           <div className="flex gap-2 shrink-0">
@@ -290,23 +284,13 @@ export function RoutePermissionMatrix({ path }: RoutePermissionMatrixProps) {
           </div>
         ) : (
           <>
-            <div className="text-xs text-muted-foreground mb-3 flex items-start gap-2 bg-muted/40 rounded px-3 py-2">
-              <Globe className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              <span>
-                Until any role is granted or denied, this page stays open to every signed-in
-                user. As soon as one role gets <strong>Granted</strong>, the page switches to
-                whitelist mode — every other role falls to no-access unless you grant them
-                too. Use <strong>Denied</strong> to blocklist a role explicitly. Per-user
-                overrides are managed on the user's profile.
-              </span>
-            </div>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[40%]">Role</TableHead>
-                  <TableHead>Users</TableHead>
-                  <TableHead>Current</TableHead>
-                  <TableHead className="w-[200px]">Access</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead className="w-[80px]">Users</TableHead>
+                  <TableHead className="w-[120px]">Current</TableHead>
+                  <TableHead className="w-[160px]">Access</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -345,26 +329,26 @@ export function RoutePermissionMatrix({ path }: RoutePermissionMatrixProps) {
                           onValueChange={(v) => setStateForRole(role.id, v as AccessState)}
                           disabled={saving}
                         >
-                          <SelectTrigger className="h-8 text-sm">
+                          <SelectTrigger className="h-8 text-sm whitespace-nowrap">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="inherit">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 whitespace-nowrap">
                                 <Globe className="h-3.5 w-3.5" />
                                 Default
                               </div>
                             </SelectItem>
                             <SelectItem value="granted">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 whitespace-nowrap">
                                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                                Grant access
+                                Grant
                               </div>
                             </SelectItem>
                             <SelectItem value="denied">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 whitespace-nowrap">
                                 <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
-                                Deny access
+                                Deny
                               </div>
                             </SelectItem>
                           </SelectContent>

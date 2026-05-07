@@ -19,11 +19,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
@@ -31,7 +26,7 @@ import {
   RefreshCw,
   CheckCircle2,
 } from "lucide-react"
-import { useState, useMemo, useEffect, type MutableRefObject } from "react"
+import { Fragment, useState, useMemo, useEffect, type MutableRefObject } from "react"
 import { usePermissionMatrix } from "@/hooks/use-permission-matrix"
 import type { PermissionModule, Permission, PermissionUser } from "@/types/permissions"
 
@@ -189,7 +184,7 @@ export function FormsPermissionMatrix({
         <CardHeader>
           <CardTitle>Role Permissions</CardTitle>
           <CardDescription>
-            Control access for each role on this form. Expand rows to override for individual users.
+            Expand a role to override per user.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -222,78 +217,68 @@ export function FormsPermissionMatrix({
                     const grantedCount = getGrantedCountForRole(role.id, selectedForm)
 
                     return (
-                      <Collapsible
-                        key={role.id}
-                        open={isExpanded}
-                        onOpenChange={() => toggleRole(role.id)}
-                        asChild
-                      >
-                        <>
-                          {/* Role row */}
-                          <TableRow className="group hover:bg-muted/60">
-                            <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-background px-2 font-medium shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted/60">
-                              <CollapsibleTrigger asChild>
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center gap-1.5 text-sm hover:text-primary focus:outline-none"
-                                >
-                                  {isExpanded ? (
-                                    <ChevronDown className="h-4 w-4 shrink-0" />
-                                  ) : (
-                                    <ChevronRight className="h-4 w-4 shrink-0" />
-                                  )}
-                                  <span className="truncate">{role.name}</span>
-                                </button>
-                              </CollapsibleTrigger>
-                            </TableCell>
-
-                            {permissions.map((p) => (
-                              <PermissionCell
-                                key={p.id}
-                                checked={hasRolePermission(role.id, selectedForm, p.id)}
-                                disabled={saving}
-                                onChange={() =>
-                                  togglePermission("role", role.id, selectedForm, p.id)
-                                }
-                              />
-                            ))}
-
-                            <TableCell className="px-1 text-center">
-                              <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
-                                {grantedCount}/{permissions.length}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-
-                          {/* User override rows */}
-                          <CollapsibleContent asChild>
-                            <>
-                              {usersInRole.length === 0 ? (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={permissions.length + 2}
-                                    className="pl-12 text-sm text-muted-foreground italic"
-                                  >
-                                    No users in this role
-                                  </TableCell>
-                                </TableRow>
+                      <Fragment key={role.id}>
+                        {/* Role row */}
+                        <TableRow className="group hover:bg-muted/60">
+                          <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-background px-2 font-medium shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted">
+                            <button
+                              type="button"
+                              onClick={() => toggleRole(role.id)}
+                              className="flex w-full items-center gap-1.5 text-sm hover:text-primary focus:outline-none"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 shrink-0" />
                               ) : (
-                                usersInRole.map((user) => (
-                                  <UserRow
-                                    key={user.id}
-                                    user={user}
-                                    selectedForm={selectedForm}
-                                    permissions={permissions}
-                                    saving={saving}
-                                    hasUserPermission={hasUserPermission}
-                                    togglePermission={togglePermission}
-                                  />
-                                ))
+                                <ChevronRight className="h-4 w-4 shrink-0" />
                               )}
-                            </>
-                          </CollapsibleContent>
-                        </>
-                      </Collapsible>
+                              <span className="truncate">{role.name}</span>
+                            </button>
+                          </TableCell>
+
+                          {permissions.map((p) => (
+                            <PermissionCell
+                              key={p.id}
+                              checked={hasRolePermission(role.id, selectedForm, p.id)}
+                              disabled={saving}
+                              onChange={() =>
+                                togglePermission("role", role.id, selectedForm, p.id)
+                              }
+                            />
+                          ))}
+
+                          <TableCell className="px-1 text-center">
+                            <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+                              {grantedCount}/{permissions.length}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* User override rows */}
+                        {isExpanded && (
+                          usersInRole.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={permissions.length + 2}
+                                className="pl-12 text-sm text-muted-foreground italic"
+                              >
+                                No users in this role
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            usersInRole.map((user) => (
+                              <UserRow
+                                key={user.id}
+                                user={user}
+                                selectedForm={selectedForm}
+                                permissions={permissions}
+                                saving={saving}
+                                hasUserPermission={hasUserPermission}
+                                togglePermission={togglePermission}
+                              />
+                            ))
+                          )
+                        )}
+                      </Fragment>
                     )
                   })}
                 </TableBody>
@@ -382,7 +367,7 @@ function UserRow({
 }: UserRowProps) {
   return (
     <TableRow className="group bg-muted/30 hover:bg-muted/50">
-      <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-muted/30 pl-8 pr-2 text-sm shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted/50">
+      <TableCell className="sticky left-0 z-10 w-[160px] min-w-[160px] bg-muted pl-8 pr-2 text-sm shadow-[1px_0_0_0_hsl(var(--border))] group-hover:bg-muted">
         <div className="truncate">{user.first_name} {user.last_name}</div>
         <div className="truncate text-xs text-muted-foreground">{user.email}</div>
       </TableCell>

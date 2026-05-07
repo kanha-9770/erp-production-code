@@ -31,6 +31,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
+import { formatTimeShort } from "@/components/attendance/attendance-format";
 
 type WidgetState =
   | "PRE_SHIFT"
@@ -658,7 +659,7 @@ export function AttendanceWidget({
               label="Checked in"
               value={
                 <>
-                  {status.checkInTime ?? "—"}
+                  {formatTimeShort(status.checkInAt)}
                   {status.lateMinutes > 0 && (
                     <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-600">
                       late by {formatHM(status.lateMinutes)}
@@ -673,7 +674,7 @@ export function AttendanceWidget({
               label="Checked out"
               value={
                 <>
-                  {status.checkOutTime ?? "—"}
+                  {formatTimeShort(status.checkOutAt)}
                   {status.isAutoCheckedOut && (
                     <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-500">
                       auto
@@ -986,11 +987,11 @@ function primaryLabel(status: AttendanceStatusPayload, liveSeconds: number) {
 function secondaryLabel(status: AttendanceStatusPayload) {
   switch (status.state) {
     case "WORKING":
-      return status.checkInTime ?? "in";
+      return status.checkInAt ? formatTimeShort(status.checkInAt) : "in";
     case "LATE":
       return `${status.lateMinutes}m late`;
     case "DONE":
-      return status.checkOutTime ?? "";
+      return status.checkOutAt ? formatTimeShort(status.checkOutAt) : "";
     case "HOLIDAY":
       return status.holidayName ?? "";
     case "ON_LEAVE":

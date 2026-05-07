@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import {
   Card,
   CardContent,
@@ -11,7 +11,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
   TableBody,
@@ -131,9 +130,7 @@ export function FieldsPermissionMatrix({
           Field Permissions
         </CardTitle>
         <CardDescription>
-          Control access for each role on individual fields of this form. Expand
-          a section to see its fields, then expand a field to configure its
-          permissions.
+          Expand a section, then a field, to override permissions for it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -298,8 +295,8 @@ function FieldPermissionTable({
 
   return (
     <div className="space-y-4">
-      <ScrollArea className="max-h-full rounded-md border">
-        <Table>
+      <div className="max-h-[calc(100vh-420px)] min-h-[300px] overflow-auto rounded-md border [&>div]:overflow-visible">
+        <Table className="min-w-[640px]">
           <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow>
               <TableHead className="min-w-[220px] font-semibold">Role / User</TableHead>
@@ -319,85 +316,78 @@ function FieldPermissionTable({
               const isExpanded = expandedRoles.has(role.id)
 
               return (
-                <Collapsible
-                  key={role.id}
-                  open={isExpanded}
-                  onOpenChange={() => toggleRole(role.id)}
-                  asChild
-                >
-                  <>
-                    <TableRow className="hover:bg-muted/60">
-                      <TableCell className="font-medium text-sm">
-                        <CollapsibleTrigger asChild>
-                          <button className="flex items-center gap-2 hover:text-primary focus:outline-none">
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                            {role.name}
-                          </button>
-                        </CollapsibleTrigger>
-                      </TableCell>
-
-                      {permissions.map((p) => (
-                        <TableCell key={p.id} className="text-center">
-                          <Checkbox
-                            checked={hasRolePermission(role.id, fieldId, p.id)}
-                            disabled={saving}
-                            title={
-                              isRoleInherited(role.id, p.id)
-                                ? "Inherited from form or section"
-                                : undefined
-                            }
-                            onCheckedChange={() =>
-                              togglePermission("role", role.id, fieldId, p.id)
-                            }
-                          />
-                        </TableCell>
-                      ))}
-
-                      <TableCell className="text-center">
-                        <Badge variant="outline">
-                          {grantedCount}/{permissions.length}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-
-                    <CollapsibleContent asChild>
-                      <>
-                        {usersInRole.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={permissions.length + 2}
-                              className="pl-12 text-xs text-muted-foreground italic"
-                            >
-                              No users in this role
-                            </TableCell>
-                          </TableRow>
+                <Fragment key={role.id}>
+                  <TableRow className="hover:bg-muted/60">
+                    <TableCell className="font-medium text-sm">
+                      <button
+                        type="button"
+                        onClick={() => toggleRole(role.id)}
+                        className="flex items-center gap-2 hover:text-primary focus:outline-none"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4" />
                         ) : (
-                          usersInRole.map((user) => (
-                            <FieldUserRow
-                              key={user.id}
-                              user={user}
-                              fieldId={fieldId}
-                              permissions={permissions}
-                              saving={saving}
-                              hasUserPermission={hasUserPermission}
-                              isUserInherited={isUserInherited}
-                              togglePermission={togglePermission}
-                            />
-                          ))
+                          <ChevronRight className="h-4 w-4" />
                         )}
-                      </>
-                    </CollapsibleContent>
-                  </>
-                </Collapsible>
+                        {role.name}
+                      </button>
+                    </TableCell>
+
+                    {permissions.map((p) => (
+                      <TableCell key={p.id} className="text-center">
+                        <Checkbox
+                          checked={hasRolePermission(role.id, fieldId, p.id)}
+                          disabled={saving}
+                          title={
+                            isRoleInherited(role.id, p.id)
+                              ? "Inherited from form or section"
+                              : undefined
+                          }
+                          onCheckedChange={() =>
+                            togglePermission("role", role.id, fieldId, p.id)
+                          }
+                        />
+                      </TableCell>
+                    ))}
+
+                    <TableCell className="text-center">
+                      <Badge variant="outline">
+                        {grantedCount}/{permissions.length}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+
+                  {isExpanded && (
+                    usersInRole.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={permissions.length + 2}
+                          className="pl-12 text-xs text-muted-foreground italic"
+                        >
+                          No users in this role
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      usersInRole.map((user) => (
+                        <FieldUserRow
+                          key={user.id}
+                          user={user}
+                          fieldId={fieldId}
+                          permissions={permissions}
+                          saving={saving}
+                          hasUserPermission={hasUserPermission}
+                          isUserInherited={isUserInherited}
+                          togglePermission={togglePermission}
+                        />
+                      ))
+                    )
+                  )}
+                </Fragment>
               )
             })}
           </TableBody>
         </Table>
-      </ScrollArea>
+      </div>
 
       <div className="flex gap-3 justify-end border-t pt-4">
         <Button
