@@ -10,7 +10,9 @@
     "start": "next start -p 5001",
     "create-default-org": "ts-node --esm --transpile-only scripts/create-default-organization.ts",
     "seed:routes": "npx tsx scripts/seed-route-permissions.ts",
-    "seed:payroll": "npx tsx scripts/seed-payroll-data.ts"
+    "seed:payroll": "npx tsx scripts/seed-payroll-data.ts",
+    "setup:hr": "npx tsx scripts/setup-hr-production.ts",
+    "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",

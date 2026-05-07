@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { sendOTPEmail } from '@/lib/email'
 import { generateOTP } from '@/lib/auth'
 import { z } from 'zod'
+import { getRequestMeta } from '@/lib/api-helpers'
+import { checkIpRate, rateLimitResponse } from '@/lib/auth/rate-limit'
 
 const ResendOTPSchema = z.object({
   userId: z.string(),
@@ -12,6 +14,13 @@ const ResendOTPSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const { ipAddress } = getRequestMeta(request)
+
+    // Tight throttle on resend — 3/min per IP. The schema also enforces
+    // a 1-minute cooldown between resends below.
+    const ipGate = checkIpRate(ipAddress, 'resend-otp')
+    if (!ipGate.allowed) return rateLimitResponse(ipGate)
+
     const body = await request.json()
     const { userId, type } = ResendOTPSchema.parse(body)
 

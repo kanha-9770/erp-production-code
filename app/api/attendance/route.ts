@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToday } from "@/lib/attendance";
 import { prisma } from "@/lib/prisma";
+import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 
 // Get attendance records
 
@@ -158,6 +159,26 @@ export async function POST(request: NextRequest) {
         { success: false, error: "Invalid action. Use 'checkin' or 'checkout'" },
         { status: 400 }
       );
+    }
+
+    // The legacy endpoint doesn't receive `organizationId`, so look it up
+    // from the user once we know we wrote a row. Without this the live
+    // payroll cache would stay stale until its TTL expired (5s) and the
+    // user would see a brief "wrong" reading on the payroll page.
+    if (record) {
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { organizationId: true },
+        });
+        if (user?.organizationId) {
+          invalidatePayrollCache(user.organizationId);
+        }
+      } catch (err) {
+        // Cache invalidation is best-effort. The TTL inside the live
+        // engine will catch up on its own within a few seconds.
+        console.warn("[attendance/legacy] cache invalidation failed:", err);
+      }
     }
 
     return NextResponse.json({

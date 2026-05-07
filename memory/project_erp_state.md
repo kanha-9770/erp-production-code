@@ -23,6 +23,14 @@ This repo is branded "erp-production-code" but is really a **low-code form-build
 
 **Recently improved (post-audit):** `/api/payroll` GET/POST now checks auth + org scope (was unauth in audit). Payroll UI rewritten with real Tabs/Cards.
 
+**Payroll real-time sync (2026-05-06):** Added [lib/utils/payroll-live.ts](../lib/utils/payroll-live.ts) — TTL-cached compute-on-read engine. GET `/api/payroll` and `/api/payroll/stats` now recompute from live data (Attendance table + LeaveRequest + Holiday + configured forms) instead of reading the orphaned `globalThis.__payrollStore` map. Every input change calls `invalidatePayrollCache(orgId)`: attendance punch ([app/api/attendance/punch/route.ts](../app/api/attendance/punch/route.ts) + legacy [app/api/attendance/route.ts](../app/api/attendance/route.ts)), leave decide/cancel ([app/api/leaves/[id]/decide/route.ts](../app/api/leaves/[id]/decide/route.ts), .../cancel), regularization approve/reject, holiday upsert/delete, payroll-setup save. TTL is 5s so 3-fan-out page-load fetches coalesce.
+
+**Payroll ⇄ Attendance join robustness (2026-05-07):** Fixed the case where Team Attendance shows punches but Payroll says 0 hours / ₹0 gross. Three changes in [lib/utils/payroll-store.ts](../lib/utils/payroll-store.ts):
+- Native attendance and form-derived employees both now emit a `userId:<id>` matchKey alongside `email:` and `empId:`. Payroll joins on whichever key works, so a profile-form record with a missing/wrong email field still matches the user's punches via userId.
+- Sharded form-record reads (form_records_1..15 except 14) now `include: { user: ... }` so submittedBy email/id is available — they were previously stripped, breaking the join for orgs whose Employee Profile form lives on a sharded table.
+- Added native-user synthesis: any active User in the org without a form-derived employee row is surfaced as a synthetic employee using User.first_name/last_name + Employee.totalSalary (or defaultBaseSalary fallback). Fixes the "user has attendance but no profile form record" case (e.g. `app3` in production).
+Auto-generate gate relaxed accordingly — it no longer requires `hasEmployeeForm`, only `hasAnyCheckInSource`.
+
 **Why:** The user keeps asking whether things are "working / automated" — they want a status check, not a re-audit. Point to the audit, then verify what changed.
 
 **How to apply:** When asked broad "is X working / automated" questions, lean on the audit + spot-check the specific files mentioned above to see if they've been fixed since 2026-04-30. Don't pretend the ERP domain exists.

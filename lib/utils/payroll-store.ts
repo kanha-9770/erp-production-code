@@ -36,6 +36,12 @@ export interface SampleAttendance {
   date: string;
   checkInTime: string;
   checkOutTime: string;
+  // Authoritative ISO datetimes from the Attendance table (when available).
+  // The HH:mm strings above are derivative — they lose seconds and AM/PM
+  // context, so for precise worked-time math we prefer these. Form-based
+  // sources won't have them and leave both null.
+  checkInAt?: string | null;
+  checkOutAt?: string | null;
 }
 
 export interface SampleLeave {
@@ -460,19 +466,49 @@ async function getNativeAttendanceForMonth(
       },
     });
 
+    // Emit one entry per (user, day) under EVERY matchKey that could plausibly
+    // identify this user — userId, login email, employee.id (if linked).
+    // The per-employee join in payroll-utils.ts dedupes by date, so emitting
+    // the same row under multiple keys is safe; it just means whichever key
+    // the employee record happens to expose, the join hits.
+    //
+    // This is what unblocks the case where the Employee Profile form has a
+    // wrong / missing email field but the user IS the same person who punched.
+    // Joining via userId works regardless of how clean the form data is.
     const out: SampleAttendance[] = [];
     for (const row of rows) {
       const email = row.user?.email
         ? String(row.user.email).toLowerCase()
-        : null;
-      if (!email) continue;
-      out.push({
+        : '';
+      const userId = row.user?.id ?? row.userId ?? null;
+      const checkInAt = (row as any).checkInAt as Date | null | undefined;
+      const checkOutAt = (row as any).checkOutAt as Date | null | undefined;
+      const inTime = row.checkInTime ?? '';
+      const outTime = row.checkOutTime ?? '';
+      // Skip rows with no real punch data on either side. Without this,
+      // a phantom row (e.g. a half-written record with checkedIn=false
+      // and all timestamps null) fed the day classifier as if the user
+      // had attended, and the classifier — receiving hours=0 — happily
+      // counted it as a full present day. That's why every employee was
+      // showing "5 days, 0.0 hours". Drop it at the source.
+      if (!inTime && !outTime && !checkInAt && !checkOutAt) continue;
+      if (!userId && !email) continue;
+      const baseRow = {
         email,
-        matchKey: `email:${email}`,
         date: row.date,
-        checkInTime: row.checkInTime ?? '',
-        checkOutTime: row.checkOutTime ?? '',
-      });
+        checkInTime: inTime,
+        checkOutTime: outTime,
+        checkInAt: checkInAt ? checkInAt.toISOString() : null,
+        checkOutAt: checkOutAt ? checkOutAt.toISOString() : null,
+      };
+      // Primary key: userId (always reliable — Attendance.userId is a FK).
+      if (userId) {
+        out.push({ ...baseRow, matchKey: `userId:${String(userId).toLowerCase()}` });
+      }
+      // Secondary key: login email (legacy join path).
+      if (email) {
+        out.push({ ...baseRow, matchKey: `email:${email}` });
+      }
     }
     return out;
   } catch (err) {
@@ -797,13 +833,24 @@ async function readRecords(
           // sharded side. The other shards rely on formId scoping.
           const sharedWhere =
             num === '14' ? { ...baseWhere, organizationId: formInfo.organizationId } : baseWhere;
-          let rows = await (prisma[key] as any).findMany({ where: sharedWhere });
+          // Always include the submittedBy user — payroll uses
+          // `row.user.email` and `row.user.id` to build matchKeys, so
+          // missing this would silently break the cross-source join
+          // (employee profile ⇄ native attendance) for sharded forms.
+          const findArgs = {
+            where: sharedWhere,
+            include: { user: { select: { id: true, email: true, username: true } } },
+          };
+          let rows = await (prisma[key] as any).findMany(findArgs);
           if (rows.length === 0 && Object.keys(where).length > 0) {
             const fallbackWhere =
               num === '14'
                 ? { formId: formInfo.id, organizationId: formInfo.organizationId }
                 : { formId: formInfo.id };
-            rows = await (prisma[key] as any).findMany({ where: fallbackWhere });
+            rows = await (prisma[key] as any).findMany({
+              where: fallbackWhere,
+              include: { user: { select: { id: true, email: true, username: true } } },
+            });
           }
           if (rows.length > 0) return rows;
         } catch (err) {
@@ -815,14 +862,17 @@ async function readRecords(
 
   try {
     // The unified form_records table HAS an organization_id column — use it.
+    // Including user.id (in addition to email/username) so the payroll
+    // engine can build a userId-based matchKey when the form's email
+    // field is missing or wrong.
     let rows = await prisma.formRecord.findMany({
       where: { ...baseWhere, organizationId: formInfo.organizationId },
-      include: { user: { select: { email: true, username: true } } },
+      include: { user: { select: { id: true, email: true, username: true } } },
     });
     if (rows.length === 0 && Object.keys(where).length > 0) {
       rows = await prisma.formRecord.findMany({
         where: { formId: formInfo.id, organizationId: formInfo.organizationId },
-        include: { user: { select: { email: true, username: true } } },
+        include: { user: { select: { id: true, email: true, username: true } } },
       });
     }
     return rows;
@@ -893,17 +943,22 @@ function pickWithMapping(
 export async function getEmployeesFromDB(organizationId: string): Promise<SampleEmployee[]> {
   const setup = await loadSetup(organizationId);
   const formInfo = await resolveFromConfigOrName(organizationId, setup?.employee ?? null, EMPLOYEE_FORM_NAMES);
-  if (!formInfo) return [];
 
   const fields = setup?.employee.fields ?? {};
   const fallbackSalary = setup?.defaultBaseSalary ?? 0;
-  const rows = await readRecords(formInfo);
+  // formInfo may be null if the org hasn't bound an Employee Profile form
+  // yet. We don't return [] anymore — we fall through to the native-user
+  // synthesis below so users who have only the static /attendance widget
+  // (and no profile form) still appear in payroll.
   const employees: SampleEmployee[] = [];
   const seen = new Set<string>();
 
-  for (const row of rows) {
-    const data = flattenRecordData(row.recordData, formInfo.labels);
+  if (formInfo) {
+    const rows = await readRecords(formInfo);
+    for (const row of rows) {
+      const data = flattenRecordData(row.recordData, formInfo.labels);
     const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
+    const userId = row.user?.id ? String(row.user.id) : null;
 
     const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, EMAIL_FALLBACKS);
     const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, EMP_ID_FALLBACKS);
@@ -914,10 +969,20 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       row.employee_id ||
       (email ? email.split('@')[0].toUpperCase() : `EMP-${row.id.slice(0, 6)}`);
 
+    // Build match keys from EVERY identity we can prove for this row.
+    // Order matters: the first non-empty key is used as the dedup key
+    // for this employee, and we want the most reliable signal first.
+    //   1. userId — Attendance.userId is a hard FK, so this is the
+    //      ground-truth join. Any record with a known submittedBy user
+    //      gets matched to that user's punches even if the form's
+    //      email field is wrong/missing.
+    //   2. email — handles legacy form records that pre-date submittedBy.
+    //   3. empId — final fallback for hand-typed employee IDs.
     const matchKeys: string[] = [];
+    if (userId) matchKeys.push(`userId:${userId.toLowerCase()}`);
     if (email) matchKeys.push(`email:${email}`);
-    if (employeeId) matchKeys.push(`empId:${String(employeeId).toLowerCase()}`);
     if (userEmail && (!email || userEmail !== email)) matchKeys.push(`email:${userEmail}`);
+    if (employeeId) matchKeys.push(`empId:${String(employeeId).toLowerCase()}`);
     if (matchKeys.length === 0) continue;
 
     const dedupKey = matchKeys[0];
@@ -961,6 +1026,112 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       dateOfJoining,
       dateOfLeaving,
     });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Native-user fallback synthesis
+  // ---------------------------------------------------------------------------
+  // The form-driven loop above only sees people who exist in the Employee
+  // Profile form. Anyone who punches in via the static /attendance widget
+  // without a corresponding form record is invisible to payroll — we saw
+  // that in production: a user named "app3" had three days of clean check-
+  // ins but never showed up in the payroll list because their profile
+  // form was never filled.
+  //
+  // Fix: union in every active User in the org. If a user is already
+  // covered by a form-derived employee (via userId, email, OR linked
+  // employee.id), we skip — the form record stays authoritative for
+  // salary and dates. Otherwise we synthesise an employee from User +
+  // optional Employee row + the configured defaultBaseSalary.
+  try {
+    const orgUsers = await prisma.user.findMany({
+      where: {
+        organizationId,
+        status: { in: ['ACTIVE', 'PENDING'] as any },
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        first_name: true,
+        last_name: true,
+        department: true,
+        joinDate: true,
+        employee: {
+          select: {
+            id: true,
+            employeeName: true,
+            department: true,
+            designation: true,
+            totalSalary: true,
+            givenSalary: true,
+            dateOfJoining: true,
+            dateOfLeaving: true,
+          },
+        },
+      },
+    });
+    for (const u of orgUsers) {
+      const userId = String(u.id);
+      const userIdKey = `userId:${userId.toLowerCase()}`;
+      const emailKey = u.email ? `email:${u.email.toLowerCase()}` : null;
+      const empIdKey = u.employee?.id
+        ? `empId:${String(u.employee.id).toLowerCase()}`
+        : null;
+
+      // If any of this user's identity keys already mapped to a
+      // form-derived employee, skip — the form is the source of truth.
+      if (seen.has(userIdKey)) continue;
+      if (emailKey && seen.has(emailKey)) continue;
+      if (empIdKey && seen.has(empIdKey)) continue;
+
+      seen.add(userIdKey);
+      if (emailKey) seen.add(emailKey);
+      if (empIdKey) seen.add(empIdKey);
+
+      const composedName =
+        [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
+        u.employee?.employeeName ||
+        u.username ||
+        (u.email ? u.email.split('@')[0] : userId);
+
+      // Salary preference: explicit Employee row → form's defaultBaseSalary.
+      // We deliberately don't fall back to 0 silently — a 0 here means
+      // the row will produce ₹0 gross which is exactly what the admin
+      // should see until they bind a salary somewhere.
+      const empSalary =
+        u.employee?.totalSalary != null
+          ? Number((u.employee.totalSalary as any).toString?.() ?? u.employee.totalSalary)
+          : u.employee?.givenSalary != null
+            ? Number((u.employee.givenSalary as any).toString?.() ?? u.employee.givenSalary)
+            : 0;
+      const totalSalary = empSalary > 0 ? empSalary : fallbackSalary;
+
+      const matchKeys: string[] = [userIdKey];
+      if (emailKey) matchKeys.push(emailKey);
+      if (empIdKey) matchKeys.push(empIdKey);
+
+      employees.push({
+        employeeId: u.employee?.id ? String(u.employee.id) : userId,
+        employeeName: String(composedName),
+        email: u.email ? u.email.toLowerCase() : '',
+        designation: u.employee?.designation ?? '',
+        department: u.employee?.department ?? u.department ?? '',
+        totalSalary,
+        matchKeys,
+        dateOfJoining: u.employee?.dateOfJoining
+          ? new Date(u.employee.dateOfJoining).toISOString().slice(0, 10)
+          : u.joinDate
+            ? new Date(u.joinDate).toISOString().slice(0, 10)
+            : null,
+        dateOfLeaving: u.employee?.dateOfLeaving
+          ? new Date(u.employee.dateOfLeaving).toISOString().slice(0, 10)
+          : null,
+      });
+    }
+  } catch (err) {
+    console.warn('[payroll] native-user synthesis failed:', err);
   }
 
   return employees;

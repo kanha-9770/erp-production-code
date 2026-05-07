@@ -6,13 +6,6 @@ import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Form,
   FormControl,
   FormField,
@@ -21,7 +14,7 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, KeyRound, Mail, ArrowLeft, Shield } from "lucide-react"
+import { Loader2, KeyRound, Mail, ArrowLeft } from "lucide-react"
 import type { AuthViewProps } from "./types"
 import { useForgotPasswordMutation } from "@/lib/api/auth"
 
@@ -43,8 +36,10 @@ export default function ForgotPasswordView({ onSwitchView }: AuthViewProps) {
   const onSubmit = async (data: ForgotPasswordFormData) => {
     try {
       const result = await forgotPassword(data).unwrap()
-
-      toast({ title: "Check your email", description: "A password reset code has been sent to your inbox." })
+      toast({
+        title: "Check your email",
+        description: "We've sent a 6-digit code to reset your password.",
+      })
       onSwitchView("reset-password", { userId: (result as any)?.userId })
     } catch (error: any) {
       const message = error?.data?.error || "Failed to send reset code. Please try again."
@@ -55,102 +50,76 @@ export default function ForgotPasswordView({ onSwitchView }: AuthViewProps) {
           variant: "destructive",
         })
       } else {
-        toast({
-          title: "Error",
-          description: message,
-          variant: "destructive",
-        })
+        toast({ title: "Error", description: message, variant: "destructive" })
       }
     }
   }
 
   return (
-    <div className="w-full max-w-md">
-      <div className="text-center mb-8">
-        <div className="mx-auto h-16 w-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg mb-6">
-          <Shield className="h-10 w-10 text-white" />
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <div className="inline-flex items-center justify-center h-12 w-12 rounded-xl bg-primary/10 text-primary">
+          <KeyRound className="h-5 w-5" />
         </div>
-        <h1 className="text-3xl font-bold text-gray-900">Forgot Password?</h1>
-        <p className="mt-3 text-lg text-gray-600">No worries — we&apos;ll help you get back in.</p>
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Forgot password?</h1>
+          <p className="text-sm text-muted-foreground">
+            Enter your email and we&apos;ll send you a 6-digit reset code.
+          </p>
+        </div>
       </div>
 
-      <Card className="border-0 shadow-2xl bg-white/90 backdrop-blur-md">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto h-12 w-12 bg-orange-100 rounded-full flex items-center justify-center mb-4">
-            <KeyRound className="h-7 w-7 text-orange-600" />
-          </div>
-          <CardTitle className="text-2xl font-bold">Reset Your Password</CardTitle>
-          <CardDescription className="text-base">
-            Enter your email address and we&apos;ll send you a reset code.
-          </CardDescription>
-        </CardHeader>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <FormField
+            control={form.control}
+            name="email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Email
+                </FormLabel>
+                <FormControl>
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      {...field}
+                      type="email"
+                      placeholder="you@company.com"
+                      autoComplete="email"
+                      className="pl-10 h-11"
+                      disabled={isLoading}
+                    />
+                  </div>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email Address</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-3.5 h-5 w-5 text-gray-400" />
-                        <Input
-                          {...field}
-                          type="email"
-                          placeholder="you@example.com"
-                          className="pl-11 h-12 text-base border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-                          disabled={isLoading}
-                        />
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <Button type="submit" className="w-full h-11 font-medium" disabled={isLoading}>
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Sending code…
+              </>
+            ) : (
+              "Send reset code"
+            )}
+          </Button>
+        </form>
+      </Form>
 
-              <Button
-                type="submit"
-                className="w-full h-12 text-lg font-medium bg-blue-600 hover:bg-blue-700 transition-all duration-200 shadow-md hover:shadow-lg"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Sending Code...
-                  </>
-                ) : (
-                  "Send Reset Code"
-                )}
-              </Button>
-            </form>
-          </Form>
-
-          <div className="mt-8 text-center">
-            <button
-              type="button"
-              onClick={() => onSwitchView("login")}
-              className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
-            >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Login
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <p className="mt-8 text-center text-sm text-gray-500">
-        Remember your password?{" "}
+      <div className="text-center">
         <button
           type="button"
           onClick={() => onSwitchView("login")}
-          className="font-medium text-blue-600 hover:underline"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          Sign in here
+          <ArrowLeft className="h-3 w-3" />
+          Back to sign in
         </button>
-      </p>
+      </div>
     </div>
   )
 }

@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { cancelLeave, getRequest, LeaveError } from '@/lib/hr/leave-service';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +65,10 @@ export async function POST(
       reason: typeof body.reason === 'string' ? body.reason.slice(0, 2000) : null,
       adminOverride: admin,
     });
+    // Cancelling a leave that was previously approved removes paid-leave
+    // days from the payroll month. Drop the cache so the next read sees
+    // truth.
+    invalidatePayrollCache(authUser.organizationId);
     return NextResponse.json(
       { success: true, request: updated },
       { headers: NO_STORE },

@@ -20,21 +20,82 @@ const HALF_DAY_MIN_HOURS = 4; // <4h logged → counted as half-day; 0h → abse
 const PF_PERCENT = 12;
 const TAX_PERCENT = 5;
 const INSURANCE_FIXED = 500;
-const LUNCH_BREAK_HOURS = 1;
 
 const DEFAULT_DAY_HOURS = 8;
 
+/**
+ * Parses an HH:mm-ish string. Tolerates "08:54", "08:54:21", "08:54:21 PM",
+ * and "8:54 AM". Returns total minutes from midnight, or null if the input
+ * is unparseable. We DO honour AM/PM when present so legacy rows written by
+ * the old `/api/attendance` POST (which used `toLocaleTimeString` with
+ * `hour12: true`) parse correctly. The new punch endpoint always writes
+ * 24-hour strings so AM/PM is absent and we treat it as 24h.
+ */
+function parseTimeToMinutes(raw: string): number | null {
+  if (!raw) return null;
+  const m = raw.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([APap][Mm])?/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  if (m[3]) {
+    const isPM = m[3].toUpperCase() === 'PM';
+    if (isPM && h < 12) h += 12;
+    if (!isPM && h === 12) h = 0;
+  }
+  return h * 60 + min;
+}
+
+/**
+ * Raw worked-hours from HH:mm strings. Used as a fallback when ISO
+ * timestamps are not available (form-based attendance).
+ *
+ * Behaviour notes:
+ *   - Both empty → 0 (no attendance to read)
+ *   - Only one side → DEFAULT_DAY_HOURS (assume full day worked, the
+ *     missing punch is treated as "forgot to clock out")
+ *   - Both present → checkout-minus-checkin in hours. We do NOT subtract
+ *     a fixed lunch break here — that used to silently zero out short
+ *     workdays and made the payroll Hours column disagree with the
+ *     Team Attendance "Worked" column (which is straight wall-clock).
+ *     Lunch policy belongs in pay computation, not in displayed hours.
+ */
 export function calculateWorkingHours(checkInTime: string, checkOutTime?: string): number {
   if (!checkInTime && !checkOutTime) return 0;
   if (!checkOutTime) return DEFAULT_DAY_HOURS;
   if (!checkInTime) return DEFAULT_DAY_HOURS;
-  const [inH, inM] = checkInTime.split(':').map(Number);
-  const [outH, outM] = checkOutTime.split(':').map(Number);
-  const inMinutes = inH * 60 + inM;
-  const outMinutes = outH * 60 + outM;
-  let diffMinutes = outMinutes - inMinutes;
+  const inMin = parseTimeToMinutes(checkInTime);
+  const outMin = parseTimeToMinutes(checkOutTime);
+  if (inMin === null || outMin === null) return 0;
+  let diffMinutes = outMin - inMin;
   if (diffMinutes < 0) diffMinutes += 24 * 60;
-  return Math.max(0, diffMinutes / 60 - LUNCH_BREAK_HOURS);
+  return Math.max(0, diffMinutes / 60);
+}
+
+/**
+ * Authoritative worked-hours computation. Prefers full ISO timestamps
+ * (`checkInAt`/`checkOutAt` from the Attendance table) over the HH:mm
+ * strings, because the strings drop seconds and AM/PM context. This is
+ * the same source the Team Attendance "Worked" column uses, so payroll's
+ * Hours column will now match it row-for-row.
+ */
+function workedHoursFromAttendance(att: {
+  checkInTime: string;
+  checkOutTime: string;
+  checkInAt?: string | null;
+  checkOutAt?: string | null;
+}): number {
+  const inAt = att.checkInAt ? Date.parse(att.checkInAt) : NaN;
+  const outAt = att.checkOutAt ? Date.parse(att.checkOutAt) : NaN;
+  if (Number.isFinite(inAt) && Number.isFinite(outAt) && outAt >= inAt) {
+    return (outAt - inAt) / 3_600_000;
+  }
+  // Only check-in ISO present → assume full day worked.
+  if (Number.isFinite(inAt) && !Number.isFinite(outAt)) {
+    return DEFAULT_DAY_HOURS;
+  }
+  // Fall back to the HH:mm strings.
+  return calculateWorkingHours(att.checkInTime, att.checkOutTime || undefined);
 }
 
 // ---- LeaveRule policy book -------------------------------------------------
@@ -183,23 +244,40 @@ function classifyDay(
   const isWeeklyOff = policy.weeklyOffDays.includes(weekday);
 
   // Check-in beats leave: if the employee actually showed up, that's the
-  // truth of the day, regardless of any approved leave on file.
+  // truth of the day, regardless of any approved leave on file. But ONLY
+  // if there's a real check-in signal — an empty / phantom row mustn't
+  // be counted as attended.
   const att = attendanceByDate.get(dateStr);
   if (att) {
-    const hours = calculateWorkingHours(att.checkInTime, att.checkOutTime || undefined);
-    z.hours = hours;
-    // Hours-based half-day inference. If only check-in is recorded,
-    // calculateWorkingHours returns DEFAULT_DAY_HOURS so a missing checkout
-    // doesn't accidentally collapse to a half-day.
-    if (hours > 0 && hours < HALF_DAY_MIN_HOURS) {
-      z.half = 0.5;
-    } else if (hours >= HALF_DAY_MIN_HOURS && hours < STANDARD_HOURS_PER_DAY * 0.85) {
-      // 4–6.8h logged → still treat as half-day to discourage gaming the clock
-      z.half = 0.5;
-    } else {
-      z.present = 1;
+    const hasIn = !!(att.checkInTime || att.checkInAt);
+    const hasOut = !!(att.checkOutTime || att.checkOutAt);
+    if (hasIn || hasOut) {
+      const hours = workedHoursFromAttendance(att);
+      z.hours = hours;
+      // Forgot-to-checkout: assume a full day so the user isn't penalised
+      // for an admin / scheduler oversight. The auto-checkout job (when
+      // configured) overwrites this later anyway.
+      if (hasIn && !hasOut) {
+        z.present = 1;
+        if (hours <= 0) z.hours = DEFAULT_DAY_HOURS;
+      } else if (hours <= 0) {
+        // Both timestamps but zero/negative diff — almost certainly a
+        // mis-punch or duplicate within the same minute. Treat as a
+        // half-day so the employee isn't paid for zero work but the row
+        // still acknowledges they attempted to clock in.
+        z.half = 0.5;
+      } else if (hours < HALF_DAY_MIN_HOURS) {
+        z.half = 0.5;
+      } else if (hours < STANDARD_HOURS_PER_DAY * 0.85) {
+        // 4–6.8h logged → still half-day to discourage gaming the clock.
+        z.half = 0.5;
+      } else {
+        z.present = 1;
+      }
+      return z;
     }
-    return z;
+    // Row exists but has no usable timestamps on either side. Fall
+    // through to the leave / weekly-off / absent classification below.
   }
 
   // No check-in. Holiday and weekly-off are paid by company policy.

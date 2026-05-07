@@ -12,6 +12,7 @@ import {
   getRequest,
   LeaveError,
 } from '@/lib/hr/leave-service';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,6 +89,10 @@ export async function POST(
       decidedById: authUser.id,
       note: typeof body.note === 'string' ? body.note.slice(0, 2000) : null,
     });
+    // Approving (or rejecting a previously-approved) leave changes
+    // payable / unpaid-leave counts for the affected month(s). Invalidate
+    // the live payroll cache so the next read recomputes from truth.
+    invalidatePayrollCache(authUser.organizationId);
     return NextResponse.json(
       { success: true, request: updated },
       { headers: NO_STORE },

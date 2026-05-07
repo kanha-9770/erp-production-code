@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getEmployeeFormsStatus,
   getEmployeesFromDB,
-  getPayrollRecords,
   getStoredMonths,
 } from '@/lib/utils/payroll-store';
+import { readLivePayroll } from '@/lib/utils/payroll-live';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
@@ -25,8 +25,10 @@ export async function GET(request: NextRequest) {
     const orgId = authUser.organizationId;
     const { searchParams } = new URL(request.url);
     const month = searchParams.get('month') ?? undefined;
-    const records = getPayrollRecords(orgId, month);
-    const [employees, formsStatus] = await Promise.all([
+    // Live read — same TTL-cached compute the records endpoint uses, so
+    // stats and the listing always agree about a punch made 1s ago.
+    const [records, employees, formsStatus] = await Promise.all([
+      readLivePayroll(orgId, month),
       getEmployeesFromDB(orgId),
       getEmployeeFormsStatus(orgId),
     ]);

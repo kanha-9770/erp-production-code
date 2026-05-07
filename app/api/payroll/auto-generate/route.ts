@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { calculatePayroll } from '@/lib/utils/payroll-utils';
 import {
   getEmployeeFormsStatus,
   PayrollRecord as InMemoryPayrollRecord,
-  setPayrollRecords,
 } from '@/lib/utils/payroll-store';
+import {
+  getLivePayroll,
+  invalidatePayrollCache,
+} from '@/lib/utils/payroll-live';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { prisma } from '@/lib/prisma';
 
@@ -83,30 +85,34 @@ export async function POST(request: NextRequest) {
 
     const formsStatus = await getEmployeeFormsStatus(authUser.organizationId);
 
-    // Gate: an Employee form is always required (we need salary + identity).
-    // Check-in is optional as a FORM — the static /attendance widget writes to
-    // the Attendance table directly, and payroll's data layer already merges
-    // those rows. Either source counts, so we only block when BOTH are missing.
-    if (!formsStatus.hasEmployeeForm || !formsStatus.hasAnyCheckInSource) {
-      const missing: string[] = [];
-      if (!formsStatus.hasEmployeeForm) {
-        missing.push('an Employee Profile form');
-      }
-      if (!formsStatus.hasAnyCheckInSource) {
-        missing.push(
-          'a check-in source (either bind a Check-In form in /settings/attendance-config OR have employees punch in via the widget at /attendance)',
-        );
-      }
+    // Gate: payroll needs (a) some way to identify employees and (b) some
+    // check-in signal. Both are now satisfiable WITHOUT bound forms because
+    // payroll-store.ts can synthesise employees from the User table and
+    // pull punches from the native Attendance table. We only block when
+    // there's literally no check-in source AND no employee profile form —
+    // that's the only configuration where the engine has nothing to work
+    // with. (User-table synthesis still produces a non-empty employee list,
+    // it just won't have any attendance to credit them with.)
+    if (!formsStatus.hasAnyCheckInSource) {
       return NextResponse.json({
         success: false,
-        message: `Cannot run payroll yet — needs ${missing.join(' AND ')}.`,
+        message:
+          'Cannot run payroll yet — no check-in source. Either bind a Check-In form in /settings/attendance-config OR have employees punch in via the widget at /attendance.',
         formsStatus,
         payrolls: [],
       });
     }
 
-    const payrolls = await calculatePayroll(authUser.organizationId, month);
-    setPayrollRecords(authUser.organizationId, month, payrolls);
+    // Force-fresh recompute through the live engine — bypasses the TTL
+    // cache so an admin clicking "Generate" always gets the very latest
+    // attendance state, and primes the cache so the immediately-following
+    // GETs (records + stats) return the same numbers without recomputing.
+    invalidatePayrollCache(authUser.organizationId, month);
+    const payrolls = await getLivePayroll(authUser.organizationId, month, {
+      force: true,
+      persist: false, // we persist below with the existing per-row error handling
+      processedBy: authUser.id,
+    });
 
     if (payrolls.length === 0) {
       return NextResponse.json({

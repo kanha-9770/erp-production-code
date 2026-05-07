@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,6 +123,11 @@ export async function POST(request: NextRequest) {
       isOptional: body.isOptional === true,
     },
   });
+
+  // Adding or toggling a holiday changes the day's payroll classification
+  // (a working-day absent flips to a paid holiday, etc.). Invalidate so
+  // the next read recomputes for this org.
+  invalidatePayrollCache(authUser.organizationId);
 
   return NextResponse.json({ success: true, holiday }, { headers: NO_STORE });
 }

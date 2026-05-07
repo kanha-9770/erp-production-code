@@ -5,6 +5,7 @@ import {
   RegularizationError,
   adminManualPunch,
 } from '@/lib/hr/attendance-regularization';
+import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,9 @@ export async function POST(request: NextRequest) {
       ip: ipAddress === 'unknown' ? null : ipAddress,
       userAgent,
     });
+    // Manual punch directly rewrites Attendance times — same shape change
+    // as a regular punch — so the live payroll cache is now stale.
+    invalidatePayrollCache(authUser.organizationId);
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof RegularizationError) {
