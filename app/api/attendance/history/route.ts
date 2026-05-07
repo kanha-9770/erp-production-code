@@ -77,15 +77,15 @@ export async function GET(request: NextRequest) {
     lng: number | null,
     punched: boolean,
   ) {
-    if (!fenceCentre || !fenceRadius) {
-      return { distanceM: null, outsideRadius: null, locationMissing: false };
-    }
     if (lat == null || lng == null) {
       return {
         distanceM: null,
         outsideRadius: null,
         locationMissing: punched,
       };
+    }
+    if (!fenceCentre || !fenceRadius) {
+      return { distanceM: null, outsideRadius: null, locationMissing: false };
     }
     const d = distanceMeters({ lat, lng }, fenceCentre);
     return {

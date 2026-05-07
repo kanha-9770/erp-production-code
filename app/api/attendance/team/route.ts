@@ -121,17 +121,18 @@ export async function GET(request: NextRequest) {
     lng: number | null,
     punched: boolean,
   ) {
-    if (!fenceCentre || !fenceRadius) {
-      return { distanceM: null, outsideRadius: null, locationMissing: false };
-    }
+    // `locationMissing` is independent of fence config: any time someone
+    // punched without sharing GPS the admin should see it, so they can
+    // notice users dodging the check even before the org has saved a fence.
     if (lat == null || lng == null) {
-      // The geofence is configured but the punch carries no GPS — flag it
-      // so admins notice that the user bypassed the location check.
       return {
         distanceM: null,
         outsideRadius: null,
         locationMissing: punched,
       };
+    }
+    if (!fenceCentre || !fenceRadius) {
+      return { distanceM: null, outsideRadius: null, locationMissing: false };
     }
     const d = distanceMeters({ lat, lng }, fenceCentre);
     return {
