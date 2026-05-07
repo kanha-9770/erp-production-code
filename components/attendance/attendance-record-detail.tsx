@@ -95,7 +95,7 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <PunchPanel
                 title="Check-In"
-                time={record.checkInTime || formatTimeShort(record.checkInAt)}
+                time={record.checkInAt ? formatTimeShort(record.checkInAt) : record.checkInTime || "—"}
                 photo={record.checkInPhoto}
                 lat={record.checkInLat}
                 lng={record.checkInLng}
@@ -105,7 +105,7 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
               />
               <PunchPanel
                 title="Check-Out"
-                time={record.checkOutTime || formatTimeShort(record.checkOutAt)}
+                time={record.checkOutAt ? formatTimeShort(record.checkOutAt) : record.checkOutTime || "—"}
                 photo={record.checkOutPhoto}
                 lat={record.checkOutLat}
                 lng={record.checkOutLng}

@@ -122,10 +122,10 @@ export function AttendanceRecordsTable({
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
-                  {r.checkInTime || formatTimeShort(r.checkInAt)}
+                  {r.checkInAt ? formatTimeShort(r.checkInAt) : r.checkInTime || "—"}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
-                  {r.checkOutTime || formatTimeShort(r.checkOutAt)}
+                  {r.checkOutAt ? formatTimeShort(r.checkOutAt) : r.checkOutTime || "—"}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
                   {worked > 0 ? formatHM(worked) : "—"}
