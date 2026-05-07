@@ -5,7 +5,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Loader2, RefreshCcw, AlertTriangle, ShieldAlert, Plus } from "lucide-react";
+import {
+  Loader2,
+  RefreshCcw,
+  AlertTriangle,
+  ShieldAlert,
+  Plus,
+  MapPin,
+  Info,
+} from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordsTable } from "./attendance-records-table";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
@@ -27,6 +35,12 @@ interface TeamResponse {
   to: string;
   users: TeamUser[];
   records: AttendanceRecord[];
+  geofence?: {
+    mode: "OFF" | "CAPTURE" | "ENFORCE";
+    lat: number | null;
+    lng: number | null;
+    radiusM: number | null;
+  };
   error?: string;
 }
 
@@ -181,6 +195,8 @@ export function TeamAttendance() {
         </div>
       )}
 
+      {data?.geofence && <GeofenceStatus geofence={data.geofence} />}
+
       {loading && !data ? (
         <div className="flex items-center gap-2 py-12 justify-center text-sm text-gray-500">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -200,6 +216,58 @@ export function TeamAttendance() {
         onOpenChange={setManualOpen}
         onSuccess={fetchTeam}
       />
+    </div>
+  );
+}
+
+// Compact strip that surfaces the org's saved geofence settings so admins
+// can immediately see whether out-of-radius / no-location flags will fire,
+// instead of staring at an empty "Where" column wondering if the config
+// even saved.
+function GeofenceStatus({
+  geofence,
+}: {
+  geofence: NonNullable<TeamResponse["geofence"]>;
+}) {
+  const configured =
+    geofence.lat != null && geofence.lng != null && geofence.radiusM != null;
+
+  if (!configured) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+        <div className="flex-1">
+          <div className="font-semibold">Geofence not configured</div>
+          <div className="text-amber-800 mt-0.5">
+            Set Latitude, Longitude and Radius in{" "}
+            <Link
+              href="/settings/attendance-config"
+              className="underline hover:no-underline"
+            >
+              Settings → Attendance Configuration → Capture &amp; security
+            </Link>{" "}
+            so out-of-radius punches get flagged here.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+      <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
+      <div className="flex-1">
+        <div className="font-semibold">
+          Geofence active · {geofence.radiusM}m radius
+        </div>
+        <div className="text-blue-800 mt-0.5">
+          Centre {geofence.lat?.toFixed(5)}, {geofence.lng?.toFixed(5)} ·
+          mode <span className="font-mono">{geofence.mode.toLowerCase()}</span>.
+          Punches outside this radius are highlighted red below; punches with
+          no GPS show as amber.
+        </div>
+      </div>
+      <Info className="h-3.5 w-3.5 mt-0.5 text-blue-500" />
     </div>
   );
 }
