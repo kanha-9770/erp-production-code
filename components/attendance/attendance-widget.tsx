@@ -17,6 +17,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -72,7 +82,7 @@ interface AttendanceStatusPayload {
 }
 
 const REFRESH_MS = 60_000;
-const GEO_TIMEOUT_MS = 5_000;
+const GEO_TIMEOUT_MS = 15_000;
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -96,20 +106,115 @@ function generateIdempotencyKey() {
   return `att-${Date.now()}-${rand}`;
 }
 
-async function captureGeo(): Promise<{ lat: number; lng: number } | null> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(null), GEO_TIMEOUT_MS);
+function distanceMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+type GeoResult =
+  | { ok: true; lat: number; lng: number }
+  | { ok: false; reason: GeoFailureReason; message: string };
+
+type GeoFailureReason =
+  | "unsupported"
+  | "insecure"
+  | "denied"
+  | "unavailable"
+  | "timeout";
+
+async function captureGeo(): Promise<GeoResult> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return {
+      ok: false,
+      reason: "unsupported",
+      message: "Your browser does not support location services.",
+    };
+  }
+  // Geolocation only works on a secure origin. On plain HTTP (other than
+  // localhost) the browser denies the request immediately, which is the
+  // single most common cause of "we couldn't read your location" — call
+  // it out so the admin/user knows to switch to HTTPS.
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return {
+      ok: false,
+      reason: "insecure",
+      message:
+        "Location only works over HTTPS. Open the site using https:// (or localhost).",
+    };
+  }
+  return new Promise<GeoResult>((resolve) => {
+    let settled = false;
+    const finish = (r: GeoResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    const timeout = setTimeout(
+      () =>
+        finish({
+          ok: false,
+          reason: "timeout",
+          message:
+            "Location request timed out. Check your GPS/Wi-Fi and try again.",
+        }),
+      GEO_TIMEOUT_MS,
+    );
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         clearTimeout(timeout);
-        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        finish({
+          ok: true,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
       },
-      () => {
+      (err) => {
         clearTimeout(timeout);
-        resolve(null);
+        if (err.code === err.PERMISSION_DENIED) {
+          finish({
+            ok: false,
+            reason: "denied",
+            message:
+              "Location permission is blocked. Click the lock icon in your browser's address bar and allow location for this site.",
+          });
+          return;
+        }
+        if (err.code === err.POSITION_UNAVAILABLE) {
+          finish({
+            ok: false,
+            reason: "unavailable",
+            message:
+              "Your device couldn't determine your position. Check that Wi-Fi or GPS is enabled.",
+          });
+          return;
+        }
+        if (err.code === err.TIMEOUT) {
+          finish({
+            ok: false,
+            reason: "timeout",
+            message:
+              "Location request timed out. Check your GPS/Wi-Fi and try again.",
+          });
+          return;
+        }
+        finish({
+          ok: false,
+          reason: "unavailable",
+          message: err.message || "Couldn't read your location.",
+        });
       },
-      { enableHighAccuracy: false, maximumAge: 60_000, timeout: GEO_TIMEOUT_MS },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: GEO_TIMEOUT_MS },
     );
   });
 }
@@ -119,7 +224,11 @@ interface UseAttendanceState {
   busy: boolean;
   error: string | null;
   status: AttendanceStatusPayload | null;
-  punch: (type: "IN" | "OUT", photoUrl?: string | null) => Promise<void>;
+  punch: (
+    type: "IN" | "OUT",
+    photoUrl?: string | null,
+    geo?: { lat: number; lng: number } | null,
+  ) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -199,7 +308,11 @@ function useAttendance(enabled: boolean): UseAttendanceState {
   }, [enabled, fetchStatus]);
 
   const punch = useCallback(
-    async (type: "IN" | "OUT", photoUrl: string | null = null) => {
+    async (
+      type: "IN" | "OUT",
+      photoUrl: string | null = null,
+      preCapturedGeo: { lat: number; lng: number } | null = null,
+    ) => {
       if (busy) return;
       setBusy(true);
       const idempotencyKey = generateIdempotencyKey();
@@ -227,7 +340,11 @@ function useAttendance(enabled: boolean): UseAttendanceState {
       const previous = status;
       if (optimistic) setStatus(optimistic);
 
-      const geo = await captureGeo();
+      let geo: { lat: number; lng: number } | null = preCapturedGeo;
+      if (!geo) {
+        const r = await captureGeo();
+        geo = r.ok ? { lat: r.lat, lng: r.lng } : null;
+      }
 
       try {
         const res = await fetch("/api/attendance/punch", {
@@ -292,6 +409,69 @@ export function AttendanceWidget({
   // hook's `busy` only kicks in once we POST to /punch.
   const [captureType, setCaptureType] = useState<"IN" | "OUT" | null>(null);
   const [captureBusy, setCaptureBusy] = useState(false);
+  // Out-of-radius / GPS-unavailable confirmation. When set, the AlertDialog
+  // is shown; on Continue we punch with the captured geo (or null), on
+  // Cancel we drop it. Photo URL is preserved so the face-capture flow
+  // doesn't lose its uploaded image when the user has to confirm.
+  const [geoConfirm, setGeoConfirm] = useState<{
+    type: "IN" | "OUT";
+    photoUrl: string | null;
+    geo: { lat: number; lng: number } | null;
+    message: string;
+  } | null>(null);
+
+  const punchWithGeoCheck = useCallback(
+    async (type: "IN" | "OUT", photoUrl: string | null) => {
+      const fence = status?.geofence;
+      const inFenceMode =
+        !!fence &&
+        fence.mode !== "OFF" &&
+        fence.lat != null &&
+        fence.lng != null &&
+        fence.radiusM != null;
+
+      const geoResult = await captureGeo();
+      const geo = geoResult.ok
+        ? { lat: geoResult.lat, lng: geoResult.lng }
+        : null;
+
+      if (inFenceMode) {
+        if (!geo) {
+          setGeoConfirm({
+            type,
+            photoUrl,
+            geo: null,
+            message: `${geoResult.ok ? "" : geoResult.message + " "}Do you want to continue with check-${type === "IN" ? "in" : "out"} anyway?`,
+          });
+          return;
+        }
+        const dist = distanceMeters(geo.lat, geo.lng, fence!.lat!, fence!.lng!);
+        if (dist > fence!.radiusM!) {
+          setGeoConfirm({
+            type,
+            photoUrl,
+            geo,
+            message: `You are ${Math.round(dist)}m away from the office (allowed radius: ${fence!.radiusM}m). Do you want to continue?`,
+          });
+          return;
+        }
+      }
+
+      await punch(type, photoUrl, geo);
+      toast({
+        title:
+          type === "IN"
+            ? "You are checked in successfully"
+            : "You are checked out successfully",
+        description: inFenceMode
+          ? "You are within the office radius"
+          : type === "IN"
+            ? "Have a great day"
+            : "Working time recorded",
+      });
+    },
+    [status?.geofence, punch, toast],
+  );
 
   // 1Hz tick drives the live working-time counter and the lateness
   // countdown. We only run it when the user is currently working OR pre-shift,
@@ -328,11 +508,7 @@ export function AttendanceWidget({
         return;
       }
       try {
-        await punch(type, null);
-        toast({
-          title: type === "IN" ? "Checked in" : "Checked out",
-          description: type === "IN" ? "Have a great day" : "Working time recorded",
-        });
+        await punchWithGeoCheck(type, null);
       } catch (e: any) {
         toast({
           title: "Punch failed",
@@ -341,7 +517,7 @@ export function AttendanceWidget({
         });
       }
     },
-    [punch, toast, status?.faceCapture.mode],
+    [punchWithGeoCheck, toast, status?.faceCapture.mode],
   );
 
   const handleCapturedPhoto = useCallback(
@@ -351,12 +527,8 @@ export function AttendanceWidget({
       setCaptureBusy(true);
       try {
         const photoUrl = await uploadFacePhoto(blob, type);
-        await punch(type, photoUrl);
-        toast({
-          title: type === "IN" ? "Checked in" : "Checked out",
-          description: "Photo recorded with your punch",
-        });
         setCaptureType(null);
+        await punchWithGeoCheck(type, photoUrl);
       } catch (e: any) {
         toast({
           title: "Punch failed",
@@ -367,7 +539,7 @@ export function AttendanceWidget({
         setCaptureBusy(false);
       }
     },
-    [captureType, punch, toast],
+    [captureType, punchWithGeoCheck, toast],
   );
 
   const handleSkipCapture = useCallback(async () => {
@@ -380,11 +552,7 @@ export function AttendanceWidget({
     }
     setCaptureType(null);
     try {
-      await punch(type, null);
-      toast({
-        title: type === "IN" ? "Checked in" : "Checked out",
-        description: "No photo attached",
-      });
+      await punchWithGeoCheck(type, null);
     } catch (e: any) {
       toast({
         title: "Punch failed",
@@ -392,7 +560,7 @@ export function AttendanceWidget({
         variant: "destructive",
       });
     }
-  }, [captureType, punch, toast, status?.faceCapture.mode]);
+  }, [captureType, punchWithGeoCheck, toast, status?.faceCapture.mode]);
 
   if (!enabled) return null;
 
@@ -576,6 +744,54 @@ export function AttendanceWidget({
           }
         />
       )}
+
+      <AlertDialog
+        open={!!geoConfirm}
+        onOpenChange={(o) => {
+          if (!o) setGeoConfirm(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {geoConfirm?.geo
+                ? "You are not in the office radius"
+                : "Location unavailable"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {geoConfirm?.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                const c = geoConfirm;
+                if (!c) return;
+                setGeoConfirm(null);
+                try {
+                  await punch(c.type, c.photoUrl, c.geo);
+                  toast({
+                    title:
+                      c.type === "IN"
+                        ? "You are checked in successfully"
+                        : "You are checked out successfully",
+                    description: "Recorded outside the office radius",
+                  });
+                } catch (e: any) {
+                  toast({
+                    title: "Punch failed",
+                    description: e?.message ?? "Try again",
+                    variant: "destructive",
+                  });
+                }
+              }}
+            >
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Popover>
   );
 }
