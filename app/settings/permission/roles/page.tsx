@@ -14,9 +14,9 @@ import type { FormSelection } from "@/types/permissions"
 import { GripVertical, Globe, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const SIDEBAR_MIN = 220
+const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 520
-const SIDEBAR_DEFAULT = 280
+const SIDEBAR_DEFAULT = 240
 const SIDEBAR_STORAGE_KEY = "roles-permissions:sidebar-width"
 
 export default function RolesPermissionsPage() {
@@ -150,7 +150,7 @@ export default function RolesPermissionsPage() {
   }
 
   return (
-    <div className="container mx-auto space-y-6">
+    <div className="w-full px-4 lg:px-6 space-y-6">
       {error && (
         <Card className="border-destructive">
           <CardContent className="pt-6">
@@ -164,7 +164,7 @@ export default function RolesPermissionsPage() {
         className="flex flex-col items-stretch gap-6 lg:flex-row lg:gap-0"
       >
         {/* Sidebar */}
-        <div className="w-full lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:w-[var(--sidebar-w,280px)] lg:shrink-0 lg:self-start">
+        <div className="w-full lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:w-[var(--sidebar-w,240px)] lg:shrink-0 lg:self-start">
           <FormsSidebar
             modules={modules}
             loading={loading}
@@ -221,8 +221,8 @@ export default function RolesPermissionsPage() {
             3. formSelection → form-level forms / sections / fields matrices.
             Mode switches via the sidebar callbacks + the "Static pages bulk"
             button above the right pane. */}
-        <div className="min-w-0 flex-1 space-y-6 lg:pl-3">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="min-w-0 flex-1 space-y-4 lg:pl-3 lg:flex lg:flex-col lg:h-[calc(100vh-3rem)]">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <Button
               size="sm"
               variant={bulkPagesView ? "default" : "outline"}
@@ -235,7 +235,9 @@ export default function RolesPermissionsPage() {
           </div>
 
           {bulkPagesView ? (
-            <StaticPagesRolesMatrix />
+            <div className="lg:flex-1 lg:min-h-0">
+              <StaticPagesRolesMatrix />
+            </div>
           ) : routeSelection ? (
             <RoutePermissionMatrix path={routeSelection} />
           ) : formSelection ? (
