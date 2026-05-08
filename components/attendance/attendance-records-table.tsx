@@ -33,15 +33,58 @@ function statusBadge(record: AttendanceRecord): {
   label: string;
   className: string;
 } {
-  if (record.checkedOut) {
-    return {
-      label: "Done",
-      className: "bg-gray-100 text-gray-700 border-gray-200",
-    };
-  }
-  if (record.checkedIn) {
+  // A live punch (checked in, not yet checked out) is always "Working" —
+  // the persisted status only gets stamped at checkout, so during the day
+  // it would otherwise read as the previous run's value (or null).
+  if (record.checkedIn && !record.checkedOut) {
     return {
       label: "Working",
+      className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    };
+  }
+  switch ((record.status ?? "").toUpperCase()) {
+    case "PRESENT":
+      return {
+        label: "Present",
+        className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      };
+    case "HALF":
+    case "HALF_DAY":
+      return {
+        label: "Half Day",
+        className: "bg-amber-100 text-amber-800 border-amber-200",
+      };
+    case "ABSENT":
+      return {
+        label: "Absent",
+        className: "bg-red-100 text-red-700 border-red-200",
+      };
+    case "ON_LEAVE":
+      return {
+        label: "On Leave",
+        className: "bg-blue-100 text-blue-800 border-blue-200",
+      };
+    case "HOLIDAY":
+      return {
+        label: "Holiday",
+        className: "bg-purple-100 text-purple-800 border-purple-200",
+      };
+    case "WEEKLY_OFF":
+      return {
+        label: "Weekly Off",
+        className: "bg-slate-100 text-slate-700 border-slate-200",
+      };
+    case "REGULARIZED":
+      return {
+        label: "Regularized",
+        className: "bg-indigo-100 text-indigo-800 border-indigo-200",
+      };
+  }
+  // Fallback for older rows where status was never written: a checked-out
+  // row still counts as Present, anything else with no signal is Absent.
+  if (record.checkedOut) {
+    return {
+      label: "Present",
       className: "bg-emerald-100 text-emerald-800 border-emerald-200",
     };
   }
