@@ -12,6 +12,7 @@ interface PayrollRecord {
   email: string;
   workingDays: number;
   workingHours: number;
+  overtimeHours?: number;
   baseSalary: number;
   hourlyRate: number;
   grossSalary: number;
@@ -20,6 +21,27 @@ interface PayrollRecord {
     tax: number;
     insurance: number;
     other: number;
+  };
+  // New labelled breakdowns emitted by the engine. Optional so legacy
+  // records (saved before the engine refactor) still render — the UI falls
+  // back to the legacy 4-slot deductions when these are absent.
+  earnings?: {
+    basic: number;
+    hra: number;
+    da: number;
+    conveyance: number;
+    medical: number;
+    lta: number;
+    specialAllowance: number;
+    overtime: number;
+  };
+  deductionsDetail?: {
+    pf: number;
+    esi: number;
+    pt: number;
+    tds: number;
+    lwf: number;
+    nps: number;
   };
   netSalary: number;
   status: 'pending' | 'processed';
@@ -37,6 +59,40 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
   if (!payroll) return null;
 
   const totalDeductions = payroll.deductions.pf + payroll.deductions.tax + payroll.deductions.insurance + payroll.deductions.other;
+  const fmt = (n: number) => n.toLocaleString('en-IN');
+  // Earnings rows from the engine breakdown. We render only non-zero lines so
+  // a payslip that doesn't use HRA/DA/LTA stays clean. Falls back to a single
+  // "Basic Salary" row when the breakdown is absent (legacy records).
+  const earningsRows: Array<[string, number]> = payroll.earnings
+    ? ([
+        ['Basic', payroll.earnings.basic],
+        ['HRA', payroll.earnings.hra],
+        ['DA', payroll.earnings.da],
+        ['Conveyance', payroll.earnings.conveyance],
+        ['Medical', payroll.earnings.medical],
+        ['LTA', payroll.earnings.lta],
+        ['Special Allowance', payroll.earnings.specialAllowance],
+        ['Overtime', payroll.earnings.overtime],
+      ] as Array<[string, number]>).filter(([, v]) => v > 0)
+    : [['Basic Salary', payroll.baseSalary]];
+  // Deduction rows from the engine breakdown. Same hide-zero treatment. The
+  // legacy 'insurance'/'other' labels are preserved for old records that
+  // don't carry deductionsDetail yet — those typically show ₹500 insurance.
+  const deductionRows: Array<[string, number]> = payroll.deductionsDetail
+    ? ([
+        ['Provident Fund (PF)', payroll.deductionsDetail.pf],
+        ['ESI', payroll.deductionsDetail.esi],
+        ['Professional Tax', payroll.deductionsDetail.pt],
+        ['TDS', payroll.deductionsDetail.tds],
+        ['LWF', payroll.deductionsDetail.lwf],
+        ['NPS', payroll.deductionsDetail.nps],
+      ] as Array<[string, number]>).filter(([, v]) => v > 0)
+    : ([
+        ['Provident Fund (PF)', payroll.deductions.pf],
+        ['Income Tax', payroll.deductions.tax],
+        ['Insurance', payroll.deductions.insurance],
+        ['Other', payroll.deductions.other],
+      ] as Array<[string, number]>).filter(([, v]) => v > 0);
 
   const handlePrint = () => {
     window.print();
@@ -145,17 +201,24 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
             <div className="py-4 border-b border-border">
               <h3 className="text-sm font-bold text-foreground mb-3 uppercase">Earnings</h3>
               <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Basic Salary</span>
-                  <span className="text-foreground font-medium">₹{payroll.baseSalary.toLocaleString()}</span>
-                </div>
+                {earningsRows.map(([label, value]) => (
+                  <div key={label} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="text-foreground font-medium">₹{fmt(value)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Working Hours</span>
-                  <span className="text-foreground font-medium">{payroll.workingHours.toFixed(1)} hrs</span>
+                  <span className="text-foreground font-medium">
+                    {payroll.workingHours.toFixed(1)} hrs
+                    {payroll.overtimeHours && payroll.overtimeHours > 0 ? (
+                      <span className="text-xs text-muted-foreground"> (incl. {payroll.overtimeHours.toFixed(1)} OT)</span>
+                    ) : null}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
                   <span className="font-semibold text-foreground">Gross Salary</span>
-                  <span className="font-bold text-primary">₹{payroll.grossSalary.toLocaleString()}</span>
+                  <span className="font-bold text-primary">₹{fmt(payroll.grossSalary)}</span>
                 </div>
               </div>
             </div>
@@ -164,25 +227,19 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
             <div className="py-4 border-b border-border">
               <h3 className="text-sm font-bold text-foreground mb-3 uppercase">Deductions</h3>
               <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Provident Fund (PF)</span>
-                  <span className="text-foreground font-medium">₹{payroll.deductions.pf.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Income Tax</span>
-                  <span className="text-foreground font-medium">₹{payroll.deductions.tax.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Insurance</span>
-                  <span className="text-foreground font-medium">₹{payroll.deductions.insurance.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Other Deductions</span>
-                  <span className="text-foreground font-medium">₹{payroll.deductions.other.toLocaleString()}</span>
-                </div>
+                {deductionRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No deductions this period.</p>
+                ) : (
+                  deductionRows.map(([label, value]) => (
+                    <div key={label} className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="text-foreground font-medium">₹{fmt(value)}</span>
+                    </div>
+                  ))
+                )}
                 <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
                   <span className="font-semibold text-foreground">Total Deductions</span>
-                  <span className="font-bold text-destructive">₹{totalDeductions.toLocaleString()}</span>
+                  <span className="font-bold text-destructive">₹{fmt(totalDeductions)}</span>
                 </div>
               </div>
             </div>
