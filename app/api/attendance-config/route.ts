@@ -8,6 +8,7 @@ import {
   type GeofenceMode,
   type PayableBasis,
 } from '@/lib/hr/attendance-config';
+import { syncOrganizationSchedule } from '@/lib/hr/attendance-report-scheduler';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +55,20 @@ function pickIpList(raw: unknown): string[] | undefined {
     .filter((s): s is string => typeof s === 'string')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+const REPORT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function pickReportRecipients(raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return undefined;
+  return Array.from(
+    new Set(
+      raw
+        .filter((s): s is string => typeof s === 'string')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => REPORT_EMAIL_RE.test(s)),
+    ),
+  );
 }
 
 function pickGeofenceMode(raw: unknown): GeofenceMode | undefined {
@@ -209,6 +224,64 @@ export async function PUT(request: NextRequest) {
     patch.attendanceApproverRoleIds = Array.from(new Set(ids));
   }
 
+  // Scheduled-report fields. Each is independently optional so a partial
+  // PUT (e.g. just toggling daily on/off) doesn't clobber the rest.
+  const recipients = pickReportRecipients(body.reportRecipients);
+  if (recipients !== undefined) patch.reportRecipients = recipients;
+  const tz = pickOptionalNullableString(body.reportTimezone);
+  if (tz !== undefined) {
+    if (tz === null || tz.trim() === '') {
+      patch.reportTimezone = null;
+    } else {
+      // Validate the IANA name up-front so cron doesn't blow up later.
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date());
+        patch.reportTimezone = tz;
+      } catch {
+        return NextResponse.json(
+          { success: false, error: `Invalid timezone: ${tz}` },
+          { status: 400 },
+        );
+      }
+    }
+  }
+  const sendHour = pickOptionalNumber(body.reportSendHour);
+  if (sendHour !== undefined) {
+    const h = Math.floor(sendHour);
+    if (h < 0 || h > 23) {
+      return NextResponse.json(
+        { success: false, error: 'reportSendHour must be 0–23' },
+        { status: 400 },
+      );
+    }
+    patch.reportSendHour = h;
+  }
+  if (typeof body.reportDailyEnabled === 'boolean')
+    patch.reportDailyEnabled = body.reportDailyEnabled;
+  if (typeof body.reportWeeklyEnabled === 'boolean')
+    patch.reportWeeklyEnabled = body.reportWeeklyEnabled;
+  if (typeof body.reportMonthlyEnabled === 'boolean')
+    patch.reportMonthlyEnabled = body.reportMonthlyEnabled;
+
   const config = await upsertAttendanceConfig(authUser.organizationId, patch);
+
+  // If anything report-related changed, re-register the cron jobs so the
+  // admin doesn't need to bounce the server. Fire-and-forget — failures
+  // only mean the new schedule kicks in next boot.
+  const reportFieldChanged =
+    'reportRecipients' in patch ||
+    'reportTimezone' in patch ||
+    'reportSendHour' in patch ||
+    'reportDailyEnabled' in patch ||
+    'reportWeeklyEnabled' in patch ||
+    'reportMonthlyEnabled' in patch;
+  if (reportFieldChanged) {
+    syncOrganizationSchedule(authUser.organizationId).catch((err) => {
+      console.error(
+        '[attendance-config] schedule re-sync failed; jobs will refresh on next boot:',
+        err,
+      );
+    });
+  }
   return NextResponse.json({ success: true, config });
 }

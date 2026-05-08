@@ -9,10 +9,15 @@
     "lint": "next lint",
     "start": "next start -p 5001",
     "create-default-org": "ts-node --esm --transpile-only scripts/create-default-organization.ts",
+    "create:second-org": "npx tsx scripts/create-second-organization.ts",
     "seed:routes": "npx tsx scripts/seed-route-permissions.ts",
     "seed:payroll": "npx tsx scripts/seed-payroll-data.ts",
     "setup:hr": "npx tsx scripts/setup-hr-production.ts",
-    "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll"
+    "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
@@ -59,6 +64,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@types/hoist-non-react-statics": "latest",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/node-cron": "^3.0.11",
     "@xyflow/react": "^12.10.2",
     "ai": "^6.0.94",
     "autoprefixer": "^10.4.20",
@@ -85,6 +91,7 @@
     "next": "14.2.16",
     "next-auth": "^4.24.11",
     "next-themes": "^0.4.4",
+    "node-cron": "^3.0.3",
     "nodemailer": "^7.0.6",
     "openai": "^6.18.0",
     "prisma": "6.19.0",
@@ -112,6 +119,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@swc/core": "^1.13.5",
     "@types/bcrypt": "^5.0.2",
     "@types/bcryptjs": "^3.0.0",

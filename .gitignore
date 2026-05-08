@@ -28,3 +28,10 @@ next-env.d.ts
 
 # ai subsystem auto-generated encryption secret
 .ai-keys-secret
+
+# playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/tests/.auth/
+.env.test

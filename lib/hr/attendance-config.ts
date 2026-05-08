@@ -39,6 +39,12 @@ export interface AttendanceConfig {
   attendanceModuleId: string | null;
   notifyOnPunch: boolean;
   attendanceApproverRoleIds: string[];
+  reportRecipients: string[];
+  reportTimezone: string | null;
+  reportSendHour: number;
+  reportDailyEnabled: boolean;
+  reportWeeklyEnabled: boolean;
+  reportMonthlyEnabled: boolean;
   isActive: boolean;
 }
 
@@ -68,6 +74,12 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   attendanceModuleId: null,
   notifyOnPunch: true,
   attendanceApproverRoleIds: [],
+  reportRecipients: [],
+  reportTimezone: null,
+  reportSendHour: 7,
+  reportDailyEnabled: false,
+  reportWeeklyEnabled: false,
+  reportMonthlyEnabled: false,
   isActive: true,
 };
 
@@ -102,6 +114,25 @@ function coerceRoleIds(raw: unknown): string[] {
     .filter((v): v is string => typeof v === 'string')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function coerceEmailList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw
+        .filter((v): v is string => typeof v === 'string')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => EMAIL_RE.test(s)),
+    ),
+  );
+}
+
+function coerceSendHour(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 7;
+  return Math.min(23, Math.max(0, Math.floor(n)));
 }
 
 export async function getAttendanceConfig(
@@ -155,6 +186,15 @@ export async function getAttendanceConfig(
           : null,
       notifyOnPunch: row.notifyOnPunch === undefined ? true : !!row.notifyOnPunch,
       attendanceApproverRoleIds: coerceRoleIds(row.attendanceApproverRoleIds),
+      reportRecipients: coerceEmailList(row.reportRecipients),
+      reportTimezone:
+        typeof row.reportTimezone === 'string' && row.reportTimezone.trim().length > 0
+          ? row.reportTimezone.trim()
+          : null,
+      reportSendHour: coerceSendHour(row.reportSendHour),
+      reportDailyEnabled: !!row.reportDailyEnabled,
+      reportWeeklyEnabled: !!row.reportWeeklyEnabled,
+      reportMonthlyEnabled: !!row.reportMonthlyEnabled,
       isActive: row.isActive ?? true,
     };
   } catch (err) {
@@ -187,6 +227,12 @@ export interface AttendanceConfigUpdate {
   attendanceModuleId?: string | null;
   notifyOnPunch?: boolean;
   attendanceApproverRoleIds?: string[];
+  reportRecipients?: string[];
+  reportTimezone?: string | null;
+  reportSendHour?: number;
+  reportDailyEnabled?: boolean;
+  reportWeeklyEnabled?: boolean;
+  reportMonthlyEnabled?: boolean;
   isActive?: boolean;
 }
 

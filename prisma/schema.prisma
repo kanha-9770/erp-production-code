@@ -1538,6 +1538,18 @@ model AttendanceConfiguration {
   // Role.id values. Empty array = admin-only (the historical default).
   attendanceApproverRoleIds Json @default("[]") @map("attendance_approver_role_ids")
 
+  // Scheduled team-attendance report email. Recipients is a JSON array of
+  // email addresses; empty/disabled flags skip the send. Timezone is an
+  // IANA name (e.g. "Asia/Kolkata") used by the cron scheduler so reports
+  // fire at reportSendHour wall-time of the org's timezone — null falls
+  // back to the server's TZ.
+  reportRecipients      Json    @default("[]") @map("report_recipients")
+  reportTimezone        String? @map("report_timezone")
+  reportSendHour        Int     @default(7) @map("report_send_hour")
+  reportDailyEnabled    Boolean @default(false) @map("report_daily_enabled")
+  reportWeeklyEnabled   Boolean @default(false) @map("report_weekly_enabled")
+  reportMonthlyEnabled  Boolean @default(false) @map("report_monthly_enabled")
+
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

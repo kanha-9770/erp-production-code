@@ -107,12 +107,25 @@ export const sendOTPEmail = async (
   }
 }
 
+interface WorkflowEmailAttachment {
+  filename: string
+  content: Buffer | string
+  contentType?: string
+}
+
 interface WorkflowEmailOptions {
   to: string
   subject: string
   body: string
   from?: string
   replyTo?: string
+  /**
+   * Optional file attachments (e.g. the scheduled team-attendance XLSX).
+   * Forwarded to nodemailer's `attachments` field as-is.
+   */
+  attachments?: WorkflowEmailAttachment[]
+  /** When true, `body` is treated as ready-to-send HTML instead of plain text. */
+  isHtml?: boolean
   /**
    * Per-rule SMTP credentials. When set, a transporter is built on the fly
    * authenticating as `smtpUser` with `smtpPass` — that way the sender shown
@@ -197,7 +210,9 @@ export const sendWorkflowEmail = async (
     })
   }
 
-  const bodyHtml = escapeHtml(options.body || "").replace(/\n/g, "<br/>")
+  const html = options.isHtml
+    ? options.body || ""
+    : `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1e293b;line-height:1.5;">${escapeHtml(options.body || "").replace(/\n/g, "<br/>")}</body></html>`
 
   const mailOptions: any = {
     from: {
@@ -206,10 +221,13 @@ export const sendWorkflowEmail = async (
     },
     to: options.to,
     subject: options.subject,
-    text: options.body || "",
-    html: `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;color:#1e293b;line-height:1.5;">${bodyHtml}</body></html>`,
+    text: options.isHtml ? undefined : options.body || "",
+    html,
   }
   if (options.replyTo) mailOptions.replyTo = options.replyTo
+  if (options.attachments && options.attachments.length > 0) {
+    mailOptions.attachments = options.attachments
+  }
 
   try {
     await activeTransporter.sendMail(mailOptions)
