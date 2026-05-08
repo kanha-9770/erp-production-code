@@ -12,6 +12,7 @@ import { Search, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, X } from "l
 import { cn } from "@/lib/utils";
 import { useGetAdminUsersQuery } from "@/lib/api/users";
 import AdvancedFilterSidebar from "@/components/modules/AdvancedFilterSidebar";
+import PageBackLink from "@/components/shared/page-back-link";
 
 interface User {
   id: string;
@@ -176,6 +177,7 @@ export default function AdminUsersTable() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Card className="border-none rounded-none shadow-none bg-transparent flex-1">
           <CardContent className="p-6 space-y-6 flex-1 flex flex-col">
+            <PageBackLink href="/admin" label="Admin" />
             {/* Toolbar */}
             <div className="flex flex-col sm:flex-row gap-4">
               <Button variant="outline" onClick={() => setIsFilterOpen(true)} className={cn(activeFilters.length && "border-blue-500 bg-blue-50")}>

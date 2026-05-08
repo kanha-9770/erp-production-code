@@ -14,6 +14,7 @@ import {
   type StatutoryConfig,
   type OvertimeConfig,
 } from '@/components/payroll/payroll-enterprise-config';
+import PageBackLink from '@/components/shared/page-back-link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -574,13 +575,7 @@ export default function PayrollConfigurePage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
-            <Link
-              href="/payroll"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Back to Payroll
-            </Link>
+            <PageBackLink href="/payroll" label="Payroll" />
             <div className="flex flex-wrap items-center gap-2">
               <div className="rounded-lg bg-primary/10 p-2">
                 <Settings className="h-5 w-5 text-primary" />

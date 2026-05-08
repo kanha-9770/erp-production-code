@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import PageBackLink from "@/components/shared/page-back-link";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -742,7 +743,8 @@ export default function ModuleDashboard() {
               <Menu className="h-6 w-6" />
             </Button>
 
-            <div>
+            <div className="space-y-0.5">
+              <PageBackLink href="/admin" label="Admin" />
               <h1 className="text-xl md:text-2xl font-bold text-gray-900">
                 Modules & Forms
               </h1>

@@ -14,6 +14,7 @@ import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery, useLazyExportFormRecordsQuery } from "@/lib/api/forms"
 import { exportToCSV, exportToXLSX, exportToPDF } from "@/lib/utils/export-utils"
 import Link from "next/link"
+import PageBackLink from "@/components/shared/page-back-link"
 
 export default function ExportPage() {
   const { toast } = useToast()
@@ -108,11 +109,9 @@ export default function ExportPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b bg-white">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-6 py-4 space-y-2">
+          <PageBackLink href="/settings/import" label="Data Migration" />
           <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
-            </Link>
             <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
               <Download className="w-5 h-5 text-green-600" />
             </div>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import PageBackLink from "@/components/shared/page-back-link"
 import {
   Select,
   SelectContent,
@@ -183,7 +184,8 @@ export default function FunctionsPage() {
     <div className="min-h-screen bg-background">
       {/* Page Header */}
       <div className="border-b bg-background">
-        <div className="px-4 sm:px-6 py-4">
+        <div className="px-4 sm:px-6 py-4 space-y-1.5">
+          <PageBackLink href="/settings" label="Settings" />
           <div className="flex items-center gap-2 mb-1">
             <Code2 className="h-5 w-5 text-primary" />
             <h1 className="text-xl font-semibold text-foreground">Functions</h1>

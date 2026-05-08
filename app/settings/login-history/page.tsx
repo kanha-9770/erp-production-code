@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Search, Download, Filter } from "lucide-react"
+import PageBackLink from "@/components/shared/page-back-link"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 
@@ -107,6 +108,7 @@ export default function LoginHistoryPage() {
 
   return (
     <div className="p-6 space-y-6 bg-[oklch(0.96_0.005_250)] min-h-screen">
+      <PageBackLink href="/settings" label="Settings" />
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">

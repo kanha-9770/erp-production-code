@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import PageBackLink from "@/components/shared/page-back-link"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetWorkflowRulesQuery, useDeleteWorkflowRuleMutation, useUpdateWorkflowRuleMutation } from "@/lib/api/workflow-rules"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -291,7 +292,8 @@ export default function WorkflowRulesPage() {
     <div className="min-h-screen bg-background">
       {/* Page Header */}
       <div className="border-b bg-background">
-        <div className="px-4 sm:px-6 py-4">
+        <div className="px-4 sm:px-6 py-4 space-y-1.5">
+          <PageBackLink href="/settings" label="Settings" />
           <div className="flex items-center gap-2 mb-1">
             <Zap className="h-5 w-5 text-primary" />
             <h1 className="text-xl font-semibold text-foreground">Workflow Rules</h1>
