@@ -18,6 +18,7 @@ import {
   workedMinutesFor,
 } from "./attendance-format";
 import type { AttendanceRecord } from "./attendance-record-detail";
+import { useUserTimezone } from "@/lib/user-timezone";
 
 interface Props {
   records: AttendanceRecord[];
@@ -100,6 +101,10 @@ export function AttendanceRecordsTable({
   onSelect,
   onRequestCorrection,
 }: Props) {
+  // Subscribe so the rendered times update live when the user changes
+  // their timezone in Profile → Preferences. The hook only triggers a
+  // re-render; the actual zone is read inside the format helpers.
+  useUserTimezone();
   if (records.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-gray-200 bg-white py-12 text-center text-sm text-gray-500">

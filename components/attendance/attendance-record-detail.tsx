@@ -22,6 +22,7 @@ import {
   mapsLink,
   workedMinutesFor,
 } from "./attendance-format";
+import { useUserTimezone } from "@/lib/user-timezone";
 
 export interface AttendanceRecord {
   id: string;
@@ -68,6 +69,9 @@ interface Props {
 }
 
 export function AttendanceRecordDetail({ record, onClose }: Props) {
+  // Re-render when the user changes their timezone so check-in/out times
+  // and the date label flip to the new zone live.
+  useUserTimezone();
   return (
     <Sheet open={!!record} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
