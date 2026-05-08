@@ -134,6 +134,27 @@ type GeoFailureReason =
   | "unavailable"
   | "timeout";
 
+function isInsecureOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  // Browsers treat localhost as a secure context regardless of protocol, so
+  // exempt those host patterns. Anything else served over plain HTTP is
+  // insecure as far as the Geolocation API is concerned.
+  const host = window.location.hostname;
+  const isLocalhost =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1" ||
+    host.endsWith(".localhost");
+  if (window.location.protocol !== "https:" && !isLocalhost) return true;
+  // Modern browsers also expose `isSecureContext` directly. Trust it when
+  // present — it covers edge cases like file://, mixed-content frames, etc.
+  if (typeof window.isSecureContext === "boolean" && !window.isSecureContext) {
+    return true;
+  }
+  return false;
+}
+
 async function captureGeo(): Promise<GeoResult> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return {
@@ -142,16 +163,17 @@ async function captureGeo(): Promise<GeoResult> {
       message: "Your browser does not support location services.",
     };
   }
-  // Geolocation only works on a secure origin. On plain HTTP (other than
-  // localhost) the browser denies the request immediately, which is the
-  // single most common cause of "we couldn't read your location" — call
-  // it out so the admin/user knows to switch to HTTPS.
-  if (typeof window !== "undefined" && window.isSecureContext === false) {
+  // Geolocation only works on a secure origin. On plain HTTP the browser
+  // throws PERMISSION_DENIED with the misleading message "User denied
+  // Geolocation: Only secure origins are allowed" — even though the user
+  // never saw a prompt. Detect this up front so the popup tells the admin
+  // "you're on HTTP" instead of accusing the user of denying the prompt.
+  if (isInsecureOrigin()) {
     return {
       ok: false,
       reason: "insecure",
       message:
-        "Location only works over HTTPS. Open the site using https:// (or localhost).",
+        "This site is being served over HTTP. Browsers only allow location on https:// (or localhost). Ask your admin to put the site behind HTTPS.",
     };
   }
   return new Promise<GeoResult>((resolve) => {
@@ -182,12 +204,32 @@ async function captureGeo(): Promise<GeoResult> {
       },
       (err) => {
         clearTimeout(timeout);
+        // Surface the raw browser message alongside our hint so anyone
+        // diagnosing in production can see the underlying cause (e.g.
+        // "Only secure origins are allowed", "User denied Geolocation").
+        const raw = err?.message ? ` (${err.message})` : "";
         if (err.code === err.PERMISSION_DENIED) {
+          // PERMISSION_DENIED on an HTTP origin almost always means the
+          // browser blocked it for being insecure, not that the user
+          // clicked "block". Re-check protocol because some browsers
+          // report isSecureContext inconsistently.
+          if (
+            typeof window !== "undefined" &&
+            window.location.protocol !== "https:" &&
+            window.location.hostname !== "localhost" &&
+            window.location.hostname !== "127.0.0.1"
+          ) {
+            finish({
+              ok: false,
+              reason: "insecure",
+              message: `This site is on HTTP — browsers block location on insecure origins.${raw} Move the site to https:// to enable check-in location.`,
+            });
+            return;
+          }
           finish({
             ok: false,
             reason: "denied",
-            message:
-              "Location permission is blocked. Click the lock icon in your browser's address bar and allow location for this site.",
+            message: `Location permission is blocked for this site. Click the lock/info icon in your browser's address bar → Site settings → Location → Allow, then refresh.${raw}`,
           });
           return;
         }
@@ -195,8 +237,7 @@ async function captureGeo(): Promise<GeoResult> {
           finish({
             ok: false,
             reason: "unavailable",
-            message:
-              "Your device couldn't determine your position. Check that Wi-Fi or GPS is enabled.",
+            message: `Your device couldn't determine your position. Check that Wi-Fi or GPS is enabled.${raw}`,
           });
           return;
         }
@@ -204,15 +245,14 @@ async function captureGeo(): Promise<GeoResult> {
           finish({
             ok: false,
             reason: "timeout",
-            message:
-              "Location request timed out. Check your GPS/Wi-Fi and try again.",
+            message: `Location request timed out. Check your GPS/Wi-Fi and try again.${raw}`,
           });
           return;
         }
         finish({
           ok: false,
           reason: "unavailable",
-          message: err.message || "Couldn't read your location.",
+          message: `Couldn't read your location.${raw}`,
         });
       },
       { enableHighAccuracy: true, maximumAge: 60_000, timeout: GEO_TIMEOUT_MS },
