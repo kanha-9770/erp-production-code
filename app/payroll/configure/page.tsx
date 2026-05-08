@@ -3,6 +3,17 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import {
+  SalaryStructureSection,
+  StatutoryComplianceSection,
+  OvertimePolicySection,
+  DEFAULT_SALARY_STRUCTURE,
+  DEFAULT_STATUTORY,
+  DEFAULT_OVERTIME,
+  type SalaryStructureConfig,
+  type StatutoryConfig,
+  type OvertimeConfig,
+} from '@/components/payroll/payroll-enterprise-config';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -98,6 +109,9 @@ interface Setup {
       name: string | null;
     };
   };
+  salaryStructure: SalaryStructureConfig;
+  statutory: StatutoryConfig;
+  overtime: OvertimeConfig;
   policy: {
     weeklyOffDays: number[];
     payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
@@ -135,6 +149,9 @@ const EMPTY_SETUP: Setup = {
     },
   },
   holiday: { formId: null, fields: { date: null, name: null } },
+  salaryStructure: { ...DEFAULT_SALARY_STRUCTURE },
+  statutory: { ...DEFAULT_STATUTORY },
+  overtime: { ...DEFAULT_OVERTIME },
   policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
 
@@ -1017,11 +1034,30 @@ export default function PayrollConfigurePage() {
           </CardContent>
         </Card>
 
+        {/* ── Enterprise Sections ────────────────────────────────────── */}
+
+        <SalaryStructureSection
+          config={setup.salaryStructure}
+          onChange={(c) => setSetup((p) => ({ ...p, salaryStructure: c }))}
+          defaultCTC={setup.defaultBaseSalary}
+          statutory={setup.statutory}
+        />
+
+        <StatutoryComplianceSection
+          config={setup.statutory}
+          onChange={(c) => setSetup((p) => ({ ...p, statutory: c }))}
+        />
+
+        <OvertimePolicySection
+          config={setup.overtime}
+          onChange={(c) => setSetup((p) => ({ ...p, overtime: c }))}
+        />
+
         <Card className="border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Briefcase className="h-5 w-5 text-primary" />
-              6. Working Days Policy
+              9. Working Days Policy
             </CardTitle>
             <CardDescription>
               Tells the calculator which days are paid weekly offs and how to convert a
