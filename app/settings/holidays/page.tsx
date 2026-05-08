@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import PageBackLink from '@/components/shared/page-back-link';
 import {
   Select,
   SelectContent,
@@ -220,7 +221,8 @@ export default function HolidaysPage() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+        <div className="space-y-1.5">
+          <PageBackLink href="/settings" label="Settings" />
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <CalendarHeart className="h-8 w-8 text-primary" />
             Holiday Calendar

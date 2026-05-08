@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Plus, RefreshCw, Sparkles, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import PageBackLink from "@/components/shared/page-back-link";
 import ProviderCard from "./provider-card";
 import AddProviderDialog from "./add-provider-dialog";
 import type { AIProviderDTO, ProviderPresetDTO, AIProviderKeyDTO } from "./types";
@@ -294,7 +295,8 @@ export default function AIConfigClient() {
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-1.5">
+          <PageBackLink href="/admin" label="Admin" />
           <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
             <Sparkles className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
             AI Providers

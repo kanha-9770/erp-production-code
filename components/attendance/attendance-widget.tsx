@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
 import { formatTimeShort } from "@/components/attendance/attendance-format";
+import { useUserTimezone } from "@/lib/user-timezone";
 
 type WidgetState =
   | "PRE_SHIFT"
@@ -441,6 +442,9 @@ export function AttendanceWidget({
   collapsed = false,
 }: AttendanceWidgetProps) {
   const { toast } = useToast();
+  // Re-render when the user changes their saved timezone so the popover's
+  // check-in/out clock labels switch zones live without a page reload.
+  useUserTimezone();
   const { loading, busy, error, status, punch } = useAttendance(enabled);
   const [now, setNow] = useState<number>(() => Date.now());
   const [open, setOpen] = useState(false);

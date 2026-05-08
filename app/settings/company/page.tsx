@@ -6,6 +6,7 @@ import { OrganizationTree } from "@/components/organization/organization-tree";
 import { RoleManagementSheet } from "@/components/organization/role-management-sheet";
 import { RoleFormModal } from "@/components/organization/role-form-modal";
 import { OrganizationUnitFormModal } from "@/components/organization/organization-unit-form-modal";
+import PageBackLink from "@/components/shared/page-back-link";
 import { StatisticsPopup } from "@/components/organization/statistics-popup";
 import { UserManagementSheet } from "@/components/organization/user-management-sheet";
 import { Shield, HelpCircle, Plus, Users, Menu } from "lucide-react";
@@ -193,6 +194,9 @@ function OrganizationManagementContent() {
       <OrganizationHeader />
 
       <main className="mx-auto max-w-screen-2xl px-3 sm:px-4 md:px-6 lg:px-8">
+        <div className="pt-3">
+          <PageBackLink href="/settings" label="Settings" />
+        </div>
         <div className="py-4 sm:py-6 md:py-8">
           <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <OrganizationTree />

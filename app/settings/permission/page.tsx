@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ShieldCheck, Route, Anchor } from "lucide-react"
 import { useRouteAccess } from "@/hooks/use-route-access"
+import PageBackLink from "@/components/shared/page-back-link"
 
 export default function PermissionPage() {
   const { isPermitted } = useRouteAccess()
@@ -17,6 +18,9 @@ export default function PermissionPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
       <div className="container mx-auto px-6 py-16">
         <div className="max-w-4xl mx-auto">
+          <div className="mb-6">
+            <PageBackLink href="/settings" label="Settings" />
+          </div>
           <div className="text-center mb-12">
             <h1 className="text-4xl font-bold text-foreground mb-4">Permission Management</h1>
             <p className="text-lg text-muted-foreground">

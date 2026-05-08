@@ -50,6 +50,7 @@ import {
   type CalendarLeave,
   dateToYmd,
 } from '@/components/leave/leave-calendar';
+import PageBackLink from '@/components/shared/page-back-link';
 
 interface BalanceRow {
   leaveType: { id: string; name: string; code: string; color: string | null };
@@ -168,7 +169,8 @@ export default function LeaveAdminPage() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+        <div className="space-y-1.5">
+          <PageBackLink href="/leave" label="Leave" />
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Wallet className="h-8 w-8 text-primary" />
             Leave Administration

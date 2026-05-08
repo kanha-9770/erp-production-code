@@ -3,7 +3,9 @@ import {
   getEmployeesFromDB,
   getHolidaysFromDB,
   getLeavesFromDB,
+  getPayrollFormulas,
   getPayrollPolicy,
+  PayrollFormulas,
   PayrollRecord,
   PayrollPolicy,
   SampleAttendance,
@@ -17,11 +19,58 @@ interface PayrollCalculation extends PayrollRecord {}
 
 const STANDARD_HOURS_PER_DAY = 8;
 const HALF_DAY_MIN_HOURS = 4; // <4h logged → counted as half-day; 0h → absent
+
+// Legacy fallback constants for the daily-payroll path that doesn't have
+// access to organization-level formulas (calculateDailyPayroll). The main
+// monthly engine (calculateForEmployee) reads PF/ESI/PT/TDS from the config
+// loaded via getPayrollFormulas — see deductions block below.
 const PF_PERCENT = 12;
 const TAX_PERCENT = 5;
 const INSURANCE_FIXED = 500;
 
 const DEFAULT_DAY_HOURS = 8;
+
+// Annual TDS computed against New Regime (FY 2025-26) slabs, plus surcharge
+// brackets and 4% Health & Education Cess. Mirrors the SalaryPreview helper
+// in components/payroll/payroll-enterprise-config.tsx so the configure-page
+// preview and the real payroll always agree.
+function computeAnnualTdsNew(annualGross: number): number {
+  let taxable = Math.max(0, annualGross - 75000);
+  if (taxable <= 1200000) return 0; // 87A rebate
+  let tax = 0;
+  if (taxable > 2400000) { tax += (taxable - 2400000) * 0.30; taxable = 2400000; }
+  if (taxable > 2000000) { tax += (taxable - 2000000) * 0.25; taxable = 2000000; }
+  if (taxable > 1600000) { tax += (taxable - 1600000) * 0.20; taxable = 1600000; }
+  if (taxable > 1200000) { tax += (taxable - 1200000) * 0.15; taxable = 1200000; }
+  if (taxable > 800000)  { tax += (taxable - 800000)  * 0.10; taxable = 800000; }
+  if (taxable > 400000)  { tax += (taxable - 400000)  * 0.05; }
+  return applySurchargeAndCess(annualGross, tax);
+}
+
+// Old Regime FY 2025-26: 0–₹2.5L Nil, ₹2.5–5L 5%, ₹5–10L 20%, >₹10L 30%.
+// Standard deduction ₹50k. Rebate u/s 87A applies when taxable ≤ ₹5L. The
+// engine does NOT model 80C/80D/HRA exemptions at this layer — those should
+// flow in as a per-employee `taxableIncomeOverride` once IT-declarations
+// land. Until then this is a baseline that will overstate TDS for employees
+// who haven't claimed exemptions; users on Old Regime should expect to true
+// up via Form 16.
+function computeAnnualTdsOld(annualGross: number): number {
+  let taxable = Math.max(0, annualGross - 50000);
+  if (taxable <= 500000) return 0; // 87A rebate (Old Regime)
+  let tax = 0;
+  if (taxable > 1000000) { tax += (taxable - 1000000) * 0.30; taxable = 1000000; }
+  if (taxable > 500000)  { tax += (taxable - 500000)  * 0.20; taxable = 500000; }
+  if (taxable > 250000)  { tax += (taxable - 250000)  * 0.05; }
+  return applySurchargeAndCess(annualGross, tax);
+}
+
+function applySurchargeAndCess(annualGross: number, tax: number): number {
+  let surcharge = 0;
+  if (annualGross > 20000000) surcharge = tax * 0.25;
+  else if (annualGross > 10000000) surcharge = tax * 0.15;
+  else if (annualGross > 5000000) surcharge = tax * 0.10;
+  return (tax + surcharge) * 1.04;
+}
 
 /**
  * Parses an HH:mm-ish string. Tolerates "08:54", "08:54:21", "08:54:21 PM",
@@ -187,6 +236,176 @@ function payableDivisor(policy: PayrollPolicy, daysInMonth: number): number {
   return daysInMonth;
 }
 
+// ---------------------------------------------------------------------------
+// computePayrollFromInputs — pure earnings/deductions math
+// ---------------------------------------------------------------------------
+// The single source of truth for "given a monthly CTC, payable days, and an
+// org's saved formulas, what does the payslip look like?". Used by both the
+// auto-generate engine (which derives payable days from attendance) and the
+// preview endpoint (which takes payable days from manual form input).
+//
+// Pure function — no IO. Caller is responsible for loading formulas / policy.
+
+export interface PayrollComputeInputs {
+  baseSalary: number; // monthly CTC
+  payableDays: number; // already net of LOP / out-of-service
+  daysInMonth: number; // for the monthDays divisor
+  overtimeHours?: { weekday: number; weekend: number; holiday: number };
+}
+
+export interface PayrollComputeResult {
+  perDay: number;
+  hourlyRate: number;
+  proRationFactor: number;
+  monthlyGross: number;
+  earnings: {
+    basic: number;
+    hra: number;
+    da: number;
+    conveyance: number;
+    medical: number;
+    lta: number;
+    specialAllowance: number;
+    overtime: number;
+  };
+  grossSalary: number;
+  deductionsDetail: {
+    pf: number;
+    esi: number;
+    pt: number;
+    tds: number;
+    lwf: number;
+    nps: number;
+  };
+  totalDeductions: number;
+  netSalary: number;
+  cappedOtHours: number;
+}
+
+export function computePayrollFromInputs(
+  inputs: PayrollComputeInputs,
+  policy: PayrollPolicy,
+  formulas: PayrollFormulas,
+): PayrollComputeResult {
+  const { baseSalary, payableDays, daysInMonth } = inputs;
+  const ss = formulas.salaryStructure;
+  const st = formulas.statutory;
+  const ot = formulas.overtime;
+
+  const divisor = payableDivisor(policy, daysInMonth);
+  const perDay = divisor > 0 ? baseSalary / divisor : 0;
+  const hourlyRate = perDay / STANDARD_HOURS_PER_DAY;
+  const proRationFactor = divisor > 0 ? payableDays / divisor : 0;
+
+  // Monthly component split (full-month figures).
+  const monthlyBasic = (baseSalary * ss.basicPercent) / 100;
+  const monthlyHra = (monthlyBasic * ss.hraPercent) / 100;
+  const monthlyDa = (monthlyBasic * ss.daPercent) / 100;
+  const monthlyConv = ss.conveyanceAllowance;
+  const monthlyMed = ss.medicalAllowance;
+  const monthlyLta = ss.ltaMonthly ? ss.lta / 12 : 0;
+  const monthlyFixedSum =
+    monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta;
+  const monthlySpecial =
+    ss.specialAllowanceMode === 'auto'
+      ? Math.max(0, baseSalary - monthlyFixedSum)
+      : ss.specialAllowanceAmount;
+  const monthlyGross = monthlyFixedSum + monthlySpecial;
+
+  // Pro-rated earned components.
+  const earnedBasic = monthlyBasic * proRationFactor;
+  const earnedHra = monthlyHra * proRationFactor;
+  const earnedDa = monthlyDa * proRationFactor;
+  const earnedConv = monthlyConv * proRationFactor;
+  const earnedMed = monthlyMed * proRationFactor;
+  const earnedLta = monthlyLta * proRationFactor;
+  const earnedSpecial = monthlySpecial * proRationFactor;
+
+  // Overtime pay capped at maxOvertimeHoursPerMonth across buckets in
+  // priority weekday → weekend → holiday.
+  let overtimePay = 0;
+  let cappedOtHours = 0;
+  if (ot.enabled && inputs.overtimeHours) {
+    let remaining = Math.max(0, ot.maxOvertimeHoursPerMonth);
+    const wkd = Math.min(Math.max(0, inputs.overtimeHours.weekday), remaining); remaining -= wkd;
+    const wke = Math.min(Math.max(0, inputs.overtimeHours.weekend), remaining); remaining -= wke;
+    const hol = Math.min(Math.max(0, inputs.overtimeHours.holiday), remaining); remaining -= hol;
+    overtimePay =
+      wkd * hourlyRate * ot.rateMultiplier +
+      wke * hourlyRate * ot.weekendMultiplier +
+      hol * hourlyRate * ot.holidayMultiplier;
+    cappedOtHours = wkd + wke + hol;
+  }
+
+  const grossSalary =
+    earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta + earnedSpecial + overtimePay;
+
+  // Deductions.
+  let pf = 0;
+  if (st.pfEnabled) {
+    const pfBase = st.pfCapEnabled ? Math.min(earnedBasic, st.pfCapAmount) : earnedBasic;
+    pf = Math.floor((pfBase * st.pfPercent) / 100);
+  }
+
+  let esi = 0;
+  if (st.esiEnabled && monthlyGross <= st.esiThreshold) {
+    esi = Math.floor((grossSalary * st.esiEmployeePercent) / 100);
+  }
+
+  let pt = 0;
+  if (st.ptEnabled && monthlyGross >= st.ptThreshold && payableDays > 0) {
+    pt = st.ptAmount;
+  }
+
+  let tds = 0;
+  if (st.tdsEnabled) {
+    if (st.tdsMode === 'slab') {
+      const annualTax =
+        st.taxRegime === 'old'
+          ? computeAnnualTdsOld(monthlyGross * 12)
+          : computeAnnualTdsNew(monthlyGross * 12);
+      tds = Math.round((annualTax / 12) * proRationFactor);
+    } else {
+      tds = Math.floor((grossSalary * st.tdsFlatPercent * 1.04) / 100);
+    }
+  }
+
+  let lwf = 0;
+  if (st.lwfEnabled && payableDays > 0) {
+    lwf = st.lwfAmount;
+  }
+
+  let nps = 0;
+  if (st.npsEnabled) {
+    nps = Math.floor((earnedBasic * st.npsEmployeePercent) / 100);
+  }
+
+  const totalDeductions = pf + tds + esi + pt + lwf + nps;
+  const netSalary = Math.max(0, Math.round(grossSalary - totalDeductions));
+
+  return {
+    perDay,
+    hourlyRate,
+    proRationFactor,
+    monthlyGross,
+    earnings: {
+      basic: Math.round(earnedBasic),
+      hra: Math.round(earnedHra),
+      da: Math.round(earnedDa),
+      conveyance: Math.round(earnedConv),
+      medical: Math.round(earnedMed),
+      lta: Math.round(earnedLta),
+      specialAllowance: Math.round(earnedSpecial),
+      overtime: Math.round(overtimePay),
+    },
+    grossSalary: Math.round(grossSalary),
+    deductionsDetail: { pf, esi, pt, tds, lwf, nps },
+    totalDeductions,
+    netSalary,
+    cappedOtHours: Math.round(cappedOtHours * 10) / 10,
+  };
+}
+
 // ---- per-employee calculator ----------------------------------------------
 
 interface DayClassification {
@@ -335,6 +554,7 @@ function calculateForEmployee(
   holidays: SampleHoliday[],
   rules: Map<string, ResolvedLeaveRule>,
   policy: PayrollPolicy,
+  formulas: PayrollFormulas,
   month: string,
 ): PayrollCalculation {
   const [yStr, mStr] = month.split('-');
@@ -382,6 +602,14 @@ function calculateForEmployee(
   };
   let totalLOP = 0; // pay-equivalent days lost
   let totalHours = 0;
+  // Overtime accumulator. Hours past `weekdayThresholdHours` on any working
+  // day count as OT. Weekends and holidays use higher multipliers (per
+  // overtimeConfig). All hours on a holiday/weekly-off with attendance count
+  // as OT (the threshold is treated as 0 for those days).
+  const ot = formulas.overtime;
+  let weekdayOtHours = 0;
+  let weekendOtHours = 0;
+  let holidayOtHours = 0;
 
   for (const dateStr of days) {
     const weekday = new Date(`${dateStr}T00:00:00`).getDay();
@@ -408,6 +636,19 @@ function calculateForEmployee(
     }
     totalLOP += c.unpaidLeaveLOP + c.absent;
     totalHours += c.hours;
+
+    if (ot.enabled && c.hours > 0) {
+      const isHoliday = holidaySet.has(dateStr);
+      const isWeeklyOff = policy.weeklyOffDays.includes(weekday);
+      if (isHoliday) {
+        holidayOtHours += c.hours;
+      } else if (isWeeklyOff) {
+        weekendOtHours += c.hours;
+      } else {
+        const excess = c.hours - ot.weekdayThresholdHours;
+        if (excess > 0) weekdayOtHours += excess;
+      }
+    }
   }
 
   // Days that count toward the salary. Each present day = 1, each half-day
@@ -421,21 +662,22 @@ function calculateForEmployee(
     breakdown.weeklyOffDays;
 
   const baseSalary = employee.totalSalary;
-  const divisor = payableDivisor(policy, daysInMonth);
-  const perDay = divisor > 0 ? baseSalary / divisor : 0;
-  const hourlyRate = perDay / STANDARD_HOURS_PER_DAY;
-  // Gross is the value of payable time. We DON'T multiply by hours — that
-  // would double-count overtime/undertime, which is a separate concern.
-  const grossSalary = perDay * breakdown.payableDays;
+  const result = computePayrollFromInputs(
+    {
+      baseSalary,
+      payableDays: breakdown.payableDays,
+      daysInMonth,
+      overtimeHours: { weekday: weekdayOtHours, weekend: weekendOtHours, holiday: holidayOtHours },
+    },
+    policy,
+    formulas,
+  );
 
-  const pf = Math.floor((grossSalary * PF_PERCENT) / 100);
-  const taxableIncome = grossSalary - pf;
-  const tax = Math.floor((taxableIncome * TAX_PERCENT) / 100);
-  const insurance = INSURANCE_FIXED;
-  const other = 0;
-
-  const totalDeductions = pf + tax + insurance + other;
-  const netSalary = Math.max(0, Math.round(grossSalary - totalDeductions));
+  const { earnings, deductionsDetail, grossSalary, netSalary, hourlyRate, cappedOtHours } = result;
+  // Map labelled deductions onto the legacy 4-slot shape so older UI surfaces
+  // (and the saved DB column) keep working without a schema change.
+  const insurance = deductionsDetail.esi;
+  const other = deductionsDetail.pt + deductionsDetail.lwf + deductionsDetail.nps;
 
   return {
     employeeId: employee.employeeId,
@@ -444,10 +686,13 @@ function calculateForEmployee(
     totalSalary: baseSalary,
     workingDays: Math.round(breakdown.payableDays * 10) / 10,
     workingHours: Math.round(totalHours * 10) / 10,
+    overtimeHours: cappedOtHours,
     baseSalary,
     hourlyRate: Math.round(hourlyRate * 100) / 100,
-    grossSalary: Math.round(grossSalary),
-    deductions: { pf, tax, insurance, other },
+    grossSalary,
+    deductions: { pf: deductionsDetail.pf, tax: deductionsDetail.tds, insurance, other },
+    earnings,
+    deductionsDetail,
     netSalary,
     status: breakdown.payableDays > 0 ? 'processed' : 'pending',
     month,
@@ -465,12 +710,13 @@ export async function calculatePayroll(
   const targetMonth = month || new Date().toISOString().slice(0, 7);
   // Run all the IO concurrently — each fetcher is independent. The leave-rule
   // lookup is global so it doesn't need an org filter.
-  const [employees, attendance, leaves, holidays, policy, rules] = await Promise.all([
+  const [employees, attendance, leaves, holidays, policy, formulas, rules] = await Promise.all([
     getEmployeesFromDB(organizationId),
     getAttendanceFromDB(organizationId, targetMonth),
     getLeavesFromDB(organizationId, targetMonth),
     getHolidaysFromDB(organizationId, targetMonth),
     getPayrollPolicy(organizationId),
+    getPayrollFormulas(organizationId),
     loadLeaveRules(),
   ]);
 
@@ -512,7 +758,7 @@ export async function calculatePayroll(
       }
     }
 
-    return calculateForEmployee(emp, empAtt, empLeaves, holidays, rules, policy, targetMonth);
+    return calculateForEmployee(emp, empAtt, empLeaves, holidays, rules, policy, formulas, targetMonth);
   });
 }
 
@@ -584,8 +830,8 @@ export function calculateDailyPayroll(
     const hourlyRate = monthlyBase / (STANDARD_WORKING_DAYS * STANDARD_HOURS_PER_DAY);
     const dailyRate = monthlyBase / STANDARD_WORKING_DAYS;
     const dailyGross = hourlyRate * a.workingHours;
-    const pf = Math.floor((dailyGross * PF_PERCENT) / 100 / 100);
-    const tax = Math.floor(((dailyGross - pf) * TAX_PERCENT) / 100 / 100);
+    const pf = Math.floor((dailyGross * PF_PERCENT) / 100);
+    const tax = Math.floor(((dailyGross - pf) * TAX_PERCENT) / 100);
     const insurance = Math.floor(INSURANCE_FIXED / STANDARD_WORKING_DAYS);
     const other = 0;
     const totalDed = pf + tax + insurance + other;

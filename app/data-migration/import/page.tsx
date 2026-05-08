@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react"
 import { Upload, ArrowLeft, Loader2, Check, AlertCircle, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import PageBackLink from "@/components/shared/page-back-link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
@@ -259,14 +260,10 @@ export default function ImportPage() {
     <div className="min-h-screen bg-background">
       {/* ─── MOBILE-RESPONSIVE HEADER ─── */}
       <div className="border-b bg-white">
-        <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4 relative">
-          {/* Row 1: Back button + icon + title + desktop step indicator */}
+        <div className="container mx-auto px-4 sm:px-6 py-3 sm:py-4 relative space-y-2">
+          <PageBackLink href="/settings/import" label="Data Migration" />
+          {/* Row 1: icon + title + desktop step indicator */}
           <div className="flex items-center gap-2 sm:gap-3">
-            <Link href="/">
-              <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 shrink-0">
-                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-              </Button>
-            </Link>
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
               <Upload className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
             </div>

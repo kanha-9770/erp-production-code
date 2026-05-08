@@ -70,6 +70,133 @@ const DEFAULT_POLICY: PayrollPolicy = {
   payableBasis: 'monthDays',
 };
 
+// Salary structure + statutory config persisted via the configure wizard.
+// Mirrors the shapes in components/payroll/payroll-enterprise-config.tsx.
+// The engine reads these to compute Basic/HRA/PF/ESI/PT/TDS instead of the
+// legacy flat 12%/5%/₹500 constants.
+export interface PayrollSalaryStructure {
+  basicPercent: number;
+  hraPercent: number;
+  daPercent: number;
+  specialAllowanceMode: 'auto' | 'manual';
+  specialAllowanceAmount: number;
+  conveyanceAllowance: number;
+  medicalAllowance: number;
+  lta: number;
+  ltaMonthly: boolean;
+}
+
+export interface PayrollStatutory {
+  pfEnabled: boolean;
+  pfPercent: number;
+  pfCapEnabled: boolean;
+  pfCapAmount: number;
+  employerPfPercent: number;
+  esiEnabled: boolean;
+  esiEmployeePercent: number;
+  esiEmployerPercent: number;
+  esiThreshold: number;
+  ptEnabled: boolean;
+  ptAmount: number;
+  ptThreshold: number;
+  ptState?: string; // for state-preset round-trip in the UI; not used by engine
+  tdsEnabled: boolean;
+  tdsMode: 'flat' | 'slab';
+  tdsFlatPercent: number;
+  taxRegime: 'old' | 'new';
+  // Optional Indian deductions on top of the core 4. Off by default.
+  lwfEnabled: boolean;
+  lwfAmount: number; // monthly flat amount (state-dependent)
+  npsEnabled: boolean;
+  npsEmployeePercent: number; // % of basic — typical voluntary range 5–10%
+}
+
+export interface PayrollOvertime {
+  enabled: boolean;
+  rateMultiplier: number;
+  weekdayThresholdHours: number;
+  weekendMultiplier: number;
+  holidayMultiplier: number;
+  maxOvertimeHoursPerMonth: number;
+}
+
+export interface PayrollFormulas {
+  salaryStructure: PayrollSalaryStructure;
+  statutory: PayrollStatutory;
+  overtime: PayrollOvertime;
+}
+
+export const DEFAULT_FORMULAS: PayrollFormulas = {
+  salaryStructure: {
+    basicPercent: 50,
+    hraPercent: 50,
+    daPercent: 0,
+    specialAllowanceMode: 'auto',
+    specialAllowanceAmount: 0,
+    conveyanceAllowance: 1600,
+    medicalAllowance: 1250,
+    lta: 0,
+    ltaMonthly: true,
+  },
+  statutory: {
+    pfEnabled: true,
+    pfPercent: 12,
+    pfCapEnabled: true,
+    pfCapAmount: 15000,
+    employerPfPercent: 12,
+    esiEnabled: false,
+    esiEmployeePercent: 0.75,
+    esiEmployerPercent: 3.25,
+    esiThreshold: 21000,
+    ptEnabled: true,
+    ptAmount: 200,
+    ptThreshold: 15000,
+    ptState: 'maharashtra',
+    tdsEnabled: true,
+    tdsMode: 'flat',
+    tdsFlatPercent: 5,
+    taxRegime: 'new',
+    lwfEnabled: false,
+    lwfAmount: 25,
+    npsEnabled: false,
+    npsEmployeePercent: 10,
+  },
+  overtime: {
+    enabled: false,
+    rateMultiplier: 1.5,
+    weekdayThresholdHours: 8,
+    weekendMultiplier: 2,
+    holidayMultiplier: 2,
+    maxOvertimeHoursPerMonth: 50,
+  },
+};
+
+// Per-component earnings breakdown emitted by the engine. All values are the
+// PRO-RATED monthly amounts (i.e. already scaled by payableDays/divisor) so
+// summing them equals grossSalary minus overtimePay.
+export interface PayrollEarnings {
+  basic: number;
+  hra: number;
+  da: number;
+  conveyance: number;
+  medical: number;
+  lta: number;
+  specialAllowance: number;
+  overtime: number;
+}
+
+// Per-component deduction breakdown. Distinct from the legacy 4-slot
+// `deductions` object so the payslip can show ESI/PT/LWF/NPS as separate
+// labelled lines instead of cramming them into 'insurance' / 'other'.
+export interface PayrollDeductionsDetail {
+  pf: number;
+  esi: number;
+  pt: number;
+  tds: number;
+  lwf: number;
+  nps: number;
+}
+
 export interface PayrollRecord {
   employeeId: string;
   employeeName: string;
@@ -77,15 +204,21 @@ export interface PayrollRecord {
   totalSalary: number;
   workingDays: number;
   workingHours: number;
+  overtimeHours: number; // OT hours actually worked (above weekday threshold)
   baseSalary: number;
   hourlyRate: number;
   grossSalary: number;
+  // Legacy 4-slot deductions, preserved for backward compatibility:
+  //   pf → PF, tax → TDS, insurance → ESI, other → PT+LWF+NPS combined.
+  // New code should prefer `deductionsDetail` for labelled values.
   deductions: {
     pf: number;
     tax: number;
     insurance: number;
     other: number;
   };
+  earnings: PayrollEarnings;
+  deductionsDetail: PayrollDeductionsDetail;
   netSalary: number;
   status: 'pending' | 'processed';
   month: string;
@@ -400,6 +533,31 @@ async function loadSetup(organizationId: string): Promise<PayrollSetupShape | nu
     console.warn('[payroll] failed to load setup:', err);
     return null;
   }
+}
+
+export async function getPayrollFormulas(organizationId: string): Promise<PayrollFormulas> {
+  // Reads the salary-structure / statutory / overtime config saved by the
+  // /payroll/configure wizard. Falls back to DEFAULT_FORMULAS when no config
+  // row exists for the org — the legacy hardcoded behaviour was 12% PF on
+  // gross + 5% flat tax + ₹500 insurance, which is closer to a placeholder
+  // than reality, so the defaults are the saner starting point.
+  try {
+    const config = await prisma.payrollConfiguration.findFirst({
+      where: { isActive: true, organizationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const m: any = config?.attendanceFieldMappings;
+    if (m && typeof m === 'object' && m._meta === SETUP_META_KEY) {
+      return {
+        salaryStructure: { ...DEFAULT_FORMULAS.salaryStructure, ...(m.salaryStructure || {}) },
+        statutory: { ...DEFAULT_FORMULAS.statutory, ...(m.statutory || {}) },
+        overtime: { ...DEFAULT_FORMULAS.overtime, ...(m.overtime || {}) },
+      };
+    }
+  } catch (err) {
+    console.warn('[payroll] failed to load formulas:', err);
+  }
+  return DEFAULT_FORMULAS;
 }
 
 export async function getPayrollPolicy(organizationId: string): Promise<PayrollPolicy> {
