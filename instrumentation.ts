@@ -21,3 +21,5 @@ export async function register() {
     console.error('[instrumentation] attendance scheduler boot failed:', err);
   }
 }
+
+
