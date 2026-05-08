@@ -37,12 +37,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, Plus, MoreVertical, Pencil, Trash2, Copy, Code2, Link2 } from "lucide-react"
+import { Search, Plus, MoreVertical, Pencil, Trash2, Copy, Code2, Link2, History, Zap, X, AlertCircle, CheckCircle2 } from "lucide-react"
 import {
   useGetFunctionsQuery,
   useCreateFunctionMutation,
   useDeleteFunctionMutation,
   useUpdateFunctionMutation,
+  useExecuteFunctionMutation,
 } from "@/lib/api/functions"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -68,6 +69,65 @@ export default function FunctionsPage() {
   const [createFunction, { isLoading: isCreating }] = useCreateFunctionMutation()
   const [deleteFunction] = useDeleteFunctionMutation()
   const [updateFunction] = useUpdateFunctionMutation()
+  const [executeFunctionMut, { isLoading: isExecuting }] = useExecuteFunctionMutation()
+
+  // Test Run dialog state
+  const [testFunction, setTestFunction] = useState<FunctionItem | null>(null)
+  const [testInputJson, setTestInputJson] = useState<string>("{}")
+  const [testInputError, setTestInputError] = useState<string>("")
+  const [testResult, setTestResult] = useState<{
+    success: boolean
+    result?: any
+    error?: string
+    durationMs: number
+    logs: Array<{ level: string; args: any[]; ts: number }>
+  } | null>(null)
+
+  const openTestDialog = (fn: FunctionItem) => {
+    setTestFunction(fn)
+    setTestInputJson("{}")
+    setTestInputError("")
+    setTestResult(null)
+  }
+
+  const runTestExecution = async () => {
+    if (!testFunction) return
+    let parsedInput: any = undefined
+    if (testInputJson.trim()) {
+      try {
+        parsedInput = JSON.parse(testInputJson)
+      } catch (err: any) {
+        setTestInputError(`Invalid JSON: ${err.message}`)
+        return
+      }
+    }
+    setTestInputError("")
+    try {
+      const r = await executeFunctionMut({
+        id: testFunction.id,
+        input: parsedInput,
+        // persist=true so the run shows up in the execution log immediately.
+        persist: true,
+      }).unwrap()
+      setTestResult(r as any)
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        error: err?.data?.error || err?.message || "Run failed",
+        durationMs: 0,
+        logs: [],
+      } as any)
+    }
+  }
+
+  const logLevelColor = (level: string): string => {
+    switch (level) {
+      case "error": return "bg-red-50 text-red-700"
+      case "warn": return "bg-amber-50 text-amber-700"
+      case "info": return "bg-blue-50 text-blue-700"
+      default: return "bg-muted/30 text-foreground"
+    }
+  }
 
   const functions: FunctionItem[] = useMemo(() => {
     const items = functionsData?.data || []
@@ -253,6 +313,14 @@ export default function FunctionsPage() {
                 </div>
               </div>
 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/settings/functions/executions")}
+              >
+                <History className="w-3.5 h-3.5 mr-1.5" />
+                Execution Log
+              </Button>
               <Button size="sm" className="ml-auto sm:ml-0" onClick={() => setCreateDialogOpen(true)}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" />
                 Create Function
@@ -323,10 +391,24 @@ export default function FunctionsPage() {
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuContent align="end" className="w-48">
                               <DropdownMenuItem onClick={() => openEditor(fn)}>
                                 <Pencil className="h-3.5 w-3.5 mr-2" />
                                 Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openTestDialog(fn)}>
+                                <Zap className="h-3.5 w-3.5 mr-2" />
+                                Test Run
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  router.push(
+                                    `/settings/functions/executions?functionId=${fn.id}`,
+                                  )
+                                }
+                              >
+                                <History className="h-3.5 w-3.5 mr-2" />
+                                View Execution Log
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleDuplicate(fn)}>
                                 <Copy className="h-3.5 w-3.5 mr-2" />
@@ -450,6 +532,146 @@ export default function FunctionsPage() {
               disabled={!newFunction.name.trim() || isCreating}
             >
               {isCreating ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Test Run Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={!!testFunction} onOpenChange={(open) => !open && setTestFunction(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Zap className="h-4 w-4 text-indigo-700" />
+              Test Run — {testFunction?.displayName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            {/* ── Input ──────────────────────────────────────────────── */}
+            <div className="space-y-2">
+              <Label className="text-xs">
+                Input (JSON, available as <code className="font-mono">ctx.input</code>)
+              </Label>
+              <Textarea
+                rows={10}
+                className="text-xs font-mono"
+                placeholder='{ "key": "value" }'
+                value={testInputJson}
+                onChange={(e) => setTestInputJson(e.target.value)}
+              />
+              {testInputError && (
+                <p className="text-[10px] text-red-600">{testInputError}</p>
+              )}
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5 w-full"
+                disabled={isExecuting || !testFunction}
+                onClick={runTestExecution}
+              >
+                <Zap className="h-3.5 w-3.5" />
+                {isExecuting ? "Running..." : "Run with this input"}
+              </Button>
+              <p className="text-[10px] text-muted-foreground">
+                Persists to the execution log so you can compare runs over time.
+              </p>
+            </div>
+
+            {/* ── Result + Logs ───────────────────────────────────────── */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Result</Label>
+                {testResult && (
+                  <div className="flex items-center gap-2">
+                    {testResult.success ? (
+                      <Badge className="text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 px-1.5 py-0 gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> success
+                      </Badge>
+                    ) : (
+                      <Badge className="text-[10px] bg-red-100 text-red-700 hover:bg-red-100 px-1.5 py-0 gap-1">
+                        <AlertCircle className="h-3 w-3" /> failed
+                      </Badge>
+                    )}
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {testResult.durationMs}ms
+                    </span>
+                  </div>
+                )}
+              </div>
+              {!testResult ? (
+                <div className="border rounded p-3 text-[11px] text-muted-foreground italic h-24 flex items-center justify-center">
+                  Click "Run" to test this function. Result + console logs will appear here.
+                </div>
+              ) : (
+                <>
+                  {testResult.error && (
+                    <div className="px-2 py-1.5 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 break-words">
+                      <span className="font-medium">Error:</span> {testResult.error}
+                    </div>
+                  )}
+                  {testResult.success && (
+                    <pre className="text-[10px] bg-muted/40 border rounded p-2 overflow-auto max-h-32 font-mono">
+                      {testResult.result === undefined
+                        ? "(no return value)"
+                        : JSON.stringify(testResult.result, null, 2)}
+                    </pre>
+                  )}
+                </>
+              )}
+
+              <Label className="text-xs pt-2">
+                Console output ({testResult?.logs?.length || 0})
+              </Label>
+              <div className="border rounded max-h-48 overflow-y-auto bg-muted/10">
+                {!testResult?.logs?.length ? (
+                  <p className="p-2 text-[11px] text-muted-foreground italic">
+                    No console output yet.
+                  </p>
+                ) : (
+                  testResult.logs.map((entry, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 px-2 py-1 text-[10px] font-mono border-b last:border-b-0 ${logLevelColor(entry.level)}`}
+                    >
+                      <span className="text-muted-foreground shrink-0 tabular-nums">
+                        {new Date(entry.ts).toISOString().slice(11, 19)}
+                      </span>
+                      <span className="uppercase text-[9px] shrink-0 mt-px">
+                        {entry.level}
+                      </span>
+                      <span className="break-words flex-1">
+                        {(entry.args || []).map((a) =>
+                          typeof a === "object" ? JSON.stringify(a) : String(a),
+                        ).join(" ")}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            {testFunction && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  router.push(
+                    `/settings/functions/executions?functionId=${testFunction.id}`,
+                  )
+                }}
+              >
+                <History className="h-3.5 w-3.5 mr-1.5" />
+                Full execution log →
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setTestFunction(null)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

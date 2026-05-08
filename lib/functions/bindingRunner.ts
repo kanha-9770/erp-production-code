@@ -462,6 +462,7 @@ async function runOne(
     recordId: ctx.recordId,
     recordData: ctx.recordData,
     triggerField,
+    persistAs: { functionId: fn.id, trigger: "binding" },
   })
 
   return {

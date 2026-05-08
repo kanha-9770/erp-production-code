@@ -361,6 +361,14 @@ export default function WorkflowRulesPage() {
                     Delete ({selectedIds.size})
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push("/settings/workflow-rules/executions")}
+                >
+                  <History className="w-3.5 h-3.5 mr-1.5" />
+                  Execution Log
+                </Button>
                 <Button size="sm" className="ml-auto sm:ml-0" onClick={() => setCreateDialogOpen(true)}>
                   <Plus className="w-3.5 h-3.5 mr-1.5" />
                   Create Rule
@@ -517,10 +525,37 @@ export default function WorkflowRulesPage() {
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  const params = new URLSearchParams({
+                                    moduleName: rule.module,
+                                    edit: rule.id,
+                                  })
+                                  router.push(`/settings/workflow-rules/create?${params.toString()}`)
+                                }}
+                              >
                                 <Pencil className="h-3.5 w-3.5 mr-2" />
                                 Edit Rule
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  try {
+                                    const r = await fetch(
+                                      `/api/workflow-rules/${rule.id}/run`,
+                                      { method: "POST", credentials: "include" },
+                                    ).then((res) => res.json())
+                                    const summary = r?.success
+                                      ? `Run ${r.status}: ${r.results?.filter((x: any) => x.ok).length || 0}/${r.results?.length || 0} action(s) ok`
+                                      : `Run failed: ${r?.error || "unknown"}`
+                                    alert(summary)
+                                  } catch (err: any) {
+                                    alert(`Run failed: ${err?.message || String(err)}`)
+                                  }
+                                }}
+                              >
+                                <Zap className="h-3.5 w-3.5 mr-2" />
+                                Run now
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => handleDuplicate(rule)}
@@ -528,9 +563,15 @@ export default function WorkflowRulesPage() {
                                 <Copy className="h-3.5 w-3.5 mr-2" />
                                 Duplicate
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  router.push(
+                                    `/settings/workflow-rules/executions?ruleId=${rule.id}`,
+                                  )
+                                }
+                              >
                                 <History className="h-3.5 w-3.5 mr-2" />
-                                View History
+                                View Execution Log
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem

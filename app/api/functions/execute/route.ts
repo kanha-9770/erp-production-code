@@ -23,7 +23,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({} as any))
-    const { id, script: rawScript, input, timeoutMs, maxOps } = body || {}
+    const {
+      id,
+      script: rawScript,
+      input,
+      timeoutMs,
+      maxOps,
+      // Opt-in flag — when true and `id` is provided, the run is persisted
+      // to function_executions for the log viewer. Defaults to false so the
+      // editor's quick-test runs stay ephemeral as they always have.
+      persist,
+    } = body || {}
 
     let script = typeof rawScript === "string" ? rawScript : ""
 
@@ -57,6 +67,17 @@ export async function POST(request: NextRequest) {
       input,
       timeoutMs: typeof timeoutMs === "number" ? Math.min(30_000, timeoutMs) : undefined,
       maxOps: typeof maxOps === "number" ? Math.min(10_000, Math.max(1, maxOps)) : undefined,
+      // Persistence is opt-in via `persist:true` in the body, AND requires
+      // a saved function id (we won't write log rows for ad-hoc untitled
+      // scripts pasted into the editor — those have no function to relate to).
+      ...(persist && id
+        ? {
+            persistAs: {
+              functionId: id,
+              trigger: "test" as const,
+            },
+          }
+        : {}),
     })
 
     return NextResponse.json({ ...result })

@@ -8,6 +8,53 @@ import {
   prepareInstantActionsForWrite,
   redactInstantActionsForRead,
 } from "@/lib/workflow/email-secrets"
+import { syncWorkflowRule, buildCronExpression } from "@/lib/workflow/scheduler"
+
+// Validate the schedule fields a client may send. Returns an error string if
+// invalid (which the route turns into a 400) or null if all good.
+function validateScheduleFields(fields: any): string | null {
+  if (fields.executeBasedOn !== "schedule") return null
+  const cadence = fields.scheduleCadence
+  if (!cadence) return "scheduleCadence is required when executeBasedOn = 'schedule'"
+  if (!["daily", "weekly", "monthly", "custom"].includes(cadence)) {
+    return "scheduleCadence must be one of: daily, weekly, monthly, custom"
+  }
+  // buildCronExpression also validates the raw cron string for cadence=custom.
+  const expr = buildCronExpression({
+    cadence,
+    cron: fields.scheduleCron ?? null,
+    hour: fields.scheduleHour ?? null,
+    minute: fields.scheduleMinute ?? null,
+    dayOfWeek: fields.scheduleDayOfWeek ?? null,
+    dayOfMonth: fields.scheduleDayOfMonth ?? null,
+    timezone: fields.scheduleTimezone ?? null,
+    enabled: true,
+  })
+  if (!expr) {
+    return cadence === "custom"
+      ? "scheduleCron is required and must be a valid 5-field cron expression"
+      : "schedule fields are invalid"
+  }
+  if (fields.scheduleTimezone) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: fields.scheduleTimezone }).format(new Date())
+    } catch {
+      return `scheduleTimezone "${fields.scheduleTimezone}" is not a valid IANA name`
+    }
+  }
+  return null
+}
+
+const SCHEDULE_FIELD_NAMES = [
+  "scheduleCadence",
+  "scheduleCron",
+  "scheduleHour",
+  "scheduleMinute",
+  "scheduleDayOfWeek",
+  "scheduleDayOfMonth",
+  "scheduleTimezone",
+  "scheduleEnabled",
+] as const
 
 /**
  * GET /api/workflow-rules?moduleName=xxx
@@ -30,7 +77,7 @@ export async function GET(request: NextRequest) {
     const where: any = { organizationId: authUser.organizationId }
     if (moduleName) where.moduleName = moduleName
 
-    const rules = await prisma.workflowRule.findMany({
+    const rules = await (prisma as any).workflowRule.findMany({
       where,
       select: {
         id: true,
@@ -45,6 +92,14 @@ export async function GET(request: NextRequest) {
         instantActions: true,
         scheduledExecute: true,
         scheduledUnit: true,
+        scheduleCadence: true,
+        scheduleCron: true,
+        scheduleHour: true,
+        scheduleMinute: true,
+        scheduleDayOfWeek: true,
+        scheduleDayOfMonth: true,
+        scheduleTimezone: true,
+        scheduleEnabled: true,
         active: true,
         createdAt: true,
         updatedAt: true,
@@ -121,6 +176,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const scheduleErr = validateScheduleFields(body)
+    if (scheduleErr) {
+      return NextResponse.json(
+        { success: false, error: scheduleErr },
+        { status: 400 }
+      )
+    }
+
     // Encrypt any plaintext SMTP password before storing. New rules have no
     // previous state, so KEPT sentinels (which shouldn't occur on create
     // anyway) resolve to undefined.
@@ -128,23 +191,31 @@ export async function POST(request: NextRequest) {
       ? prepareInstantActionsForWrite(instantActions, { previous: null })
       : null
 
-    const rule = await prisma.workflowRule.create({
-      data: {
-        name: name.trim(),
-        description: description?.trim() || null,
-        moduleName,
-        executeBasedOn,
-        recordAction: recordAction || null,
-        dateField: dateField || null,
-        conditionType: conditionType || "all",
-        conditions: conditions || null,
-        instantActions: writableInstantActions,
-        scheduledExecute: scheduledExecute || null,
-        scheduledUnit: scheduledUnit || null,
-        organizationId: authUser.organizationId,
-        createdById: authUser.id,
-      },
-    })
+    const createData: any = {
+      name: name.trim(),
+      description: description?.trim() || null,
+      moduleName,
+      executeBasedOn,
+      recordAction: recordAction || null,
+      dateField: dateField || null,
+      conditionType: conditionType || "all",
+      conditions: conditions || null,
+      instantActions: writableInstantActions,
+      scheduledExecute: scheduledExecute || null,
+      scheduledUnit: scheduledUnit || null,
+      organizationId: authUser.organizationId,
+      createdById: authUser.id,
+    }
+    for (const f of SCHEDULE_FIELD_NAMES) {
+      if (body[f] !== undefined) createData[f] = body[f]
+    }
+
+    const rule = await (prisma as any).workflowRule.create({ data: createData })
+
+    // Hot-reload the scheduler — non-fatal if it fails (rule still saved).
+    syncWorkflowRule(rule.id).catch((err) =>
+      console.error(`[POST /api/workflow-rules] sync failed for ${rule.id}:`, err),
+    )
 
     return NextResponse.json({
       success: true,
@@ -217,11 +288,39 @@ export async function PUT(request: NextRequest) {
     if (fields.scheduledExecute !== undefined) updateData.scheduledExecute = fields.scheduledExecute || null
     if (fields.scheduledUnit !== undefined) updateData.scheduledUnit = fields.scheduledUnit || null
     if (fields.active !== undefined) updateData.active = fields.active
+    for (const f of SCHEDULE_FIELD_NAMES) {
+      if (fields[f] !== undefined) updateData[f] = fields[f]
+    }
 
-    const updated = await prisma.workflowRule.update({
+    // Validate schedule shape if any schedule field changed OR the trigger is
+    // being switched to schedule mode. Use the merged view (existing + patch)
+    // so partial updates pass when the unchanged fields are already valid.
+    const incomingExecuteBasedOn = fields.executeBasedOn ?? existing.executeBasedOn
+    if (
+      incomingExecuteBasedOn === "schedule" &&
+      (fields.executeBasedOn !== undefined ||
+        SCHEDULE_FIELD_NAMES.some((f) => fields[f] !== undefined))
+    ) {
+      const merged: any = { ...existing, ...updateData }
+      const scheduleErr = validateScheduleFields(merged)
+      if (scheduleErr) {
+        return NextResponse.json(
+          { success: false, error: scheduleErr },
+          { status: 400 }
+        )
+      }
+    }
+
+    const updated = await (prisma as any).workflowRule.update({
       where: { id },
       data: updateData,
     })
+
+    // Hot-reload scheduler — covers active toggle, schedule edits, and
+    // executeBasedOn flips.
+    syncWorkflowRule(id).catch((err) =>
+      console.error(`[PUT /api/workflow-rules] sync failed for ${id}:`, err),
+    )
 
     return NextResponse.json({
       success: true,
@@ -277,6 +376,11 @@ export async function DELETE(request: NextRequest) {
       userName: authUser.email,
       organizationId: authUser.organizationId,
     })
+
+    // Tear down any in-process schedule for this rule (sync notices it's gone).
+    syncWorkflowRule(id).catch((err) =>
+      console.error(`[DELETE /api/workflow-rules] sync failed for ${id}:`, err),
+    )
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

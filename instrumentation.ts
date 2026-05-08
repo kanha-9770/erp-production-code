@@ -1,23 +1,26 @@
 /**
  * Next.js instrumentation hook. Runs once when the Node server starts —
- * the only safe place to register long-lived background workers like our
- * cron-based attendance report scheduler.
+ * the only safe place to register long-lived background workers.
+ *
+ * Boots the generic workflow scheduler, which fires every active rule whose
+ * `executeBasedOn = "schedule"`. The legacy attendance-only scheduler has
+ * been retired in favour of this generic engine; its config is migrated to
+ * scheduled WorkflowRules by scripts/migrate-attendance-schedules-to-workflows.ts.
  *
  * Guarded by the runtime check so the file is a no-op in the Edge runtime
- * (no node-cron, no prisma there).
+ * (no node-cron, no Prisma there). Set DISABLE_WORKFLOW_SCHEDULER=1 on every
+ * replica but one when scaling horizontally to avoid duplicate fires.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  if (process.env.DISABLE_ATTENDANCE_SCHEDULER === '1') {
-    console.log('[instrumentation] attendance scheduler disabled via env');
-    return;
+  if (process.env.NEXT_RUNTIME !== "nodejs") return
+  if (process.env.DISABLE_WORKFLOW_SCHEDULER === "1") {
+    console.log("[instrumentation] workflow scheduler disabled via env")
+    return
   }
   try {
-    const { startAttendanceReportScheduler } = await import(
-      '@/lib/hr/attendance-report-scheduler'
-    );
-    await startAttendanceReportScheduler();
+    const { startWorkflowScheduler } = await import("@/lib/workflow/scheduler")
+    await startWorkflowScheduler()
   } catch (err) {
-    console.error('[instrumentation] attendance scheduler boot failed:', err);
+    console.error("[instrumentation] workflow scheduler boot failed:", err)
   }
 }

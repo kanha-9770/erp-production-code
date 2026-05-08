@@ -189,14 +189,56 @@ export async function generateTeamAttendanceReport(
     perUser.set(r.userId, cur);
   }
 
+  // Per-user min(check-in) and max(check-out) so the Summary sheet shows
+  // the punch times alongside the day-count aggregates. For a daily report
+  // this is "the" check-in/out for that day; for weekly/monthly it surfaces
+  // the earliest arrival and latest departure across the period — both useful
+  // signals on a single line per employee.
+  const punchByUser = new Map<
+    string,
+    { firstIn: Date | null; lastOut: Date | null; firstInRaw: string | null; lastOutRaw: string | null }
+  >();
+  for (const r of records) {
+    const cur = punchByUser.get(r.userId) ?? {
+      firstIn: null,
+      lastOut: null,
+      firstInRaw: null,
+      lastOutRaw: null,
+    };
+    if (r.checkInAt) {
+      if (!cur.firstIn || r.checkInAt < cur.firstIn) cur.firstIn = r.checkInAt;
+    } else if (r.checkInTime) {
+      // Legacy rows only have the wall-clock string. Keep the earliest one.
+      if (!cur.firstInRaw || r.checkInTime < cur.firstInRaw) cur.firstInRaw = r.checkInTime;
+    }
+    if (r.checkOutAt) {
+      if (!cur.lastOut || r.checkOutAt > cur.lastOut) cur.lastOut = r.checkOutAt;
+    } else if (r.checkOutTime) {
+      if (!cur.lastOutRaw || r.checkOutTime > cur.lastOutRaw) cur.lastOutRaw = r.checkOutTime;
+    }
+    punchByUser.set(r.userId, cur);
+  }
+
   const summaryRows = Array.from(userById.values())
     .map((u) => {
       const t = perUser.get(u.id);
+      const p = punchByUser.get(u.id);
+      // Prefer the typed timestamp; fall back to the legacy wall-clock string.
+      const firstCheckIn = p
+        ? fmtDateTime(p.firstIn) || p.firstInRaw || ''
+        : '';
+      const lastCheckOut = p
+        ? fmtDateTime(p.lastOut) || p.lastOutRaw || ''
+        : '';
       return {
         Employee: u.name,
         Email: u.email,
         Department: u.department ?? '',
         Designation: u.designation ?? '',
+        // Naming: for daily reports this IS the day's check-in/out. For
+        // weekly/monthly it's earliest arrival / latest departure in window.
+        'First Check-in': firstCheckIn,
+        'Last Check-out': lastCheckOut,
         'Present days': t?.presentDays ?? 0,
         'Late days': t?.lateDays ?? 0,
         'Auto-checkout days': t?.autoCheckedOutDays ?? 0,

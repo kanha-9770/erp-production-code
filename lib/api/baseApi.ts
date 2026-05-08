@@ -62,9 +62,30 @@ export const baseApi = createApi({
     // Functions
     "Functions",
     "FunctionBindings",
+    "FunctionExecutions",
     // Notifications
     "Notifications",
     "NotificationsUnreadCount",
+    // Real Estate Brokerage (Module #2)
+    "Properties",
+    "Property",
+    "Agents",
+    "Agent",
+    "AgentTree",
+    "Ranks",
+    "Leads",
+    "Lead",
+    "LeadActivities",
+    "Viewings",
+    // REBM Phase 2 — Finance
+    "Transactions",
+    "Transaction",
+    "CommissionRules",
+    "MyWallet",
+    "Wallets",
+    "MyLedger",
+    "BankAccounts",
+    "Withdrawals",
   ],
   endpoints: () => ({}),
 })

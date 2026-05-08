@@ -1,22 +1,20 @@
 /**
- * In-process scheduler for the team-attendance email reports.
+ * DEPRECATED — superseded by the generic workflow scheduler.
  *
- * Reads every active AttendanceConfiguration on boot and registers up to
- * three node-cron jobs per org (daily/weekly/monthly) when the matching
- * `report*Enabled` flag is on AND `reportRecipients` is non-empty. Every
- * job fires `hour` wall-time of the org's `reportTimezone` and emails an
- * XLSX of the previous period to the configured recipients.
+ * This module used to register node-cron jobs at boot for every org's
+ * AttendanceConfiguration report* settings. Those schedules now live as
+ * scheduled WorkflowRules (executeBasedOn = "schedule") with a Report Export
+ * action, fired by lib/workflow/scheduler.ts. See:
+ *   - scripts/migrate-attendance-schedules-to-workflows.ts (one-time migrator)
+ *   - lib/workflow/scheduler.ts (the generic engine)
+ *   - lib/workflow/report-builder.ts (generates the XLSX, including attendance)
  *
- * IMPORTANT: this is an in-process scheduler. It assumes a single Node
- * process — if the app is scaled horizontally (multiple PM2 instances,
- * Docker replicas, k8s pods) every replica will fire its own copy of the
- * email. Either run with a single replica, or migrate to an external
- * scheduler that POSTs /api/cron/team-attendance with CRON_SECRET.
- *
- * Re-syncing: after admins change a config (toggle a cadence, edit
- * recipients, change timezone) call `syncOrganizationSchedule(orgId)` so
- * we don't have to reboot the server. The hot path is small — at most 3
- * jobs per org are torn down and re-registered.
+ * The boot path is gone (instrumentation.ts no longer calls
+ * startAttendanceReportScheduler). `syncOrganizationSchedule` is now a no-op
+ * so editing AttendanceConfiguration doesn't double-register cron jobs
+ * alongside the migrated WorkflowRules. `runReport` is preserved as a thin
+ * wrapper so /api/cron/team-attendance keeps working for any external caller
+ * that hasn't switched to /api/workflow-rules/:id/run yet.
  */
 
 import cron, { type ScheduledTask } from 'node-cron';
@@ -124,76 +122,31 @@ function teardownOrg(organizationId: string) {
   jobsByOrg.delete(organizationId);
 }
 
+/**
+ * No-op now. Editing an AttendanceConfiguration used to re-register cron
+ * jobs in-process; with the generic workflow scheduler in charge of all
+ * scheduled emails, the legacy tear-down/re-register path is intentionally
+ * disabled to avoid duplicate fires. Admins should manage cadence + recipients
+ * via the workflow rule directly (Settings → Workflow Rules).
+ */
 export async function syncOrganizationSchedule(organizationId: string): Promise<void> {
-  const config = await getAttendanceConfig(organizationId);
+  // Tear down any leftover legacy timers from a process that booted under
+  // the old code path. Idempotent — safe to call repeatedly.
   teardownOrg(organizationId);
-
-  // Skip orgs with nothing to do — saves us a stray timer.
-  const anyEnabled =
-    config.reportDailyEnabled ||
-    config.reportWeeklyEnabled ||
-    config.reportMonthlyEnabled;
-  if (!anyEnabled || config.reportRecipients.length === 0) {
-    return;
-  }
-
-  const tz = isValidTimezone(config.reportTimezone) ? config.reportTimezone : undefined;
-  const hour = config.reportSendHour;
-  const fresh: JobsByKind = {};
-
-  for (const kind of KINDS) {
-    const enabled =
-      (kind === 'daily' && config.reportDailyEnabled) ||
-      (kind === 'weekly' && config.reportWeeklyEnabled) ||
-      (kind === 'monthly' && config.reportMonthlyEnabled);
-    if (!enabled) continue;
-    const expr = cronExprFor(kind, hour);
-    try {
-      const task = cron.schedule(
-        expr,
-        () => {
-          runReport(organizationId, kind).catch((err) => {
-            console.error(
-              `[attendance-scheduler] ${organizationId}/${kind} threw:`,
-              err,
-            );
-          });
-        },
-        tz ? { timezone: tz } : undefined,
-      );
-      fresh[kind] = task;
-      console.log(
-        `[attendance-scheduler] registered ${organizationId}/${kind} \`${expr}\`${tz ? ` (${tz})` : ''}`,
-      );
-    } catch (err) {
-      console.error(
-        `[attendance-scheduler] failed to register ${organizationId}/${kind}:`,
-        err,
-      );
-    }
-  }
-  jobsByOrg.set(organizationId, fresh);
+  return;
 }
 
+/**
+ * Deprecated — instrumentation.ts no longer calls this. Left as a no-op so
+ * any forgotten callsite doesn't crash. The generic scheduler at
+ * lib/workflow/scheduler.ts is the source of truth.
+ */
 export async function startAttendanceReportScheduler(): Promise<void> {
   if (started) return;
   started = true;
-  try {
-    const configs = await (prisma as any).attendanceConfiguration.findMany({
-      where: { isActive: true, organizationId: { not: null } },
-      select: { organizationId: true },
-    });
-    for (const c of configs) {
-      if (!c.organizationId) continue;
-      await syncOrganizationSchedule(c.organizationId);
-    }
-    console.log(
-      `[attendance-scheduler] started — ${jobsByOrg.size} org(s) with active jobs`,
-    );
-  } catch (err) {
-    console.error('[attendance-scheduler] start failed:', err);
-    started = false;
-  }
+  console.warn(
+    '[attendance-scheduler] startAttendanceReportScheduler is deprecated — workflow scheduler handles scheduled reports now',
+  );
 }
 
 /** Test-only: number of orgs with at least one active job. */

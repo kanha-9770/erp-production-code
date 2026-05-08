@@ -83,6 +83,22 @@ interface InstantActionEntry {
   notifyFieldIds?: string[]
   notifyTitle?: string
   notifyMessage?: string
+  // For type === "Report Export" — generate an XLSX from a data source and
+  // email it to the same recipient sources as Email Notification (minus
+  // emailToField, since scheduled runs have no triggering record).
+  reportName?: string
+  reportDataSource?: string // "attendance" | "form-module"
+  reportModuleName?: string // required for "form-module"
+  reportPeriod?: string // "daily" | "weekly" | "monthly" | "all-time"
+  reportTimezone?: string
+  reportFieldIds?: string[]
+  reportFormIds?: string[]
+  reportFilters?: Array<{ field: string; operator: string; value?: string }>
+  reportSortBy?: string
+  reportSortDir?: string // "asc" | "desc"
+  reportFilenameTemplate?: string
+  reportMaxRows?: number
+  reportSheetName?: string
 }
 
 function normalizeActions(raw: unknown): InstantActionEntry[] {
@@ -122,6 +138,42 @@ function normalizeActions(raw: unknown): InstantActionEntry[] {
             : undefined,
           notifyTitle: typeof entry.notifyTitle === "string" ? entry.notifyTitle : undefined,
           notifyMessage: typeof entry.notifyMessage === "string" ? entry.notifyMessage : undefined,
+          reportName: typeof entry.reportName === "string" ? entry.reportName : undefined,
+          reportDataSource: typeof entry.reportDataSource === "string" ? entry.reportDataSource : undefined,
+          reportModuleName: typeof entry.reportModuleName === "string" ? entry.reportModuleName : undefined,
+          reportPeriod: typeof entry.reportPeriod === "string" ? entry.reportPeriod : undefined,
+          reportTimezone: typeof entry.reportTimezone === "string" ? entry.reportTimezone : undefined,
+          reportFieldIds: Array.isArray(entry.reportFieldIds)
+            ? entry.reportFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          reportFormIds: Array.isArray(entry.reportFormIds)
+            ? entry.reportFormIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          reportFilters: Array.isArray(entry.reportFilters)
+            ? entry.reportFilters
+                .filter(
+                  (f: any) =>
+                    f && typeof f.field === "string" && typeof f.operator === "string",
+                )
+                .map((f: any) => ({
+                  field: f.field,
+                  operator: f.operator,
+                  value: typeof f.value === "string" ? f.value : "",
+                }))
+            : undefined,
+          reportSortBy: typeof entry.reportSortBy === "string" ? entry.reportSortBy : undefined,
+          reportSortDir:
+            entry.reportSortDir === "asc" || entry.reportSortDir === "desc"
+              ? entry.reportSortDir
+              : undefined,
+          reportFilenameTemplate:
+            typeof entry.reportFilenameTemplate === "string" ? entry.reportFilenameTemplate : undefined,
+          reportMaxRows:
+            typeof entry.reportMaxRows === "number" && Number.isFinite(entry.reportMaxRows)
+              ? entry.reportMaxRows
+              : undefined,
+          reportSheetName:
+            typeof entry.reportSheetName === "string" ? entry.reportSheetName : undefined,
         }
       }
       return null
@@ -799,6 +851,7 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
               recordId,
               recordData,
             },
+            persistAs: { functionId: fn.id, trigger: "workflow" },
           })
           if (!result.success) {
             console.warn(
@@ -842,5 +895,572 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
   } catch (err) {
     // Trigger failures must NEVER bubble — they could break the record save.
     console.error("[workflow] triggerWorkflowsForRecord failed", err)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schedule / manual rule execution
+//
+// runWorkflowRule(ruleId, trigger) is what the workflow scheduler and the
+// "Run now" admin endpoint call. It loads the rule, executes every action
+// that makes sense without a triggering record (Email Notification, System
+// Notification, Report Export, Function), and writes a WorkflowExecution row
+// for the admin's history view.
+//
+// This deliberately does NOT reuse triggerWorkflowsForRecord — that path is
+// tightly coupled to a current record (field-value resolution, Field Update,
+// per-record placeholders). Scheduled runs have a different shape:
+//   - no recordData → {{field}} placeholders render empty
+//   - emailToField recipient source is skipped (no record to read from)
+//   - Field Update actions are skipped (nothing to update)
+//   - Report Export is the headline use case
+// ─────────────────────────────────────────────────────────────────────────────
+
+const isEmailish = (s: string) => /\S+@\S+\.\S+/.test(s)
+
+/**
+ * Substitute metadata placeholders (date, period, module, rule, organization,
+ * recipient) into a subject or body template. Used by both the Report Export
+ * action and the schedule-time Email Notification action.
+ *
+ * Field placeholders like {{Field Label}} / {{api_name}} are NOT touched here
+ * — they're handled by `renderEmailTemplate` in the event-based path where a
+ * recordData + fieldMap exist. Scheduled runs have no triggering record, so
+ * {{Field Label}} resolves to empty.
+ *
+ * Case-insensitive, whitespace-tolerant: {{ Organization }} works the same as
+ * {{Organization}} or {{organization}}. Unknown placeholders are left untouched
+ * so an admin can always spot a typo by searching the rendered email for "{{".
+ */
+function renderMetaPlaceholders(
+  template: string,
+  ctx: {
+    date?: string
+    from?: string
+    to?: string
+    period?: string
+    moduleName?: string
+    ruleName?: string
+    organizationName?: string
+    recipient?: string
+  },
+): string {
+  if (!template) return ""
+  const map: Record<string, string> = {
+    date: ctx.date || "",
+    from: ctx.from || ctx.date || "",
+    to: ctx.to || ctx.date || "",
+    period: ctx.period || "",
+    module: ctx.moduleName || "",
+    module_name: ctx.moduleName || "",
+    rule: ctx.ruleName || "",
+    rule_name: ctx.ruleName || "",
+    organization: ctx.organizationName || "",
+    org: ctx.organizationName || "",
+    org_name: ctx.organizationName || "",
+    recipient: ctx.recipient || "",
+    recipient_email: ctx.recipient || "",
+  }
+  return template.replace(/\{\{\s*([\w\s]+?)\s*\}\}/g, (whole, rawKey) => {
+    const key = String(rawKey).trim().toLowerCase().replace(/\s+/g, "_")
+    if (Object.prototype.hasOwnProperty.call(map, key)) return map[key]
+    return whole // leave unknown placeholders alone (typos stay visible)
+  })
+}
+
+async function resolveStaticAndRoleEmails(
+  emailToStatic: string | undefined,
+  emailToRoleIds: string[] | undefined,
+  organizationId: string,
+): Promise<string[]> {
+  const set = new Set<string>()
+
+  if (emailToStatic) {
+    for (const part of emailToStatic.split(/[,;\s]+/)) {
+      const t = part.trim()
+      if (t && isEmailish(t)) set.add(t)
+    }
+  }
+
+  if (emailToRoleIds && emailToRoleIds.length > 0) {
+    const [assignments, orgOwners] = await Promise.all([
+      prisma.userUnitAssignment.findMany({
+        where: {
+          roleId: { in: emailToRoleIds },
+          user: { organizationId },
+        },
+        select: { user: { select: { email: true } } },
+      }),
+      prisma.role
+        .findMany({
+          where: { id: { in: emailToRoleIds }, isAdmin: true },
+          select: { id: true },
+        })
+        .then(async (adminRoles) => {
+          if (adminRoles.length === 0) return [] as Array<{ email: string | null }>
+          const org = await prisma.organization.findUnique({
+            where: { id: organizationId },
+            select: { owner: { select: { email: true } } },
+          })
+          return org?.owner ? [{ email: org.owner.email }] : []
+        }),
+    ])
+    for (const a of assignments) {
+      const e = (a.user?.email || "").trim()
+      if (e && isEmailish(e)) set.add(e)
+    }
+    for (const u of orgOwners) {
+      const e = (u.email || "").trim()
+      if (e && isEmailish(e)) set.add(e)
+    }
+  }
+
+  return Array.from(set)
+}
+
+interface ScheduledActionResult {
+  type: string
+  ok: boolean
+  detail?: any
+  error?: string
+}
+
+export type WorkflowTriggerKind =
+  | "schedule"
+  | "manual"
+  | "record-create"
+  | "record-edit"
+  | "record-delete"
+
+/**
+ * Execute every action on a single rule without a triggering record. Used by
+ * the scheduler and the manual "Run now" admin endpoint. Always writes a
+ * WorkflowExecution row capturing per-action results.
+ */
+export async function runWorkflowRule(
+  ruleId: string,
+  trigger: WorkflowTriggerKind = "manual",
+): Promise<{
+  success: boolean
+  status: "success" | "partial" | "failed" | "skipped"
+  results: ScheduledActionResult[]
+  error?: string
+}> {
+  const startedAt = new Date()
+  const results: ScheduledActionResult[] = []
+  let recipientCount = 0
+  let topLevelError: string | undefined
+
+  let rule: any = null
+  try {
+    rule = await (prisma as any).workflowRule.findUnique({
+      where: { id: ruleId },
+      select: {
+        id: true,
+        name: true,
+        active: true,
+        moduleName: true,
+        organizationId: true,
+        instantActions: true,
+        scheduleTimezone: true,
+      },
+    })
+  } catch (err: any) {
+    topLevelError = err?.message || String(err)
+  }
+
+  if (!rule) {
+    console.warn(`[workflow] runWorkflowRule(${ruleId}) — rule not found`)
+    return { success: false, status: "failed", results, error: topLevelError || "rule not found" }
+  }
+  if (!rule.active) {
+    console.log(`[workflow] runWorkflowRule(${ruleId}) — rule inactive, skipping`)
+    return { success: true, status: "skipped", results, error: "rule inactive" }
+  }
+
+  const actions = normalizeActions(rule.instantActions)
+  console.log(
+    `[workflow] runWorkflowRule "${rule.name}" (${rule.id}) trigger=${trigger} → ${actions.length} action(s)`,
+  )
+
+  // Resolve org name once so {{Organization}} placeholders in templates can
+  // render. Falls back to the org id if the lookup fails — better than an
+  // empty signoff that says "Best regards, ".
+  let organizationName = ""
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: rule.organizationId },
+      select: { name: true },
+    })
+    organizationName = org?.name || ""
+  } catch {
+    /* leave empty */
+  }
+
+  // Lazy-load report-builder + email-secrets only when the relevant action
+  // type is actually present. Keeps the scheduler boot path light.
+  let buildReport: typeof import("@/lib/workflow/report-builder").buildReport | null = null
+  let decryptSmtp: typeof import("@/lib/workflow/email-secrets").decryptStoredSmtpPass | null = null
+
+  for (const act of actions) {
+    try {
+      // ── Email Notification (no record → no field placeholders) ──────────
+      if (act.type === "Email Notification") {
+        const recipients = await resolveStaticAndRoleEmails(
+          act.emailToStatic,
+          act.emailToRoleIds,
+          rule.organizationId,
+        )
+        if (recipients.length === 0) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: "no recipients resolved (no static addresses or role users)",
+          })
+          continue
+        }
+
+        if (!decryptSmtp) {
+          decryptSmtp = (await import("@/lib/workflow/email-secrets")).decryptStoredSmtpPass
+        }
+        const smtpUser = (act.emailSmtpUser || act.emailFrom || "").trim() || undefined
+        const smtpPass = decryptSmtp(act.emailSmtpPass) || undefined
+
+        // Per-template placeholder substitution. Each recipient gets the
+        // same body, but {{recipient}} resolves to that recipient's address
+        // so a personalised greeting still works.
+        const baseCtx = {
+          date: new Date().toISOString().slice(0, 10),
+          period: "",
+          moduleName: rule.moduleName,
+          ruleName: rule.name,
+          organizationName,
+        }
+        const subjectTpl = act.emailSubject || act.emailName || `Workflow: ${rule.name}`
+        const bodyTpl = act.emailBody || ""
+
+        let okCount = 0
+        for (const to of recipients) {
+          const ctx = { ...baseCtx, recipient: to }
+          const r = await sendWorkflowEmail({
+            to,
+            subject: renderMetaPlaceholders(subjectTpl, ctx),
+            body: renderMetaPlaceholders(bodyTpl, ctx),
+            isHtml: /<[a-z][\s\S]*>/i.test(bodyTpl),
+            from: act.emailFrom || undefined,
+            replyTo: act.emailReplyTo || undefined,
+            smtpUser,
+            smtpPass,
+          })
+          if (r.success) okCount++
+        }
+        recipientCount += okCount
+        results.push({
+          type: act.type,
+          ok: okCount > 0,
+          detail: { sent: okCount, total: recipients.length },
+        })
+        continue
+      }
+
+      // ── Report Export ───────────────────────────────────────────────────
+      if (act.type === "Report Export") {
+        if (!buildReport) {
+          buildReport = (await import("@/lib/workflow/report-builder")).buildReport
+        }
+        if (!decryptSmtp) {
+          decryptSmtp = (await import("@/lib/workflow/email-secrets")).decryptStoredSmtpPass
+        }
+
+        const recipients = await resolveStaticAndRoleEmails(
+          act.emailToStatic,
+          act.emailToRoleIds,
+          rule.organizationId,
+        )
+        if (recipients.length === 0) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: "no recipients resolved",
+          })
+          continue
+        }
+
+        const dataSource = (act.reportDataSource as any) || "form-module"
+        const period = (act.reportPeriod as any) || "daily"
+        const timezone = act.reportTimezone || rule.scheduleTimezone || null
+
+        let report: any
+        try {
+          report = await buildReport(
+            {
+              dataSource,
+              moduleName: act.reportModuleName || rule.moduleName,
+              period,
+              timezone,
+              fieldIds: act.reportFieldIds,
+              formIds: act.reportFormIds,
+              filters: act.reportFilters,
+              sortBy: act.reportSortBy,
+              sortDir: act.reportSortDir as any,
+              filenameTemplate: act.reportFilenameTemplate,
+              maxRows: act.reportMaxRows,
+              sheetName: act.reportSheetName,
+            },
+            rule.organizationId,
+          )
+        } catch (err: any) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: `report build failed: ${err?.message || err}`,
+          })
+          continue
+        }
+
+        const smtpUser = (act.emailSmtpUser || act.emailFrom || "").trim() || undefined
+        const smtpPass = decryptSmtp(act.emailSmtpPass) || undefined
+
+        // Resolve placeholders against the actual report context so
+        // {{from}}, {{to}}, {{date}}, {{period}}, {{module}}, {{Organization}}
+        // become their real values instead of literally appearing in the
+        // recipient's inbox. {{recipient}} is per-send.
+        const baseCtx = {
+          date: new Date().toISOString().slice(0, 10),
+          from: report.summary.from,
+          to: report.summary.to,
+          period,
+          moduleName: act.reportModuleName || rule.moduleName,
+          ruleName: rule.name,
+          organizationName,
+        }
+
+        const subjectTpl =
+          act.emailSubject ||
+          act.reportName ||
+          `[${rule.name}] ${report.summary.label}`
+        const bodyTpl = `${act.emailBody || ""}${report.htmlSummary || ""}`
+
+        let okCount = 0
+        for (const to of recipients) {
+          const ctx = { ...baseCtx, recipient: to }
+          const r = await sendWorkflowEmail({
+            to,
+            subject: renderMetaPlaceholders(subjectTpl, ctx),
+            body: renderMetaPlaceholders(bodyTpl, ctx),
+            isHtml: true,
+            from: act.emailFrom || undefined,
+            replyTo: act.emailReplyTo || undefined,
+            smtpUser,
+            smtpPass,
+            attachments: [
+              {
+                filename: report.filename,
+                content: report.buffer,
+                contentType: report.contentType,
+              },
+            ],
+          })
+          if (r.success) okCount++
+        }
+        recipientCount += okCount
+        results.push({
+          type: act.type,
+          ok: okCount > 0,
+          detail: {
+            sent: okCount,
+            total: recipients.length,
+            rowCount: report.summary.rowCount,
+            filename: report.filename,
+          },
+        })
+        continue
+      }
+
+      // ── System Notification (works without a record — no formId scope) ──
+      if (act.type === "System Notification") {
+        if (!act.notifyRoleIds || act.notifyRoleIds.length === 0) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: "no roles configured",
+          })
+          continue
+        }
+
+        const [assignments, orgOwners] = await Promise.all([
+          prisma.userUnitAssignment.findMany({
+            where: {
+              roleId: { in: act.notifyRoleIds },
+              user: { organizationId: rule.organizationId },
+            },
+            select: { userId: true },
+          }),
+          prisma.role
+            .findMany({
+              where: { id: { in: act.notifyRoleIds }, isAdmin: true },
+              select: { id: true },
+            })
+            .then(async (adminRoles) => {
+              if (adminRoles.length === 0) return [] as Array<{ id: string }>
+              const org = await prisma.organization.findUnique({
+                where: { id: rule.organizationId },
+                select: { ownerId: true },
+              })
+              return org?.ownerId ? [{ id: org.ownerId }] : []
+            }),
+        ])
+        const recipientIds = Array.from(
+          new Set([
+            ...assignments.map((a) => a.userId),
+            ...orgOwners.map((u) => u.id),
+          ]),
+        )
+        if (recipientIds.length === 0) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: "no users found for roles",
+          })
+          continue
+        }
+
+        const title = act.notifyTitle || act.notifyName || `Scheduled: ${rule.name}`
+        const body = act.notifyMessage || null
+
+        try {
+          await (prisma as any).notification.createMany({
+            data: recipientIds.map((uid: string) => ({
+              recipientId: uid,
+              organizationId: rule.organizationId,
+              title,
+              body,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              moduleName: rule.moduleName,
+            })),
+            skipDuplicates: true,
+          })
+        } catch (err: any) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: err?.message || String(err),
+          })
+          continue
+        }
+
+        recipientCount += recipientIds.length
+        results.push({
+          type: act.type,
+          ok: true,
+          detail: { recipients: recipientIds.length },
+        })
+        continue
+      }
+
+      // ── Function (no record context — script gets `triggerSource: "scheduled"`)
+      if (act.type === "Function") {
+        if (!act.functionId) {
+          results.push({ type: act.type, ok: false, error: "no functionId" })
+          continue
+        }
+        const fn = await prisma.crmFunction.findFirst({
+          where: { id: act.functionId, organizationId: rule.organizationId },
+          select: { id: true, script: true, displayName: true },
+        })
+        if (!fn || !fn.script) {
+          results.push({ type: act.type, ok: false, error: "function not found" })
+          continue
+        }
+        // executeFunction needs a userId. For scheduled runs we use the org
+        // owner — matches what the rule's createdBy would imply but is more
+        // resilient to a creator being deleted.
+        const org = await prisma.organization.findUnique({
+          where: { id: rule.organizationId },
+          select: { ownerId: true },
+        })
+        if (!org?.ownerId) {
+          results.push({
+            type: act.type,
+            ok: false,
+            error: "org has no owner — function actor unavailable",
+          })
+          continue
+        }
+        const r = await executeFunction({
+          script: fn.script,
+          organizationId: rule.organizationId,
+          userId: org.ownerId,
+          input: {
+            triggerSource: "scheduled",
+            ruleId: rule.id,
+            ruleName: rule.name,
+            moduleName: rule.moduleName,
+            trigger,
+          },
+          persistAs: { functionId: fn.id, trigger: "scheduled" },
+        })
+        results.push({
+          type: act.type,
+          ok: r.success,
+          error: r.success ? undefined : r.error,
+        })
+        continue
+      }
+
+      // ── Field Update has no meaning without a record — record skipped ──
+      if (act.type === "Field Update") {
+        results.push({
+          type: act.type,
+          ok: false,
+          error: "field update requires a triggering record — skipped on schedule",
+        })
+        continue
+      }
+
+      results.push({ type: act.type, ok: false, error: "unknown action type" })
+    } catch (err: any) {
+      results.push({
+        type: act.type,
+        ok: false,
+        error: err?.message || String(err),
+      })
+    }
+  }
+
+  const finishedAt = new Date()
+  const okCount = results.filter((r) => r.ok).length
+  const status: "success" | "partial" | "failed" =
+    okCount === results.length && results.length > 0
+      ? "success"
+      : okCount === 0
+        ? "failed"
+        : "partial"
+
+  try {
+    await (prisma as any).workflowExecution.create({
+      data: {
+        ruleId: rule.id,
+        organizationId: rule.organizationId,
+        trigger,
+        status: results.length === 0 ? "skipped" : status,
+        startedAt,
+        finishedAt,
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        actionsRun: results.length,
+        recipientCount: recipientCount || null,
+        error: topLevelError || results.find((r) => !r.ok)?.error || null,
+        details: results as any,
+      },
+    })
+  } catch (err) {
+    console.error(`[workflow] runWorkflowRule(${ruleId}) — execution-log write failed:`, err)
+  }
+
+  return {
+    success: status === "success" || status === "partial",
+    status: results.length === 0 ? "skipped" : status,
+    results,
   }
 }

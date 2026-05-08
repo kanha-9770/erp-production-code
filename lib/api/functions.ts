@@ -111,13 +111,70 @@ export const functionsApi = baseApi.injectEndpoints({
         error?: string
         durationMs: number
       }>,
-      { id?: string; script?: string; input?: any; timeoutMs?: number; maxOps?: number }
+      { id?: string; script?: string; input?: any; timeoutMs?: number; maxOps?: number; persist?: boolean }
     >({
       query: (body) => ({
         url: "/functions/execute",
         method: "POST",
         body,
       }),
+      // Test runs that persist invalidate the executions tag so the log
+      // viewer auto-refreshes after a manual test.
+      invalidatesTags: (_r, _e, arg) => (arg.persist ? ["FunctionExecutions"] : []),
+    }),
+
+    getFunctionExecutions: builder.query<
+      {
+        success: boolean
+        summary: {
+          total: number
+          byStatus: Record<string, number>
+          byTrigger: Record<string, number>
+          lastRunAt: string | null
+          totalDurationMs: number
+          avgDurationMs: number
+          windowFrom: string | null
+          windowTo: string | null
+        }
+        data: Array<{
+          id: string
+          functionId: string
+          trigger: string
+          status: string
+          startedAt: string
+          finishedAt: string | null
+          durationMs: number | null
+          input: any
+          result: any
+          logs: Array<{ level: string; args: any[]; ts: number }> | null
+          error: string | null
+          userId: string | null
+          function: { name: string; displayName: string; category: string } | null
+          user: { id: string; email: string; first_name: string | null; last_name: string | null } | null
+        }>
+        pagination: { limit: number; offset: number; total: number }
+      },
+      {
+        functionId?: string
+        status?: string
+        trigger?: string
+        since?: string
+        until?: string
+        limit?: number
+        offset?: number
+      } | void
+    >({
+      query: (params) => {
+        const sp = new URLSearchParams()
+        if (params) {
+          for (const [k, v] of Object.entries(params)) {
+            if (v !== undefined && v !== null && v !== "") sp.set(k, String(v))
+          }
+        }
+        const qs = sp.toString()
+        return `/functions/executions${qs ? `?${qs}` : ""}`
+      },
+      providesTags: ["FunctionExecutions"],
     }),
 
     // ── Bindings ──────────────────────────────────────────────────────────
@@ -257,6 +314,7 @@ export const {
   useUpdateFunctionMutation,
   useDeleteFunctionMutation,
   useExecuteFunctionMutation,
+  useGetFunctionExecutionsQuery,
   useListBindingsQuery,
   useListAllBindingsQuery,
   useGetBindingsTreeQuery,
