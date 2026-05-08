@@ -1,12 +1,12 @@
 'use client';
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { IndianRupee, Shield, Clock, Calculator, Info } from 'lucide-react';
+import { IndianRupee, Shield, Clock, Info } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export interface SalaryStructureConfig {
@@ -110,9 +110,9 @@ function NumericRow({
           step={step ?? 1}
           value={value}
           onChange={(e) => onChange(Number(e.target.value) || 0)}
-          className="h-9 w-32 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="h-9 w-full sm:w-32 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         />
-        {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
+        {suffix && <span className="text-xs text-muted-foreground whitespace-nowrap">{suffix}</span>}
       </div>
     </div>
   );
@@ -132,14 +132,6 @@ function ToggleRow({
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
-  );
-}
-
-function FormulaChip({ formula }: { formula: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-mono text-muted-foreground">
-      <Calculator className="h-3 w-3" /> {formula}
-    </span>
   );
 }
 
@@ -168,8 +160,22 @@ function SalaryPreview({
     ? Math.round(gross * statutory.esiEmployeePercent / 100)
     : 0;
   const pt = statutory.ptEnabled && gross >= statutory.ptThreshold ? statutory.ptAmount : 0;
+  const calculateTdsSlab = (annualGross: number) => {
+    let taxable = Math.max(0, annualGross - 75000); // Standard deduction
+    if (taxable <= 1200000) return 0; // Rebate
+    let tax = 0;
+    if (taxable > 2400000) { tax += (taxable - 2400000) * 0.30; taxable = 2400000; }
+    if (taxable > 2000000) { tax += (taxable - 2000000) * 0.25; taxable = 2000000; }
+    if (taxable > 1600000) { tax += (taxable - 1600000) * 0.20; taxable = 1600000; }
+    if (taxable > 1200000) { tax += (taxable - 1200000) * 0.15; taxable = 1200000; }
+    if (taxable > 800000)  { tax += (taxable - 800000)  * 0.10; taxable = 800000; }
+    if (taxable > 400000)  { tax += (taxable - 400000)  * 0.05; }
+    return tax;
+  };
   const tds = statutory.tdsEnabled
-    ? (statutory.tdsMode === 'flat' ? Math.round(gross * statutory.tdsFlatPercent / 100) : 0)
+    ? (statutory.tdsMode === 'flat' 
+         ? Math.round(gross * statutory.tdsFlatPercent / 100) 
+         : Math.round(calculateTdsSlab(gross * 12) / 12))
     : 0;
   const totalDed = pf + esi + pt + tds;
   const net = gross - totalDed;
@@ -242,91 +248,89 @@ export function SalaryStructureSection({
   const ctc = defaultCTC ?? 30000;
 
   return (
-    <Card className="border-border">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <IndianRupee className="h-5 w-5 text-primary" />
-          6. Salary Structure
-        </CardTitle>
-        <CardDescription>
-          Define how CTC is split into components. The formulas below are applied to
-          every employee's mapped salary during payroll generation.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Component Percentages
-          </p>
-
-          <NumericRow
-            label="Basic Pay"
-            description="% of CTC"
-            value={config.basicPercent}
-            onChange={(v) => u({ basicPercent: Math.min(100, Math.max(0, v)) })}
-            suffix="% of CTC"
-            min={0} max={100}
-          />
-          <div className="pl-2"><FormulaChip formula={`Basic = CTC × ${config.basicPercent}%`} /></div>
-
-          <NumericRow
-            label="HRA"
-            description="% of Basic (50% metro / 40% non-metro)"
-            value={config.hraPercent}
-            onChange={(v) => u({ hraPercent: Math.min(100, Math.max(0, v)) })}
-            suffix="% of Basic"
-            min={0} max={100}
-          />
-          <div className="pl-2"><FormulaChip formula={`HRA = Basic × ${config.hraPercent}%`} /></div>
-
-          <NumericRow
-            label="DA (Dearness Allowance)"
-            description="% of Basic — set to 0 if not applicable"
-            value={config.daPercent}
-            onChange={(v) => u({ daPercent: Math.min(100, Math.max(0, v)) })}
-            suffix="% of Basic"
-            min={0} max={100}
-          />
-
-          <div className="border-t border-border pt-3 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Fixed Allowances (₹/month)
-            </p>
-            <NumericRow label="Conveyance Allowance" value={config.conveyanceAllowance} onChange={(v) => u({ conveyanceAllowance: v })} suffix="₹/month" />
-            <NumericRow label="Medical Allowance" value={config.medicalAllowance} onChange={(v) => u({ medicalAllowance: v })} suffix="₹/month" />
-            <NumericRow label="LTA (per year)" value={config.lta} onChange={(v) => u({ lta: v })} suffix="₹/year" />
-            <ToggleRow label="Divide LTA monthly" description="Spread yearly LTA across 12 months" checked={config.ltaMonthly} onChange={(v) => u({ ltaMonthly: v })} />
+    <AccordionItem value="salary-structure" className="border rounded-lg bg-card overflow-hidden">
+      <AccordionTrigger className="px-5 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/20">
+        <div className="flex items-center gap-3">
+          <div className="rounded-md bg-primary/10 p-1.5">
+            <IndianRupee className="h-5 w-5 text-primary" />
           </div>
-
-          <div className="border-t border-border pt-3 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Special Allowance
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
-              <div>
-                <p className="text-sm font-medium text-foreground">Calculation Mode</p>
-                <p className="text-xs text-muted-foreground">Auto = CTC minus all other components</p>
-              </div>
-              <Select value={config.specialAllowanceMode} onValueChange={(v: 'auto' | 'manual') => u({ specialAllowanceMode: v })}>
-                <SelectTrigger className="h-9 w-48"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto (balancing figure)</SelectItem>
-                  <SelectItem value="manual">Manual (fixed amount)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {config.specialAllowanceMode === 'auto' && (
-              <div className="pl-2"><FormulaChip formula="Special = CTC − (Basic + HRA + DA + Fixed)" /></div>
-            )}
-            {config.specialAllowanceMode === 'manual' && (
-              <NumericRow label="Special Allowance Amount" value={config.specialAllowanceAmount} onChange={(v) => u({ specialAllowanceAmount: v })} suffix="₹/month" />
-            )}
+          <div className="text-left">
+            <div className="font-semibold text-base">Salary Structure</div>
+            <div className="text-xs text-muted-foreground font-normal">Define how CTC is split into base, HRA, and allowances.</div>
           </div>
         </div>
+      </AccordionTrigger>
+      <AccordionContent className="px-5 pb-5 pt-2">
+        <div className="space-y-5">
+          <div className="space-y-4 rounded-lg border border-border bg-muted/10 p-4 mt-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Component Percentages
+            </p>
 
-        <SalaryPreview ctc={ctc} salary={config} statutory={statutory} />
-      </CardContent>
-    </Card>
+            <NumericRow
+              label="Basic Pay"
+              description="Percentage of total CTC"
+              value={config.basicPercent}
+              onChange={(v) => u({ basicPercent: Math.min(100, Math.max(0, v)) })}
+              suffix="% of CTC"
+              min={0} max={100}
+            />
+
+            <NumericRow
+              label="HRA"
+              description="Percentage of Basic (50% metro / 40% non-metro)"
+              value={config.hraPercent}
+              onChange={(v) => u({ hraPercent: Math.min(100, Math.max(0, v)) })}
+              suffix="% of Basic"
+              min={0} max={100}
+            />
+
+            <NumericRow
+              label="DA (Dearness Allowance)"
+              description="Percentage of Basic (Set to 0 if not applicable)"
+              value={config.daPercent}
+              onChange={(v) => u({ daPercent: Math.min(100, Math.max(0, v)) })}
+              suffix="% of Basic"
+              min={0} max={100}
+            />
+
+            <div className="border-t border-border pt-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Fixed Allowances
+              </p>
+              <NumericRow label="Conveyance Allowance" value={config.conveyanceAllowance} onChange={(v) => u({ conveyanceAllowance: v })} suffix="₹ / month" />
+              <NumericRow label="Medical Allowance" value={config.medicalAllowance} onChange={(v) => u({ medicalAllowance: v })} suffix="₹ / month" />
+              <NumericRow label="Leave Travel Allowance (LTA)" value={config.lta} onChange={(v) => u({ lta: v })} suffix="₹ / year" />
+              <ToggleRow label="Divide LTA monthly" description="Spread yearly LTA across 12 months" checked={config.ltaMonthly} onChange={(v) => u({ ltaMonthly: v })} />
+            </div>
+
+            <div className="border-t border-border pt-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Special Allowance
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Calculation Mode</p>
+                  <p className="text-xs text-muted-foreground">How special allowance is computed</p>
+                </div>
+                <Select value={config.specialAllowanceMode} onValueChange={(v: 'auto' | 'manual') => u({ specialAllowanceMode: v })}>
+                  <SelectTrigger className="h-9 w-full sm:w-48"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto (Balancing figure)</SelectItem>
+                    <SelectItem value="manual">Manual (Fixed amount)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {config.specialAllowanceMode === 'manual' && (
+                <NumericRow label="Special Allowance Amount" value={config.specialAllowanceAmount} onChange={(v) => u({ specialAllowanceAmount: v })} suffix="₹ / month" />
+              )}
+            </div>
+          </div>
+
+          <SalaryPreview ctc={ctc} salary={config} statutory={statutory} />
+        </div>
+      </AccordionContent>
+    </AccordionItem>
   );
 }
 
@@ -341,119 +345,116 @@ export function StatutoryComplianceSection({
   const u = (patch: Partial<StatutoryConfig>) => onChange({ ...config, ...patch });
 
   return (
-    <Card className="border-border">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-primary" />
-          7. Statutory Compliance
-        </CardTitle>
-        <CardDescription>
-          Configure mandatory government deductions. These are applied automatically
-          during payroll generation based on each employee's salary components.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        {/* PF */}
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">EPF</Badge>
-              <p className="text-sm font-semibold text-foreground">Provident Fund</p>
-            </div>
-            <Switch checked={config.pfEnabled} onCheckedChange={(v) => u({ pfEnabled: v })} />
+    <AccordionItem value="statutory-compliance" className="border rounded-lg bg-card overflow-hidden">
+      <AccordionTrigger className="px-5 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/20">
+        <div className="flex items-center gap-3">
+          <div className="rounded-md bg-primary/10 p-1.5">
+            <Shield className="h-5 w-5 text-primary" />
           </div>
-          {config.pfEnabled && (
-            <div className="space-y-3 pl-1">
-              <NumericRow label="Employee PF %" description="Deducted from employee's Basic" value={config.pfPercent} onChange={(v) => u({ pfPercent: v })} suffix="% of Basic" step={0.5} />
-              <NumericRow label="Employer PF %" description="Company's contribution" value={config.employerPfPercent} onChange={(v) => u({ employerPfPercent: v })} suffix="% of Basic" step={0.5} />
-              <ToggleRow label="Apply PF ceiling" description="Cap the Basic amount on which PF is calculated" checked={config.pfCapEnabled} onChange={(v) => u({ pfCapEnabled: v })} />
-              {config.pfCapEnabled && (
-                <NumericRow label="PF ceiling amount" description="PF calculated on min(Basic, this cap)" value={config.pfCapAmount} onChange={(v) => u({ pfCapAmount: v })} suffix="₹" />
-              )}
-              <div className="pl-2"><FormulaChip formula={`PF = min(Basic, ${config.pfCapEnabled ? `₹${config.pfCapAmount}` : 'Basic'}) × ${config.pfPercent}%`} /></div>
-            </div>
-          )}
+          <div className="text-left">
+            <div className="font-semibold text-base">Statutory Compliance</div>
+            <div className="text-xs text-muted-foreground font-normal">Configure PF, ESI, Professional Tax, and TDS.</div>
+          </div>
         </div>
-
-        {/* ESI */}
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">ESIC</Badge>
-              <p className="text-sm font-semibold text-foreground">Employee State Insurance</p>
-            </div>
-            <Switch checked={config.esiEnabled} onCheckedChange={(v) => u({ esiEnabled: v })} />
-          </div>
-          {config.esiEnabled && (
-            <div className="space-y-3 pl-1">
-              <NumericRow label="ESI threshold" description="ESI applies only if gross ≤ this" value={config.esiThreshold} onChange={(v) => u({ esiThreshold: v })} suffix="₹" />
-              <NumericRow label="Employee ESI %" value={config.esiEmployeePercent} onChange={(v) => u({ esiEmployeePercent: v })} suffix="% of Gross" step={0.25} />
-              <NumericRow label="Employer ESI %" value={config.esiEmployerPercent} onChange={(v) => u({ esiEmployerPercent: v })} suffix="% of Gross" step={0.25} />
-              <div className="pl-2"><FormulaChip formula={`ESI = Gross × ${config.esiEmployeePercent}% (if Gross ≤ ₹${config.esiThreshold})`} /></div>
-            </div>
-          )}
-        </div>
-
-        {/* Professional Tax */}
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">PT</Badge>
-              <p className="text-sm font-semibold text-foreground">Professional Tax</p>
-            </div>
-            <Switch checked={config.ptEnabled} onCheckedChange={(v) => u({ ptEnabled: v })} />
-          </div>
-          {config.ptEnabled && (
-            <div className="space-y-3 pl-1">
-              <NumericRow label="PT amount" description="Fixed monthly deduction" value={config.ptAmount} onChange={(v) => u({ ptAmount: v })} suffix="₹/month" />
-              <NumericRow label="PT threshold" description="PT applies only if gross ≥ this" value={config.ptThreshold} onChange={(v) => u({ ptThreshold: v })} suffix="₹" />
-              <div className="pl-2"><FormulaChip formula={`PT = ₹${config.ptAmount} (if Gross ≥ ₹${config.ptThreshold})`} /></div>
-            </div>
-          )}
-        </div>
-
-        {/* TDS */}
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">TDS</Badge>
-              <p className="text-sm font-semibold text-foreground">Tax Deducted at Source</p>
-            </div>
-            <Switch checked={config.tdsEnabled} onCheckedChange={(v) => u({ tdsEnabled: v })} />
-          </div>
-          {config.tdsEnabled && (
-            <div className="space-y-3 pl-1">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
-                <div>
-                  <p className="text-sm font-medium text-foreground">TDS Mode</p>
-                  <p className="text-xs text-muted-foreground">Flat % or income tax slabs</p>
-                </div>
-                <Select value={config.tdsMode} onValueChange={(v: 'flat' | 'slab') => u({ tdsMode: v })}>
-                  <SelectTrigger className="h-9 w-48"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="flat">Flat percentage</SelectItem>
-                    <SelectItem value="slab">Slab-based (New Regime)</SelectItem>
-                  </SelectContent>
-                </Select>
+      </AccordionTrigger>
+      <AccordionContent className="px-5 pb-5 pt-2">
+        <div className="space-y-4 mt-2">
+          {/* PF */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">EPF</Badge>
+                <p className="text-sm font-semibold text-foreground">Provident Fund</p>
               </div>
-              {config.tdsMode === 'flat' && (
-                <>
-                  <NumericRow label="TDS flat rate" value={config.tdsFlatPercent} onChange={(v) => u({ tdsFlatPercent: v })} suffix="% of Gross" step={0.5} />
-                  <div className="pl-2"><FormulaChip formula={`TDS = Gross × ${config.tdsFlatPercent}%`} /></div>
-                </>
-              )}
-              {config.tdsMode === 'slab' && (
-                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  <p className="font-medium">New Tax Regime (FY 2025–26)</p>
-                  <p>0–₹4L: Nil · ₹4–8L: 5% · ₹8–12L: 10% · ₹12–16L: 15% · ₹16–20L: 20% · ₹20–24L: 25% · &gt;₹24L: 30%</p>
-                  <p className="mt-1 text-[10px]">Monthly TDS is auto-computed as annual projected tax ÷ 12</p>
-                </div>
-              )}
+              <Switch checked={config.pfEnabled} onCheckedChange={(v) => u({ pfEnabled: v })} />
             </div>
-          )}
+            {config.pfEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <NumericRow label="Employee PF %" description="Deducted from employee's Basic" value={config.pfPercent} onChange={(v) => u({ pfPercent: v })} suffix="% of Basic" step={0.5} />
+                <NumericRow label="Employer PF %" description="Company's contribution" value={config.employerPfPercent} onChange={(v) => u({ employerPfPercent: v })} suffix="% of Basic" step={0.5} />
+                <ToggleRow label="Apply PF ceiling" description="Cap the Basic amount on which PF is calculated" checked={config.pfCapEnabled} onChange={(v) => u({ pfCapEnabled: v })} />
+                {config.pfCapEnabled && (
+                  <NumericRow label="PF ceiling amount" description="Maximum Basic pay subject to PF" value={config.pfCapAmount} onChange={(v) => u({ pfCapAmount: v })} suffix="₹" />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ESI */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">ESIC</Badge>
+                <p className="text-sm font-semibold text-foreground">Employee State Insurance</p>
+              </div>
+              <Switch checked={config.esiEnabled} onCheckedChange={(v) => u({ esiEnabled: v })} />
+            </div>
+            {config.esiEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <NumericRow label="ESI threshold" description="ESI applies only if gross ≤ this" value={config.esiThreshold} onChange={(v) => u({ esiThreshold: v })} suffix="₹" />
+                <NumericRow label="Employee ESI %" value={config.esiEmployeePercent} onChange={(v) => u({ esiEmployeePercent: v })} suffix="% of Gross" step={0.25} />
+                <NumericRow label="Employer ESI %" value={config.esiEmployerPercent} onChange={(v) => u({ esiEmployerPercent: v })} suffix="% of Gross" step={0.25} />
+              </div>
+            )}
+          </div>
+
+          {/* Professional Tax */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">PT</Badge>
+                <p className="text-sm font-semibold text-foreground">Professional Tax</p>
+              </div>
+              <Switch checked={config.ptEnabled} onCheckedChange={(v) => u({ ptEnabled: v })} />
+            </div>
+            {config.ptEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <NumericRow label="PT amount" description="Fixed monthly deduction" value={config.ptAmount} onChange={(v) => u({ ptAmount: v })} suffix="₹ / month" />
+                <NumericRow label="PT threshold" description="PT applies only if gross ≥ this" value={config.ptThreshold} onChange={(v) => u({ ptThreshold: v })} suffix="₹" />
+              </div>
+            )}
+          </div>
+
+          {/* TDS */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">TDS</Badge>
+                <p className="text-sm font-semibold text-foreground">Tax Deducted at Source</p>
+              </div>
+              <Switch checked={config.tdsEnabled} onCheckedChange={(v) => u({ tdsEnabled: v })} />
+            </div>
+            {config.tdsEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">TDS Mode</p>
+                    <p className="text-xs text-muted-foreground">Flat % or income tax slabs</p>
+                  </div>
+                  <Select value={config.tdsMode} onValueChange={(v: 'flat' | 'slab') => u({ tdsMode: v })}>
+                    <SelectTrigger className="h-9 w-full sm:w-48"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flat">Flat percentage</SelectItem>
+                      <SelectItem value="slab">Slab-based (New Regime)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {config.tdsMode === 'flat' && (
+                  <NumericRow label="TDS flat rate" value={config.tdsFlatPercent} onChange={(v) => u({ tdsFlatPercent: v })} suffix="% of Gross" step={0.5} />
+                )}
+                {config.tdsMode === 'slab' && (
+                  <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-2">
+                    <p className="font-medium text-foreground">New Tax Regime (FY 2025–26)</p>
+                    <p className="mt-1 leading-relaxed">0–₹4L: Nil · ₹4–8L: 5% · ₹8–12L: 10% · ₹12–16L: 15% · ₹16–20L: 20% · ₹20–24L: 25% · &gt;₹24L: 30%</p>
+                    <p className="mt-1 text-[10px] opacity-80">Monthly TDS is auto-computed as annual projected tax ÷ 12</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      </AccordionContent>
+    </AccordionItem>
   );
 }
 
@@ -468,36 +469,33 @@ export function OvertimePolicySection({
   const u = (patch: Partial<OvertimeConfig>) => onChange({ ...config, ...patch });
 
   return (
-    <Card className="border-border">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Clock className="h-5 w-5 text-primary" />
-          8. Overtime Policy{' '}
-          <Badge variant="outline" className="ml-2 text-xs">Optional</Badge>
-        </CardTitle>
-        <CardDescription>
-          Configure overtime calculation rules. When enabled, hours worked beyond the
-          daily threshold are paid at the configured multiplier of the hourly rate.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+    <AccordionItem value="overtime-policy" className="border rounded-lg bg-card overflow-hidden">
+      <AccordionTrigger className="px-5 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/20">
+        <div className="flex items-center gap-3">
+          <div className="rounded-md bg-primary/10 p-1.5">
+            <Clock className="h-5 w-5 text-primary" />
+          </div>
+          <div className="text-left">
+            <div className="font-semibold text-base">Overtime Policy <Badge variant="secondary" className="ml-2 font-normal text-[10px]">Optional</Badge></div>
+            <div className="text-xs text-muted-foreground font-normal">Configure multipliers and limits for overtime pay.</div>
+          </div>
+        </div>
+      </AccordionTrigger>
+      <AccordionContent className="px-5 pb-5 pt-2">
+        <div className="space-y-4 rounded-lg border border-border bg-muted/10 p-4 mt-2">
           <ToggleRow label="Enable Overtime" description="Calculate and pay overtime in payroll" checked={config.enabled} onChange={(v) => u({ enabled: v })} />
 
           {config.enabled && (
-            <div className="space-y-3 border-t border-border pt-3">
-              <NumericRow label="Weekday threshold" description="OT starts after this many hours/day" value={config.weekdayThresholdHours} onChange={(v) => u({ weekdayThresholdHours: v })} suffix="hours/day" />
+            <div className="space-y-3 border-t border-border pt-4">
+              <NumericRow label="Weekday threshold" description="OT starts after this many hours/day" value={config.weekdayThresholdHours} onChange={(v) => u({ weekdayThresholdHours: v })} suffix="hours / day" />
               <NumericRow label="Weekday OT rate" description="Multiplier of hourly rate" value={config.rateMultiplier} onChange={(v) => u({ rateMultiplier: v })} suffix="× hourly rate" step={0.25} />
               <NumericRow label="Weekend OT rate" value={config.weekendMultiplier} onChange={(v) => u({ weekendMultiplier: v })} suffix="× hourly rate" step={0.25} />
               <NumericRow label="Holiday OT rate" value={config.holidayMultiplier} onChange={(v) => u({ holidayMultiplier: v })} suffix="× hourly rate" step={0.25} />
               <NumericRow label="Monthly OT cap" description="Maximum overtime hours per month" value={config.maxOvertimeHoursPerMonth} onChange={(v) => u({ maxOvertimeHoursPerMonth: v })} suffix="hours" />
-              <div className="pl-2 space-y-1">
-                <FormulaChip formula={`OT Pay = OT_Hours × (Basic / (Days × ${config.weekdayThresholdHours})) × ${config.rateMultiplier}×`} />
-              </div>
             </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </AccordionContent>
+    </AccordionItem>
   );
 }
