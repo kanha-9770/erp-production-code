@@ -48,6 +48,9 @@ interface Props {
   streaming: boolean;
   onClose: () => void;
   onPickFollowUp: (text: string) => void;
+  // When true (viewport < md), the panel renders as a fixed-position
+  // slide-over drawer pinned to the right edge instead of an inline column.
+  isMobile?: boolean;
 }
 
 interface ExtractedInsights {
@@ -130,6 +133,7 @@ function InsightsPanelImpl({
   streaming,
   onClose,
   onPickFollowUp,
+  isMobile = false,
 }: Props) {
   const [busyExport, setBusyExport] = useState(false);
 
@@ -227,7 +231,14 @@ function InsightsPanelImpl({
   };
 
   return (
-    <aside className="relative flex flex-col w-[340px] xl:w-[380px] shrink-0 h-full border-l border-border/70 bg-gradient-to-b from-background via-background to-muted/20">
+    <aside
+      className={cn(
+        "flex flex-col h-full border-l border-border/70 bg-gradient-to-b from-background via-background to-muted/20",
+        isMobile
+          ? "fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] shadow-2xl shrink-0"
+          : "relative w-[340px] xl:w-[380px] shrink-0"
+      )}
+    >
       {/* Header */}
       <div className="relative px-4 py-3 border-b border-border/70">
         <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />

@@ -150,12 +150,14 @@ export default function ProviderCard({
 
   return (
     <Card className={provider.isDefault ? "border-primary" : ""}>
-      <CardContent className="p-5 space-y-5">
+      <CardContent className="p-4 sm:p-5 space-y-5">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold">{provider.displayName}</h3>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base sm:text-lg font-semibold break-words">
+                {provider.displayName}
+              </h3>
               {provider.isDefault && (
                 <Badge className="bg-primary/10 text-primary border-primary/30">
                   Default
@@ -163,11 +165,11 @@ export default function ProviderCard({
               )}
               {!provider.isActive && <Badge variant="secondary">Inactive</Badge>}
             </div>
-            <p className="text-xs text-muted-foreground font-mono">
+            <p className="text-xs text-muted-foreground font-mono break-all">
               {provider.baseUrl}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 -mx-1 sm:mx-0">
             <Button
               variant="ghost"
               size="sm"
@@ -201,7 +203,7 @@ export default function ProviderCard({
         {/* Models section */}
         <div className="space-y-3">
           <div className="flex items-end gap-3 flex-wrap">
-            <div className="flex-1 min-w-[220px]">
+            <div className="flex-1 min-w-0 sm:min-w-[220px] basis-full sm:basis-auto">
               <Label className="text-xs">Default model</Label>
               <Select
                 value={provider.defaultModel}

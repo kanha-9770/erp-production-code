@@ -40,6 +40,11 @@ interface Props {
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string, isPinned: boolean) => void;
+  // When true (viewport < md), the sidebar renders as a fixed-position
+  // slide-over drawer instead of an inline column. The resize handle is
+  // hidden in this mode and a close button replaces it.
+  isMobile?: boolean;
+  onCloseMobile?: () => void;
 }
 
 const BUCKET_ORDER = [
@@ -88,6 +93,8 @@ export default function ConversationSidebar({
   onRename,
   onDelete,
   onTogglePin,
+  isMobile = false,
+  onCloseMobile,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -214,32 +221,49 @@ export default function ConversationSidebar({
 
   return (
     <aside
-      className="relative flex flex-col bg-sidebar text-sidebar-foreground shrink-0 h-full border-r border-sidebar-border"
-      style={{ width: `${width}px` }}
+      className={cn(
+        "flex flex-col bg-sidebar text-sidebar-foreground h-full border-r border-sidebar-border",
+        isMobile
+          ? "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-[320px] shadow-2xl shrink-0"
+          : "relative shrink-0"
+      )}
+      style={!isMobile ? { width: `${width}px` } : undefined}
     >
-      {/* Resize handle */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        onMouseDown={handleResizeMouseDown}
-        onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
-        className={cn(
-          "absolute top-0 right-0 h-full w-1 -mr-0.5 cursor-col-resize z-10 transition-colors",
-          "hover:bg-primary/30",
-          dragging && "bg-primary/50"
-        )}
-        title="Drag to resize · double-click to reset"
-      />
+      {/* Resize handle — desktop only; the drawer can't be resized on mobile. */}
+      {!isMobile && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onMouseDown={handleResizeMouseDown}
+          onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
+          className={cn(
+            "absolute top-0 right-0 h-full w-1 -mr-0.5 cursor-col-resize z-10 transition-colors",
+            "hover:bg-primary/30",
+            dragging && "bg-primary/50"
+          )}
+          title="Drag to resize · double-click to reset"
+        />
+      )}
 
       {/* Brand row */}
       <div className="px-3 pt-4 pb-2 flex items-center gap-2">
         <div className="h-7 w-7 rounded-md bg-primary/90 flex items-center justify-center shrink-0">
           <MessageSquareText className="h-4 w-4 text-primary-foreground" />
         </div>
-        <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+        <span className="text-sm font-semibold tracking-tight text-sidebar-foreground flex-1">
           Assistant
         </span>
+        {isMobile && onCloseMobile && (
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            aria-label="Close sidebar"
+            className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* New chat */}

@@ -292,25 +292,35 @@ export default function AIConfigClient() {
   );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Sparkles className="h-6 w-6 text-primary" />
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-semibold flex items-center gap-2">
+            <Sparkles className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
             AI Providers
           </h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
             Configure cloud LLM providers, rotate multiple API keys per provider, and pick
             which model the chatbot uses. All providers must expose an OpenAI-compatible{" "}
-            <code className="text-xs">POST /v1/chat/completions</code> endpoint.
+            <code className="text-xs break-all">POST /v1/chat/completions</code> endpoint.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
+        <div className="flex gap-2 shrink-0 sm:self-start">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={reload}
+            disabled={loading}
+            className="flex-1 sm:flex-none"
+          >
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="flex-1 sm:flex-none"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Add provider
           </Button>

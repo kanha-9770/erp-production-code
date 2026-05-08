@@ -660,9 +660,11 @@ export function AttendanceWidget({
         <div className={className}>{pill}</div>
       </PopoverTrigger>
       <PopoverContent
-        side="right"
-        align="end"
-        className="w-80 p-0 overflow-hidden"
+        side="top"
+        align="start"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-[min(20rem,calc(100vw-1.5rem))] p-0 overflow-hidden"
       >
         <div className={cn("px-4 py-3 border-b", palette.headerBg)}>
           <div className="flex items-center gap-2">

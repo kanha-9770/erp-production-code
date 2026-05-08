@@ -251,7 +251,13 @@ export default function ChatbotUI() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null
   );
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Default-closed on mobile so the chat area gets the full viewport. Users
+  // toggle the sidebar via the header hamburger; on mobile it slides over
+  // the chat instead of stealing horizontal space.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth >= 768;
+  });
   // Insights panel defaults to open on wide screens only. Below ~1280px the
   // three-column layout becomes cramped, so we start collapsed and let the
   // user toggle it back on via the header button.
@@ -259,6 +265,21 @@ export default function ChatbotUI() {
     if (typeof window === "undefined") return true;
     return window.innerWidth >= 1280;
   });
+  // Track viewport once and on resize so we can render the side panels as
+  // overlay drawers below md (768px) and inline columns at md+.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth < 768);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  // On mobile only one drawer at a time — opening one auto-closes the other
+  // so the user is never left with two stacked overlays.
+  useEffect(() => {
+    if (!isMobile) return;
+    if (sidebarOpen && insightsOpen) setInsightsOpen(false);
+  }, [isMobile, sidebarOpen, insightsOpen]);
 
   // Chat state
   const [messages, setMessages] = useState<LocalMessage[]>([]);
@@ -1133,18 +1154,35 @@ export default function ChatbotUI() {
   }, []);
 
   return (
-    <div className="flex h-full overflow-hidden bg-background">
+    <div className="flex h-full overflow-hidden bg-background relative">
       {sidebarOpen && (
-        <ConversationSidebar
-          conversations={conversations}
-          activeId={activeConversationId}
-          loading={loadingConversations}
-          onSelect={openConversation}
-          onNew={newConversation}
-          onRename={renameConversation}
-          onDelete={deleteConversation}
-          onTogglePin={togglePin}
-        />
+        <>
+          {isMobile && (
+            <div
+              className="fixed inset-0 z-30 bg-black/50 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden
+            />
+          )}
+          <ConversationSidebar
+            conversations={conversations}
+            activeId={activeConversationId}
+            loading={loadingConversations}
+            onSelect={(id) => {
+              openConversation(id);
+              if (isMobile) setSidebarOpen(false);
+            }}
+            onNew={() => {
+              newConversation();
+              if (isMobile) setSidebarOpen(false);
+            }}
+            onRename={renameConversation}
+            onDelete={deleteConversation}
+            onTogglePin={togglePin}
+            isMobile={isMobile}
+            onCloseMobile={() => setSidebarOpen(false)}
+          />
+        </>
       )}
 
       <div className="flex-1 flex flex-col min-w-0 h-full relative bg-background">
@@ -1180,13 +1218,17 @@ export default function ChatbotUI() {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          {/* Provider/Model selects — hidden below sm to keep the header in a
+              single row on mobile. The settings popover surfaces the same
+              context (system prompt + temperature) and the underlying state
+              still drives requests, so nothing is lost on small screens. */}
+          <div className="hidden sm:flex items-center gap-1.5">
             <Select
               value={providerId}
               onValueChange={setProviderId}
               disabled={streaming || providers.length === 0}
             >
-              <SelectTrigger className="h-8 w-[140px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+              <SelectTrigger className="h-8 w-[120px] lg:w-[140px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
@@ -1199,13 +1241,13 @@ export default function ChatbotUI() {
             </Select>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="hidden sm:flex items-center gap-1.5">
             <Select
               value={model}
               onValueChange={setModel}
               disabled={streaming || modelOptions.length === 0}
             >
-              <SelectTrigger className="h-8 w-[170px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+              <SelectTrigger className="h-8 w-[140px] lg:w-[170px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
                 <SelectValue placeholder="Model" />
               </SelectTrigger>
               <SelectContent>
@@ -1293,7 +1335,11 @@ export default function ChatbotUI() {
                 <Settings2 className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-96" align="end">
+            <PopoverContent
+              className="w-[min(24rem,calc(100vw-1.5rem))]"
+              align="end"
+              collisionPadding={12}
+            >
               <div className="space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -1623,19 +1669,32 @@ export default function ChatbotUI() {
       </div>
 
       {insightsOpen && providers.length > 0 && !providerError && (
-        <InsightsPanel
-          messages={messages}
-          activeConversationTitle={
-            activeConversationId
-              ? activeConversation?.title ?? "Analysis"
-              : "New analysis"
-          }
-          providerLabel={activeProvider?.displayName}
-          modelLabel={model}
-          streaming={streaming}
-          onClose={() => setInsightsOpen(false)}
-          onPickFollowUp={(text) => sendMessage(text)}
-        />
+        <>
+          {isMobile && (
+            <div
+              className="fixed inset-0 z-30 bg-black/50 md:hidden"
+              onClick={() => setInsightsOpen(false)}
+              aria-hidden
+            />
+          )}
+          <InsightsPanel
+            messages={messages}
+            activeConversationTitle={
+              activeConversationId
+                ? activeConversation?.title ?? "Analysis"
+                : "New analysis"
+            }
+            providerLabel={activeProvider?.displayName}
+            modelLabel={model}
+            streaming={streaming}
+            onClose={() => setInsightsOpen(false)}
+            onPickFollowUp={(text) => {
+              sendMessage(text);
+              if (isMobile) setInsightsOpen(false);
+            }}
+            isMobile={isMobile}
+          />
+        </>
       )}
     </div>
   );
