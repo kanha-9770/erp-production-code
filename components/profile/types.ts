@@ -74,3 +74,4 @@ export type ProfileTabId =
   | "notifications"
   | "preferences"
   | "security"
+  | "organization"

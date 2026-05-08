@@ -217,6 +217,11 @@ model UserSession {
 model Organization {
   id                String             @id @default(cuid())
   name              String
+  // ISO 4217 currency code that the whole org bills/pays in. Applied
+  // app-wide via the `lib/org-currency` helpers — payroll, salary
+  // fields, currency form fields, etc. Only org admins/owners can
+  // change it (PUT /api/organization/settings).
+  currency          String             @default("USD")
   ownerId           String?            @unique @map("owner_id")
   owner             User?              @relation("Owner", fields: [ownerId], references: [id], onDelete: SetNull)
   users             User[]             @relation("UserOrganization")

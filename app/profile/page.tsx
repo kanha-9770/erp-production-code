@@ -33,6 +33,7 @@ import {
   Shield,
   LogOut,
   ChevronRight,
+  Building2,
 } from "lucide-react"
 import { useGetUserQuery, useLogoutMutation } from "@/lib/api/auth"
 import OverviewTab from "@/components/profile/OverviewTab"
@@ -41,15 +42,22 @@ import EmploymentTab from "@/components/profile/EmploymentTab"
 import NotificationsTab from "@/components/profile/NotificationsTab"
 import PreferencesTab from "@/components/profile/PreferencesTab"
 import SecurityTab from "@/components/profile/SecurityTab"
+import OrganizationTab from "@/components/profile/OrganizationTab"
 import type { ProfileTabId, ProfileUser } from "@/components/profile/types"
 import { displayName, initialsOf } from "@/components/profile/profile-utils"
 
-const TABS: Array<{
+interface TabDef {
   id: ProfileTabId
   label: string
   icon: React.ReactNode
   description: string
-}> = [
+  // When true, the tab only renders for org admins / owners. The
+  // sidebar entry is hidden for everyone else, and a deep-link to the
+  // hash silently falls back to the overview tab.
+  adminOnly?: boolean
+}
+
+const TABS: Array<TabDef> = [
   {
     id: "overview",
     label: "Overview",
@@ -86,9 +94,20 @@ const TABS: Array<{
     icon: <Shield className="h-4 w-4" />,
     description: "Password, sessions, activity",
   },
+  {
+    id: "organization",
+    label: "Organization",
+    icon: <Building2 className="h-4 w-4" />,
+    description: "Currency, org-wide settings",
+    adminOnly: true,
+  },
 ]
 
-const VALID_TABS = new Set<ProfileTabId>(TABS.map((t) => t.id))
+// Used by the hash-routing effect which runs before user data is loaded.
+// Admin gating is enforced separately at render time, so a non-admin
+// landing on /profile#organization will momentarily set tab state but
+// the post-load re-validation below snaps them back to overview.
+const ALL_TAB_IDS = new Set<ProfileTabId>(TABS.map((t) => t.id))
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -101,7 +120,7 @@ export default function ProfilePage() {
   useEffect(() => {
     const sync = () => {
       const h = (window.location.hash || "").replace(/^#/, "") as ProfileTabId
-      setTab(VALID_TABS.has(h) ? h : "overview")
+      setTab(ALL_TAB_IDS.has(h) ? h : "overview")
     }
     sync()
     window.addEventListener("hashchange", sync)
@@ -136,7 +155,34 @@ export default function ProfilePage() {
   }
 
   const user = data?.user as ProfileUser | undefined
-  const activeTab = useMemo(() => TABS.find((t) => t.id === tab) ?? TABS[0], [tab])
+
+  // Admin status — owners count as admins for tab visibility.
+  const isAdmin = !!user?.isAdmin || !!user?.isOrgOwner
+  const visibleTabs = useMemo(
+    () => TABS.filter((t) => !t.adminOnly || isAdmin),
+    [isAdmin],
+  )
+  const visibleTabIds = useMemo(
+    () => new Set(visibleTabs.map((t) => t.id)),
+    [visibleTabs],
+  )
+
+  // If a non-admin somehow lands on an admin-only tab (deep-link, stale
+  // hash, role demotion mid-session), snap them back to a tab they can
+  // actually see. Runs once per relevant change.
+  useEffect(() => {
+    if (user && !visibleTabIds.has(tab)) {
+      setTab("overview")
+      if (typeof window !== "undefined" && window.location.hash) {
+        window.history.replaceState({}, "", window.location.pathname)
+      }
+    }
+  }, [tab, visibleTabIds, user])
+
+  const activeTab = useMemo(
+    () => visibleTabs.find((t) => t.id === tab) ?? TABS[0],
+    [tab, visibleTabs],
+  )
 
   if (isLoading || !user) {
     return <LoadingShell />
@@ -155,7 +201,7 @@ export default function ProfilePage() {
         {/* Mobile tab strip — sticky so navigation stays available while scrolling. */}
         <div className="lg:hidden sticky top-0 -mx-4 px-4 py-2 bg-background/95 backdrop-blur border-b z-10 mt-4">
           <nav className="flex gap-1 overflow-x-auto scrollbar-hide">
-            {TABS.map((t) => (
+            {visibleTabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -178,7 +224,7 @@ export default function ProfilePage() {
           {/* Sidebar */}
           <aside className="hidden lg:block">
             <nav className="sticky top-6 space-y-1">
-              {TABS.map((t) => (
+              {visibleTabs.map((t) => (
                 <button
                   key={t.id}
                   type="button"
@@ -231,6 +277,9 @@ export default function ProfilePage() {
               {tab === "notifications" && <NotificationsTab />}
               {tab === "preferences" && <PreferencesTab />}
               {tab === "security" && <SecurityTab />}
+              {tab === "organization" && isAdmin && (
+                <OrganizationTab user={user} />
+              )}
             </div>
           </main>
         </div>

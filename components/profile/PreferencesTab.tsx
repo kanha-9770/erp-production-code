@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
+import { notifyTimezoneChanged } from "@/lib/user-timezone"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -281,6 +282,10 @@ export default function PreferencesTab() {
       }).catch(() => null)
       setSaved(draft)
       setSavedTheme(themeChoice)
+      // Broadcast the new timezone to any other component that's reading
+      // it via useUserTimezone() — attendance tables, the widget popover,
+      // etc. — so they re-render with the new zone immediately.
+      notifyTimezoneChanged(draft.timezone)
       toast({ title: "Preferences saved" })
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message, variant: "destructive" })

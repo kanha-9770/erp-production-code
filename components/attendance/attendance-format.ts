@@ -2,6 +2,11 @@
 // pages. Kept tiny and pure so they're cheap to call inside table cells
 // without spinning up extra deps.
 
+import {
+  formatDateKeyInUserZone,
+  formatTimeInUserZone,
+} from "@/lib/user-timezone";
+
 export function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -20,28 +25,16 @@ export function formatHMS(seconds: number): string {
 }
 
 export function formatDateLong(yyyymmdd: string): string {
-  const [y, m, d] = yyyymmdd.split("-").map(Number);
-  if (!y || !m || !d) return yyyymmdd;
-  // Construct a Date in local time, then format. We don't care about the
-  // exact wall-clock tz here — only the day label, which Date renders
-  // consistently in en-IN / en-US locales.
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  // Date keys are calendar days, not timestamps — render them in the
+  // user's chosen zone so the weekday label matches their local calendar.
+  return formatDateKeyInUserZone(yyyymmdd);
 }
 
 export function formatTimeShort(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // ISO timestamps stored on attendance rows are absolute moments. Format
+  // them in the user's chosen timezone so check-in/check-out clocks
+  // match the time the user actually sees on their wall.
+  return formatTimeInUserZone(iso);
 }
 
 export function workedMinutesFor(record: {
