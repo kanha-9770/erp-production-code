@@ -173,7 +173,7 @@ export function SettingsPage() {
   }, [searchQuery, isPermitted])
 
   return (
-    <div className="h-full bg-[oklch(0.96_0.005_250)]">
+    <div className="h-full bg-muted/30 dark:bg-gray-950">
       {/* Header - made responsive */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-4 bg-background border-b gap-4">
         <div className="flex items-center gap-4">

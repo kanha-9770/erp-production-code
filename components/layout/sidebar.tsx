@@ -501,8 +501,8 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
           "outline-none focus-visible:ring-2 focus-visible:ring-[#5a4d96]/40",
           isDeep ? "gap-1.5" : "gap-2",
           isActive
-            ? "bg-[#5a4d96]/10 text-[#5a4d96] font-semibold"
-            : "text-gray-700 hover:bg-white/70 hover:text-gray-900",
+            ? "bg-[#5a4d96]/10 dark:bg-[#5a4d96]/20 text-[#5a4d96] dark:text-[#b8aef0] font-semibold"
+            : "text-gray-700 dark:text-gray-300 hover:bg-white/70 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-gray-100",
         )}
         style={{ paddingLeft: indent, paddingRight: 8 }}
         title={undefined /* handled by Tooltip wrapper below */}
@@ -522,7 +522,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         <IconComponent
           className={cn(
             "flex-shrink-0 transition-colors",
-            isActive ? "text-[#5a4d96]" : "text-gray-500 group-hover:text-gray-700",
+            isActive ? "text-[#5a4d96] dark:text-[#b8aef0]" : "text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200",
           )}
           style={{ height: iconSize, width: iconSize }}
         />
@@ -536,7 +536,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
               "flex-shrink-0 transition-transform duration-200",
               isDeep ? "h-3 w-3" : "h-3.5 w-3.5",
               isExpanded && "rotate-90",
-              isActive ? "text-[#5a4d96]" : "text-gray-400 group-hover:text-gray-600",
+              isActive ? "text-[#5a4d96] dark:text-[#b8aef0]" : "text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300",
             )}
           />
         )}
@@ -761,7 +761,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex h-full md:h-screen bg-gray-200 text-black relative">
+      <div className="flex h-full md:h-screen bg-gray-200 dark:bg-gray-900 text-black dark:text-gray-100 relative">
         {/* ── Icon rail ───────────────────────────────────────────── */}
         <div
           className="flex w-12 flex-col items-center gap-1.5 py-3"
@@ -893,7 +893,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
             className="flex items-center justify-between gap-2 px-4 pt-4 pb-3"
           >
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-[15px] font-semibold tracking-tight text-gray-900">
+              <h2 className="truncate text-[15px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
                 {viewTitle}
               </h2>
             </div>
@@ -903,7 +903,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => setIsCreateDialogOpen(true)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-black/5 hover:text-gray-900 transition-colors disabled:opacity-40"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-100 transition-colors disabled:opacity-40"
                       disabled={isUserLoading}
                       aria-label="Create new module"
                     >
@@ -916,7 +916,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
               {onMobileClose && (
                 <button
                   onClick={onMobileClose}
-                  className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-black/5 hover:text-gray-900 transition-colors"
+                  className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
                   aria-label="Close menu"
                 >
                   <X className="h-4 w-4" />
@@ -936,9 +936,9 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search modules"
                   className={cn(
-                    "h-8 pl-8 pr-12 text-sm bg-white/80 border border-black/10 rounded-md",
+                    "h-8 pl-8 pr-12 text-sm bg-white/80 dark:bg-gray-800/80 dark:text-gray-100 border border-black/10 dark:border-white/10 rounded-md",
                     "shadow-none focus-visible:ring-2 focus-visible:ring-[#5a4d96]/30 focus-visible:border-[#5a4d96]/50",
-                    "placeholder:text-gray-400",
+                    "placeholder:text-gray-400 dark:placeholder:text-gray-500",
                   )}
                 />
                 {searchQuery ? (
@@ -950,7 +950,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                     <X className="h-3.5 w-3.5" />
                   </button>
                 ) : (
-                  <kbd className="hidden md:inline-flex pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-5 select-none items-center gap-0.5 rounded border border-black/10 bg-white/80 px-1.5 font-mono text-[10px] font-medium text-gray-500">
+                  <kbd className="hidden md:inline-flex pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-5 select-none items-center gap-0.5 rounded border border-black/10 dark:border-white/10 bg-white/80 dark:bg-gray-800/80 px-1.5 font-mono text-[10px] font-medium text-gray-500 dark:text-gray-400">
                     /
                   </kbd>
                 )}
@@ -961,7 +961,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
           {/* Section label */}
           {view === "modules" && (
             <div className="px-4 pb-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
                 Workspace
               </span>
             </div>
@@ -984,7 +984,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                     Failed to load modules
                   </div>
                 ) : modules.length === 0 ? (
-                  <div className="mx-1 rounded-md border border-dashed border-black/10 bg-white/40 px-3 py-6 text-center text-xs text-gray-500">
+                  <div className="mx-1 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
                     No modules yet
                     {canManageModules && (
                       <button
@@ -996,7 +996,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                     )}
                   </div>
                 ) : filteredTree.length === 0 ? (
-                  <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 bg-white/40 px-3 py-4 text-center text-xs text-gray-500">
+                  <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
                     No matches for "{searchQuery}"
                   </div>
                 ) : (
@@ -1006,7 +1006,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                 )}
               </>
             ) : (
-              <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 bg-white/40 px-3 py-6 text-center text-xs text-gray-500">
+              <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
                 {viewTitle} view coming soon
               </div>
             )}
@@ -1016,33 +1016,33 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
               live working timer is always in the user's peripheral vision.
               Hides itself when the user is unauthenticated. */}
           {!!userData?.user && (
-            <div className="border-t border-black/10 px-2 py-2">
+            <div className="border-t border-black/10 dark:border-white/10 px-2 py-2">
               <AttendanceWidget />
             </div>
           )}
 
           {/* User area */}
           {canAccess("/profile") && (
-            <div className="border-t border-black/10 px-2 py-2 flex items-center gap-1">
+            <div className="border-t border-black/10 dark:border-white/10 px-2 py-2 flex items-center gap-1">
               <Link href="/profile" className="flex-1 min-w-0">
-                <button className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-black/5 transition-colors group">
+                <button className="w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-black/5 dark:hover:bg-white/10 transition-colors group">
                   <div
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold text-white shrink-0 ring-1 ring-black/5"
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold text-white shrink-0 ring-1 ring-black/5 dark:ring-white/10"
                     style={{ backgroundColor: ACCENT }}
                   >
                     {userInitial}
                   </div>
                   <div className="flex-1 min-w-0 text-left">
-                    <div className="text-[13px] font-medium text-gray-900 truncate leading-tight">
+                    <div className="text-[13px] font-medium text-gray-900 dark:text-gray-100 truncate leading-tight">
                       {userName}
                     </div>
                     {userEmail && (
-                      <div className="text-[11px] text-gray-500 truncate leading-tight mt-0.5">
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight mt-0.5">
                         {userEmail}
                       </div>
                     )}
                   </div>
-                  <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0 group-hover:text-gray-600 transition-colors" />
+                  <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
                 </button>
               </Link>
               <div className="shrink-0 pr-1">

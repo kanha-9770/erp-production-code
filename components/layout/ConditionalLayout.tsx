@@ -33,7 +33,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   return (
     <PermissionProvider>
       <RoutePermissionGuard>
-        <div className="flex h-screen bg-gray-50">
+        <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
           {/* Mobile backdrop */}
           {mobileSidebarOpen && (
             <div
@@ -59,15 +59,15 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
           {/* Main content area */}
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
             {/* Mobile top bar */}
-            <div className="md:hidden flex items-center gap-3 h-12 px-4 border-b bg-white shrink-0">
+            <div className="md:hidden flex items-center gap-3 h-12 px-4 border-b bg-white dark:bg-gray-900 dark:border-gray-800 shrink-0">
               <button
                 onClick={() => setMobileSidebarOpen(true)}
-                className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100 transition-colors"
+                className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 aria-label="Open menu"
               >
-                <Menu className="h-5 w-5 text-gray-700" />
+                <Menu className="h-5 w-5 text-gray-700 dark:text-gray-200" />
               </button>
-              <span className="text-sm font-semibold text-gray-800">ERP</span>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">ERP</span>
             </div>
 
             <main className="flex-1 overflow-y-auto overflow-x-hidden">{children}</main>

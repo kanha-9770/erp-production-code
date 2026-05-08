@@ -64,8 +64,44 @@ export interface PayrollSetup {
       name: string | null;
     };
   };
+  salaryStructure?: {
+    basicPercent: number;
+    hraPercent: number;
+    daPercent: number;
+    specialAllowanceMode: 'auto' | 'manual';
+    specialAllowanceAmount: number;
+    conveyanceAllowance: number;
+    medicalAllowance: number;
+    lta: number;
+    ltaMonthly: boolean;
+  };
+  statutory?: {
+    pfEnabled: boolean;
+    pfPercent: number;
+    pfCapEnabled: boolean;
+    pfCapAmount: number;
+    employerPfPercent: number;
+    esiEnabled: boolean;
+    esiEmployeePercent: number;
+    esiEmployerPercent: number;
+    esiThreshold: number;
+    ptEnabled: boolean;
+    ptAmount: number;
+    ptThreshold: number;
+    tdsEnabled: boolean;
+    tdsMode: 'flat' | 'slab';
+    tdsFlatPercent: number;
+  };
+  overtime?: {
+    enabled: boolean;
+    rateMultiplier: number;
+    weekdayThresholdHours: number;
+    weekendMultiplier: number;
+    holidayMultiplier: number;
+    maxOvertimeHoursPerMonth: number;
+  };
   policy: {
-    weeklyOffDays: number[]; // 0=Sun, 1=Mon, ..., 6=Sat. Default [0].
+    weeklyOffDays: number[];
     payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
   };
 }
@@ -101,6 +137,23 @@ const EMPTY_SETUP: PayrollSetup = {
     },
   },
   holiday: { formId: null, fields: { date: null, name: null } },
+  salaryStructure: {
+    basicPercent: 50, hraPercent: 50, daPercent: 0,
+    specialAllowanceMode: 'auto', specialAllowanceAmount: 0,
+    conveyanceAllowance: 1600, medicalAllowance: 1250,
+    lta: 0, ltaMonthly: true,
+  },
+  statutory: {
+    pfEnabled: true, pfPercent: 12, pfCapEnabled: true, pfCapAmount: 15000,
+    employerPfPercent: 12, esiEnabled: false, esiEmployeePercent: 0.75,
+    esiEmployerPercent: 3.25, esiThreshold: 21000, ptEnabled: true,
+    ptAmount: 200, ptThreshold: 15000, tdsEnabled: true,
+    tdsMode: 'flat', tdsFlatPercent: 5,
+  },
+  overtime: {
+    enabled: false, rateMultiplier: 1.5, weekdayThresholdHours: 8,
+    weekendMultiplier: 2, holidayMultiplier: 2, maxOvertimeHoursPerMonth: 50,
+  },
   policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
 
@@ -140,6 +193,9 @@ function extractSetup(mappings: any): PayrollSetup {
         formId: mappings.holiday?.formId ?? null,
         fields: { ...EMPTY_SETUP.holiday.fields, ...(mappings.holiday?.fields || {}) },
       },
+      salaryStructure: { ...EMPTY_SETUP.salaryStructure!, ...(mappings.salaryStructure || {}) },
+      statutory: { ...EMPTY_SETUP.statutory!, ...(mappings.statutory || {}) },
+      overtime: { ...EMPTY_SETUP.overtime!, ...(mappings.overtime || {}) },
       policy: { weeklyOffDays, payableBasis },
     };
   }
