@@ -303,69 +303,79 @@ function ProfileHeader({
 }) {
   const primaryRole = user.unitAssignments[0]?.role?.name
   return (
-    <div className="rounded-xl border bg-background p-4 sm:p-5 flex items-center gap-4">
-      <Avatar className="h-14 w-14 sm:h-16 sm:w-16 border shrink-0">
-        {user.avatar ? <AvatarImage src={user.avatar} alt={displayName(user)} /> : null}
-        <AvatarFallback className="text-base font-semibold bg-primary/10 text-primary">
-          {initialsOf(user)}
-        </AvatarFallback>
-      </Avatar>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate">
-            {displayName(user)}
-          </h1>
-          {user.isOrgOwner && (
-            <Badge variant="default" className="text-[10px] px-1.5 h-5">
-              Owner
-            </Badge>
-          )}
-          {user.isAdmin && !user.isOrgOwner && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 h-5">
-              Admin
-            </Badge>
-          )}
-          {user.email_verified ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 h-5 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-            >
-              Verified
-            </Badge>
-          ) : (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 h-5 text-amber-600 dark:text-amber-400 border-amber-500/30"
-            >
-              Unverified
-            </Badge>
-          )}
+    <div className="relative overflow-hidden rounded-xl border bg-background shadow-sm">
+      {/* Soft gradient banner so the identity card has a tasteful accent
+          without leaning on a hard solid colour. */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-primary/10 via-violet-500/10 to-cyan-500/10 dark:from-primary/20 dark:via-violet-500/15 dark:to-cyan-500/15"
+      />
+      <div className="relative flex items-center gap-4 p-4 sm:p-5">
+        <Avatar className="h-16 w-16 sm:h-20 sm:w-20 ring-4 ring-background shadow-md shrink-0">
+          {user.avatar ? (
+            <AvatarImage src={user.avatar} alt={displayName(user)} />
+          ) : null}
+          <AvatarFallback className="text-lg font-bold bg-primary/15 text-primary">
+            {initialsOf(user)}
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate">
+              {displayName(user)}
+            </h1>
+            {user.isOrgOwner && (
+              <Badge className="text-[10px] px-1.5 h-5 bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-300 border-transparent">
+                Owner
+              </Badge>
+            )}
+            {user.isAdmin && !user.isOrgOwner && (
+              <Badge className="text-[10px] px-1.5 h-5 bg-blue-100 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 border-transparent">
+                Admin
+              </Badge>
+            )}
+            {user.email_verified ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 h-5 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-50/60 dark:bg-emerald-500/10"
+              >
+                Verified
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 h-5 text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10"
+              >
+                Unverified
+              </Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground truncate mt-1">
+            {user.email}
+            {primaryRole ? <> · {primaryRole}</> : null}
+            {user.organization?.name ? <> · {user.organization.name}</> : null}
+          </div>
         </div>
-        <div className="text-xs text-muted-foreground truncate">
-          {user.email}
-          {primaryRole ? <> · {primaryRole}</> : null}
-          {user.organization?.name ? <> · {user.organization.name}</> : null}
-        </div>
+        <Button
+          variant="outline"
+          onClick={onLogout}
+          disabled={loggingOut}
+          className="h-9 hidden sm:inline-flex"
+        >
+          <LogOut className="h-3.5 w-3.5 mr-1.5" />
+          Sign out
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onLogout}
+          disabled={loggingOut}
+          className="sm:hidden"
+          aria-label="Sign out"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <Button
-        variant="outline"
-        onClick={onLogout}
-        disabled={loggingOut}
-        className="h-9 hidden sm:inline-flex"
-      >
-        <LogOut className="h-3.5 w-3.5 mr-1.5" />
-        Sign out
-      </Button>
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={onLogout}
-        disabled={loggingOut}
-        className="sm:hidden"
-        aria-label="Sign out"
-      >
-        <LogOut className="h-3.5 w-3.5" />
-      </Button>
     </div>
   )
 }
