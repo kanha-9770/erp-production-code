@@ -228,6 +228,36 @@ export const STATIC_PAGES: StaticPage[] = [
     adminOnly: true,
     icon: 'settings',
   },
+  {
+    path: '/real-estate/compliance',
+    label: 'My Compliance',
+    group: 'Real Estate',
+    description: 'KYC documents, license, agency agreement',
+    icon: 'shield',
+  },
+  {
+    path: '/real-estate/admin/compliance',
+    label: 'Compliance Queue',
+    group: 'Real Estate',
+    description: 'Verify / reject agent KYC submissions',
+    adminOnly: true,
+    icon: 'shield',
+  },
+  {
+    path: '/real-estate/admin/rank-promotions',
+    label: 'Rank Promotions',
+    group: 'Real Estate',
+    description: 'Evaluate criteria + auto-promote agents',
+    adminOnly: true,
+    icon: 'sparkles',
+  },
+  {
+    path: '/real-estate/reports',
+    label: 'Reports',
+    group: 'Real Estate',
+    description: 'Sales register, leaderboard, tax statement, etc.',
+    icon: 'file-text',
+  },
 
   // ── Profile ────────────────────────────────────────────────────────────
   {

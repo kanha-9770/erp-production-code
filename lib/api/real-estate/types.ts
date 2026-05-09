@@ -456,7 +456,9 @@ export interface CommissionAudit {
   createdAt: string;
 }
 
-export interface TransactionDetail extends Transaction {
+export interface TransactionDetail extends Omit<Transaction, "property"> {
+  // Detail endpoint returns the full Property row, not the trimmed list view.
+  property: Property | null;
   documents: TransactionDocument[];
   commissionSplits: CommissionSplit[];
   commissionAudits: CommissionAudit[];
@@ -608,4 +610,241 @@ export interface WithdrawalRequest {
     ifscOrSwift: string;
   };
   wallet?: { availableBalance: number; currency: string };
+}
+
+// ─── Phase 3 — Compliance, Reports, Rank promotion ───────────────────────────
+
+export type ComplianceDocumentType =
+  | "GOVERNMENT_ID"
+  | "REAL_ESTATE_LICENSE"
+  | "TAX_FORM"
+  | "AGENCY_AGREEMENT"
+  | "ADDRESS_PROOF"
+  | "OTHER";
+
+export type ComplianceDocumentStatus =
+  | "PENDING"
+  | "VERIFIED"
+  | "REJECTED"
+  | "EXPIRED";
+
+export interface ComplianceDocument {
+  id: string;
+  organizationId: string;
+  agentProfileId: string;
+  type: ComplianceDocumentType;
+  name: string;
+  url: string;
+  documentNumber: string | null;
+  issuedBy: string | null;
+  issuedAt: string | null;
+  expiryDate: string | null;
+  status: ComplianceDocumentStatus;
+  rejectionReason: string | null;
+  verifiedById: string | null;
+  verifiedAt: string | null;
+  uploadedById: string;
+  createdAt: string;
+  updatedAt: string;
+  agentProfile?: {
+    id: string;
+    user: {
+      id: string;
+      email: string;
+      first_name: string | null;
+      last_name: string | null;
+      avatar: string | null;
+    };
+  };
+}
+
+export interface MyComplianceResponse {
+  agent: {
+    id: string;
+    status: AgentStatus;
+    complianceStatus: AgentComplianceStatus;
+    licenseNumber: string | null;
+    licenseAuthority: string | null;
+    licenseIssuedAt: string | null;
+    licenseExpiresAt: string | null;
+  };
+  documents: ComplianceDocument[];
+  requiredTypes: readonly string[];
+}
+
+export interface AgentComplianceDetail {
+  id: string;
+  user: {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    avatar: string | null;
+  };
+  complianceStatus: AgentComplianceStatus;
+  status: AgentStatus;
+  licenseExpiresAt: string | null;
+  complianceDocuments: ComplianceDocument[];
+}
+
+// Reports — typed loosely since each report has a distinct shape. We give
+// each its own interface so consumers stay safe.
+
+export interface SalesRegisterRow {
+  id: string;
+  code: string | null;
+  closedAt: string | null;
+  property: { id: string; title: string; code: string | null; city: string } | null;
+  buyer: { id: string; name: string } | null;
+  listingAgentId: string;
+  sellingAgentId: string | null;
+  salePrice: number;
+  baseCommission: number;
+  currency: string;
+}
+export interface SalesRegisterReport {
+  rows: SalesRegisterRow[];
+  summary: { count: number; totalSales: number; totalCommission: number };
+}
+
+export interface CommissionRegisterRow {
+  id: string;
+  transaction: {
+    id: string;
+    code: string | null;
+    closedAt: string | null;
+    property: { title: string; code: string | null } | null;
+  } | null;
+  role: CommissionSplitRole;
+  level: number | null;
+  beneficiaryUserId: string | null;
+  percent: number;
+  amount: number;
+  status: CommissionStatus;
+  createdAt: string;
+}
+export interface CommissionRegisterReport {
+  rows: CommissionRegisterRow[];
+  summary: {
+    count: number;
+    totalAmount: number;
+    onHold: number;
+    released: number;
+    reversed: number;
+  };
+}
+
+export interface PayoutRegisterRow {
+  id: string;
+  userId: string;
+  amount: number;
+  fee: number;
+  netAmount: number;
+  status: WithdrawalStatus;
+  bankAccount: {
+    bankName: string;
+    accountNumberLast4: string;
+    accountHolderName: string;
+  };
+  paidAt: string | null;
+  paymentReference: string | null;
+  createdAt: string;
+}
+export interface PayoutRegisterReport {
+  rows: PayoutRegisterRow[];
+  summary: { count: number; totalRequested: number; totalPaid: number };
+}
+
+export interface LeadConversionReport {
+  summary: { total: number; converted: number; lost: number; conversionRate: number };
+  byStatus: Record<string, number>;
+  bySource: Record<string, number>;
+  byScore: Record<string, number>;
+}
+
+export interface LeaderboardRow {
+  user: {
+    id: string;
+    email: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    avatar?: string | null;
+  };
+  sales: number;
+  revenue: number;
+  commission: number;
+}
+export interface LeaderboardReport {
+  rows: LeaderboardRow[];
+}
+
+export interface PropertyAgingRow {
+  id: string;
+  title: string;
+  code: string | null;
+  city: string;
+  currency: string;
+  listingPrice: number;
+  status: PropertyStatus;
+  listedAt: string;
+  daysOnMarket: number;
+}
+export interface PropertyAgingReport {
+  rows: PropertyAgingRow[];
+}
+
+export interface ComplianceStatusRow {
+  agentId: string;
+  user: {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    avatar: string | null;
+  };
+  complianceStatus: AgentComplianceStatus;
+  docsTotal: number;
+  docsVerified: number;
+  docsPending: number;
+  docsRejected: number;
+  docsExpiringSoon: number;
+  licenseExpiresAt: string | null;
+}
+export interface ComplianceStatusReport {
+  summary: { COMPLIANT: number; PENDING_KYC: number; NON_COMPLIANT: number };
+  rows: ComplianceStatusRow[];
+}
+
+export interface TaxStatementRow {
+  id: string;
+  transactionCode: string | null;
+  propertyTitle: string | null;
+  role: CommissionSplitRole;
+  level: number | null;
+  amount: number;
+  status: CommissionStatus;
+  createdAt: string;
+}
+export interface TaxStatementReport {
+  user: {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+  } | null;
+  financialYear: number;
+  period: { from: string; to: string };
+  summary: { grossEarned: number; reversed: number; netEarned: number };
+  rows: TaxStatementRow[];
+}
+
+export interface PromotionResult {
+  agentId: string;
+  userId: string;
+  fromRankId: string | null;
+  fromRankName: string | null;
+  toRankId: string;
+  toRankName: string;
+  metrics: { personalSales: number; teamSize: number; teamRevenue: number };
+  promoted: boolean;
 }

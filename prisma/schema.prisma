@@ -2686,10 +2686,11 @@ model AgentProfile {
 
   // Profile fields
   specializations Json    @default("[]") // ["RESIDENTIAL","COMMERCIAL"]
-  serviceAreas    Json    @default("[]") // ["Mumbai","Pune"]
+  serviceAreas    Json    @default("[]") @map("service_areas") // ["Mumbai","Pune"]
   bio             String? @db.Text
 
-  promotions RankPromotionLog[]
+  promotions          RankPromotionLog[]
+  complianceDocuments ComplianceDocument[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -3254,6 +3255,61 @@ enum WithdrawalStatus {
   PAID
   FAILED
   CANCELLED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPLIANCE (Phase 3 — FR-8)
+// One row per uploaded KYC / license / agreement file. The agent's overall
+// AgentProfile.complianceStatus is auto-derived from these rows: COMPLIANT
+// when every REQUIRED type has a VERIFIED row whose expiry is in the future.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ComplianceDocumentType {
+  GOVERNMENT_ID
+  REAL_ESTATE_LICENSE
+  TAX_FORM
+  AGENCY_AGREEMENT
+  ADDRESS_PROOF
+  OTHER
+}
+
+enum ComplianceDocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+model ComplianceDocument {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  agentProfileId String       @map("agent_profile_id")
+  agentProfile   AgentProfile @relation(fields: [agentProfileId], references: [id], onDelete: Cascade)
+
+  type ComplianceDocumentType
+  name String
+  url  String
+
+  documentNumber String?   @map("document_number")
+  issuedBy       String?   @map("issued_by")
+  issuedAt       DateTime? @map("issued_at")
+  expiryDate     DateTime? @map("expiry_date")
+
+  status          ComplianceDocumentStatus @default(PENDING)
+  rejectionReason String?                  @map("rejection_reason") @db.Text
+
+  verifiedById String?   @map("verified_by_id") // → User.id
+  verifiedAt   DateTime? @map("verified_at")
+
+  uploadedById String   @map("uploaded_by_id") // → User.id
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([agentProfileId, status])
+  @@index([type])
+  @@index([expiryDate])
+  @@map("re_compliance_documents")
 }
 
 // Withdrawal request from an agent's wallet. FR-7.4 — routes through approval

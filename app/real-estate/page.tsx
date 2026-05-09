@@ -1,212 +1,335 @@
 "use client";
 
 /**
- * Real Estate Brokerage — module landing page.
- * KPI tiles + quick links to Properties / Agents / Leads / Viewings.
+ * Real Estate dashboard. Four things to deliver in the first viewport:
+ *   1. Where am I?               — module title, quick stats
+ *   2. What's important now?     — KPI tiles with comparators
+ *   3. What's about to happen?   — upcoming viewings list
+ *   4. What can I jump to?       — quick-actions row + ⌘K palette hint
  *
- * Counts come from the existing list endpoints; we ask for limit=1 and read
- * `meta.total` so we don't pull every row just to paint a number.
+ * Counts come from existing list endpoints with `limit=1` so we don't pull
+ * full result sets just to paint a number.
  */
 
 import Link from "next/link";
 import { useGetPropertiesQuery } from "@/lib/api/real-estate/properties";
 import { useGetAgentsQuery } from "@/lib/api/real-estate/agents";
 import { useGetLeadsQuery, useGetViewingsQuery } from "@/lib/api/real-estate/leads";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useGetTransactionsQuery } from "@/lib/api/real-estate/transactions";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
-  Building2,
-  Users,
-  Inbox,
-  CalendarDays,
-  ArrowRight,
-  Plus,
-  TrendingUp,
+  Building2, Users, Inbox, CalendarDays, ArrowRight, Plus, TrendingUp,
+  Search, Receipt, Wallet, Shield, BarChart3,
+  Network, Sparkles, Flame,
 } from "lucide-react";
+import {
+  formatCurrency, LEAD_STATUS_VARIANT, LEAD_STATUS_LABEL,
+  fullName,
+} from "@/components/real-estate/constants";
+import { useCommandPalette } from "@/components/real-estate/workspace";
+import { cn } from "@/lib/utils";
 
 export default function RealEstateDashboard() {
-  // Tile counts — keep payload minimal; we only need meta.total.
-  const propertiesQ = useGetPropertiesQuery({ limit: 1 });
-  const availablePropertiesQ = useGetPropertiesQuery({ status: "AVAILABLE", limit: 1 });
-  const agentsQ = useGetAgentsQuery({ limit: 1 });
-  const activeAgentsQ = useGetAgentsQuery({ status: "ACTIVE", limit: 1 });
-  const leadsQ = useGetLeadsQuery({ limit: 1 });
-  const openLeadsQ = useGetLeadsQuery({ status: "QUALIFIED", limit: 1 });
+  const palette = useCommandPalette();
 
-  // Viewings in next 7 days.
+  const propsQ = useGetPropertiesQuery({ limit: 1 });
+  const propsAvailQ = useGetPropertiesQuery({ status: "AVAILABLE", limit: 1 });
+  const agentsQ = useGetAgentsQuery({ limit: 1 });
+  const agentsActiveQ = useGetAgentsQuery({ status: "ACTIVE", limit: 1 });
+  const leadsQ = useGetLeadsQuery({ limit: 1 });
+  const leadsHotQ = useGetLeadsQuery({ score: "HOT", limit: 1 });
+  const txnsClosedQ = useGetTransactionsQuery({ status: "CLOSED", limit: 1 });
+
   const now = new Date();
   const weekFromNow = new Date(now.getTime() + 7 * 86400000);
   const viewingsQ = useGetViewingsQuery({
     from: now.toISOString(),
     to: weekFromNow.toISOString(),
     status: "SCHEDULED",
-    limit: 5,
+    limit: 6,
   });
 
+  // Most recent leads — populates the activity column.
+  const recentLeadsQ = useGetLeadsQuery({ limit: 6 });
+
   return (
-    <div className="container mx-auto p-4 sm:p-6 space-y-6 max-w-7xl">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2 sm:gap-3">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-primary shrink-0" />
-            Real Estate Brokerage
+    <div className="container mx-auto p-4 sm:p-6 space-y-5 max-w-7xl">
+      {/* Header: title + ⌘K hint + primary CTA */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <span>Real Estate Brokerage</span>
+            <span>·</span>
+            <span>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+            Good {greeting()}.
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Property inventory, agent hierarchy, leads, and commissions.
+            Property inventory, agent hierarchy, leads, and commissions — all in one place.
           </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" onClick={() => palette.setOpen(true)} className="gap-2">
+            <Search className="h-4 w-4" />
+            <span className="hidden sm:inline">Quick search</span>
+            <kbd className="hidden sm:inline-flex h-5 px-1.5 items-center rounded border bg-muted text-[10px] font-mono">⌘K</kbd>
+          </Button>
+          <Button asChild>
+            <Link href="/real-estate/properties/new">
+              <Plus className="h-4 w-4 mr-1.5" /> New listing
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {/* KPI tiles */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
+      {/* KPI grid */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <KpiTile
-          title="Properties"
+          label="Properties"
           icon={<Building2 className="h-4 w-4" />}
-          loading={propertiesQ.isLoading}
-          primary={propertiesQ.data?.meta.total ?? 0}
-          secondary={`${availablePropertiesQ.data?.meta.total ?? 0} available`}
+          loading={propsQ.isLoading}
+          primary={propsQ.data?.meta.total ?? 0}
+          secondary={`${propsAvailQ.data?.meta.total ?? 0} available`}
           href="/real-estate/properties"
+          tint="blue"
         />
         <KpiTile
-          title="Agents"
+          label="Agents"
           icon={<Users className="h-4 w-4" />}
           loading={agentsQ.isLoading}
           primary={agentsQ.data?.meta.total ?? 0}
-          secondary={`${activeAgentsQ.data?.meta.total ?? 0} active`}
+          secondary={`${agentsActiveQ.data?.meta.total ?? 0} active`}
           href="/real-estate/agents"
+          tint="violet"
         />
         <KpiTile
-          title="Leads"
+          label="Leads"
           icon={<Inbox className="h-4 w-4" />}
           loading={leadsQ.isLoading}
           primary={leadsQ.data?.meta.total ?? 0}
-          secondary={`${openLeadsQ.data?.meta.total ?? 0} qualified`}
+          secondary={`${leadsHotQ.data?.meta.total ?? 0} hot`}
           href="/real-estate/leads"
+          tint="amber"
+          accent={(leadsHotQ.data?.meta.total ?? 0) > 0 ? <Flame className="h-3 w-3 text-amber-600" /> : null}
         />
         <KpiTile
-          title="Viewings (7d)"
-          icon={<CalendarDays className="h-4 w-4" />}
-          loading={viewingsQ.isLoading}
-          primary={viewingsQ.data?.data.length ?? 0}
-          secondary="next 7 days"
-          href="/real-estate/viewings"
+          label="Closed deals"
+          icon={<Receipt className="h-4 w-4" />}
+          loading={txnsClosedQ.isLoading}
+          primary={txnsClosedQ.data?.meta.total ?? 0}
+          secondary="all-time"
+          href="/real-estate/transactions"
+          tint="emerald"
         />
       </div>
 
-      {/* Quick actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Quick actions</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Button asChild variant="outline" className="justify-start h-auto py-3">
-            <Link href="/real-estate/properties/new">
-              <Plus className="h-4 w-4 mr-2" /> New property listing
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="justify-start h-auto py-3">
-            <Link href="/real-estate/leads/new">
-              <Plus className="h-4 w-4 mr-2" /> Capture lead
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="justify-start h-auto py-3">
-            <Link href="/real-estate/agents/new">
-              <Plus className="h-4 w-4 mr-2" /> Onboard agent
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="justify-start h-auto py-3">
-            <Link href="/real-estate/agents/tree">
-              <TrendingUp className="h-4 w-4 mr-2" /> View agent tree
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Upcoming viewings */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">Upcoming viewings</CardTitle>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/real-estate/viewings">
-              View all <ArrowRight className="h-3 w-3 ml-1" />
-            </Link>
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {viewingsQ.isLoading ? (
-            <div className="space-y-2">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-14" />
-              ))}
+      {/* Two-column body: viewings + recent activity */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        {/* Upcoming viewings — wider column on desktop */}
+        <Card className="lg:col-span-2">
+          <div className="px-4 sm:px-5 py-3 border-b flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Next 7 days</h2>
+              {!viewingsQ.isLoading && (
+                <Badge variant="secondary" className="text-[10px] tabular-nums">
+                  {viewingsQ.data?.data.length ?? 0}
+                </Badge>
+              )}
             </div>
-          ) : !viewingsQ.data?.data.length ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              No viewings scheduled in the next 7 days.
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {viewingsQ.data.data.map((v) => (
-                <li key={v.id} className="py-3 flex items-start gap-3">
-                  <CalendarDays className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium truncate">
-                        {v.property?.title ?? "Property"}
-                      </span>
-                      <Badge variant="default" className="shrink-0 text-[10px]">
-                        {v.status}
+            <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+              <Link href="/real-estate/viewings">
+                View calendar <ArrowRight className="h-3 w-3 ml-1" />
+              </Link>
+            </Button>
+          </div>
+          <CardContent className="p-0">
+            {viewingsQ.isLoading ? (
+              <div className="p-4 space-y-2">
+                {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12" />)}
+              </div>
+            ) : !viewingsQ.data?.data.length ? (
+              <div className="py-12 text-center">
+                <CalendarDays className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  No viewings scheduled.
+                </p>
+                <Button asChild variant="link" size="sm">
+                  <Link href="/real-estate/viewings/new">Schedule one</Link>
+                </Button>
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {viewingsQ.data.data.map((v) => {
+                  const when = new Date(v.scheduledAt);
+                  const day = when.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+                  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+                  return (
+                    <li key={v.id} className="px-4 sm:px-5 py-3 hover:bg-muted/30 transition-colors">
+                      <Link href={`/real-estate/leads/${v.leadId}`} className="flex items-center gap-3">
+                        <div className="h-10 w-12 rounded-md bg-muted/60 flex flex-col items-center justify-center shrink-0 text-[10px] uppercase tracking-wider">
+                          <span className="font-bold tabular-nums leading-none">{when.getDate()}</span>
+                          <span className="text-muted-foreground leading-none mt-0.5">
+                            {when.toLocaleString(undefined, { month: "short" })}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate text-sm">
+                            {v.property?.title ?? "Property"}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {day} · {time} · {v.lead?.name ?? "—"}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] shrink-0">
+                          {v.status}
+                        </Badge>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent leads */}
+        <Card>
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Inbox className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Recent leads</h2>
+            </div>
+            <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+              <Link href="/real-estate/leads">
+                All <ArrowRight className="h-3 w-3 ml-1" />
+              </Link>
+            </Button>
+          </div>
+          <CardContent className="p-0">
+            {recentLeadsQ.isLoading ? (
+              <div className="p-4 space-y-2">
+                {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10" />)}
+              </div>
+            ) : !recentLeadsQ.data?.data.length ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                No leads yet.
+                <div className="mt-1">
+                  <Button asChild variant="link" size="sm">
+                    <Link href="/real-estate/leads/new">Capture first lead</Link>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {recentLeadsQ.data.data.slice(0, 6).map((l) => (
+                  <li key={l.id} className="px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                    <Link href={`/real-estate/leads/${l.id}`} className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm truncate font-medium">{l.name}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {l.budgetMax ? formatCurrency(l.budgetMax) : "—"} · {l.preferredCities[0] ?? "—"}
+                        </div>
+                      </div>
+                      <Badge variant={LEAD_STATUS_VARIANT[l.status]} className="text-[10px] shrink-0">
+                        {LEAD_STATUS_LABEL[l.status]}
                       </Badge>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {new Date(v.scheduledAt).toLocaleString()} ·{" "}
-                      {v.lead?.name ?? "—"}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick links — ribbon of secondary navigation */}
+      <Card>
+        <CardContent className="p-3 sm:p-4">
+          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Jump to</div>
+          <div className="flex flex-wrap gap-2">
+            <QuickLink href="/real-estate/properties/new" icon={Plus} label="New listing" />
+            <QuickLink href="/real-estate/leads/new" icon={Plus} label="Capture lead" />
+            <QuickLink href="/real-estate/agents/new" icon={Plus} label="Onboard agent" />
+            <QuickLink href="/real-estate/agents/tree" icon={Network} label="Hierarchy tree" />
+            <QuickLink href="/real-estate/agents/ranks" icon={Sparkles} label="Ranks" />
+            <QuickLink href="/real-estate/wallet" icon={Wallet} label="My wallet" />
+            <QuickLink href="/real-estate/compliance" icon={Shield} label="Compliance" />
+            <QuickLink href="/real-estate/reports" icon={BarChart3} label="Reports" />
+            <QuickLink href="/real-estate/payouts" icon={TrendingUp} label="Payouts" />
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 }
 
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "morning";
+  if (h < 17) return "afternoon";
+  return "evening";
+}
+
 function KpiTile({
-  title,
-  icon,
-  loading,
-  primary,
-  secondary,
-  href,
+  label, icon, loading, primary, secondary, href, tint, accent,
 }: {
-  title: string;
+  label: string;
   icon: React.ReactNode;
   loading: boolean;
   primary: number;
   secondary: string;
   href: string;
+  tint: "blue" | "violet" | "amber" | "emerald";
+  accent?: React.ReactNode;
 }) {
+  const tintClass = {
+    blue: "from-blue-500/10 to-transparent text-blue-600 dark:text-blue-400",
+    violet: "from-violet-500/10 to-transparent text-violet-600 dark:text-violet-400",
+    amber: "from-amber-500/10 to-transparent text-amber-600 dark:text-amber-400",
+    emerald: "from-emerald-500/10 to-transparent text-emerald-600 dark:text-emerald-400",
+  }[tint];
+
   return (
-    <Link href={href} className="block">
-      <Card className="hover:shadow-md transition-shadow h-full">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            {icon}
-            {title}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <Skeleton className="h-8 w-20" />
-          ) : (
-            <div className="text-3xl font-bold tabular-nums">{primary}</div>
-          )}
-          <div className="text-xs text-muted-foreground mt-1">{secondary}</div>
+    <Link href={href} className="block group">
+      <Card className="overflow-hidden h-full transition-all group-hover:shadow-md group-hover:-translate-y-px">
+        <CardContent className="p-4 relative">
+          <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-50", tintClass.split(" ")[0], tintClass.split(" ")[1])} />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <div className={cn("h-8 w-8 rounded-lg bg-background flex items-center justify-center shadow-sm", tintClass)}>
+                {icon}
+              </div>
+              {accent}
+            </div>
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{label}</div>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              {loading ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                <span className="text-2xl font-bold tabular-nums">{primary.toLocaleString()}</span>
+              )}
+              <span className="text-xs text-muted-foreground">{secondary}</span>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </Link>
   );
 }
+
+function QuickLink({ href, icon: Icon, label }: { href: string; icon: any; label: string }) {
+  return (
+    <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+      <Link href={href}>
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </Link>
+    </Button>
+  );
+}
+

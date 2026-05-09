@@ -11,6 +11,8 @@ import type {
   CommissionSplitRole,
   CommissionStatus,
   CommissionTermType,
+  ComplianceDocumentStatus,
+  ComplianceDocumentType,
   LedgerCategory,
   LedgerStatus,
   LeadActivityType,
@@ -377,4 +379,30 @@ export const WITHDRAWAL_STATUS_VARIANT: Record<WithdrawalStatus, BadgeVariant> =
   PAID: "default",
   FAILED: "destructive",
   CANCELLED: "outline",
+};
+
+// ─── Phase 3 — Compliance ────────────────────────────────────────────────────
+
+export const COMPLIANCE_DOC_TYPE_LABEL: Record<ComplianceDocumentType, string> = {
+  GOVERNMENT_ID: "Government ID",
+  REAL_ESTATE_LICENSE: "Real Estate License",
+  TAX_FORM: "Tax Form",
+  AGENCY_AGREEMENT: "Agency Agreement",
+  ADDRESS_PROOF: "Address Proof",
+  OTHER: "Other",
+};
+export const COMPLIANCE_DOC_TYPE_OPTIONS = Object.entries(COMPLIANCE_DOC_TYPE_LABEL).map(
+  ([value, label]) => ({ value: value as ComplianceDocumentType, label }),
+);
+export const COMPLIANCE_DOC_STATUS_LABEL: Record<ComplianceDocumentStatus, string> = {
+  PENDING: "Pending",
+  VERIFIED: "Verified",
+  REJECTED: "Rejected",
+  EXPIRED: "Expired",
+};
+export const COMPLIANCE_DOC_STATUS_VARIANT: Record<ComplianceDocumentStatus, BadgeVariant> = {
+  PENDING: "secondary",
+  VERIFIED: "default",
+  REJECTED: "destructive",
+  EXPIRED: "destructive",
 };
