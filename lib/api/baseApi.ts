@@ -46,6 +46,9 @@ export const baseApi = createApi({
     "OrgUnits",
     // Admin
     "AdminUsers",
+    // Employee master
+    "Employees",
+    "Employee",
     // Settings
     "MasterData",
     // Route Permissions

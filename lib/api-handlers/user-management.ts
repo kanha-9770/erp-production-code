@@ -346,6 +346,10 @@ export const UserManagementHandlers = {
         designation: true, totalSalary: true, givenSalary: true,
         bonusAmount: true, nightAllowance: true, overTime: true,
         oneHourExtra: true, status: true,
+        emailAddress1: true, personalContact: true,
+        dateOfJoining: true, dateOfLeaving: true,
+        companyName: true, employeeEngagementTeamName: true,
+        gender: true, shiftType: true,
       };
 
       let employees;
@@ -379,4 +383,203 @@ export const UserManagementHandlers = {
       return NextResponse.json({ success: true, employees, isAdmin: adminUser });
     }, "getEmployees");
   },
+
+  // GET /api/employees/[id]
+  async getEmployee(request: NextRequest, id: string): Promise<NextResponse> {
+    return handle(async () => {
+      const authUser = await requireAuth(request);
+      const employee = await prisma.employee.findFirst({
+        where: {
+          id,
+          OR: [
+            { user: { organizationId: authUser.organizationId } },
+            { userId: null },
+          ],
+        },
+      });
+      if (!employee) {
+        return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, employee });
+    }, "getEmployee");
+  },
+
+  // POST /api/employees
+  async createEmployee(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const authUser = await requireAuth(request);
+      const body = await request.json();
+
+      if (!body?.employeeName || !String(body.employeeName).trim()) {
+        return NextResponse.json(
+          { error: "Employee name is required" },
+          { status: 400 }
+        );
+      }
+
+      const data = sanitizeEmployeePayload(body) as any;
+      const employee = await prisma.employee.create({ data });
+      void authUser;
+      return NextResponse.json({ success: true, employee }, { status: 201 });
+    }, "createEmployee");
+  },
+
+  // PUT /api/employees/[id]
+  async updateEmployee(request: NextRequest, id: string): Promise<NextResponse> {
+    return handle(async () => {
+      const authUser = await requireAuth(request);
+      const body = await request.json();
+
+      const existing = await prisma.employee.findFirst({
+        where: {
+          id,
+          OR: [
+            { user: { organizationId: authUser.organizationId } },
+            { userId: null },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!existing) {
+        return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      }
+
+      const data = sanitizeEmployeePayload(body, { partial: true });
+      const employee = await prisma.employee.update({ where: { id }, data });
+      return NextResponse.json({ success: true, employee });
+    }, "updateEmployee");
+  },
+
+  // DELETE /api/employees/[id]
+  async deleteEmployee(request: NextRequest, id: string): Promise<NextResponse> {
+    return handle(async () => {
+      const authUser = await requireAuth(request);
+      const existing = await prisma.employee.findFirst({
+        where: {
+          id,
+          OR: [
+            { user: { organizationId: authUser.organizationId } },
+            { userId: null },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!existing) {
+        return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      }
+      await prisma.employee.delete({ where: { id } });
+      return NextResponse.json({ success: true });
+    }, "deleteEmployee");
+  },
 };
+
+// Coerces the raw client payload into a Prisma-safe Employee write. With
+// `partial: true` only fields actually present on the body are forwarded, so
+// PATCH/PUT calls don't blank out untouched columns.
+function sanitizeEmployeePayload(
+  body: Record<string, any>,
+  opts: { partial?: boolean } = {}
+): Record<string, any> {
+  const data: Record<string, any> = {};
+  const partial = opts.partial ?? false;
+
+  const strField = (key: string, target = key, trim = true) => {
+    if (!(key in body)) return;
+    const v = body[key];
+    if (v === null || v === undefined || v === "") {
+      if (!partial) data[target] = null;
+      else data[target] = null;
+      return;
+    }
+    data[target] = typeof v === "string" && trim ? v.trim() : v;
+  };
+  const numField = (key: string, target = key) => {
+    if (!(key in body)) return;
+    const v = body[key];
+    if (v === null || v === undefined || v === "") {
+      data[target] = null;
+      return;
+    }
+    const n = typeof v === "string" ? parseFloat(v) : Number(v);
+    data[target] = Number.isFinite(n) ? n : null;
+  };
+  const intField = (key: string, target = key) => {
+    if (!(key in body)) return;
+    const v = body[key];
+    if (v === null || v === undefined || v === "") {
+      data[target] = null;
+      return;
+    }
+    const n = typeof v === "string" ? parseInt(v, 10) : Math.trunc(Number(v));
+    data[target] = Number.isFinite(n) ? n : null;
+  };
+  const dateField = (key: string, target = key) => {
+    if (!(key in body)) return;
+    const v = body[key];
+    if (!v) {
+      data[target] = null;
+      return;
+    }
+    const d = new Date(v);
+    data[target] = Number.isNaN(d.getTime()) ? null : d;
+  };
+  const boolField = (key: string, target = key) => {
+    if (!(key in body)) return;
+    data[target] = !!body[key];
+  };
+
+  if ("employeeName" in body) data.employeeName = String(body.employeeName).trim();
+  strField("department");
+  strField("designation");
+  strField("nativePlace");
+  strField("country");
+  strField("permanentAddress");
+  strField("currentAddress");
+  strField("personalContact");
+  strField("alternateNo1");
+  strField("alternateNo2");
+  strField("emailAddress1");
+  strField("emailAddress2");
+  strField("aadharCardNo");
+  strField("aadharCardUpload");
+  strField("panCardUpload");
+  strField("passportUpload");
+  strField("bankName");
+  strField("bankAccountNo");
+  strField("ifscCode");
+  strField("shiftType");
+  strField("inTime");
+  strField("outTime");
+  strField("companyName");
+  strField("employeeEngagementTeamName");
+
+  if ("gender" in body) {
+    const g = String(body.gender || "").toUpperCase();
+    data.gender = ["MALE", "FEMALE", "OTHER"].includes(g) ? g : "OTHER";
+  }
+  if ("status" in body) {
+    const s = String(body.status || "").toUpperCase();
+    data.status = ["ACTIVE", "INACTIVE", "ON_LEAVE", "TERMINATED"].includes(s)
+      ? s
+      : "ACTIVE";
+  }
+
+  numField("totalSalary");
+  numField("givenSalary");
+  numField("bonusAmount");
+  numField("nightAllowance");
+  numField("overTime");
+  numField("oneHourExtra");
+
+  intField("incrementMonth");
+  intField("yearsOfAgreement");
+  intField("bonusAfterYears");
+
+  dateField("dob");
+  dateField("dateOfJoining");
+  dateField("dateOfLeaving");
+
+  boolField("companySimIssue");
+
+  return data;
+}
