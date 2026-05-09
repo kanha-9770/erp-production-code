@@ -3,7 +3,7 @@
 import type React from "react"
 import { usePathname } from "next/navigation"
 import { CrmSidebar } from "./sidebar"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { PermissionProvider } from "@/context/PermissionContext"
 import { RoutePermissionGuard } from "@/components/guards/route-permission-guard"
 import { Menu } from "lucide-react"
@@ -12,7 +12,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [currentView, setCurrentView] = useState<string>("home")
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
- 
+
   const publicRoutes = [
     "/login",
     "/register",
@@ -22,11 +22,26 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
     "/unauthorized",
   ]
 
-  if (
+  const isPublic =
     publicRoutes.includes(pathname) ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/form/")
-  ) {
+
+  // Lock html/body scroll only while the app shell is mounted. Without this,
+  // a child that accidentally exceeds 100vh (a stray `min-h-screen`, a tall
+  // portal, an unconstrained widget) lets the document itself grow taller
+  // than the viewport — producing a second, browser-level scrollbar next to
+  // <main>'s own scrollbar. Public routes (login, /form/, /auth) keep
+  // normal document scrolling because they bypass the shell entirely.
+  useEffect(() => {
+    if (isPublic) return
+    document.documentElement.classList.add("app-shell-active")
+    return () => {
+      document.documentElement.classList.remove("app-shell-active")
+    }
+  }, [isPublic])
+
+  if (isPublic) {
     return <>{children}</>
   }
 

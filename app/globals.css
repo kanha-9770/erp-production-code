@@ -78,6 +78,19 @@
     overscroll-behavior: none;
   }
 
+  /* When the app shell is mounted, the document itself must not scroll —
+     <main> is the only scroll container. ConditionalLayout adds the
+     `app-shell-active` class to <html> on mount and removes it on
+     unmount, so public routes (login, /form/, /auth) that render outside
+     the shell keep normal page scrolling. This kills the second
+     "browser" scrollbar that appears when a child of <main> accidentally
+     exceeds 100vh. */
+  html.app-shell-active,
+  html.app-shell-active body {
+    height: 100%;
+    overflow: hidden;
+  }
+
   /* Density scaling. The user picks a density preset in
      Profile → Preferences → Appearance. Compact mode also exposes a
      slider that lets them choose exactly how small the UI should be.

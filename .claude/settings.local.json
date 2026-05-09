@@ -9,11 +9,11 @@
       "Bash(node -e \":*)",
       "Read(//tmp/**)",
       "Bash(grep -rn \"min-h-screen\\\\|min-h-\\\\[100vh\\\\]\\\\|min-h-full\\\\|h-screen\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\app\\\\settings\" 2>nul | head -20)",
-      "Bash(grep -rln \"h-screen\\\\|h-full\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\app\\\\settings\\\\functions\\\\editor\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\app\\\\builder\" 2>nul)"
-    ],
-    "additionalDirectories": [
-      "C:\\Users\\taman\\erp-production-code",
-      "c:\\Users\\taman\\erp-production-code"
+      "Bash(grep -rln \"h-screen\\\\|h-full\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\app\\\\settings\\\\functions\\\\editor\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\app\\\\builder\" 2>nul)",
+      "Bash(grep -rn \"h-screen\\\\|min-h-screen\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\components\\\\guards\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\context\\\\PermissionContext.tsx\" 2>nul | head -10)",
+      "Bash(grep -n \"min-h-screen\\\\|h-screen\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\components\\\\attendance\\\\attendance-widget.tsx\" 2>nul)",
+      "Bash(grep -rn \"min-h-screen\\\\|min-h-\\\\[100vh\\\\]\\\\|min-h-full\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\components\\\\attendance\" 2>nul)",
+      "Bash(grep -rn \"min-h-screen\" \"c:\\\\Users\\\\taman\\\\erp-production-code\\\\components\" 2>nul | head -30)"
     ]
   }
 }
