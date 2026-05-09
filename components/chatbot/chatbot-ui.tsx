@@ -1392,7 +1392,7 @@ export default function ChatbotUI() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="relative flex-1 overflow-y-auto claude-scroll min-h-0 bg-background"
+          className="relative flex-1 overflow-y-auto overscroll-contain claude-scroll min-h-0 bg-background"
         >
           <div className="relative max-w-3xl mx-auto w-full px-4 sm:px-6 pt-6 pb-8 space-y-6">
             {loadingProviders ? (

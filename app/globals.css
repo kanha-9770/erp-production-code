@@ -67,6 +67,17 @@
     @apply bg-background text-foreground;
   }
 
+  /* App-shell scrolling: <main> is the canonical scroll container
+     (see ConditionalLayout). Prevent the browser from rubber-banding
+     html/body or triggering pull-to-refresh when a scroll gesture
+     reaches the top/bottom of an inner scroller. Without this, an
+     overshoot reveals the page background as a bare strip below the
+     content. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
   /* Density scaling. The user picks a density preset in
      Profile → Preferences → Appearance. Compact mode also exposes a
      slider that lets them choose exactly how small the UI should be.

@@ -70,7 +70,7 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">ERP</span>
             </div>
 
-            <main className="flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
+            <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{children}</main>
           </div>
         </div>
       </RoutePermissionGuard>
