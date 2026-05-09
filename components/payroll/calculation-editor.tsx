@@ -21,7 +21,7 @@ interface CalculationFormula {
   formula: string
 }
 
-const formulas: CalculationFormula[] = [
+const DEFAULT_FORMULAS: CalculationFormula[] = [
   {
     id: "base",
     name: "Base Salary",
@@ -40,12 +40,13 @@ const formulas: CalculationFormula[] = [
 ]
 
 interface CalculationEditorProps {
-  onSave?: (formulas: any[]) => void
+  onSave?: (formulas: CalculationFormula[]) => void
 }
 
 export function CalculationEditor({ onSave }: CalculationEditorProps) {
-  const [selected, setSelected] = useState(formulas[0].id)
-  const [code, setCode] = useState(formulas[0].formula)
+  const [formulas, setFormulas] = useState<CalculationFormula[]>(DEFAULT_FORMULAS)
+  const [selected, setSelected] = useState(DEFAULT_FORMULAS[0].id)
+  const [code, setCode] = useState(DEFAULT_FORMULAS[0].formula)
   const [testResult, setTestResult] = useState<{ success: boolean; result?: any; error?: string } | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
 
@@ -57,7 +58,7 @@ export function CalculationEditor({ onSave }: CalculationEditorProps) {
       setCode(formula.formula)
       setTestResult(null)
     }
-  }, [selected])
+  }, [selected, formulas])
 
   const handleFormulaChange = (value: string) => {
     setCode(value)
@@ -79,15 +80,18 @@ export function CalculationEditor({ onSave }: CalculationEditorProps) {
   }
 
   const handleSave = () => {
-    onSave?.(formulas)
+    const updated = formulas.map((f) => (f.id === selected ? { ...f, formula: code } : f))
+    setFormulas(updated)
+    onSave?.(updated)
     setHasChanges(false)
     toast.success("Formula saved!")
   }
 
   const handleReset = () => {
-    const original = formulas.find((f) => f.id === selected)
+    const original = DEFAULT_FORMULAS.find((f) => f.id === selected)
     if (original) {
       setCode(original.formula)
+      setFormulas((prev) => prev.map((f) => (f.id === selected ? { ...f, formula: original.formula } : f)))
       setHasChanges(false)
       setTestResult(null)
       toast.info("Formula reset to default")
@@ -114,6 +118,7 @@ export function CalculationEditor({ onSave }: CalculationEditorProps) {
             value={selected}
             onValueChange={(val) => {
               setSelected(val)
+              setHasChanges(false)
               const formula = formulas.find((f) => f.id === val)
               if (formula) setCode(formula.formula)
             }}

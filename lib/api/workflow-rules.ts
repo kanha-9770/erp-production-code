@@ -23,6 +23,15 @@ export interface WorkflowRuleData {
   instantActions: WorkflowInstantAction[] | null
   scheduledExecute: string | null
   scheduledUnit: string | null
+  // Schedule trigger fields (executeBasedOn === "schedule")
+  scheduleCadence: string | null
+  scheduleCron: string | null
+  scheduleHour: number | null
+  scheduleMinute: number | null
+  scheduleDayOfWeek: number | null
+  scheduleDayOfMonth: number | null
+  scheduleTimezone: string | null
+  scheduleEnabled: boolean
   active: boolean
   createdAt: string
   updatedAt: string
@@ -60,6 +69,20 @@ export interface WorkflowInstantAction {
   notifyFieldIds?: string[]
   notifyTitle?: string
   notifyMessage?: string
+  // For type === "Report Export"
+  reportName?: string
+  reportDataSource?: string
+  reportModuleName?: string
+  reportPeriod?: string
+  reportTimezone?: string
+  reportFieldIds?: string[]
+  reportFormIds?: string[]
+  reportFilters?: Array<{ field: string; operator: string; value?: string }>
+  reportSortBy?: string
+  reportSortDir?: string
+  reportFilenameTemplate?: string
+  reportMaxRows?: number
+  reportSheetName?: string
 }
 
 export interface CreateWorkflowRuleBody {
@@ -78,6 +101,22 @@ export interface CreateWorkflowRuleBody {
   instantActions?: WorkflowInstantAction[]
   scheduledExecute?: string
   scheduledUnit?: string
+  // Schedule trigger fields (only sent when executeBasedOn === "schedule")
+  scheduleCadence?: string | null
+  scheduleCron?: string | null
+  scheduleHour?: number | null
+  scheduleMinute?: number | null
+  scheduleDayOfWeek?: number | null
+  scheduleDayOfMonth?: number | null
+  scheduleTimezone?: string | null
+  scheduleEnabled?: boolean
+}
+
+export interface RunWorkflowRuleResult {
+  success: boolean
+  status: "success" | "partial" | "failed" | "skipped"
+  results: Array<{ type: string; ok: boolean; detail?: any; error?: string }>
+  error?: string
 }
 
 export const workflowRulesApi = baseApi.injectEndpoints({
@@ -121,6 +160,67 @@ export const workflowRulesApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["WorkflowRules"],
     }),
+
+    runWorkflowRule: builder.mutation<RunWorkflowRuleResult, string>({
+      query: (id) => ({
+        url: `/workflow-rules/${id}/run`,
+        method: "POST",
+      }),
+    }),
+
+    getWorkflowRuleExecutions: builder.query<ApiResponse<any[]>, string>({
+      query: (id) => `/workflow-rules/${id}/run`,
+    }),
+
+    getWorkflowExecutions: builder.query<
+      {
+        success: boolean
+        summary: {
+          total: number
+          byStatus: Record<string, number>
+          byTrigger: Record<string, number>
+          lastRunAt: string | null
+          totalRecipients: number
+          windowFrom: string | null
+          windowTo: string | null
+        }
+        data: Array<{
+          id: string
+          ruleId: string
+          trigger: string
+          status: string
+          startedAt: string
+          finishedAt: string | null
+          durationMs: number | null
+          actionsRun: number
+          recipientCount: number | null
+          error: string | null
+          details: any
+          rule: { name: string; moduleName: string } | null
+        }>
+        pagination: { limit: number; offset: number; total: number }
+      },
+      {
+        ruleId?: string
+        status?: string
+        trigger?: string
+        since?: string
+        until?: string
+        limit?: number
+        offset?: number
+      } | void
+    >({
+      query: (params) => {
+        const sp = new URLSearchParams()
+        if (params) {
+          for (const [k, v] of Object.entries(params)) {
+            if (v !== undefined && v !== null && v !== "") sp.set(k, String(v))
+          }
+        }
+        const qs = sp.toString()
+        return `/workflow-rules/executions${qs ? `?${qs}` : ""}`
+      },
+    }),
   }),
 })
 
@@ -129,4 +229,7 @@ export const {
   useCreateWorkflowRuleMutation,
   useUpdateWorkflowRuleMutation,
   useDeleteWorkflowRuleMutation,
+  useRunWorkflowRuleMutation,
+  useGetWorkflowRuleExecutionsQuery,
+  useGetWorkflowExecutionsQuery,
 } = workflowRulesApi

@@ -45,6 +45,7 @@ export type StaticPageGroup =
   | 'Leave Management'
   | 'Payroll'
   | 'HR & Employees'
+  | 'Real Estate'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -131,6 +132,103 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'settings',
   },
 
+  // ── Real Estate Brokerage (Module #2) ──────────────────────────────────
+  {
+    path: '/real-estate',
+    label: 'Real Estate Dashboard',
+    group: 'Real Estate',
+    description: 'Brokerage overview, KPIs, and quick links',
+    icon: 'building2',
+  },
+  {
+    path: '/real-estate/properties',
+    label: 'Properties',
+    group: 'Real Estate',
+    description: 'Property inventory & listings',
+    icon: 'building2',
+  },
+  {
+    path: '/real-estate/agents',
+    label: 'Agents',
+    group: 'Real Estate',
+    description: 'Agents, ranks, MLM hierarchy',
+    icon: 'users',
+  },
+  {
+    path: '/real-estate/agents/tree',
+    label: 'Agent Hierarchy',
+    group: 'Real Estate',
+    description: 'Visual MLM tree of all agents',
+    icon: 'users',
+  },
+  {
+    path: '/real-estate/agents/ranks',
+    label: 'Ranks & Promotion Rules',
+    group: 'Real Estate',
+    description: 'Configure agent ranks & override percents',
+    adminOnly: true,
+    icon: 'settings',
+  },
+  {
+    path: '/real-estate/leads',
+    label: 'Leads',
+    group: 'Real Estate',
+    description: 'CRM pipeline (list + Kanban)',
+    icon: 'inbox',
+  },
+  {
+    path: '/real-estate/viewings',
+    label: 'Property Viewings',
+    group: 'Real Estate',
+    description: 'Scheduled viewings calendar',
+    icon: 'calendar',
+  },
+  {
+    path: '/real-estate/transactions',
+    label: 'Transactions',
+    group: 'Real Estate',
+    description: 'Property sales — pending and closed',
+    icon: 'wallet',
+  },
+  {
+    path: '/real-estate/wallet',
+    label: 'My Wallet',
+    group: 'Real Estate',
+    description: 'Commission balance and ledger',
+    icon: 'wallet',
+  },
+  {
+    path: '/real-estate/payouts',
+    label: 'Payouts',
+    group: 'Real Estate',
+    description: 'Withdrawal requests, bank accounts',
+    icon: 'wallet',
+  },
+  {
+    path: '/real-estate/admin/wallets',
+    label: 'Wallets (admin)',
+    group: 'Real Estate',
+    description: 'Commission liability across all agents',
+    adminOnly: true,
+    icon: 'wallet',
+  },
+  {
+    path: '/real-estate/admin/payouts',
+    label: 'Payout Approvals',
+    group: 'Real Estate',
+    description: 'Approve / reject / mark-paid withdrawals',
+    adminOnly: true,
+    icon: 'inbox',
+  },
+  {
+    path: '/real-estate/admin/commission-rules',
+    label: 'Commission Rules',
+    group: 'Real Estate',
+    description: 'Configure splits, override percents, hold period',
+    adminOnly: true,
+    icon: 'settings',
+  },
+
   // ── Profile ────────────────────────────────────────────────────────────
   {
     path: '/profile',
@@ -182,6 +280,7 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Leave Management',
   'Payroll',
   'HR & Employees',
+  'Real Estate',
   'Settings',
   'Profile',
   'AI & Tools',

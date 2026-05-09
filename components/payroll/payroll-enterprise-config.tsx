@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -34,10 +35,31 @@ export interface StatutoryConfig {
   ptEnabled: boolean;
   ptAmount: number;
   ptThreshold: number;
+  ptState?: string;
   tdsEnabled: boolean;
   tdsMode: 'flat' | 'slab';
   tdsFlatPercent: number;
+  taxRegime: 'old' | 'new';
+  lwfEnabled: boolean;
+  lwfAmount: number;
+  npsEnabled: boolean;
+  npsEmployeePercent: number;
 }
+
+// Per-state PT presets. PT is governed by individual State Profession Tax
+// Acts so the amount and threshold differ by state. Values reflect the most
+// common monthly slab; HR teams should treat these as defaults and adjust if
+// they have a precise gross-band schedule for their state.
+export const PT_STATE_PRESETS: Record<string, { amount: number; threshold: number; label: string }> = {
+  maharashtra: { amount: 200, threshold: 10000, label: 'Maharashtra (₹200/mo over ₹10k)' },
+  karnataka:   { amount: 200, threshold: 25000, label: 'Karnataka (₹200/mo over ₹25k)' },
+  westBengal:  { amount: 110, threshold: 10000, label: 'West Bengal (₹110/mo over ₹10k)' },
+  tamilNadu:   { amount: 208, threshold: 21001, label: 'Tamil Nadu (₹208/mo over ₹21k)' },
+  delhi:       { amount: 0,   threshold: 0,     label: 'Delhi (no PT)' },
+  telangana:   { amount: 200, threshold: 20000, label: 'Telangana (₹200/mo over ₹20k)' },
+  gujarat:     { amount: 200, threshold: 12000, label: 'Gujarat (₹200/mo over ₹12k)' },
+  custom:      { amount: 200, threshold: 15000, label: 'Custom' },
+};
 
 export interface OvertimeConfig {
   enabled: boolean;
@@ -72,10 +94,16 @@ export const DEFAULT_STATUTORY: StatutoryConfig = {
   esiThreshold: 21000,
   ptEnabled: true,
   ptAmount: 200,
-  ptThreshold: 15000,
+  ptThreshold: 10000,
+  ptState: 'maharashtra',
   tdsEnabled: true,
   tdsMode: 'flat',
   tdsFlatPercent: 5,
+  taxRegime: 'new',
+  lwfEnabled: false,
+  lwfAmount: 25,
+  npsEnabled: false,
+  npsEmployeePercent: 10,
 };
 
 export const DEFAULT_OVERTIME: OvertimeConfig = {
@@ -160,9 +188,16 @@ function SalaryPreview({
     ? Math.round(gross * statutory.esiEmployeePercent / 100)
     : 0;
   const pt = statutory.ptEnabled && gross >= statutory.ptThreshold ? statutory.ptAmount : 0;
-  const calculateTdsSlab = (annualGross: number) => {
+  const applySurchargeAndCess = (annualGross: number, tax: number) => {
+    let surcharge = 0;
+    if (annualGross > 20000000) surcharge = tax * 0.25;
+    else if (annualGross > 10000000) surcharge = tax * 0.15;
+    else if (annualGross > 5000000) surcharge = tax * 0.10;
+    return (tax + surcharge) * 1.04;
+  };
+  const calculateTdsSlabNew = (annualGross: number) => {
     let taxable = Math.max(0, annualGross - 75000); // Standard deduction
-    if (taxable <= 1200000) return 0; // Rebate
+    if (taxable <= 1200000) return 0; // 87A rebate (FY 2025-26 New Regime)
     let tax = 0;
     if (taxable > 2400000) { tax += (taxable - 2400000) * 0.30; taxable = 2400000; }
     if (taxable > 2000000) { tax += (taxable - 2000000) * 0.25; taxable = 2000000; }
@@ -170,14 +205,29 @@ function SalaryPreview({
     if (taxable > 1200000) { tax += (taxable - 1200000) * 0.15; taxable = 1200000; }
     if (taxable > 800000)  { tax += (taxable - 800000)  * 0.10; taxable = 800000; }
     if (taxable > 400000)  { tax += (taxable - 400000)  * 0.05; }
-    return tax;
+    return applySurchargeAndCess(annualGross, tax);
+  };
+  const calculateTdsSlabOld = (annualGross: number) => {
+    let taxable = Math.max(0, annualGross - 50000);
+    if (taxable <= 500000) return 0;
+    let tax = 0;
+    if (taxable > 1000000) { tax += (taxable - 1000000) * 0.30; taxable = 1000000; }
+    if (taxable > 500000)  { tax += (taxable - 500000)  * 0.20; taxable = 500000; }
+    if (taxable > 250000)  { tax += (taxable - 250000)  * 0.05; }
+    return applySurchargeAndCess(annualGross, tax);
   };
   const tds = statutory.tdsEnabled
-    ? (statutory.tdsMode === 'flat' 
-         ? Math.round(gross * statutory.tdsFlatPercent / 100) 
-         : Math.round(calculateTdsSlab(gross * 12) / 12))
+    ? (statutory.tdsMode === 'flat'
+         ? Math.round(gross * statutory.tdsFlatPercent * 1.04 / 100)
+         : Math.round(
+             (statutory.taxRegime === 'old'
+               ? calculateTdsSlabOld(gross * 12)
+               : calculateTdsSlabNew(gross * 12)) / 12,
+           ))
     : 0;
-  const totalDed = pf + esi + pt + tds;
+  const lwf = statutory.lwfEnabled ? statutory.lwfAmount : 0;
+  const nps = statutory.npsEnabled ? Math.round(basic * statutory.npsEmployeePercent / 100) : 0;
+  const totalDed = pf + esi + pt + tds + lwf + nps;
   const net = gross - totalDed;
   const fmt = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);
 
@@ -220,6 +270,8 @@ function SalaryPreview({
         {esi > 0 && <><span className="text-muted-foreground">ESI (Employee)</span><span className="text-right tabular-nums text-red-600">−₹{fmt(esi)}</span></>}
         {pt > 0 && <><span className="text-muted-foreground">Professional Tax</span><span className="text-right tabular-nums text-red-600">−₹{fmt(pt)}</span></>}
         {tds > 0 && <><span className="text-muted-foreground">TDS</span><span className="text-right tabular-nums text-red-600">−₹{fmt(tds)}</span></>}
+        {lwf > 0 && <><span className="text-muted-foreground">LWF</span><span className="text-right tabular-nums text-red-600">−₹{fmt(lwf)}</span></>}
+        {nps > 0 && <><span className="text-muted-foreground">NPS</span><span className="text-right tabular-nums text-red-600">−₹{fmt(nps)}</span></>}
         <div className="contents font-semibold border-t border-border pt-1">
           <span>Total Deductions</span>
           <span className="text-right tabular-nums text-red-600">−₹{fmt(totalDed)}</span>
@@ -245,7 +297,12 @@ export function SalaryStructureSection({
   statutory: StatutoryConfig;
 }) {
   const u = (patch: Partial<SalaryStructureConfig>) => onChange({ ...config, ...patch });
-  const ctc = defaultCTC ?? 30000;
+  // Admins often want to stress-test the structure at multiple CTC bands
+  // (e.g. ₹25k vs ₹50k vs ₹15L) without changing the org-wide default. The
+  // Live Preview now drives off this local state, defaulting to the org's
+  // saved CTC so first render matches what existing UIs showed.
+  const [previewCtc, setPreviewCtc] = useState<number>(defaultCTC ?? 30000);
+  const ctc = previewCtc;
 
   return (
     <AccordionItem value="salary-structure" className="border rounded-lg bg-card overflow-hidden">
@@ -325,6 +382,17 @@ export function SalaryStructureSection({
                 <NumericRow label="Special Allowance Amount" value={config.specialAllowanceAmount} onChange={(v) => u({ specialAllowanceAmount: v })} suffix="₹ / month" />
               )}
             </div>
+          </div>
+
+          <div className="rounded-lg border border-dashed border-border bg-muted/5 p-4">
+            <NumericRow
+              label="Preview CTC"
+              description="Stress-test the structure at any monthly CTC. Doesn't save."
+              value={previewCtc}
+              onChange={(v) => setPreviewCtc(Math.max(0, v))}
+              suffix="₹ / month"
+              step={1000}
+            />
           </div>
 
           <SalaryPreview ctc={ctc} salary={config} statutory={statutory} />
@@ -409,8 +477,64 @@ export function StatutoryComplianceSection({
             </div>
             {config.ptEnabled && (
               <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
-                <NumericRow label="PT amount" description="Fixed monthly deduction" value={config.ptAmount} onChange={(v) => u({ ptAmount: v })} suffix="₹ / month" />
-                <NumericRow label="PT threshold" description="PT applies only if gross ≥ this" value={config.ptThreshold} onChange={(v) => u({ ptThreshold: v })} suffix="₹" />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">State preset</p>
+                    <p className="text-xs text-muted-foreground">Auto-fills the state's slab</p>
+                  </div>
+                  <Select
+                    value={config.ptState ?? 'custom'}
+                    onValueChange={(v) => {
+                      const preset = PT_STATE_PRESETS[v];
+                      if (preset && v !== 'custom') {
+                        u({ ptState: v, ptAmount: preset.amount, ptThreshold: preset.threshold });
+                      } else {
+                        u({ ptState: v });
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full sm:w-64"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PT_STATE_PRESETS).map(([k, p]) => (
+                        <SelectItem key={k} value={k}>{p.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <NumericRow label="PT amount" description="Fixed monthly deduction" value={config.ptAmount} onChange={(v) => u({ ptAmount: v, ptState: 'custom' })} suffix="₹ / month" />
+                <NumericRow label="PT threshold" description="PT applies only if gross ≥ this" value={config.ptThreshold} onChange={(v) => u({ ptThreshold: v, ptState: 'custom' })} suffix="₹" />
+              </div>
+            )}
+          </div>
+
+          {/* LWF */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 border-rose-200">LWF</Badge>
+                <p className="text-sm font-semibold text-foreground">Labour Welfare Fund</p>
+              </div>
+              <Switch checked={config.lwfEnabled} onCheckedChange={(v) => u({ lwfEnabled: v })} />
+            </div>
+            {config.lwfEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <NumericRow label="LWF amount" description="Flat monthly amount (state-wise; Maharashtra: ₹25, Karnataka: ₹20)" value={config.lwfAmount} onChange={(v) => u({ lwfAmount: v })} suffix="₹ / month" />
+              </div>
+            )}
+          </div>
+
+          {/* NPS */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] bg-cyan-50 text-cyan-700 border-cyan-200">NPS</Badge>
+                <p className="text-sm font-semibold text-foreground">National Pension Scheme</p>
+              </div>
+              <Switch checked={config.npsEnabled} onCheckedChange={(v) => u({ npsEnabled: v })} />
+            </div>
+            {config.npsEnabled && (
+              <div className="space-y-3 pl-1 pt-2 border-t border-border/50">
+                <NumericRow label="Employee NPS %" description="Percentage of Basic (typical 5–10%, deductible u/s 80CCD(1B))" value={config.npsEmployeePercent} onChange={(v) => u({ npsEmployeePercent: v })} suffix="% of Basic" step={0.5} />
               </div>
             )}
           </div>
@@ -435,19 +559,48 @@ export function StatutoryComplianceSection({
                     <SelectTrigger className="h-9 w-full sm:w-48"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="flat">Flat percentage</SelectItem>
-                      <SelectItem value="slab">Slab-based (New Regime)</SelectItem>
+                      <SelectItem value="slab">Slab-based</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 {config.tdsMode === 'flat' && (
-                  <NumericRow label="TDS flat rate" value={config.tdsFlatPercent} onChange={(v) => u({ tdsFlatPercent: v })} suffix="% of Gross" step={0.5} />
+                  <>
+                    <NumericRow label="TDS flat rate" value={config.tdsFlatPercent} onChange={(v) => u({ tdsFlatPercent: v })} suffix="% of Gross" step={0.5} />
+                    <p className="text-xs text-muted-foreground pl-1">+ 4% Health &amp; Education Cess applied automatically.</p>
+                  </>
                 )}
                 {config.tdsMode === 'slab' && (
-                  <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-2">
-                    <p className="font-medium text-foreground">New Tax Regime (FY 2025–26)</p>
-                    <p className="mt-1 leading-relaxed">0–₹4L: Nil · ₹4–8L: 5% · ₹8–12L: 10% · ₹12–16L: 15% · ₹16–20L: 20% · ₹20–24L: 25% · &gt;₹24L: 30%</p>
-                    <p className="mt-1 text-[10px] opacity-80">Monthly TDS is auto-computed as annual projected tax ÷ 12</p>
-                  </div>
+                  <>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[220px_1fr] sm:items-center">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Tax Regime</p>
+                        <p className="text-xs text-muted-foreground">Old (with 80C/HRA) or New (lower slabs, no exemptions)</p>
+                      </div>
+                      <Select value={config.taxRegime} onValueChange={(v: 'old' | 'new') => u({ taxRegime: v })}>
+                        <SelectTrigger className="h-9 w-full sm:w-48"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="new">New Regime (default)</SelectItem>
+                          <SelectItem value="old">Old Regime</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {config.taxRegime === 'new' && (
+                      <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-2">
+                        <p className="font-medium text-foreground">New Tax Regime (FY 2025–26)</p>
+                        <p className="mt-1 leading-relaxed">0–₹4L: Nil · ₹4–8L: 5% · ₹8–12L: 10% · ₹12–16L: 15% · ₹16–20L: 20% · ₹20–24L: 25% · &gt;₹24L: 30%</p>
+                        <p className="mt-1 leading-relaxed">Std deduction ₹75k · 87A rebate ≤ ₹12L · + 4% cess · Surcharge 10%/15%/25% over ₹50L/₹1Cr/₹2Cr.</p>
+                        <p className="mt-1 text-[10px] opacity-80">Monthly TDS = annual projected tax ÷ 12</p>
+                      </div>
+                    )}
+                    {config.taxRegime === 'old' && (
+                      <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-2">
+                        <p className="font-medium text-foreground">Old Tax Regime (FY 2025–26)</p>
+                        <p className="mt-1 leading-relaxed">0–₹2.5L: Nil · ₹2.5–5L: 5% · ₹5–10L: 20% · &gt;₹10L: 30%</p>
+                        <p className="mt-1 leading-relaxed">Std deduction ₹50k · 87A rebate ≤ ₹5L · + 4% cess · Surcharge brackets.</p>
+                        <p className="mt-1 text-[10px] opacity-80">Engine does NOT yet model 80C/80D/HRA exemptions — TDS will overstate until per-employee IT declarations are wired.</p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

@@ -164,7 +164,10 @@ model User {
   savedFilters        SavedFilter[]            @relation("SavedFilterCreator")
   workflowRules       WorkflowRule[]           @relation("WorkflowRuleCreator")
   functions           CrmFunction[]            @relation("CrmFunctionCreator")
+  functionExecutions  FunctionExecution[]      @relation("FunctionExecutionActor")
   notifications       Notification[]           @relation("NotificationRecipient")
+  agentProfile        AgentProfile?
+  reWallet            Wallet?
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -236,7 +239,9 @@ model Organization {
   lookupTemplates   LookupTemplate[]
   savedFilters      SavedFilter[]
   workflowRules     WorkflowRule[]
+  workflowExecutions WorkflowExecution[]
   functions         CrmFunction[]
+  functionExecutions FunctionExecution[]
   functionBindings  FunctionBinding[]
   notifications     Notification[]
   createdAt         DateTime           @default(now()) @map("created_at")
@@ -2012,30 +2017,66 @@ model ChatMessage {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model WorkflowRule {
-  id               String       @id @default(cuid())
-  name             String
-  description      String?
-  moduleName       String       @map("module_name")
-  executeBasedOn   String       @map("execute_based_on") // "record-action" | "record-field"
-  recordAction     String?      @map("record_action") // "Create" | "Create or Edit" | "Edit" | "Delete"
-  dateField        String?      @map("date_field") // "Created Time" | "Last Activity Time" etc.
-  conditionType    String       @default("all") @map("condition_type") // "all" | "matching"
-  conditions       Json? // Array of condition objects
-  instantActions   Json?        @map("instant_actions") // Array of selected instant action names
-  scheduledExecute String?      @map("scheduled_execute") // Number value
-  scheduledUnit    String?      @map("scheduled_unit") // "Minutes" | "Hours" | "Days"
-  active           Boolean      @default(true)
-  organizationId   String       @map("organization_id")
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdById      String       @map("created_by_id")
-  createdBy        User         @relation("WorkflowRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt        DateTime     @default(now()) @map("created_at")
-  updatedAt        DateTime     @updatedAt @map("updated_at")
+  id                String              @id @default(cuid())
+  name              String
+  description       String?
+  moduleName        String              @map("module_name")
+  executeBasedOn    String              @map("execute_based_on") // "record-action" | "record-field" | "schedule"
+  recordAction      String?             @map("record_action") // "Create" | "Create or Edit" | "Edit" | "Delete"
+  dateField         String?             @map("date_field") // "Created Time" | "Last Activity Time" etc.
+  conditionType     String              @default("all") @map("condition_type") // "all" | "matching"
+  conditions        Json? // Array of condition objects
+  instantActions    Json?               @map("instant_actions") // Array of selected instant action names
+  scheduledExecute  String?             @map("scheduled_execute") // Number value (legacy: delay-after-date-field)
+  scheduledUnit     String?             @map("scheduled_unit") // "Minutes" | "Hours" | "Days"
+  // ── Schedule trigger fields (executeBasedOn = "schedule") ─────────────────
+  scheduleCadence   String?             @map("schedule_cadence") // "daily" | "weekly" | "monthly" | "custom"
+  scheduleCron      String?             @map("schedule_cron") // raw cron expression when cadence = "custom"
+  scheduleHour      Int?                @map("schedule_hour") // 0-23, used by daily/weekly/monthly
+  scheduleMinute    Int?                @default(0) @map("schedule_minute") // 0-59
+  scheduleDayOfWeek Int?                @map("schedule_day_of_week") // 0=Sun..6=Sat, weekly only
+  scheduleDayOfMonth Int?               @map("schedule_day_of_month") // 1-31, monthly only
+  scheduleTimezone  String?             @map("schedule_timezone") // IANA tz, e.g. "Asia/Kolkata"
+  scheduleEnabled   Boolean             @default(true) @map("schedule_enabled")
+  active            Boolean             @default(true)
+  organizationId    String              @map("organization_id")
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById       String              @map("created_by_id")
+  createdBy         User                @relation("WorkflowRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  executions        WorkflowExecution[]
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   @@index([organizationId])
   @@index([createdById])
   @@index([moduleName])
+  @@index([executeBasedOn, active])
   @@map("workflow_rules")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Executions — audit log of every rule firing (scheduled or event)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WorkflowExecution {
+  id             String       @id @default(cuid())
+  ruleId         String       @map("rule_id")
+  rule           WorkflowRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  trigger        String // "schedule" | "manual" | "record-create" | "record-edit" | "record-delete"
+  status         String // "success" | "partial" | "failed" | "skipped"
+  startedAt      DateTime     @default(now()) @map("started_at")
+  finishedAt     DateTime?    @map("finished_at")
+  durationMs     Int?         @map("duration_ms")
+  actionsRun     Int          @default(0) @map("actions_run")
+  recipientCount Int?         @map("recipient_count")
+  error          String?      @db.Text
+  details        Json? // per-action results, recipient lists, etc.
+
+  @@index([ruleId, startedAt])
+  @@index([organizationId, startedAt])
+  @@map("workflow_executions")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2057,6 +2098,7 @@ model CrmFunction {
   createdById    String            @map("created_by_id")
   createdBy      User              @relation("CrmFunctionCreator", fields: [createdById], references: [id], onDelete: Cascade)
   bindings       FunctionBinding[]
+  executions     FunctionExecution[]
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
 
@@ -2064,6 +2106,38 @@ model CrmFunction {
   @@index([createdById])
   @@index([category])
   @@map("crm_functions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Function executions — audit log for every script run (manual test, workflow
+// rule, scheduled trigger, binding event). Powers the /settings/functions/
+// executions page and the per-function "View Logs" panel.
+// ─────────────────────────────────────────────────────────────────────────────
+model FunctionExecution {
+  id             String       @id @default(cuid())
+  functionId     String       @map("function_id")
+  function       CrmFunction  @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  trigger        String // "manual" | "test" | "workflow" | "scheduled" | "binding" | "rest-api"
+  status         String // "success" | "failed"
+  startedAt      DateTime     @default(now()) @map("started_at")
+  finishedAt     DateTime?    @map("finished_at")
+  durationMs     Int?         @map("duration_ms")
+  input          Json?
+  result         Json?
+  // Console output captured during the run — array of { level, args, ts }.
+  // Stored as Json so the log viewer can render with colour coding.
+  logs           Json?
+  error          String?      @db.Text
+  // Acting user — null for fully autonomous runs (e.g. scheduled with no
+  // session). Resolves via the User relation for display.
+  userId         String?      @map("user_id")
+  user           User?        @relation("FunctionExecutionActor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([functionId, startedAt])
+  @@index([organizationId, startedAt])
+  @@map("function_executions")
 }
 
 // Connects a CrmFunction to a Form / FormField / FormModule with a trigger
@@ -2329,4 +2403,902 @@ model TrashRetentionSetting {
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@map("trash_retention_settings")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REAL ESTATE BROKERAGE MANAGEMENT (REBM) — Phase 1
+// Module #2 of the ERP. Covers Property inventory, Agent hierarchy (MLM tree),
+// and Lead/CRM pipeline with viewings. Commission engine, wallets, payouts and
+// compliance follow in later phases.
+//
+// Conventions (match the rest of the schema):
+//   - User / Organization references are stored as plain Strings (no @relation)
+//     to mirror LeaveRequest / AttendanceRegularization. Service layer joins.
+//   - Strong ownership relations (Property → images / docs, Lead → activities)
+//     keep @relation for cascade delete.
+//   - Decimal money fields use @db.Decimal(14,2); percent fields use (7,4).
+//   - All tables prefixed `re_` for clear namespacing within the database.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum PropertyType {
+  RESIDENTIAL
+  COMMERCIAL
+  LAND
+  INDUSTRIAL
+  AGRICULTURAL
+}
+
+enum PropertySubType {
+  APARTMENT
+  VILLA
+  HOUSE
+  TOWNHOUSE
+  STUDIO
+  PENTHOUSE
+  OFFICE
+  RETAIL
+  WAREHOUSE
+  HOTEL
+  PLOT
+  FARM
+  OTHER
+}
+
+enum PropertyStatus {
+  DRAFT
+  AVAILABLE
+  UNDER_CONTRACT
+  SOLD
+  WITHDRAWN
+  EXPIRED
+}
+
+enum PropertyDocumentType {
+  TITLE_DEED
+  NOC
+  FLOOR_PLAN
+  TAX_RECEIPT
+  AGREEMENT
+  POSSESSION_LETTER
+  OTHER
+}
+
+enum CommissionTermType {
+  PERCENTAGE
+  FLAT_FEE
+}
+
+model Property {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+
+  // Identity
+  title       String
+  code        String? // optional human-readable code, e.g. "PROP-2026-0042"
+  description String? @db.Text
+
+  // Classification
+  type    PropertyType
+  subType PropertySubType? @map("sub_type")
+  status  PropertyStatus   @default(DRAFT)
+
+  // Location
+  addressLine1 String   @map("address_line_1")
+  addressLine2 String?  @map("address_line_2")
+  city         String
+  state        String?
+  country      String
+  postalCode   String?  @map("postal_code")
+  latitude     Decimal? @db.Decimal(10, 7)
+  longitude    Decimal? @db.Decimal(10, 7)
+
+  // Pricing & area
+  listingPrice Decimal  @map("listing_price") @db.Decimal(14, 2)
+  currency     String   @default("INR")
+  area         Decimal? @db.Decimal(12, 2)
+  areaUnit     String?  @map("area_unit") // sqft, sqm, acre, hectare
+  bedrooms     Int?
+  bathrooms    Int?
+  parkingSpots Int?     @map("parking_spots")
+  yearBuilt    Int?     @map("year_built")
+
+  // Free-form features bag — ["pool","gym","gated"]
+  features Json @default("[]")
+
+  // Commission terms (FR-1.7)
+  commissionTermType   CommissionTermType @default(PERCENTAGE) @map("commission_term_type")
+  commissionPercentage Decimal?           @map("commission_percentage") @db.Decimal(7, 4)
+  commissionFlatFee    Decimal?           @map("commission_flat_fee") @db.Decimal(14, 2)
+
+  // Listing dates
+  listedAt          DateTime  @default(now()) @map("listed_at")
+  expectedClosingAt DateTime? @map("expected_closing_at")
+  finalClosingAt    DateTime? @map("final_closing_at")
+  expiresAt         DateTime? @map("expires_at")
+
+  // Listing agent (FR-1.10) — User.id, plain String (service layer joins)
+  listingAgentId String @map("listing_agent_id")
+
+  // Constraint per BR-12 — minimum acceptable closing % of listing price
+  minClosingPercent Decimal? @map("min_closing_percent") @db.Decimal(5, 2)
+
+  // Denormalised primary image URL for fast list-page rendering
+  primaryImageUrl String? @map("primary_image_url")
+
+  images       PropertyImage[]
+  documents    PropertyDocument[]
+  priceHistory PropertyPriceHistory[]
+  viewings     PropertyViewing[]
+  transactions Transaction[]
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+  @@index([organizationId, type, subType])
+  @@index([city, country])
+  @@index([listingAgentId])
+  @@index([listingPrice])
+  @@map("re_properties")
+}
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  propertyId String   @map("property_id")
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  url        String
+  caption    String?
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([propertyId, sortOrder])
+  @@map("re_property_images")
+}
+
+model PropertyDocument {
+  id           String               @id @default(cuid())
+  propertyId   String               @map("property_id")
+  property     Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  type         PropertyDocumentType
+  name         String
+  url          String
+  verifiedAt   DateTime?            @map("verified_at")
+  verifiedById String?              @map("verified_by_id") // → User.id
+  uploadedById String               @map("uploaded_by_id") // → User.id
+  createdAt    DateTime             @default(now()) @map("created_at")
+
+  @@index([propertyId])
+  @@index([type])
+  @@map("re_property_documents")
+}
+
+model PropertyPriceHistory {
+  id          String   @id @default(cuid())
+  propertyId  String   @map("property_id")
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  oldPrice    Decimal  @map("old_price") @db.Decimal(14, 2)
+  newPrice    Decimal  @map("new_price") @db.Decimal(14, 2)
+  changedById String   @map("changed_by_id") // → User.id
+  reason      String?
+  changedAt   DateTime @default(now()) @map("changed_at")
+
+  @@index([propertyId, changedAt])
+  @@map("re_property_price_history")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT HIERARCHY (MLM tree)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AgentStatus {
+  PENDING_KYC
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum AgentComplianceStatus {
+  COMPLIANT
+  PENDING_KYC
+  NON_COMPLIANT
+}
+
+model Rank {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  name           String
+  code           String // unique within org, e.g. TRAINEE / ASSOCIATE / MD
+  description    String?
+  level          Int     @default(0) // higher = more senior
+
+  // Promotion criteria — auto-evaluated; manual override permitted
+  minPersonalSales     Int?     @map("min_personal_sales")
+  minTeamSize          Int?     @map("min_team_size")
+  minTeamRevenue       Decimal? @map("min_team_revenue") @db.Decimal(16, 2)
+  evaluationWindowDays Int?     @map("evaluation_window_days") // null = lifetime
+
+  // Override percents by tree depth, e.g. [5, 3, 1]. Stored as Json so depth
+  // can be re-tuned without a schema change.
+  overridePercents Json @default("[]") @map("override_percents")
+
+  // Optional rank-up bonus credited to wallet on promotion
+  rankUpBonus Decimal? @map("rank_up_bonus") @db.Decimal(14, 2)
+
+  // Optional team-sales multiplier (e.g. MD earns extra on team revenue)
+  teamBonusPercent Decimal? @map("team_bonus_percent") @db.Decimal(7, 4)
+
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agents AgentProfile[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, level])
+  @@map("re_ranks")
+}
+
+model AgentProfile {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @unique @map("user_id")
+  user           User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Optional employee link — Section 3.1 (agent may also be HR employee)
+  employeeId String? @unique @map("employee_id")
+
+  // MLM tree (FR-2.1, FR-2.2)
+  sponsorId String?        @map("sponsor_id")
+  sponsor   AgentProfile?  @relation("AgentSponsor", fields: [sponsorId], references: [id], onDelete: SetNull)
+  recruits  AgentProfile[] @relation("AgentSponsor")
+
+  parentId String?        @map("parent_id")
+  parent   AgentProfile?  @relation("AgentParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children AgentProfile[] @relation("AgentParent")
+
+  // Sponsor code — shareable handle that lets recruits self-onboard into tree
+  sponsorCode String? @unique @map("sponsor_code")
+
+  // Rank
+  rankId         String?   @map("rank_id")
+  rank           Rank?     @relation(fields: [rankId], references: [id], onDelete: SetNull)
+  rankAssignedAt DateTime? @map("rank_assigned_at")
+
+  // Status & compliance
+  status           AgentStatus           @default(PENDING_KYC)
+  complianceStatus AgentComplianceStatus @default(PENDING_KYC) @map("compliance_status")
+
+  // License (FR-8)
+  licenseNumber    String?   @map("license_number")
+  licenseAuthority String?   @map("license_authority")
+  licenseIssuedAt  DateTime? @map("license_issued_at")
+  licenseExpiresAt DateTime? @map("license_expires_at")
+
+  // Lifecycle
+  joinedAt         DateTime  @default(now()) @map("joined_at")
+  suspendedAt      DateTime? @map("suspended_at")
+  terminatedAt     DateTime? @map("terminated_at")
+  suspensionReason String?   @map("suspension_reason")
+
+  // Profile fields
+  specializations Json    @default("[]") // ["RESIDENTIAL","COMMERCIAL"]
+  serviceAreas    Json    @default("[]") // ["Mumbai","Pune"]
+  bio             String? @db.Text
+
+  promotions RankPromotionLog[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([sponsorId])
+  @@index([parentId])
+  @@index([rankId])
+  @@index([licenseExpiresAt])
+  @@map("re_agent_profiles")
+}
+
+model RankPromotionLog {
+  id           String       @id @default(cuid())
+  agentId      String       @map("agent_id")
+  agent        AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  fromRankId   String?      @map("from_rank_id")
+  toRankId     String       @map("to_rank_id")
+  triggeredBy  String       @map("triggered_by") // 'SYSTEM' | 'MANUAL'
+  approvedById String?      @map("approved_by_id") // → User.id
+  reason       String?
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@index([agentId, createdAt])
+  @@map("re_rank_promotions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEADS / CRM
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  VIEWING_SCHEDULED
+  NEGOTIATING
+  CONVERTED
+  LOST
+}
+
+enum LeadScore {
+  HOT
+  WARM
+  COLD
+}
+
+enum LeadSource {
+  WEBSITE
+  REFERRAL
+  WALK_IN
+  PORTAL
+  SOCIAL
+  CAMPAIGN
+  WEBHOOK
+  OTHER
+}
+
+enum LeadActivityType {
+  CALL
+  EMAIL
+  MEETING
+  VIEWING
+  NOTE
+  STATUS_CHANGE
+  ASSIGNMENT
+}
+
+enum ViewingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Lead {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  // Contact
+  name     String
+  email    String?
+  phone    String?
+  altPhone String? @map("alt_phone")
+
+  // Interest profile
+  budgetMin       Decimal? @map("budget_min") @db.Decimal(14, 2)
+  budgetMax       Decimal? @map("budget_max") @db.Decimal(14, 2)
+  preferredCities Json     @default("[]") @map("preferred_cities")
+  propertyTypes   Json     @default("[]") @map("property_types") // ["RESIDENTIAL"]
+  bedroomsMin     Int?     @map("bedrooms_min")
+
+  // Pipeline (FR-3.2)
+  status        LeadStatus @default(NEW)
+  score         LeadScore  @default(WARM)
+  source        LeadSource @default(OTHER)
+  sourceDetails String?    @map("source_details")
+
+  // Assignment
+  assignedAgentId String?   @map("assigned_agent_id") // → User.id
+  assignedAt      DateTime? @map("assigned_at")
+
+  // Follow-up (FR-3.7)
+  nextFollowUpAt  DateTime? @map("next_follow_up_at")
+  lastContactedAt DateTime? @map("last_contacted_at")
+
+  // Conversion (FR-3.8 / BR-13)
+  convertedAt DateTime? @map("converted_at")
+  buyerId     String?   @unique @map("buyer_id")
+  buyer       Buyer?    @relation(fields: [buyerId], references: [id])
+  lostReason  String?   @map("lost_reason")
+
+  notes      String? @db.Text
+  activities LeadActivity[]
+  viewings   PropertyViewing[]
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([assignedAgentId, status])
+  @@index([nextFollowUpAt])
+  @@index([score])
+  @@map("re_leads")
+}
+
+model LeadActivity {
+  id         String           @id @default(cuid())
+  leadId     String           @map("lead_id")
+  lead       Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type       LeadActivityType
+  agentId    String           @map("agent_id") // → User.id
+  occurredAt DateTime         @default(now()) @map("occurred_at")
+  subject    String?
+  content    String?          @db.Text
+  outcome    String?
+  // Type-specific payload, e.g. { fromStatus, toStatus } or
+  // { fromAgentId, toAgentId } for ASSIGNMENT
+  data Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([leadId, occurredAt])
+  @@index([agentId, occurredAt])
+  @@map("re_lead_activities")
+}
+
+model PropertyViewing {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  leadId         String        @map("lead_id")
+  lead           Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  propertyId     String        @map("property_id")
+  property       Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agentId        String        @map("agent_id") // → User.id
+  scheduledAt    DateTime      @map("scheduled_at")
+  durationMin    Int           @default(30) @map("duration_min")
+  status         ViewingStatus @default(SCHEDULED)
+  feedback       String?       @db.Text
+  outcomeRating  Int?          @map("outcome_rating") // 1–5
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, scheduledAt])
+  @@index([propertyId, scheduledAt])
+  @@index([agentId, scheduledAt])
+  @@index([leadId])
+  @@map("re_property_viewings")
+}
+
+// Confirmed customer once a lead converts. Separated from Lead so future
+// Transaction / Payment / Agreement entities can attach without polluting the
+// CRM-side tables.
+model Buyer {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  name           String
+  email          String?
+  phone          String?
+  panOrTaxId     String? @map("pan_or_tax_id") // sensitive — masked in UI
+  addressLine1   String? @map("address_line_1")
+  city           String?
+  country        String?
+
+  lead         Lead? // back-ref via Lead.buyerId
+  transactions Transaction[]
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([phone])
+  @@map("re_buyers")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REBM Phase 2 — Transactions, Commission Engine, Wallets/Ledger, Payouts
+// FR-4, FR-5, FR-6, FR-7
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum TransactionStatus {
+  PENDING
+  CLOSED
+  CANCELLED
+  DISPUTED
+}
+
+enum TransactionDocumentType {
+  CONTRACT
+  SALE_DEED
+  PAYMENT_PROOF
+  KYC
+  OTHER
+}
+
+// A property sale. FR-4. The commission engine fires on transition to CLOSED
+// and reverses on subsequent CANCELLED.
+model Transaction {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  code String? // optional human-readable code, e.g. TXN-2026-0007
+
+  propertyId String   @map("property_id")
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  buyerId String? @map("buyer_id")
+  buyer   Buyer?  @relation(fields: [buyerId], references: [id])
+
+  // Listing & selling agents may be the same User (FR-4.3). Plain Strings
+  // (User.id) per the prevailing pattern; service layer joins.
+  listingAgentId String  @map("listing_agent_id")
+  sellingAgentId String? @map("selling_agent_id")
+
+  // Pricing (Decimal for safety; FR-5.8)
+  salePrice  Decimal @map("sale_price") @db.Decimal(14, 2)
+  currency   String  @default("INR")
+
+  // Lifecycle
+  status     TransactionStatus @default(PENDING)
+  closedAt   DateTime?         @map("closed_at")
+  cancelledAt DateTime?        @map("cancelled_at")
+  cancellationReason String?   @map("cancellation_reason") @db.Text
+
+  // Versioning — once closed, the transaction "owns" the rule it used (FR-5.11
+  // / BR-9). The application layer stamps these at close time.
+  commissionRuleId      String?  @map("commission_rule_id")
+  commissionRuleVersion Int?     @map("commission_rule_version")
+
+  // Total commission produced by the engine. Sum of CommissionSplit.amount.
+  baseCommission Decimal? @map("base_commission") @db.Decimal(14, 2)
+
+  // Payment terms — free-form for Phase 2; later iterations may model EMIs.
+  paymentTerms String? @map("payment_terms") @db.Text
+
+  documents     TransactionDocument[]
+  commissionSplits CommissionSplit[]
+  commissionAudits CommissionAudit[]
+  ledgerEntries LedgerEntry[]
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+  @@index([propertyId])
+  @@index([buyerId])
+  @@index([listingAgentId])
+  @@index([sellingAgentId])
+  @@index([closedAt])
+  @@map("re_transactions")
+}
+
+model TransactionDocument {
+  id            String                  @id @default(cuid())
+  transactionId String                  @map("transaction_id")
+  transaction   Transaction             @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  type          TransactionDocumentType
+  name          String
+  url           String
+  uploadedById  String                  @map("uploaded_by_id")
+  createdAt     DateTime                @default(now()) @map("created_at")
+
+  @@index([transactionId])
+  @@index([type])
+  @@map("re_transaction_documents")
+}
+
+// Versioned, configurable commission rule. FR-5.11 — once a transaction
+// closes against a (rule, version), that pair is frozen on the transaction
+// row, so future edits don't disturb history.
+model CommissionRule {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  name           String
+  description    String?
+
+  // Optional scope. When propertyType is set, the rule only matches that
+  // type. Null = applies to all types as a fallback.
+  propertyType PropertyType? @map("property_type")
+
+  // The current active version is the row with isActive=true and the highest
+  // version number. We never mutate rules in place — a "save" creates a new
+  // CommissionRule row with version+1 and flips the previous one inactive.
+  version  Int     @default(1)
+  isActive Boolean @default(true) @map("is_active")
+
+  // Splits, % of base. FR-5.3 — must sum to 100.
+  listingAgentPercent Decimal @map("listing_agent_percent") @db.Decimal(7, 4)
+  sellingAgentPercent Decimal @map("selling_agent_percent") @db.Decimal(7, 4)
+  brokeragePercent    Decimal @map("brokerage_percent") @db.Decimal(7, 4)
+
+  // Override percents by tree depth (taken FROM the brokerage share).
+  // Same shape as Rank.overridePercents; rules can declare their own ladder
+  // or fall through to the agent's rank.overridePercents (controlled by
+  // useRankOverrides). Stored as Json (decimal array).
+  overridePercents  Json    @default("[]") @map("override_percents")
+  useRankOverrides  Boolean @default(false) @map("use_rank_overrides")
+  maxOverrideDepth  Int     @default(3) @map("max_override_depth")
+
+  // Default base commission = % of sale price for any property that doesn't
+  // override on the Property row itself (Property.commissionPercentage /
+  // commissionFlatFee). Optional — leave null to require per-property values.
+  defaultBasePercent Decimal? @map("default_base_percent") @db.Decimal(7, 4)
+
+  // Operational config
+  holdPeriodDays   Int     @default(7) @map("hold_period_days") // FR-5.12
+  compressionRule  Boolean @default(true) @map("compression_rule") // FR-5.6 / BR-8
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  splits CommissionSplit[]
+  audits CommissionAudit[]
+
+  @@index([organizationId, isActive, propertyType])
+  @@index([propertyType, version])
+  @@map("re_commission_rules")
+}
+
+enum CommissionSplitRole {
+  LISTING_AGENT
+  SELLING_AGENT
+  BROKERAGE
+  OVERRIDE
+  RANK_BONUS
+}
+
+enum CommissionStatus {
+  ON_HOLD
+  RELEASED
+  REVERSED
+}
+
+// One row per beneficiary of a transaction's commission. LISTING_AGENT,
+// SELLING_AGENT and BROKERAGE rows are the FR-5.3 splits; OVERRIDE rows are
+// the upline distribution (one per level), RANK_BONUS rows are FR-5.7 extras.
+model CommissionSplit {
+  id            String      @id @default(cuid())
+  organizationId String     @map("organization_id")
+  transactionId String      @map("transaction_id")
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  ruleId  String?         @map("rule_id")
+  rule    CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  role            CommissionSplitRole
+  // For OVERRIDE rows: 1, 2, 3 = depth from the originating agent. Null for
+  // listing/selling/brokerage rows.
+  level           Int?
+  // Beneficiary user (agent) — null for the BROKERAGE-house row, which is
+  // tracked at org level only.
+  beneficiaryUserId String?           @map("beneficiary_user_id")
+
+  percent  Decimal           @db.Decimal(7, 4) // % applied
+  amount   Decimal           @db.Decimal(14, 2) // computed amount
+  status   CommissionStatus  @default(ON_HOLD)
+
+  ledgerEntryId String? @unique @map("ledger_entry_id") // 1:1 with the credit row
+  reversalLedgerEntryId String? @unique @map("reversal_ledger_entry_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([transactionId])
+  @@index([beneficiaryUserId, status])
+  @@map("re_commission_splits")
+}
+
+// One audit record per commission calculation (and per reversal). FR-5.10 —
+// keeps the inputs, the rule snapshot, and the resulting splits as JSON so
+// disputes can be answered without rerunning the engine.
+model CommissionAudit {
+  id            String      @id @default(cuid())
+  organizationId String     @map("organization_id")
+  transactionId String      @map("transaction_id")
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  ruleId      String?         @map("rule_id")
+  rule        CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  ruleVersion Int             @map("rule_version")
+
+  kind  String // 'CALCULATE' | 'REVERSE' | 'RELEASE'
+  inputs   Json // sale price, agents, rank chain, rule snapshot
+  outputs  Json // split rows snapshot
+  notes    String? @db.Text
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([transactionId, createdAt])
+  @@index([organizationId, kind])
+  @@map("re_commission_audits")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WALLET / LEDGER (FR-6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One per User who participates in commissions. Created lazily when the user
+// first earns / is debited. The summary fields are denormalised — they're a
+// projection of the ledger and are recomputed on every write inside the same
+// transaction so concurrent writes can't desync them.
+model Wallet {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @unique @map("user_id")
+  user           User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  currency String @default("INR")
+
+  // Sums of all RELEASED entries (credits − debits)
+  availableBalance Decimal @default(0) @map("available_balance") @db.Decimal(14, 2)
+  // Sums of all ON_HOLD entries (credits − debits) — pending release
+  pendingBalance   Decimal @default(0) @map("pending_balance") @db.Decimal(14, 2)
+  totalCredits     Decimal @default(0) @map("total_credits") @db.Decimal(14, 2)
+  totalDebits      Decimal @default(0) @map("total_debits") @db.Decimal(14, 2)
+
+  isFrozen     Boolean @default(false) @map("is_frozen")
+  freezeReason String? @map("freeze_reason")
+
+  ledgerEntries LedgerEntry[]
+  withdrawals   WithdrawalRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@map("re_wallets")
+}
+
+enum LedgerEntryType {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerCategory {
+  COMMISSION
+  OVERRIDE
+  BONUS
+  DESK_FEE
+  MARKETING_FEE
+  WITHDRAWAL
+  REFUND
+  ADJUSTMENT
+  REVERSAL
+  RANK_UP_BONUS
+}
+
+enum LedgerStatus {
+  ON_HOLD
+  RELEASED
+  REVERSED
+}
+
+// Append-only financial movements. FR-6.2 / NFR-7. Application-layer code
+// MUST never UPDATE or DELETE these rows. We only ever insert new rows
+// (including offsetting reversals).
+model LedgerEntry {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  walletId       String @map("wallet_id")
+  wallet         Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type     LedgerEntryType
+  category LedgerCategory
+  status   LedgerStatus    @default(RELEASED)
+
+  amount        Decimal @db.Decimal(14, 2) // always positive
+  // Snapshot of the wallet's available balance after this row was applied —
+  // makes statements straightforward to render.
+  balanceAfter  Decimal @map("balance_after") @db.Decimal(14, 2)
+  currency      String  @default("INR")
+
+  description String?
+
+  // Optional cross-references — at most one is set per row.
+  transactionId    String?      @map("transaction_id")
+  transaction      Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  splitId          String?      @map("split_id") // → CommissionSplit.id
+  withdrawalId     String?      @map("withdrawal_id")
+  reversesEntryId  String?      @map("reverses_entry_id") // → LedgerEntry.id
+
+  releasedAt DateTime? @map("released_at")
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([walletId, createdAt])
+  @@index([walletId, status])
+  @@index([transactionId])
+  @@index([category, createdAt])
+  @@map("re_ledger_entries")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYOUTS (FR-7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Bank account for an agent. FR-7.1 — accountNumber stored encrypted at the
+// application layer; we keep accountNumberLast4 plaintext for UI display.
+model BankAccount {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  userId         String  @map("user_id")
+
+  label             String?
+  bankName          String  @map("bank_name")
+  accountHolderName String  @map("account_holder_name")
+  // Encrypted at rest (AES-256 — encryption key from REBM_BANK_KEY env var)
+  accountNumberEncrypted String @map("account_number_encrypted")
+  accountNumberLast4     String @map("account_number_last4")
+  ifscOrSwift            String @map("ifsc_or_swift")
+  branch                 String?
+  country                String  @default("IN")
+
+  isPrimary  Boolean @default(false) @map("is_primary")
+  verifiedAt DateTime? @map("verified_at")
+
+  withdrawals WithdrawalRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([organizationId])
+  @@map("re_bank_accounts")
+}
+
+enum WithdrawalStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+// Withdrawal request from an agent's wallet. FR-7.4 — routes through approval
+// (Compliance Officer → Admin payment). The state machine is enforced in the
+// handler.
+model WithdrawalRequest {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  walletId String @map("wallet_id")
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id") // requester / wallet owner
+
+  bankAccountId String       @map("bank_account_id")
+  bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id])
+
+  amount      Decimal @db.Decimal(14, 2)
+  fee         Decimal @default(0) @db.Decimal(14, 2)
+  netAmount   Decimal @map("net_amount") @db.Decimal(14, 2) // amount − fee
+  currency    String  @default("INR")
+
+  status WithdrawalStatus @default(REQUESTED)
+
+  // Approval & payment tracking
+  approvedById   String?   @map("approved_by_id")
+  approvedAt     DateTime? @map("approved_at")
+  rejectedById   String?   @map("rejected_by_id")
+  rejectedAt     DateTime? @map("rejected_at")
+  rejectionReason String?  @map("rejection_reason")
+  paidById       String?   @map("paid_by_id")
+  paidAt         DateTime? @map("paid_at")
+  paymentReference String? @map("payment_reference")
+  failureReason   String?  @map("failure_reason")
+
+  // Ledger debit row that holds the funds while the request is in-flight
+  holdLedgerEntryId String? @unique @map("hold_ledger_entry_id")
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([userId, status])
+  @@index([walletId])
+  @@map("re_withdrawal_requests")
 }

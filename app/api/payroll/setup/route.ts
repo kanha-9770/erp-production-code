@@ -88,9 +88,15 @@ export interface PayrollSetup {
     ptEnabled: boolean;
     ptAmount: number;
     ptThreshold: number;
+    ptState?: string;
     tdsEnabled: boolean;
     tdsMode: 'flat' | 'slab';
     tdsFlatPercent: number;
+    taxRegime: 'old' | 'new';
+    lwfEnabled: boolean;
+    lwfAmount: number;
+    npsEnabled: boolean;
+    npsEmployeePercent: number;
   };
   overtime?: {
     enabled: boolean;
@@ -147,8 +153,10 @@ const EMPTY_SETUP: PayrollSetup = {
     pfEnabled: true, pfPercent: 12, pfCapEnabled: true, pfCapAmount: 15000,
     employerPfPercent: 12, esiEnabled: false, esiEmployeePercent: 0.75,
     esiEmployerPercent: 3.25, esiThreshold: 21000, ptEnabled: true,
-    ptAmount: 200, ptThreshold: 15000, tdsEnabled: true,
-    tdsMode: 'flat', tdsFlatPercent: 5,
+    ptAmount: 200, ptThreshold: 10000, ptState: 'maharashtra',
+    tdsEnabled: true, tdsMode: 'flat', tdsFlatPercent: 5,
+    taxRegime: 'new', lwfEnabled: false, lwfAmount: 25,
+    npsEnabled: false, npsEmployeePercent: 10,
   },
   overtime: {
     enabled: false, rateMultiplier: 1.5, weekdayThresholdHours: 8,
@@ -224,6 +232,44 @@ export async function GET(request: NextRequest) {
 
     const setup = extractSetup(config?.attendanceFieldMappings);
 
+    // Stale-formId scrub: any formId saved in the config but no longer owned
+    // by the caller's org gets nulled out before the client sees it. This
+    // happens when an admin's org membership changes, when forms get deleted,
+    // or when configs were copied across tenants. Without this, the configure
+    // page hits 404 on every fetchFields call and Save returns 403 because
+    // the POST validator rejects unknown formIds.
+    const referencedFormIds = [
+      setup.employee.formId,
+      setup.checkIn.formId,
+      setup.checkOut.formId,
+      setup.leave.formId,
+      setup.holiday.formId,
+    ].filter((x): x is string => Boolean(x));
+
+    const droppedFormIds: string[] = [];
+    if (referencedFormIds.length > 0) {
+      const owned = await prisma.form.findMany({
+        where: {
+          id: { in: referencedFormIds },
+          module: { organizationId: authUser.organizationId },
+        },
+        select: { id: true },
+      });
+      const ownedSet = new Set(owned.map((f) => f.id));
+      const stale = (id: string | null) => (id && !ownedSet.has(id) ? id : null);
+
+      const e = stale(setup.employee.formId);
+      if (e) { droppedFormIds.push(e); setup.employee.formId = null; setup.employee.fields = { ...EMPTY_SETUP.employee.fields }; }
+      const ci = stale(setup.checkIn.formId);
+      if (ci) { droppedFormIds.push(ci); setup.checkIn.formId = null; setup.checkIn.fields = { ...EMPTY_SETUP.checkIn.fields }; }
+      const co = stale(setup.checkOut.formId);
+      if (co) { droppedFormIds.push(co); setup.checkOut.formId = null; setup.checkOut.fields = { ...EMPTY_SETUP.checkOut.fields }; }
+      const lv = stale(setup.leave.formId);
+      if (lv) { droppedFormIds.push(lv); setup.leave.formId = null; setup.leave.fields = { ...EMPTY_SETUP.leave.fields }; }
+      const ho = stale(setup.holiday.formId);
+      if (ho) { droppedFormIds.push(ho); setup.holiday.formId = null; setup.holiday.fields = { ...EMPTY_SETUP.holiday.fields }; }
+    }
+
     // The sidebar uses anchorModuleId to nest the Payroll route under the
     // module that owns the configured Employee form. We walk from the form's
     // direct module up to the top-level (level-0) ancestor, so Payroll
@@ -251,7 +297,13 @@ export async function GET(request: NextRequest) {
       anchorModuleId = cursor?.id ?? null;
     }
 
-    return NextResponse.json({ success: true, setup, hasConfig: !!config, anchorModuleId });
+    return NextResponse.json({
+      success: true,
+      setup,
+      hasConfig: !!config,
+      anchorModuleId,
+      droppedFormIds,
+    });
   } catch (error) {
     console.error('[payroll] setup GET error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load setup' }, { status: 500 });

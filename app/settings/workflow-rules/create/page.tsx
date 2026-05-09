@@ -4,13 +4,21 @@ import { useState, useMemo, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
 import { useGetFormDetailQuery } from "@/lib/api/forms"
-import { useCreateWorkflowRuleMutation, useUpdateWorkflowRuleMutation, useGetWorkflowRulesQuery } from "@/lib/api/workflow-rules"
+import {
+  useCreateWorkflowRuleMutation,
+  useUpdateWorkflowRuleMutation,
+  useGetWorkflowRulesQuery,
+  useRunWorkflowRuleMutation,
+} from "@/lib/api/workflow-rules"
 import { useGetFunctionsQuery, useCreateFunctionMutation, useGetBindingsTreeQuery } from "@/lib/api/functions"
 import { useGetRolesQuery } from "@/lib/api/permissions"
 import { useGetAdminUsersQuery } from "@/lib/api/users"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EmailTemplatePicker } from "@/components/workflow/email-template-picker"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import {
@@ -45,7 +53,8 @@ import { format } from "date-fns"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type ExecuteBasedOn = "" | "record-action" | "record-field"
+type ExecuteBasedOn = "" | "record-action" | "record-field" | "schedule"
+type ScheduleCadence = "" | "daily" | "weekly" | "monthly" | "custom"
 type RecordAction = "" | "Create" | "Create or Edit" | "Edit" | "Delete"
 type DateField = "" | "Created Time" | "Last Activity Time" | "Last Emailed Time" | "Unsubscribed Time"
 
@@ -126,10 +135,26 @@ interface InstantAction {
   notifyFieldIds?: string[]
   notifyTitle?: string
   notifyMessage?: string
+  // For type === "Report Export": data source + period + recipients. Subject/
+  // body / from / SMTP creds reuse the Email Notification fields above.
+  reportName?: string
+  reportDataSource?: string
+  reportModuleName?: string
+  reportPeriod?: string
+  reportTimezone?: string
+  reportFieldIds?: string[]
+  reportFormIds?: string[]
+  reportFilters?: Array<{ field: string; operator: string; value?: string }>
+  reportSortBy?: string
+  reportSortDir?: string
+  reportFilenameTemplate?: string
+  reportMaxRows?: number
+  reportSheetName?: string
 }
 
 const ALL_INSTANT_ACTION_TYPES = [
   "Email Notification",
+  "Report Export",
   "System Notification",
   "Task",
   "Field Update",
@@ -206,6 +231,39 @@ function normalizeActions(raw: unknown): InstantAction[] {
             : undefined,
           notifyTitle: typeof entry.notifyTitle === "string" ? entry.notifyTitle : undefined,
           notifyMessage: typeof entry.notifyMessage === "string" ? entry.notifyMessage : undefined,
+          reportName: typeof entry.reportName === "string" ? entry.reportName : undefined,
+          reportDataSource: typeof entry.reportDataSource === "string" ? entry.reportDataSource : undefined,
+          reportModuleName: typeof entry.reportModuleName === "string" ? entry.reportModuleName : undefined,
+          reportPeriod: typeof entry.reportPeriod === "string" ? entry.reportPeriod : undefined,
+          reportTimezone: typeof entry.reportTimezone === "string" ? entry.reportTimezone : undefined,
+          reportFieldIds: Array.isArray(entry.reportFieldIds)
+            ? entry.reportFieldIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          reportFormIds: Array.isArray(entry.reportFormIds)
+            ? entry.reportFormIds.filter((x: any) => typeof x === "string")
+            : undefined,
+          reportFilters: Array.isArray(entry.reportFilters)
+            ? entry.reportFilters
+                .filter((f: any) => f && typeof f.field === "string" && typeof f.operator === "string")
+                .map((f: any) => ({
+                  field: f.field,
+                  operator: f.operator,
+                  value: typeof f.value === "string" ? f.value : "",
+                }))
+            : undefined,
+          reportSortBy: typeof entry.reportSortBy === "string" ? entry.reportSortBy : undefined,
+          reportSortDir:
+            entry.reportSortDir === "asc" || entry.reportSortDir === "desc"
+              ? entry.reportSortDir
+              : undefined,
+          reportFilenameTemplate:
+            typeof entry.reportFilenameTemplate === "string" ? entry.reportFilenameTemplate : undefined,
+          reportMaxRows:
+            typeof entry.reportMaxRows === "number" && Number.isFinite(entry.reportMaxRows)
+              ? entry.reportMaxRows
+              : undefined,
+          reportSheetName:
+            typeof entry.reportSheetName === "string" ? entry.reportSheetName : undefined,
         }
       }
       return null
@@ -260,13 +318,135 @@ export default function CreateWorkflowRulePage() {
   const [scheduledUnit, setScheduledUnit] = useState("Hours")
   const [scheduledDone, setScheduledDone] = useState(false)
 
+  // Schedule trigger (executeBasedOn === "schedule") — independent of the
+  // legacy "scheduledExecute/Unit" delay which only applies to date-field
+  // triggers. The cron engine reads these.
+  const [scheduleCadence, setScheduleCadence] = useState<ScheduleCadence>("daily")
+  const [scheduleHour, setScheduleHour] = useState<number>(9)
+  const [scheduleMinute, setScheduleMinute] = useState<number>(0)
+  const [scheduleDayOfWeek, setScheduleDayOfWeek] = useState<number>(1) // Monday
+  const [scheduleDayOfMonth, setScheduleDayOfMonth] = useState<number>(1)
+  const [scheduleTimezone, setScheduleTimezone] = useState<string>(
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  )
+  const [scheduleCron, setScheduleCron] = useState<string>("")
+  const [scheduleEnabled, setScheduleEnabled] = useState<boolean>(true)
+
   // Active / inactive toggle (existing rules only)
   const [isActive, setIsActive] = useState(true)
   const [togglingActive, setTogglingActive] = useState(false)
 
   const [createWorkflowRule, { isLoading: isCreating }] = useCreateWorkflowRuleMutation()
   const [updateWorkflowRule, { isLoading: isUpdating }] = useUpdateWorkflowRuleMutation()
+  const [runWorkflowRule, { isLoading: isRunning }] = useRunWorkflowRuleMutation()
   const isSaving = isCreating || isUpdating
+
+  // ── Test Run state ───────────────────────────────────────────────────────
+  // Pops a side panel that fires the rule against /api/workflow-rules/:id/run
+  // and renders the per-action results inline. The dev-server log lines that
+  // would normally be the only signal are also pulled in via the response's
+  // `results` array — same content, but visible in the UI.
+  type TestLogEntry = {
+    ts: string
+    level: "info" | "success" | "warn" | "error"
+    message: string
+  }
+  const [testPanelOpen, setTestPanelOpen] = useState(false)
+  const [testLog, setTestLog] = useState<TestLogEntry[]>([])
+  const [testResult, setTestResult] = useState<null | {
+    success: boolean
+    status: "success" | "partial" | "failed" | "skipped"
+    results: Array<{ type: string; ok: boolean; detail?: any; error?: string }>
+    error?: string
+    elapsedMs: number
+  }>(null)
+
+  const appendTestLog = (level: TestLogEntry["level"], message: string) => {
+    setTestLog((prev) => [
+      ...prev,
+      { ts: new Date().toISOString(), level, message },
+    ])
+  }
+
+  const handleTestRun = async () => {
+    setTestPanelOpen(true)
+    setTestLog([])
+    setTestResult(null)
+
+    if (!canSaveRule) {
+      appendTestLog("error", "Cannot test — fill required fields first.")
+      return
+    }
+
+    const startedAt = Date.now()
+
+    // Save first so /run reads the current configuration. We do this even
+    // when isEditing because the user may have unsaved changes mid-edit.
+    appendTestLog("info", isEditing ? "Saving latest changes..." : "Saving new rule before test run...")
+    const saved = await persistRule({}, true)
+    if (!saved) {
+      appendTestLog("error", `Save failed: ${saveError || "see console for details"}`)
+      return
+    }
+    appendTestLog("success", "Saved.")
+
+    // After a fresh create the URL still says ?ruleId=... isn't set; to find
+    // the new rule's id we re-query the list. For edits ruleId is already
+    // known from the URL.
+    let targetRuleId = ruleId
+    if (!targetRuleId) {
+      try {
+        const refreshed = await fetch("/api/workflow-rules", { credentials: "include" }).then((r) => r.json())
+        const match = (refreshed?.data || []).find(
+          (r: any) =>
+            r.name === ruleName.trim() && r.moduleName === moduleName,
+        )
+        if (match?.id) targetRuleId = match.id
+      } catch {
+        /* ignored — we'll error below */
+      }
+    }
+    if (!targetRuleId) {
+      appendTestLog("error", "Could not determine rule id after save — try Save then click Test again.")
+      return
+    }
+
+    appendTestLog("info", `POST /api/workflow-rules/${targetRuleId}/run`)
+    try {
+      const res = await runWorkflowRule(targetRuleId).unwrap()
+      const elapsed = Date.now() - startedAt
+      const summary = `Status=${res.status}  actions=${res.results.length}  ok=${res.results.filter((r) => r.ok).length}/${res.results.length}`
+      appendTestLog(
+        res.status === "success" ? "success" : res.status === "partial" ? "warn" : "error",
+        summary,
+      )
+      for (const r of res.results) {
+        const detailStr = r.detail
+          ? ` — ${typeof r.detail === "object" ? JSON.stringify(r.detail) : String(r.detail)}`
+          : ""
+        if (r.ok) {
+          appendTestLog("success", `[${r.type}] ok${detailStr}`)
+        } else {
+          appendTestLog("error", `[${r.type}] failed: ${r.error || "(no error message)"}${detailStr}`)
+        }
+      }
+      if (res.error) {
+        appendTestLog("error", `top-level error: ${res.error}`)
+      }
+      setTestResult({ ...res, elapsedMs: elapsed })
+    } catch (err: any) {
+      const elapsed = Date.now() - startedAt
+      const msg = err?.data?.error || err?.message || String(err)
+      appendTestLog("error", `Request failed: ${msg}`)
+      setTestResult({
+        success: false,
+        status: "failed",
+        results: [],
+        error: msg,
+        elapsedMs: elapsed,
+      })
+    }
+  }
 
   // Fetch existing rule data when editing
   const { data: rulesData } = useGetWorkflowRulesQuery(undefined, { skip: !isEditing })
@@ -302,6 +482,15 @@ export default function CreateWorkflowRulePage() {
     setScheduledExecute(existingRule.scheduledExecute || "")
     setScheduledUnit(existingRule.scheduledUnit || "Hours")
     if (existingRule.scheduledExecute) setScheduledDone(true)
+    // Schedule trigger fields
+    if (existingRule.scheduleCadence) setScheduleCadence(existingRule.scheduleCadence as ScheduleCadence)
+    if (typeof existingRule.scheduleHour === "number") setScheduleHour(existingRule.scheduleHour)
+    if (typeof existingRule.scheduleMinute === "number") setScheduleMinute(existingRule.scheduleMinute)
+    if (typeof existingRule.scheduleDayOfWeek === "number") setScheduleDayOfWeek(existingRule.scheduleDayOfWeek)
+    if (typeof existingRule.scheduleDayOfMonth === "number") setScheduleDayOfMonth(existingRule.scheduleDayOfMonth)
+    if (existingRule.scheduleTimezone) setScheduleTimezone(existingRule.scheduleTimezone)
+    if (existingRule.scheduleCron) setScheduleCron(existingRule.scheduleCron)
+    if (typeof existingRule.scheduleEnabled === "boolean") setScheduleEnabled(existingRule.scheduleEnabled)
     setShowDescription(!!existingRule.description)
     setIsActive(existingRule.active !== false)
     // Move to completed state
@@ -346,6 +535,150 @@ export default function CreateWorkflowRulePage() {
   // View Function dialog (argument mapping)
   const [viewFnDialogOpen, setViewFnDialogOpen] = useState(false)
   const [fnArgMappings, setFnArgMappings] = useState<Array<{ id: string; name: string; value: string }>>([])
+
+  // ── Report Export dialog state ──────────────────────────────────────────
+  // Generates an XLSX from a data source (attendance | form-module) and emails
+  // it to the configured recipients. All fields below live on a single
+  // "Report Export" InstantAction entry, so editing/loading uses the same
+  // index lookup as Email Notification.
+  const [reportDialogOpen, setReportDialogOpen] = useState(false)
+  const [reportFormName, setReportFormName] = useState("")
+  const [reportFormDataSource, setReportFormDataSource] = useState<"attendance" | "form-module">("attendance")
+  const [reportFormModuleName, setReportFormModuleName] = useState("")
+  const [reportFormPeriod, setReportFormPeriod] = useState<"daily" | "weekly" | "monthly" | "all-time">("daily")
+  const [reportFormTimezone, setReportFormTimezone] = useState("")
+  const [reportFormToStatic, setReportFormToStatic] = useState("")
+  const [reportFormSubject, setReportFormSubject] = useState("")
+  const [reportFormBody, setReportFormBody] = useState("")
+  // Empty array = "all fields" (the runner sends every column when fieldIds is
+  // empty/undefined). The picker turns specific field ids on/off.
+  const [reportFormFieldIds, setReportFormFieldIds] = useState<string[]>([])
+  const [reportFieldSearch, setReportFieldSearch] = useState("")
+  // Form allowlist within the chosen module — empty = include every form.
+  const [reportSelectedFormIds, setReportSelectedFormIds] = useState<string[]>([])
+  // Record-level filters (AND-combined). Each row is field/operator/value.
+  const [reportFilters, setReportFilters] = useState<
+    Array<{ id: string; field: string; operator: string; value: string }>
+  >([])
+  const [reportSortBy, setReportSortBy] = useState<string>("")
+  const [reportSortDir, setReportSortDir] = useState<"asc" | "desc">("desc")
+  const [reportFilenameTemplate, setReportFilenameTemplate] = useState<string>("")
+  const [reportSheetName, setReportSheetName] = useState<string>("")
+  const [reportMaxRows, setReportMaxRows] = useState<number>(5000)
+  // Tab so the dialog stays compact even with all the new options.
+  const [reportDialogTab, setReportDialogTab] = useState<"data" | "filters" | "delivery" | "advanced">("data")
+
+  // Email template picker — shared between Email Notification + Report Export
+  // dialogs. `templatePickerTarget` decides which form fields get filled when
+  // the user picks a template.
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
+  const [templatePickerTarget, setTemplatePickerTarget] = useState<"report" | "email">("report")
+
+  const reportAction = useMemo(
+    () => selectedInstantActions.find((a) => a.type === "Report Export"),
+    [selectedInstantActions],
+  )
+
+  const openReportDialog = () => {
+    if (reportAction) {
+      setReportFormName(reportAction.reportName || "")
+      setReportFormDataSource((reportAction.reportDataSource as any) || "attendance")
+      setReportFormModuleName(reportAction.reportModuleName || moduleName || "")
+      setReportFormPeriod((reportAction.reportPeriod as any) || "daily")
+      setReportFormTimezone(reportAction.reportTimezone || scheduleTimezone || "")
+      setReportFormToStatic(reportAction.emailToStatic || "")
+      setReportFormSubject(reportAction.emailSubject || "")
+      setReportFormBody(reportAction.emailBody || "")
+      setReportFormFieldIds(reportAction.reportFieldIds || [])
+      setReportSelectedFormIds(reportAction.reportFormIds || [])
+      setReportFilters(
+        (reportAction.reportFilters || []).map((f, i) => ({
+          id: `f-${i}-${Math.random().toString(36).slice(2, 6)}`,
+          field: f.field,
+          operator: f.operator,
+          value: f.value || "",
+        })),
+      )
+      setReportSortBy(reportAction.reportSortBy || "")
+      setReportSortDir((reportAction.reportSortDir as any) || "desc")
+      setReportFilenameTemplate(reportAction.reportFilenameTemplate || "")
+      setReportSheetName(reportAction.reportSheetName || "")
+      setReportMaxRows(reportAction.reportMaxRows ?? 5000)
+    } else {
+      setReportFormName("")
+      setReportFormDataSource("attendance")
+      setReportFormModuleName(moduleName || "")
+      setReportFormPeriod("daily")
+      setReportFormTimezone(scheduleTimezone || "")
+      setReportFormToStatic("")
+      setReportFormSubject("")
+      setReportFormBody("")
+      setReportFormFieldIds([])
+      setReportSelectedFormIds([])
+      setReportFilters([])
+      setReportSortBy("")
+      setReportSortDir("desc")
+      setReportFilenameTemplate("")
+      setReportSheetName("")
+      setReportMaxRows(5000)
+    }
+    setReportFieldSearch("")
+    setReportDialogTab("data")
+    setReportDialogOpen(true)
+  }
+
+  const saveReportAction = async () => {
+    if (!reportFormToStatic.trim()) return
+    const cleanFilters = reportFilters
+      .filter((f) => f.field && f.operator)
+      .map((f) => ({ field: f.field, operator: f.operator, value: f.value || "" }))
+    const newAction: InstantAction = {
+      type: "Report Export",
+      reportName: reportFormName.trim() || "Scheduled Report",
+      reportDataSource: reportFormDataSource,
+      reportModuleName:
+        reportFormDataSource === "form-module"
+          ? reportFormModuleName.trim() || moduleName
+          : undefined,
+      reportPeriod: reportFormPeriod,
+      reportTimezone: reportFormTimezone.trim() || undefined,
+      reportFieldIds: reportFormFieldIds.length > 0 ? reportFormFieldIds : undefined,
+      reportFormIds: reportSelectedFormIds.length > 0 ? reportSelectedFormIds : undefined,
+      reportFilters: cleanFilters.length > 0 ? cleanFilters : undefined,
+      reportSortBy: reportSortBy.trim() || undefined,
+      reportSortDir: reportSortBy.trim() ? reportSortDir : undefined,
+      reportFilenameTemplate: reportFilenameTemplate.trim() || undefined,
+      reportSheetName: reportSheetName.trim() || undefined,
+      reportMaxRows: reportMaxRows && reportMaxRows !== 5000 ? reportMaxRows : undefined,
+      emailToStatic: reportFormToStatic.trim(),
+      emailSubject: reportFormSubject.trim() || undefined,
+      emailBody: reportFormBody.trim() || undefined,
+    }
+    const filtered = selectedInstantActions.filter((a) => a.type !== "Report Export")
+    const nextActions = [...filtered, newAction]
+    setSelectedInstantActions(nextActions)
+    setReportDialogOpen(false)
+    if (isEditing) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
+
+  // Recipient validation runs without `treeData` so it stays declared early.
+  const reportRecipientStats = useMemo(() => {
+    const raw = reportFormToStatic.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean)
+    const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)
+    const valid = raw.filter(isEmail)
+    const invalid = raw.filter((s) => !isEmail(s))
+    return { valid, invalid, total: raw.length }
+  }, [reportFormToStatic])
+
+  const removeReportAction = async () => {
+    const nextActions = selectedInstantActions.filter((a) => a.type !== "Report Export")
+    setSelectedInstantActions(nextActions)
+    if (isEditing) {
+      await persistRule({ instantActions: nextActions }, true)
+    }
+  }
 
   // ── Email Notification dialog state ─────────────────────────────────────
   type EmailDialogStep = null | "associate" | "create"
@@ -945,6 +1278,11 @@ export default function CreateWorkflowRulePage() {
       openNotifyDialog()
       return
     }
+    if (type === "Report Export") {
+      // Report Export uses its own dialog — not a toggle.
+      openReportDialog()
+      return
+    }
     setSelectedInstantActions((prev) => {
       const exists = prev.some((a) => a.type === type)
       if (exists) return prev.filter((a) => a.type !== type)
@@ -993,6 +1331,49 @@ export default function CreateWorkflowRulePage() {
     )
   }, [treeData, moduleName])
 
+  // Report Export module/forms/fields options — declared after `treeData`
+  // so they don't trigger a TDZ error on render.
+  const reportFormsInModule = useMemo(() => {
+    const target = reportFormModuleName.trim() || moduleName
+    if (!target) return [] as Array<{ id: string; name: string }>
+    const mods = treeData?.data || []
+    const mod =
+      mods.find((m: any) => m.name === target) ||
+      mods.find((m: any) => (m.name || "").toLowerCase() === target.toLowerCase())
+    if (!mod) return []
+    return ((mod as any).forms || []).map((f: any) => ({ id: f.id, name: f.name }))
+  }, [treeData, reportFormModuleName, moduleName])
+
+  const reportModuleOptions = useMemo(() => {
+    const mods = treeData?.data || []
+    return mods.map((m: any) => ({
+      name: m.name,
+      label: m.label || m.name,
+    }))
+  }, [treeData])
+
+  const reportFieldOptions = useMemo(() => {
+    const target = reportFormModuleName.trim() || moduleName
+    if (!target) return [] as Array<{ id: string; label: string; apiName: string; formName: string }>
+    const mods = treeData?.data || []
+    const mod =
+      mods.find((m: any) => m.name === target) ||
+      mods.find((m: any) => (m.name || "").toLowerCase() === target.toLowerCase())
+    if (!mod) return []
+    const out: Array<{ id: string; label: string; apiName: string; formName: string }> = []
+    for (const f of (mod as any).forms || []) {
+      for (const fld of f.fields || []) {
+        out.push({
+          id: fld.id,
+          label: fld.label,
+          apiName: fld.apiName,
+          formName: f.name,
+        })
+      }
+    }
+    return out
+  }, [treeData, reportFormModuleName, moduleName])
+
   const moduleFields = useMemo(() => {
     if (!treeModule) return [] as Array<{ id: string; label: string; formId: string; formName: string; apiName: string }>
     const out: Array<{ id: string; label: string; formId: string; formName: string; apiName: string }> = []
@@ -1018,12 +1399,19 @@ export default function CreateWorkflowRulePage() {
     }))
   }, [treeModule])
 
+  const scheduleIsValid =
+    executeBasedOn === "schedule" &&
+    !!scheduleCadence &&
+    (scheduleCadence !== "custom" || !!scheduleCron.trim())
+
   const canGoNext =
     executeBasedOn === "record-action"
       ? !!recordAction
       : executeBasedOn === "record-field"
         ? !!dateField
-        : false
+        : executeBasedOn === "schedule"
+          ? scheduleIsValid
+          : false
 
   const handleNext = () => {
     if (step === 1 && canGoNext) setStep(2)
@@ -1055,6 +1443,20 @@ export default function CreateWorkflowRulePage() {
       instantActions: effectiveActions,
       scheduledExecute: scheduledExecute || undefined,
       scheduledUnit: scheduledExecute ? scheduledUnit : undefined,
+      // Schedule trigger fields — sent only when this trigger type is active
+      // so we don't accidentally clobber unrelated rules.
+      ...(executeBasedOn === "schedule"
+        ? {
+            scheduleCadence,
+            scheduleCron: scheduleCadence === "custom" ? scheduleCron.trim() : null,
+            scheduleHour,
+            scheduleMinute,
+            scheduleDayOfWeek: scheduleCadence === "weekly" ? scheduleDayOfWeek : null,
+            scheduleDayOfMonth: scheduleCadence === "monthly" ? scheduleDayOfMonth : null,
+            scheduleTimezone,
+            scheduleEnabled,
+          }
+        : {}),
     }
     try {
       setSaveStatus("saving")
@@ -1102,7 +1504,9 @@ export default function CreateWorkflowRulePage() {
     ruleName?.trim() &&
     moduleName &&
     executeBasedOn &&
-    (recordAction || dateField)
+    (executeBasedOn === "schedule"
+      ? scheduleIsValid
+      : recordAction || dateField),
   )
 
   // Condition helpers
@@ -1136,6 +1540,22 @@ export default function CreateWorkflowRulePage() {
       return (
         <>
           This rule will be executed based on <strong>{dateField}</strong> field.
+        </>
+      )
+    }
+    if (executeBasedOn === "schedule" && scheduleIsValid) {
+      const h12 = scheduleHour % 12 === 0 ? 12 : scheduleHour % 12
+      const period = scheduleHour >= 12 ? "PM" : "AM"
+      const time = `${h12}:${String(scheduleMinute).padStart(2, "0")} ${period}`
+      const dowName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][scheduleDayOfWeek]
+      let when = ""
+      if (scheduleCadence === "daily") when = `every day at ${time}`
+      else if (scheduleCadence === "weekly") when = `every ${dowName} at ${time}`
+      else if (scheduleCadence === "monthly") when = `on day ${scheduleDayOfMonth} of every month at ${time}`
+      else if (scheduleCadence === "custom") when = `on cron \`${scheduleCron}\``
+      return (
+        <>
+          Runs <strong>{when}</strong> ({scheduleTimezone}).
         </>
       )
     }
@@ -1367,6 +1787,7 @@ export default function CreateWorkflowRulePage() {
                       <SelectContent>
                         <SelectItem value="record-action" className="text-xs">Record Action</SelectItem>
                         <SelectItem value="record-field" className="text-xs">Date/Time field</SelectItem>
+                        <SelectItem value="schedule" className="text-xs">Schedule (recurring)</SelectItem>
                       </SelectContent>
                     </Select>
 
@@ -1407,6 +1828,165 @@ export default function CreateWorkflowRulePage() {
                           <SelectItem value="Unsubscribed Time" className="text-xs">Unsubscribed Time</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+                  )}
+
+                  {executeBasedOn === "schedule" && (
+                    <div className="space-y-2 border-t pt-2">
+                      <div className="space-y-1">
+                        <p className="text-[11px] text-foreground">Cadence</p>
+                        <Select
+                          value={scheduleCadence}
+                          onValueChange={(v) => setScheduleCadence(v as ScheduleCadence)}
+                        >
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue placeholder="Choose..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="daily" className="text-xs">Daily</SelectItem>
+                            <SelectItem value="weekly" className="text-xs">Weekly</SelectItem>
+                            <SelectItem value="monthly" className="text-xs">Monthly</SelectItem>
+                            <SelectItem value="custom" className="text-xs">Custom (cron)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {scheduleCadence !== "custom" && (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-foreground">Time</p>
+                          <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+                            {/* 12-hour input (1-12). Stored as 24-hour internally. */}
+                            <Input
+                              type="number"
+                              min={1}
+                              max={12}
+                              className="h-7 text-xs"
+                              placeholder="hr"
+                              value={(() => {
+                                const h12 = scheduleHour % 12
+                                return h12 === 0 ? 12 : h12
+                              })()}
+                              onChange={(e) => {
+                                const raw = Number(e.target.value)
+                                if (!Number.isFinite(raw)) return
+                                const h12 = Math.max(1, Math.min(12, raw))
+                                const isPM = scheduleHour >= 12
+                                // Mirror the AM/PM-aware mapping in saveSchedule below.
+                                const next =
+                                  h12 === 12 ? (isPM ? 12 : 0) : isPM ? h12 + 12 : h12
+                                setScheduleHour(next)
+                              }}
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              max={59}
+                              className="h-7 text-xs"
+                              placeholder="min"
+                              value={scheduleMinute}
+                              onChange={(e) =>
+                                setScheduleMinute(Math.max(0, Math.min(59, Number(e.target.value) || 0)))
+                              }
+                            />
+                            <Select
+                              value={scheduleHour >= 12 ? "PM" : "AM"}
+                              onValueChange={(v) => {
+                                const isPM = v === "PM"
+                                const h12 = scheduleHour % 12 === 0 ? 12 : scheduleHour % 12
+                                const next =
+                                  h12 === 12 ? (isPM ? 12 : 0) : isPM ? h12 + 12 : h12
+                                setScheduleHour(next)
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-16">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="AM" className="text-xs">AM</SelectItem>
+                                <SelectItem value="PM" className="text-xs">PM</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            Stored as {String(scheduleHour).padStart(2, "0")}:{String(scheduleMinute).padStart(2, "0")} (24-hour) in {scheduleTimezone || "your timezone"}.
+                          </p>
+                        </div>
+                      )}
+
+                      {scheduleCadence === "weekly" && (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-foreground">Day of week</p>
+                          <Select
+                            value={String(scheduleDayOfWeek)}
+                            onValueChange={(v) => setScheduleDayOfWeek(Number(v))}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0" className="text-xs">Sunday</SelectItem>
+                              <SelectItem value="1" className="text-xs">Monday</SelectItem>
+                              <SelectItem value="2" className="text-xs">Tuesday</SelectItem>
+                              <SelectItem value="3" className="text-xs">Wednesday</SelectItem>
+                              <SelectItem value="4" className="text-xs">Thursday</SelectItem>
+                              <SelectItem value="5" className="text-xs">Friday</SelectItem>
+                              <SelectItem value="6" className="text-xs">Saturday</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {scheduleCadence === "monthly" && (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-foreground">Day of month (1-31)</p>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={31}
+                            className="h-7 text-xs"
+                            value={scheduleDayOfMonth}
+                            onChange={(e) => setScheduleDayOfMonth(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
+                          />
+                        </div>
+                      )}
+
+                      {scheduleCadence === "custom" && (
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-foreground">Cron expression (5 fields: M H D M DOW)</p>
+                          <Input
+                            placeholder="0 9 * * 1-5"
+                            className="h-7 text-xs font-mono"
+                            value={scheduleCron}
+                            onChange={(e) => setScheduleCron(e.target.value)}
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            Example: <code>0 9 * * 1-5</code> = weekdays at 09:00.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <p className="text-[11px] text-foreground">Timezone (IANA)</p>
+                        <Input
+                          placeholder="Asia/Kolkata"
+                          className="h-7 text-xs font-mono"
+                          value={scheduleTimezone}
+                          onChange={(e) => setScheduleTimezone(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="checkbox"
+                          id="schedule-enabled"
+                          checked={scheduleEnabled}
+                          onChange={(e) => setScheduleEnabled(e.target.checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <Label htmlFor="schedule-enabled" className="text-xs font-normal cursor-pointer">
+                          Schedule enabled
+                        </Label>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2081,6 +2661,21 @@ export default function CreateWorkflowRulePage() {
           title={!canSaveRule ? "Pick a When trigger before saving" : "Save rule"}
         >
           {isSaving || saveStatus === "saving" ? "Saving..." : "Save"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs px-4 gap-1.5"
+          disabled={!canSaveRule || isRunning || isSaving}
+          onClick={handleTestRun}
+          title={
+            !canSaveRule
+              ? "Fill required fields before testing"
+              : "Save and run this rule once — actions WILL fire (emails sent, notifications posted)"
+          }
+        >
+          <Zap className="h-3.5 w-3.5" />
+          {isRunning ? "Testing..." : "Test Rule"}
         </Button>
         <Button
           variant="outline"
@@ -2813,6 +3408,24 @@ export default function CreateWorkflowRulePage() {
                 <div className="grid grid-cols-[110px_1fr] items-start gap-3">
                   <Label htmlFor="email-subject" className="text-xs text-right pt-2">Email Template</Label>
                   <div className="space-y-2">
+                    <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded px-2.5 py-1.5">
+                      <div className="flex items-center gap-1.5 text-[11px] text-indigo-900">
+                        <FileText className="h-3.5 w-3.5" />
+                        <span>Start from a professional template.</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[11px] px-2 border-indigo-300"
+                        onClick={() => {
+                          setTemplatePickerTarget("email")
+                          setTemplatePickerOpen(true)
+                        }}
+                      >
+                        Browse templates
+                      </Button>
+                    </div>
                     <Input
                       id="email-subject"
                       value={emailFormSubject}
@@ -2824,8 +3437,8 @@ export default function CreateWorkflowRulePage() {
                       value={emailFormBody}
                       onChange={(e) => setEmailFormBody(e.target.value)}
                       placeholder={"Body — e.g. Hi {{full_name}}, welcome!"}
-                      rows={5}
-                      className="text-xs resize-none"
+                      rows={6}
+                      className="text-xs resize-none font-mono"
                     />
                   </div>
                 </div>
@@ -3722,6 +4335,727 @@ export default function CreateWorkflowRulePage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Report Export Dialog ───────────────────────────────────────── */}
+      <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">
+              Report Export {reportFormName ? `— ${reportFormName}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+
+          <Tabs value={reportDialogTab} onValueChange={(v) => setReportDialogTab(v as any)}>
+            <TabsList className="grid w-full grid-cols-4 h-8">
+              <TabsTrigger value="data" className="text-xs">Data</TabsTrigger>
+              <TabsTrigger value="filters" className="text-xs">
+                Filters
+                {reportFilters.filter((f) => f.field && f.operator).length > 0 && (
+                  <Badge className="ml-1.5 h-4 px-1 text-[9px] bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
+                    {reportFilters.filter((f) => f.field && f.operator).length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="delivery" className="text-xs">Delivery</TabsTrigger>
+              <TabsTrigger value="advanced" className="text-xs">Advanced</TabsTrigger>
+            </TabsList>
+
+            {/* ── Data tab ───────────────────────────────────────────── */}
+            <TabsContent value="data" className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+              <div className="space-y-1">
+                <Label className="text-xs">Report name</Label>
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="e.g. Daily attendance digest"
+                  value={reportFormName}
+                  onChange={(e) => setReportFormName(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Data source</Label>
+                  <Select
+                    value={reportFormDataSource}
+                    onValueChange={(v) => setReportFormDataSource(v as any)}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="attendance" className="text-xs">Attendance (HR)</SelectItem>
+                      <SelectItem value="form-module" className="text-xs">Form Module records</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">Period</Label>
+                  <Select
+                    value={reportFormPeriod}
+                    onValueChange={(v) => setReportFormPeriod(v as any)}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily" className="text-xs">Daily (yesterday)</SelectItem>
+                      <SelectItem value="weekly" className="text-xs">Weekly (last 7 days)</SelectItem>
+                      <SelectItem value="monthly" className="text-xs">Monthly (last calendar month)</SelectItem>
+                      {reportFormDataSource === "form-module" && (
+                        <SelectItem value="all-time" className="text-xs">All time</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {reportFormDataSource === "form-module" && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Module to export</Label>
+                  <Select
+                    value={reportFormModuleName || moduleName || ""}
+                    onValueChange={(v) => {
+                      setReportFormModuleName(v)
+                      setReportFormFieldIds([])
+                      setReportSelectedFormIds([])
+                      setReportFilters([])
+                      setReportSortBy("")
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Pick a module..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {reportModuleOptions.length === 0 ? (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">No modules</div>
+                      ) : (
+                        reportModuleOptions.map((m) => (
+                          <SelectItem key={m.name} value={m.name} className="text-xs">
+                            {m.label}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">
+                    Defaults to the rule's module ({moduleName || "—"}). Pick a different one to export records from elsewhere.
+                  </p>
+                </div>
+              )}
+
+              {reportFormDataSource === "form-module" && reportFormsInModule.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">
+                      Forms to include
+                      <span className="ml-2 text-[10px] text-muted-foreground font-normal">
+                        {reportSelectedFormIds.length === 0
+                          ? `All ${reportFormsInModule.length} forms`
+                          : `${reportSelectedFormIds.length} of ${reportFormsInModule.length} selected`}
+                      </span>
+                    </Label>
+                    {reportSelectedFormIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-[10px] text-primary hover:underline"
+                        onClick={() => setReportSelectedFormIds([])}
+                      >
+                        Use all
+                      </button>
+                    )}
+                  </div>
+                  <div className="border rounded max-h-32 overflow-y-auto">
+                    {reportFormsInModule.map((f) => {
+                      const checked = reportSelectedFormIds.includes(f.id)
+                      return (
+                        <label
+                          key={f.id}
+                          className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted/40 cursor-pointer border-b last:border-b-0"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5"
+                            checked={checked}
+                            onChange={(e) =>
+                              setReportSelectedFormIds((prev) =>
+                                e.target.checked
+                                  ? [...prev, f.id]
+                                  : prev.filter((id) => id !== f.id),
+                              )
+                            }
+                          />
+                          <span className="flex-1 truncate">{f.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {reportFormDataSource === "form-module" && reportFieldOptions.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">
+                      Columns to include
+                      <span className="ml-2 text-[10px] text-muted-foreground font-normal">
+                        {reportFormFieldIds.length === 0
+                          ? `All ${reportFieldOptions.length} fields`
+                          : `${reportFormFieldIds.length} of ${reportFieldOptions.length} selected`}
+                      </span>
+                    </Label>
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <button
+                        type="button"
+                        className="text-primary hover:underline"
+                        onClick={() =>
+                          setReportFormFieldIds(reportFieldOptions.map((f) => f.id))
+                        }
+                      >
+                        Select all
+                      </button>
+                      {reportFormFieldIds.length > 0 && (
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={() => setReportFormFieldIds([])}
+                        >
+                          Use all
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <Input
+                    className="h-7 text-xs"
+                    placeholder="Search fields..."
+                    value={reportFieldSearch}
+                    onChange={(e) => setReportFieldSearch(e.target.value)}
+                  />
+                  <div className="border rounded max-h-44 overflow-y-auto">
+                    {reportFieldOptions
+                      .filter((f) => {
+                        const q = reportFieldSearch.trim().toLowerCase()
+                        if (!q) return true
+                        return (
+                          f.label.toLowerCase().includes(q) ||
+                          (f.apiName || "").toLowerCase().includes(q) ||
+                          f.formName.toLowerCase().includes(q)
+                        )
+                      })
+                      .map((f) => {
+                        const checked = reportFormFieldIds.includes(f.id)
+                        return (
+                          <label
+                            key={f.id}
+                            className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-muted/40 cursor-pointer border-b last:border-b-0"
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5"
+                              checked={checked}
+                              onChange={(e) => {
+                                setReportFormFieldIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev, f.id]
+                                    : prev.filter((id) => id !== f.id),
+                                )
+                              }}
+                            />
+                            <span className="flex-1 truncate">{f.label}</span>
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {f.formName}
+                            </span>
+                          </label>
+                        )
+                      })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Leave all unchecked to export every field. Otherwise the XLSX includes only the columns you tick.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label className="text-xs">Timezone (IANA)</Label>
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="Asia/Kolkata"
+                  value={reportFormTimezone}
+                  onChange={(e) => setReportFormTimezone(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Sets the boundaries of "yesterday", "last 7 days", etc. Defaults to the rule's schedule timezone if blank.
+                </p>
+              </div>
+            </TabsContent>
+
+            {/* ── Filters tab ────────────────────────────────────────── */}
+            <TabsContent value="filters" className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+              {reportFormDataSource !== "form-module" ? (
+                <div className="text-xs text-muted-foreground italic px-2 py-3 bg-muted/30 rounded">
+                  Filters and sort are only available for Form Module exports. Attendance reports use a fixed format.
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">
+                        Filter records
+                        <span className="ml-2 text-[10px] text-muted-foreground font-normal">
+                          (AND-combined)
+                        </span>
+                      </Label>
+                      <button
+                        type="button"
+                        className="text-[10px] text-primary hover:underline"
+                        onClick={() =>
+                          setReportFilters((prev) => [
+                            ...prev,
+                            {
+                              id: `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                              field: "",
+                              operator: "equals",
+                              value: "",
+                            },
+                          ])
+                        }
+                      >
+                        + Add filter
+                      </button>
+                    </div>
+                    {reportFilters.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground italic">
+                        No filters — every record in the period will be exported.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {reportFilters.map((f) => (
+                          <div key={f.id} className="flex items-center gap-1.5">
+                            <Select
+                              value={f.field}
+                              onValueChange={(v) =>
+                                setReportFilters((prev) =>
+                                  prev.map((row) => (row.id === f.id ? { ...row, field: v } : row)),
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-7 text-xs flex-1 min-w-0">
+                                <SelectValue placeholder="Field" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {reportFieldOptions.length === 0 ? (
+                                  <div className="px-2 py-2 text-xs text-muted-foreground">
+                                    No fields
+                                  </div>
+                                ) : (
+                                  reportFieldOptions.map((opt) => (
+                                    <SelectItem key={opt.id} value={opt.id} className="text-xs">
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))
+                                )}
+                              </SelectContent>
+                            </Select>
+                            <Select
+                              value={f.operator}
+                              onValueChange={(v) =>
+                                setReportFilters((prev) =>
+                                  prev.map((row) => (row.id === f.id ? { ...row, operator: v } : row)),
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-7 text-xs w-32 shrink-0">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equals" className="text-xs">equals</SelectItem>
+                                <SelectItem value="is not" className="text-xs">is not</SelectItem>
+                                <SelectItem value="contains" className="text-xs">contains</SelectItem>
+                                <SelectItem value="does not contain" className="text-xs">does not contain</SelectItem>
+                                <SelectItem value="is empty" className="text-xs">is empty</SelectItem>
+                                <SelectItem value="is not empty" className="text-xs">is not empty</SelectItem>
+                                <SelectItem value=">" className="text-xs">{">"}</SelectItem>
+                                <SelectItem value=">=" className="text-xs">{"≥"}</SelectItem>
+                                <SelectItem value="<" className="text-xs">{"<"}</SelectItem>
+                                <SelectItem value="<=" className="text-xs">{"≤"}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              className="h-7 text-xs flex-1 min-w-0"
+                              placeholder="Value"
+                              disabled={f.operator === "is empty" || f.operator === "is not empty"}
+                              value={f.value}
+                              onChange={(e) =>
+                                setReportFilters((prev) =>
+                                  prev.map((row) =>
+                                    row.id === f.id ? { ...row, value: e.target.value } : row,
+                                  ),
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="text-foreground hover:text-destructive shrink-0"
+                              onClick={() =>
+                                setReportFilters((prev) => prev.filter((row) => row.id !== f.id))
+                              }
+                              title="Remove filter"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t pt-3 space-y-1.5">
+                    <Label className="text-xs">Sort records by</Label>
+                    <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                      <Select
+                        value={reportSortBy || "__created__"}
+                        onValueChange={(v) => setReportSortBy(v === "__created__" ? "" : v)}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="Pick a field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__created__" className="text-xs">
+                            Created date (default)
+                          </SelectItem>
+                          {reportFieldOptions.map((opt) => (
+                            <SelectItem key={opt.id} value={opt.id} className="text-xs">
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={reportSortDir} onValueChange={(v) => setReportSortDir(v as any)}>
+                        <SelectTrigger className="h-7 text-xs w-24">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="desc" className="text-xs">Newest first</SelectItem>
+                          <SelectItem value="asc" className="text-xs">Oldest first</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Max rows (1–50,000)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={50000}
+                      className="h-7 text-xs w-32"
+                      value={reportMaxRows}
+                      onChange={(e) =>
+                        setReportMaxRows(
+                          Math.max(1, Math.min(50000, Number(e.target.value) || 5000)),
+                        )
+                      }
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Hard cap. The XLSX header notes when truncation happens.
+                    </p>
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
+            {/* ── Delivery tab ───────────────────────────────────────── */}
+            <TabsContent value="delivery" className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+              <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] text-indigo-900">
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Quickly fill subject + body from a professional template.</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[11px] px-2 border-indigo-300"
+                  onClick={() => {
+                    setTemplatePickerTarget("report")
+                    setTemplatePickerOpen(true)
+                  }}
+                >
+                  Browse templates
+                </Button>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Recipients (comma- or newline-separated)</Label>
+                <Textarea
+                  rows={3}
+                  className="text-xs"
+                  placeholder="hr@example.com, manager@example.com"
+                  value={reportFormToStatic}
+                  onChange={(e) => setReportFormToStatic(e.target.value)}
+                />
+                {reportRecipientStats.total > 0 && (
+                  <div className="flex items-center gap-3 text-[10px]">
+                    <span className="text-emerald-700">
+                      ✓ {reportRecipientStats.valid.length} valid
+                    </span>
+                    {reportRecipientStats.invalid.length > 0 && (
+                      <span className="text-red-600" title={reportRecipientStats.invalid.join(", ")}>
+                        ✗ {reportRecipientStats.invalid.length} invalid: {reportRecipientStats.invalid.slice(0, 3).join(", ")}
+                        {reportRecipientStats.invalid.length > 3 ? "..." : ""}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Email subject</Label>
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="Daily attendance report"
+                  value={reportFormSubject}
+                  onChange={(e) => setReportFormSubject(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Email body (HTML allowed; report summary appended automatically)</Label>
+                <Textarea
+                  rows={5}
+                  className="text-xs"
+                  placeholder="Hi team, please find attached today's report."
+                  value={reportFormBody}
+                  onChange={(e) => setReportFormBody(e.target.value)}
+                />
+              </div>
+            </TabsContent>
+
+            {/* ── Advanced tab ───────────────────────────────────────── */}
+            <TabsContent value="advanced" className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
+              <div className="space-y-1">
+                <Label className="text-xs">Filename template</Label>
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="{{module}}-{{period}}-{{date}}.xlsx"
+                  value={reportFilenameTemplate}
+                  onChange={(e) => setReportFilenameTemplate(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Placeholders:
+                  <code className="mx-1">{"{{module}}"}</code>
+                  <code className="mx-1">{"{{period}}"}</code>
+                  <code className="mx-1">{"{{date}}"}</code>
+                  <code className="mx-1">{"{{from}}"}</code>
+                  <code className="mx-1">{"{{to}}"}</code>
+                  . Default:{" "}
+                  <code>{"{{module}}-{{period}}-{{date}}.xlsx"}</code>
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">XLSX sheet name</Label>
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="Records"
+                  maxLength={31}
+                  value={reportSheetName}
+                  onChange={(e) => setReportSheetName(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Max 31 chars (Excel limit). Default: <code>Records</code>.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+          <DialogFooter className="gap-2">
+            {reportAction && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-destructive hover:text-destructive"
+                onClick={() => {
+                  removeReportAction()
+                  setReportDialogOpen(false)
+                }}
+              >
+                Remove
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setReportDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              disabled={reportRecipientStats.valid.length === 0}
+              onClick={saveReportAction}
+            >
+              Save Report Export
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Email Template Picker (shared between Email Notification + Report Export) ── */}
+      <EmailTemplatePicker
+        open={templatePickerOpen}
+        onOpenChange={setTemplatePickerOpen}
+        actionType={templatePickerTarget === "email" ? "Email Notification" : "Report Export"}
+        onApply={({ subject, body }) => {
+          if (templatePickerTarget === "email") {
+            setEmailFormSubject(subject)
+            setEmailFormBody(body)
+          } else {
+            setReportFormSubject(subject)
+            setReportFormBody(body)
+          }
+        }}
+      />
+
+      {/* ── Test Run Result Panel ──────────────────────────────────────── */}
+      {/* Modeless dock pinned bottom-right so the user can see the rule
+          editor underneath while reading the per-action log. Closes on click
+          or after a successful run; the executions page is the persistent
+          history. */}
+      {testPanelOpen && (
+        <div className="fixed bottom-4 right-4 w-[480px] max-w-[calc(100vw-2rem)] max-h-[70vh] bg-background border rounded-md shadow-xl z-50 flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Zap className="h-3.5 w-3.5 text-indigo-700" />
+              <span className="text-xs font-semibold">Test Run</span>
+              {isRunning && (
+                <span className="text-[10px] text-muted-foreground">running...</span>
+              )}
+              {testResult && (
+                <Badge
+                  className={`text-[10px] px-1.5 py-0 font-medium ${
+                    testResult.status === "success"
+                      ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
+                      : testResult.status === "partial"
+                      ? "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                      : testResult.status === "skipped"
+                      ? "bg-slate-100 text-slate-600 hover:bg-slate-100"
+                      : "bg-red-100 text-red-700 hover:bg-red-100"
+                  }`}
+                >
+                  {testResult.status}
+                </Badge>
+              )}
+              {testResult && (
+                <span className="text-[10px] text-muted-foreground">{testResult.elapsedMs}ms</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="text-[10px] text-muted-foreground hover:text-foreground px-1.5"
+                onClick={() => {
+                  setTestLog([])
+                  setTestResult(null)
+                }}
+                title="Clear log"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => setTestPanelOpen(false)}
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-1 font-mono text-[11px]">
+            {testLog.length === 0 ? (
+              <p className="text-muted-foreground italic">Waiting for run...</p>
+            ) : (
+              testLog.map((entry, i) => (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2 px-2 py-1 rounded ${
+                    entry.level === "error"
+                      ? "bg-red-50 text-red-700"
+                      : entry.level === "warn"
+                      ? "bg-amber-50 text-amber-700"
+                      : entry.level === "success"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-muted/30 text-foreground"
+                  }`}
+                >
+                  <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                    {entry.ts.slice(11, 19)}
+                  </span>
+                  <span className="break-words flex-1">{entry.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          {testResult && testResult.results.length > 0 && (
+            <div className="border-t px-2 py-1.5 bg-muted/20">
+              <p className="text-[10px] font-semibold text-foreground mb-1">Action results</p>
+              <div className="space-y-1">
+                {testResult.results.map((r, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 px-2 py-1 rounded text-[11px] ${
+                      r.ok ? "bg-emerald-50" : "bg-red-50"
+                    }`}
+                  >
+                    <span className={r.ok ? "text-emerald-700" : "text-red-700"}>
+                      {r.ok ? "✓" : "✗"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium">{r.type}</div>
+                      {r.error && <div className="text-red-700 break-words">{r.error}</div>}
+                      {r.detail && (
+                        <div className="text-[10px] text-muted-foreground font-mono break-all">
+                          {typeof r.detail === "object"
+                            ? JSON.stringify(r.detail)
+                            : String(r.detail)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="border-t px-3 py-2 flex items-center justify-between bg-muted/30">
+            <span className="text-[10px] text-muted-foreground">
+              ⚠ Real run — emails sent, notifications posted, reports generated
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[11px] px-2"
+                onClick={() => router.push(`/settings/workflow-rules/executions${ruleId ? `?ruleId=${ruleId}` : ""}`)}
+              >
+                Full log →
+              </Button>
+              <Button
+                size="sm"
+                className="h-6 text-[11px] px-2 gap-1"
+                disabled={isRunning || isSaving || !canSaveRule}
+                onClick={handleTestRun}
+              >
+                <Zap className="h-3 w-3" />
+                Run again
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

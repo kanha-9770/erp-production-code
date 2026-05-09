@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -346,6 +346,31 @@ export default function PayrollConfigurePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [autoConfigured, setAutoConfigured] = useState(false);
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  const errorBannerRef = useRef<HTMLDivElement | null>(null);
+
+  // Mirrors the server-side validation in app/api/payroll/setup/route.ts so
+  // we can surface missing required fields BEFORE hitting the API. On mobile
+  // the page is long enough that a 400 banner at the top is invisible — this
+  // catches problems while the user is still scrolled near the relevant card.
+  const validateSetup = (s: Setup): string[] => {
+    const errs: string[] = [];
+    if (!s.employee.formId) errs.push('Select an Employee Profile form');
+    if (!s.employee.fields.email && !s.employee.fields.employeeId) {
+      errs.push('Map at least Employee Email or Employee ID on the Employee Profile form');
+    }
+    if (!s.employee.fields.salary && !s.defaultBaseSalary) {
+      errs.push('Map a Salary field OR set a Default Base Salary');
+    }
+    if (!s.checkIn.formId) errs.push('Select a Check-In form');
+    if (s.checkIn.formId && !s.checkIn.fields.checkInTime) {
+      errs.push('Map the Check-In Time field');
+    }
+    if (s.checkIn.formId && !s.checkIn.fields.date) {
+      errs.push('Map the Date field on the Check-In form');
+    }
+    return errs;
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -378,6 +403,17 @@ export default function PayrollConfigurePage() {
       const setupJson = await setupRes.json();
       const loaded: Setup = setupJson.setup ?? EMPTY_SETUP;
       setSetup(loaded);
+      // Surface any formIds the server scrubbed because they no longer
+      // belong to the org. The setup state already has them nulled out;
+      // we just tell the admin so they know to re-bind those forms.
+      const dropped: string[] = Array.isArray(setupJson.droppedFormIds) ? setupJson.droppedFormIds : [];
+      if (dropped.length > 0) {
+        setStaleNotice(
+          `${dropped.length} previously-bound form${dropped.length === 1 ? '' : 's'} no longer exist in this organization and ${dropped.length === 1 ? 'was' : 'were'} cleared. Re-bind them below.`,
+        );
+      } else {
+        setStaleNotice(null);
+      }
 
       await Promise.all([
         loaded.employee.formId ? fetchFields(loaded.employee.formId, 'employee') : Promise.resolve(),
@@ -400,6 +436,25 @@ export default function PayrollConfigurePage() {
   const fetchFields = async (formId: string, section: Section): Promise<void> => {
     try {
       const res = await fetch(`/api/payroll/form-fields?formId=${formId}`, { cache: 'no-store' });
+      // 404 means the saved formId no longer belongs to this org (form deleted
+      // or admin changed orgs). Defensively clear the section so Save isn't
+      // blocked by a stale reference. The setup GET already scrubs these
+      // server-side, so this is just a belt-and-braces fallback.
+      if (res.status === 404) {
+        setSetup((prev) => ({
+          ...prev,
+          [section]: {
+            formId: null,
+            fields: { ...(EMPTY_SETUP[section] as any).fields },
+          },
+        }));
+        if (section === 'employee') setEmployeeFields([]);
+        if (section === 'checkIn') setCheckInFields([]);
+        if (section === 'checkOut') setCheckOutFields([]);
+        if (section === 'leave') setLeaveFields([]);
+        if (section === 'holiday') setHolidayFields([]);
+        return;
+      }
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load form fields');
       const fields: FieldOption[] = json.fields ?? [];
@@ -470,6 +525,19 @@ export default function PayrollConfigurePage() {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    // Pre-flight: catch missing required fields before the round-trip so the
+    // user sees a clear list of what's missing instead of a generic 400.
+    const clientErrors = validateSetup(setup);
+    if (clientErrors.length > 0) {
+      setError(clientErrors.join('. '));
+      setSaving(false);
+      // Scroll the banner into view on small screens — without this the user
+      // sits at the bottom of the form and never sees the validation message.
+      requestAnimationFrame(() => {
+        errorBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      return;
+    }
     try {
       const res = await fetch('/api/payroll/setup', {
         method: 'POST',
@@ -481,6 +549,9 @@ export default function PayrollConfigurePage() {
       setSuccess('Configuration saved. You can now generate payroll.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
+      requestAnimationFrame(() => {
+        errorBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
     } finally {
       setSaving(false);
     }
@@ -616,9 +687,22 @@ export default function PayrollConfigurePage() {
         )}
 
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">
+          <div
+            ref={errorBannerRef}
+            className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700"
+          >
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{error}</span>
+            <div className="space-y-1">
+              {error.split('. ').filter(Boolean).map((msg, i) => (
+                <p key={i}>{msg}</p>
+              ))}
+            </div>
+          </div>
+        )}
+        {staleNotice && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{staleNotice}</span>
           </div>
         )}
         {success && (
@@ -1213,14 +1297,25 @@ export default function PayrollConfigurePage() {
           </TabsContent>
         </Tabs>
 
-        <div className="sticky bottom-4 z-10 flex items-center justify-between gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-lg backdrop-blur sm:justify-end">
-          <Button variant="ghost" onClick={() => router.push('/payroll')}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={saving} className="gap-2 px-6">
-            <Save className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
-            {saving ? 'Saving...' : 'Save Configuration'}
-          </Button>
+        <div className="sticky bottom-4 z-10 space-y-2">
+          {error && (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/15 px-3 py-2 text-xs text-red-700 shadow-md backdrop-blur">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Fix the issue{error.split('. ').filter(Boolean).length === 1 ? '' : 's'} above before saving.
+                Scroll up to see the full list.
+              </span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-lg backdrop-blur sm:justify-end">
+            <Button variant="ghost" onClick={() => router.push('/payroll')}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={saving} className="gap-2 px-6">
+              <Save className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
+              {saving ? 'Saving...' : 'Save Configuration'}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

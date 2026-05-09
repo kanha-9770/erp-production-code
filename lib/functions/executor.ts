@@ -35,6 +35,18 @@ export interface ExecuteOptions {
   /** For field-level events: the apiName (or label / id, fallback) of the
    *  field that fired. Surfaced as `ctx.triggerField`. */
   triggerField?: string
+  /**
+   * When provided, the executor writes a FunctionExecution row at the end of
+   * the run for the /settings/functions/executions log viewer. Fire-and-forget
+   * — a persistence failure never affects the script's success/result.
+   *
+   * Omit this for ephemeral runs (e.g. the editor's quick-test) so the log
+   * table doesn't fill up with noise.
+   */
+  persistAs?: {
+    functionId: string
+    trigger: "manual" | "test" | "workflow" | "scheduled" | "binding" | "rest-api"
+  }
 }
 
 export interface ExecuteResult {
@@ -583,19 +595,84 @@ export async function executeFunction(opts: ExecuteOptions): Promise<ExecuteResu
       ),
     ])
 
-    return {
+    const finalResult: ExecuteResult = {
       success: true,
       result,
       logs,
       durationMs: Date.now() - start,
     }
+    persistExecutionLog(opts, finalResult, start)
+    return finalResult
   } catch (err: any) {
     const message = err?.message || "Execution failed"
-    return {
+    const finalResult: ExecuteResult = {
       success: false,
       error: message,
       logs,
       durationMs: Date.now() - start,
     }
+    persistExecutionLog(opts, finalResult, start)
+    return finalResult
   }
+}
+
+/**
+ * Fire-and-forget log writer. Only runs when the caller passed `persistAs`
+ * — keeps the editor's quick-test runs out of the log table so it stays
+ * focused on production runs (workflow / scheduled / binding / explicit
+ * test-from-list-page).
+ *
+ * Trims log/input/result payloads if they exceed a sensible bound so a chatty
+ * script can't bloat the row past Postgres's row-size limits.
+ */
+function persistExecutionLog(
+  opts: ExecuteOptions,
+  res: ExecuteResult,
+  startedAtMs: number,
+): void {
+  if (!opts.persistAs) return
+  const { functionId, trigger } = opts.persistAs
+
+  // Cap each payload — Postgres handles large jsonb fine but the log viewer
+  // doesn't need 5 MB blobs. 256 KB per field keeps the row well under any
+  // practical limit while preserving useful context.
+  const cap = (v: any, max = 256_000): any => {
+    if (v === undefined) return undefined
+    try {
+      const s = JSON.stringify(v)
+      if (s.length <= max) return v
+      return { __truncated: true, preview: s.slice(0, max) + "...", originalBytes: s.length }
+    } catch {
+      return { __unserialisable: true }
+    }
+  }
+
+  const startedAt = new Date(startedAtMs)
+  const finishedAt = new Date()
+
+  // Don't await — script callers (workflow trigger, scheduler) treat function
+  // execution as best-effort; a logging hiccup must not break the rule run.
+  prisma
+    .functionExecution.create({
+      data: {
+        functionId,
+        organizationId: opts.organizationId,
+        trigger,
+        status: res.success ? "success" : "failed",
+        startedAt,
+        finishedAt,
+        durationMs: res.durationMs,
+        input: cap(opts.input) ?? null,
+        result: cap(res.result) ?? null,
+        logs: cap(res.logs.slice(-500)) ?? null, // last 500 console lines
+        error: res.error ?? null,
+        userId: opts.userId || null,
+      },
+    })
+    .catch((err: any) => {
+      console.error(
+        `[functions] persist execution log failed for ${functionId}:`,
+        err?.message || err,
+      )
+    })
 }
