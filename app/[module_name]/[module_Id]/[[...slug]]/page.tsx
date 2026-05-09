@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Lock, Edit3, MousePointer2 } from "lucide-react";
+import { Loader2, Lock, Edit3, MousePointer2, Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import FormsContent from "@/components/dynamicSubmodule/formsContent";
 import { PublicFormDialog } from "@/components/public-form-dialog";
 import { useGetModuleByIdQuery } from "@/lib/api/modules";
@@ -144,6 +146,38 @@ export default function ModulePage({
       setLoading(false);
     }
   }, [moduleData]);
+
+  // The Employee form (if the module owns one) drives the hybrid Employee
+  // Master view: locked Identity fields the admin cannot delete plus any
+  // custom fields they add via the form builder. We surface a "Customize"
+  // button straight to the builder for that form, and on first admin load
+  // we ensure the core Identity fields exist on the form.
+  const employeeForm = allModuleForms.find(
+    (f: any) => (f as any)?.isEmployeeForm === true,
+  ) as Form | undefined;
+  const [coreFieldsEnsured, setCoreFieldsEnsured] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!employeeForm || !isAdmin) return;
+    if (coreFieldsEnsured === employeeForm.id) return;
+    setCoreFieldsEnsured(employeeForm.id);
+    fetch(`/api/forms/${employeeForm.id}/ensure-core-fields`, {
+      method: "POST",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data?.created > 0) {
+          // Reload records so newly-injected fields appear as columns.
+          refetchRecords();
+        }
+      })
+      .catch(() => {
+        // Silent — the page still works without the core fields, the admin
+        // just won't see the Identity columns until ensure succeeds.
+      });
+  }, [employeeForm?.id, isAdmin, coreFieldsEnsured, refetchRecords]);
 
   useEffect(() => {
     if (moduleError) {
@@ -671,7 +705,25 @@ export default function ModulePage({
 
   return (
     <div className="flex flex-col h-full p-2 gap-2 max-w-full overflow-hidden">
-      <div className="shrink-0">
+      <div className="shrink-0 space-y-2">
+        {employeeForm && isAdmin && (
+          <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+            <div className="text-xs text-amber-900 flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5 text-amber-600" />
+              <span>
+                <span className="font-medium">Hybrid form:</span>{" "}
+                Identity fields are locked. Add or rearrange any other fields
+                from the form builder.
+              </span>
+            </div>
+            <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+              <Link href={`/builder/${employeeForm.id}`}>
+                <Settings2 className="h-3.5 w-3.5 mr-1.5" />
+                Customize Form
+              </Link>
+            </Button>
+          </div>
+        )}
         <FormsContent
           forms={allModuleForms}
           selectedForm={selectedForm}
