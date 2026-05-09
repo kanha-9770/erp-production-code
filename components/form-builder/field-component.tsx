@@ -45,6 +45,7 @@ import {
   Copy,
   Upload,
   Calculator,
+  Lock,
 } from "lucide-react";
 import type { FormField, FieldOption } from "@/types/form-builder";
 import { LookupField } from "@/components/forms/lookup-field";
@@ -80,6 +81,11 @@ export default function FieldComponent({
     field?.defaultValue || "",
   );
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+
+  // Locked-core fields (stamped by ensure-core-fields for the Employee Master
+  // hybrid page) cannot be renamed or deleted from the builder UI. The server
+  // also enforces this — the UI guard is just for affordance.
+  const isCoreField = (field as any)?.properties?.isCore === true;
 
   const labelInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -566,7 +572,7 @@ export default function FieldComponent({
             </div>
 
             <div className="flex-1 min-w-0">
-              {isEditingLabel ? (
+              {isEditingLabel && !isCoreField ? (
                 <Input
                   ref={labelInputRef}
                   value={editLabel}
@@ -579,18 +585,39 @@ export default function FieldComponent({
                 />
               ) : (
                 <div
-                  className="space-y-1 cursor-pointer"
-                  onClick={() => setIsEditingLabel(true)}
+                  className={cn("space-y-1", !isCoreField && "cursor-pointer")}
+                  onClick={() => {
+                    if (isCoreField) {
+                      toast({
+                        title: "Locked core field",
+                        description: "This field is part of the Employee Master core and cannot be renamed.",
+                      });
+                      return;
+                    }
+                    setIsEditingLabel(true);
+                  }}
+                  title={isCoreField ? "Locked core field — rename disabled" : undefined}
                 >
                   <p
                     className={cn(
-                      "text-sm font-medium",
+                      "text-sm font-medium flex items-center gap-1.5",
                       isInSubform && "text-purple-800",
                     )}
                   >
-                    {field.label}{" "}
+                    {isCoreField && (
+                      <Lock
+                        className="h-3 w-3 text-amber-600 shrink-0"
+                        aria-label="Locked core field"
+                      />
+                    )}
+                    <span>{field.label}</span>
                     {field.validation?.required && (
                       <span className="text-red-500">*</span>
+                    )}
+                    {isCoreField && (
+                      <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px] leading-4 border-amber-300 text-amber-700 bg-amber-50">
+                        Core
+                      </Badge>
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -619,14 +646,18 @@ export default function FieldComponent({
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => setIsDeleteDialogOpen(true)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </DropdownMenuItem>
+                {!isCoreField && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setIsDeleteDialogOpen(true)}
+                      className="text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

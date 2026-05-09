@@ -324,7 +324,7 @@ export function PublicFormDialog({
                 <div className="flex items-center justify-center sm:justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
                   <Lock className="h-3 w-3 shrink-0" />
                   <span className="hidden sm:inline">
-                    View only — contact admin for submit access
+                    View only Permission — contact admin for submit access
                   </span>
                   <span className="sm:hidden">View only</span>
                 </div>
@@ -345,11 +345,10 @@ export function PublicFormDialog({
                   <Button
                     type="submit"
                     disabled={submitting || loading || hasErrorsOrMissingRequired()}
-                    className={`flex-1 sm:flex-none h-8 text-xs font-medium ${
-                      hasErrorsOrMissingRequired() && !submitting && !loading
-                        ? "opacity-60 cursor-not-allowed"
-                        : ""
-                    }`}
+                    className={`flex-1 sm:flex-none h-8 text-xs font-medium ${hasErrorsOrMissingRequired() && !submitting && !loading
+                      ? "opacity-60 cursor-not-allowed"
+                      : ""
+                      }`}
                   >
                     {submitting ? (
                       <>

@@ -314,6 +314,38 @@ export const FormBuilderHandlers = {
   async updateField(request: NextRequest, fieldId: string): Promise<NextResponse> {
     return handle(async () => {
       const body = await request.json();
+
+      // Locked-core guard: fields stamped with `properties.isCore = true` by
+      // ensure-core-fields cannot have their identity (label/type/coreKey)
+      // changed. Validation, ordering, width, options etc. are still editable
+      // so the admin can still tune required/optional, sort order, etc.
+      const existing = await prisma.formField.findUnique({
+        where: { id: fieldId },
+        select: { label: true, type: true, properties: true },
+      });
+      const existingProps = (existing?.properties as any) ?? {};
+      if (existingProps?.isCore === true) {
+        if (typeof body.label === "string" && body.label !== existing!.label) {
+          return NextResponse.json(
+            { success: false, error: "This is a locked core field — its label cannot be changed." },
+            { status: 403 }
+          );
+        }
+        if (typeof body.type === "string" && body.type !== existing!.type) {
+          return NextResponse.json(
+            { success: false, error: "This is a locked core field — its type cannot be changed." },
+            { status: 403 }
+          );
+        }
+        // Don't let callers strip the lock by overwriting properties.
+        const incomingProps = body.properties && typeof body.properties === "object" ? body.properties : {};
+        body.properties = {
+          ...incomingProps,
+          isCore: true,
+          coreKey: existingProps.coreKey,
+        };
+      }
+
       const field = await DatabaseService.updateField(fieldId, {
         sectionId: body.sectionId, subformId: body.subformId,
         type: body.type, label: body.label, placeholder: body.placeholder,
@@ -336,6 +368,21 @@ export const FormBuilderHandlers = {
   async deleteField(request: NextRequest, fieldId: string): Promise<NextResponse> {
     return handle(async () => {
       const user = await requireAuth(request);
+
+      // Locked-core guard: refuse to soft-delete a field that the Employee
+      // Master hybrid page depends on. The admin can still customise the rest
+      // of the form freely.
+      const existing = await prisma.formField.findUnique({
+        where: { id: fieldId },
+        select: { properties: true },
+      });
+      if (((existing?.properties as any)?.isCore) === true) {
+        return NextResponse.json(
+          { success: false, error: "This is a locked core field and cannot be deleted." },
+          { status: 403 }
+        );
+      }
+
       await moveToTrash("FormField", fieldId, {
         userId: user.id,
         userName: user.email,
