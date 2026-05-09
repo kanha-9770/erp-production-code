@@ -99,6 +99,9 @@ export const baseApi = createApi({
     "ReportPropertyAging",
     "ReportComplianceStatus",
     "ReportTax",
+    // Inventory (Module #3)
+    "InventoryProducts",
+    "InventoryProduct",
   ],
   endpoints: () => ({}),
 })

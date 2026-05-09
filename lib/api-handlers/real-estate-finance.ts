@@ -145,6 +145,72 @@ export const WalletHandlers = {
     }, "listMyLedger");
   },
 
+  // GET /api/real-estate/admin/ledger — admin-wide ledger feed.
+  // Powers Point History + Fund Transfer reports.
+  async listAllLedger(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      const admin = await isUserAdmin(auth.id, auth.organizationId);
+      if (!admin)
+        return NextResponse.json(
+          { error: "Admin access required" },
+          { status: 403 },
+        );
+      const url = new URL(request.url);
+      const status = url.searchParams.get("status") ?? undefined;
+      const category = url.searchParams.get("category") ?? undefined;
+      const userId = url.searchParams.get("userId") ?? undefined;
+      const from = url.searchParams.get("from") ?? undefined;
+      const to = url.searchParams.get("to") ?? undefined;
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 500);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+
+      const where: Prisma.LedgerEntryWhereInput = {
+        organizationId: auth.organizationId,
+        ...(status ? { status: status as any } : {}),
+        ...(category ? { category: category as any } : {}),
+        ...(from || to
+          ? {
+              createdAt: {
+                ...(from ? { gte: new Date(from) } : {}),
+                ...(to ? { lte: new Date(to) } : {}),
+              },
+            }
+          : {}),
+        ...(userId ? { wallet: { userId } } : {}),
+      };
+
+      const [items, total] = await Promise.all([
+        prisma.ledgerEntry.findMany({
+          where,
+          take: limit,
+          skip: offset,
+          orderBy: { createdAt: "desc" },
+          include: {
+            wallet: {
+              select: {
+                userId: true,
+                user: {
+                  select: { id: true, email: true, first_name: true, last_name: true, avatar: true },
+                },
+              },
+            },
+          },
+        }),
+        prisma.ledgerEntry.count({ where }),
+      ]);
+
+      return NextResponse.json({
+        success: true,
+        data: items.map((e) => ({
+          ...serializeEntry(e as any),
+          beneficiary: e.wallet?.user ?? null,
+        })),
+        meta: { total, limit, offset },
+      });
+    }, "listAllLedger");
+  },
+
   // GET /api/real-estate/wallets — admin overview of all wallets
   async listAll(request: NextRequest): Promise<NextResponse> {
     return handle(async () => {

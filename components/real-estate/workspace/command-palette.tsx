@@ -41,6 +41,15 @@ import {
   Plus,
   Home,
   Banknote,
+  TrendingUp,
+  ShieldCheck,
+  UserPlus,
+  Coins,
+  List,
+  GitBranch,
+  Trophy,
+  Activity,
+  Boxes,
 } from "lucide-react";
 import { useGetPropertiesQuery } from "@/lib/api/real-estate/properties";
 import { useGetAgentsQuery } from "@/lib/api/real-estate/agents";
@@ -69,17 +78,38 @@ export function useCommandPalette() {
 
 const STATIC_PAGES = [
   { href: "/real-estate", icon: Home, label: "Dashboard" },
+  { href: "/real-estate/dashboards/sales", icon: TrendingUp, label: "Sales Dashboard" },
+  { href: "/real-estate/dashboards/network", icon: Network, label: "Agent Network Dashboard" },
   { href: "/real-estate/properties", icon: Building2, label: "Properties" },
   { href: "/real-estate/agents", icon: Users, label: "Agents" },
-  { href: "/real-estate/agents/tree", icon: Network, label: "Agent hierarchy" },
+  { href: "/real-estate/agents/tree", icon: Network, label: "Hierarchy: Tree" },
+  { href: "/real-estate/agents/hierarchy-list", icon: List, label: "Hierarchy: List" },
+  { href: "/real-estate/agents/binary", icon: GitBranch, label: "Hierarchy: Binary" },
+  { href: "/real-estate/agents/sponsor", icon: Network, label: "Hierarchy: Sponsor" },
   { href: "/real-estate/agents/ranks", icon: Sparkles, label: "Ranks" },
+  { href: "/real-estate/members/active", icon: Users, label: "Active Network Members" },
+  { href: "/real-estate/members/pending", icon: UserPlus, label: "Pending Onboarding" },
+  { href: "/real-estate/members/kyc", icon: Shield, label: "KYC Details" },
   { href: "/real-estate/leads", icon: Inbox, label: "Leads" },
   { href: "/real-estate/viewings", icon: CalendarDays, label: "Viewings" },
   { href: "/real-estate/transactions", icon: Receipt, label: "Transactions" },
   { href: "/real-estate/wallet", icon: Wallet, label: "My wallet" },
   { href: "/real-estate/payouts", icon: Banknote, label: "Payouts" },
   { href: "/real-estate/compliance", icon: Shield, label: "My compliance" },
-  { href: "/real-estate/reports", icon: BarChart3, label: "Reports" },
+  { href: "/real-estate/reports", icon: BarChart3, label: "Reports hub" },
+  { href: "/real-estate/reports/sales", icon: Receipt, label: "Sales Report" },
+  { href: "/real-estate/reports/payouts", icon: Banknote, label: "Payout Report" },
+  { href: "/real-estate/reports/top-earners", icon: Trophy, label: "Top Earners" },
+  { href: "/real-estate/reports/joining", icon: UserPlus, label: "Joining Report" },
+  { href: "/real-estate/reports/member-income", icon: Coins, label: "Member Income Report" },
+  { href: "/real-estate/reports/fund-transfer", icon: Coins, label: "Fund Transfer Report" },
+  { href: "/real-estate/reports/point-history", icon: Activity, label: "Wallet Activity" },
+  { href: "/real-estate/admin/sub-admins", icon: ShieldCheck, label: "Sub-Admins" },
+  { href: "/real-estate/admin/fund-credit", icon: Coins, label: "Fund Credit (admin)" },
+  // Inventory module — listed in the real-estate palette so Cmd+K reaches
+  // it from anywhere; it isn't part of REBM but it's a convenience hop.
+  { href: "/inventory", icon: Boxes, label: "Inventory: Products" },
+  { href: "/inventory/new", icon: Plus, label: "New product" },
 ];
 
 const QUICK_ACTIONS = [

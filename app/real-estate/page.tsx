@@ -247,6 +247,38 @@ export default function RealEstateDashboard() {
         </Card>
       </div>
 
+      {/* Dashboards row — links to the deep-dive Sales / Network views */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link href="/real-estate/dashboards/sales" className="block group">
+          <Card className="h-full transition-all group-hover:shadow-md group-hover:-translate-y-px">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold">Sales Dashboard</div>
+                <div className="text-xs text-muted-foreground">Revenue, expense, profit, top properties</div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/real-estate/dashboards/network" className="block group">
+          <Card className="h-full transition-all group-hover:shadow-md group-hover:-translate-y-px">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                <Network className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold">Agent Network Dashboard</div>
+                <div className="text-xs text-muted-foreground">Override commissions, members, registrations</div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+      </div>
+
       {/* Quick links — ribbon of secondary navigation */}
       <Card>
         <CardContent className="p-3 sm:p-4">
@@ -256,6 +288,9 @@ export default function RealEstateDashboard() {
             <QuickLink href="/real-estate/leads/new" icon={Plus} label="Capture lead" />
             <QuickLink href="/real-estate/agents/new" icon={Plus} label="Onboard agent" />
             <QuickLink href="/real-estate/agents/tree" icon={Network} label="Hierarchy tree" />
+            <QuickLink href="/real-estate/agents/hierarchy-list" icon={Users} label="Hierarchy list" />
+            <QuickLink href="/real-estate/members/active" icon={Users} label="Active members" />
+            <QuickLink href="/real-estate/members/pending" icon={Users} label="Pending KYC" />
             <QuickLink href="/real-estate/agents/ranks" icon={Sparkles} label="Ranks" />
             <QuickLink href="/real-estate/wallet" icon={Wallet} label="My wallet" />
             <QuickLink href="/real-estate/compliance" icon={Shield} label="Compliance" />

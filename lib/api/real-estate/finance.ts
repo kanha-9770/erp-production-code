@@ -25,6 +25,22 @@ export interface LedgerListParams {
   offset?: number;
 }
 
+export interface AdminLedgerListParams extends LedgerListParams {
+  userId?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface AdminLedgerEntry extends LedgerEntry {
+  beneficiary: {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    avatar: string | null;
+  } | null;
+}
+
 export const financeApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // ─── Wallet ────────────────────────────────────────────────────────────
@@ -41,6 +57,14 @@ export const financeApi = baseApi.injectEndpoints({
     getAllWallets: builder.query<{ success: boolean; data: Wallet[] }, void>({
       query: () => "/real-estate/wallets",
       providesTags: [{ type: "Wallets", id: "LIST" }],
+    }),
+
+    getAdminLedger: builder.query<
+      PaginatedResponse<AdminLedgerEntry>,
+      AdminLedgerListParams | void
+    >({
+      query: (params) => `/real-estate/admin/ledger${toQuery(params ?? {})}`,
+      providesTags: [{ type: "MyLedger", id: "ALL" }],
     }),
 
     adjustWallet: builder.mutation<
@@ -213,6 +237,7 @@ export const {
   useGetMyWalletQuery,
   useGetMyLedgerQuery,
   useGetAllWalletsQuery,
+  useGetAdminLedgerQuery,
   useAdjustWalletMutation,
   useReleaseDueCommissionsMutation,
   useGetMyBankAccountsQuery,

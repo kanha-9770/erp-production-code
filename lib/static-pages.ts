@@ -46,6 +46,7 @@ export type StaticPageGroup =
   | 'Payroll'
   | 'HR & Employees'
   | 'Real Estate'
+  | 'Inventory'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -132,13 +133,47 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'settings',
   },
 
+  // ── Inventory (Module #3) ──────────────────────────────────────────────
+  // Product catalog with a structured form **and** a Webflow-style page
+  // builder for the storefront detail page.
+  {
+    path: '/inventory',
+    label: 'Inventory',
+    group: 'Inventory',
+    description: 'Products, stock, page builder',
+    icon: 'boxes',
+  },
+  {
+    path: '/inventory/new',
+    label: 'New Product',
+    group: 'Inventory',
+    description: 'Quick-create a product',
+    icon: 'plus',
+  },
+
   // ── Real Estate Brokerage (Module #2) ──────────────────────────────────
+  // Pages are listed in sidebar order — top to bottom mirrors the in-app
+  // navigation flow (overview → inventory → people → money → admin).
   {
     path: '/real-estate',
     label: 'Real Estate Dashboard',
     group: 'Real Estate',
-    description: 'Brokerage overview, KPIs, and quick links',
+    description: 'Module home — KPIs and quick links',
     icon: 'building2',
+  },
+  {
+    path: '/real-estate/dashboards/sales',
+    label: 'Sales Dashboard',
+    group: 'Real Estate',
+    description: 'Revenue, expense, profit, top properties',
+    icon: 'trending-up',
+  },
+  {
+    path: '/real-estate/dashboards/network',
+    label: 'Agent Network Dashboard',
+    group: 'Real Estate',
+    description: 'Override commissions, registrations, members map',
+    icon: 'network',
   },
   {
     path: '/real-estate/properties',
@@ -156,10 +191,31 @@ export const STATIC_PAGES: StaticPage[] = [
   },
   {
     path: '/real-estate/agents/tree',
-    label: 'Agent Hierarchy',
+    label: 'Hierarchy: Tree',
     group: 'Real Estate',
-    description: 'Visual MLM tree of all agents',
-    icon: 'users',
+    description: 'Visual sponsor/parent tree of all agents',
+    icon: 'network',
+  },
+  {
+    path: '/real-estate/agents/hierarchy-list',
+    label: 'Hierarchy: List',
+    group: 'Real Estate',
+    description: 'Flat depth-indented agent list (spreadsheet view)',
+    icon: 'list',
+  },
+  {
+    path: '/real-estate/agents/binary',
+    label: 'Hierarchy: Binary',
+    group: 'Real Estate',
+    description: 'Left/right binary placement view of recruits',
+    icon: 'network',
+  },
+  {
+    path: '/real-estate/agents/sponsor',
+    label: 'Hierarchy: Sponsor',
+    group: 'Real Estate',
+    description: 'Sponsor-edge tree (the chain commission overrides walk)',
+    icon: 'network',
   },
   {
     path: '/real-estate/agents/ranks',
@@ -252,11 +308,102 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'sparkles',
   },
   {
+    path: '/real-estate/admin/sub-admins',
+    label: 'Sub-Admins',
+    group: 'Real Estate',
+    description: 'Brokerage staff with admin privileges',
+    adminOnly: true,
+    icon: 'shield',
+  },
+  {
+    path: '/real-estate/admin/fund-credit',
+    label: 'Fund Credit',
+    group: 'Real Estate',
+    description: 'Manual wallet credit / debit (dual-authorized)',
+    adminOnly: true,
+    icon: 'coins',
+  },
+  // Members Management — focused views over the agents data
+  {
+    path: '/real-estate/members/active',
+    label: 'Active Network Members',
+    group: 'Real Estate',
+    description: 'Active agents currently selling',
+    icon: 'users',
+  },
+  {
+    path: '/real-estate/members/pending',
+    label: 'Pending Onboarding',
+    group: 'Real Estate',
+    description: 'Agents awaiting KYC verification',
+    adminOnly: true,
+    icon: 'user-plus',
+  },
+  {
+    path: '/real-estate/members/kyc',
+    label: 'KYC Details',
+    group: 'Real Estate',
+    description: 'Compliance overview + expiring documents',
+    adminOnly: true,
+    icon: 'shield',
+  },
+  {
     path: '/real-estate/reports',
     label: 'Reports',
     group: 'Real Estate',
     description: 'Sales register, leaderboard, tax statement, etc.',
     icon: 'file-text',
+  },
+  {
+    path: '/real-estate/reports/joining',
+    label: 'Joining Report',
+    group: 'Real Estate',
+    description: 'Agents who joined in the period (recruiting analytics)',
+    icon: 'user-plus',
+  },
+  {
+    path: '/real-estate/reports/member-income',
+    label: 'Member Income Report',
+    group: 'Real Estate',
+    description: 'Per-agent gross / reversed / net commission',
+    icon: 'coins',
+  },
+  {
+    path: '/real-estate/reports/sales',
+    label: 'Sales Report',
+    group: 'Real Estate',
+    description: 'Closed sales register, period-filtered',
+    icon: 'receipt',
+  },
+  {
+    path: '/real-estate/reports/payouts',
+    label: 'Payout Report',
+    group: 'Real Estate',
+    description: 'Withdrawal register — requested through paid',
+    icon: 'banknote',
+  },
+  {
+    path: '/real-estate/reports/top-earners',
+    label: 'Top Earners',
+    group: 'Real Estate',
+    description: 'Highest-grossing agents leaderboard',
+    icon: 'trophy',
+  },
+  {
+    path: '/real-estate/reports/fund-transfer',
+    label: 'Fund Transfer Report',
+    group: 'Real Estate',
+    description: 'Manual ledger adjustments audit log',
+    adminOnly: true,
+    icon: 'coins',
+  },
+  {
+    path: '/real-estate/reports/point-history',
+    label: 'Wallet Activity',
+    group: 'Real Estate',
+    description: 'All ledger entries across all wallets',
+    adminOnly: true,
+    icon: 'activity',
   },
 
   // ── Profile ────────────────────────────────────────────────────────────
