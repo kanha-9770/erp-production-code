@@ -1989,7 +1989,7 @@ export default function FormBuilderPage() {
                 </Button>
               </div>
             </header>
-            <main className="flex-1 overflow-y-auto">
+            <main className="flex-1 overflow-y-auto overscroll-contain">
               <FormCanvas
                 form={form}
                 onFormUpdate={handleFormUpdate}
