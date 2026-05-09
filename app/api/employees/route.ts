@@ -6,3 +6,7 @@ import { UserManagementHandlers as H } from "@/lib/api-handlers/user-management"
 export async function GET(request: NextRequest) {
   return H.getEmployees(request);
 }
+
+export async function POST(request: NextRequest) {
+  return H.createEmployee(request);
+}

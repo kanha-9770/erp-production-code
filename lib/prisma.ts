@@ -10,6 +10,10 @@ export const prisma =
     log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   })
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma
+// Always pin the singleton — without this, Next.js dev hot-reloads (and
+// any code path that re-imports this module) can leak PrismaClient
+// instances, each opening its own pool of PG connections and exhausting
+// the Supabase pooler (EMAXCONNSESSION).
+globalForPrisma.prisma = prisma
 
 export { PrismaClient }
