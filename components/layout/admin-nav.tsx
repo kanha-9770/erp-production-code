@@ -115,25 +115,25 @@ export function AdminNav({ user }: AdminNavProps) {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/admin/profile">
+                <Link href="/profile">
                   <User className="h-4 w-4 mr-2" />
                   Profile
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/admin/profile/update">
+                <Link href="/profile#personal">
                   <UserCog className="h-4 w-4 mr-2" />
                   Update Profile
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/admin/profile/security">
+                <Link href="/profile#security">
                   <Shield className="h-4 w-4 mr-2" />
                   Security Settings
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/admin/profile/email-preferences">
+                <Link href="/profile#notifications">
                   <Mail className="h-4 w-4 mr-2" />
                   Email Preferences
                 </Link>
