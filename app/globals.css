@@ -106,6 +106,27 @@
   }
 }
 
+/* Auth carousel progress fill — used by the rotating dashboard preview on
+   the login screen to visually indicate the auto-rotate countdown.
+   Uses transform: scaleX() (compositor-only) instead of width to avoid
+   per-frame layout/paint. */
+@keyframes auth-progress {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.auth-progress-fill {
+  width: 100%;
+  transform-origin: left center;
+  will-change: transform;
+  animation: auth-progress 4s linear forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-progress-fill {
+    animation: none;
+    transform: scaleX(1);
+  }
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
    Global dark-mode bridge.
 

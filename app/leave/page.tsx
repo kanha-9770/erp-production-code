@@ -886,9 +886,6 @@ function ApplyLeaveSheet({
                         style={{ backgroundColor: b.leaveType.color || '#94a3b8' }}
                       />
                       {b.leaveType.name}
-                      <span className="text-muted-foreground">
-                        — {b.available.toFixed(1)} available
-                      </span>
                     </span>
                   </SelectItem>
                 ))}
@@ -896,14 +893,8 @@ function ApplyLeaveSheet({
             </Select>
             {balance && (
               <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-xs space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">
-                    {balance.isPaid ? 'Paid leave' : 'Unpaid (LOP)'}
-                  </span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {balance.available.toFixed(1)} /{' '}
-                    {(balance.allocated + balance.carriedForward).toFixed(0)} left
-                  </span>
+                <div className="font-medium">
+                  {balance.isPaid ? 'Paid leave' : 'Unpaid (LOP)'}
                 </div>
                 {ruleHints.length > 0 && (
                   <div className="text-muted-foreground flex items-start gap-1.5">

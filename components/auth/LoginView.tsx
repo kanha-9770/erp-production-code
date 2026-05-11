@@ -23,7 +23,7 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, LogIn, Mail, Lock, Eye, EyeOff } from "lucide-react"
+import { Loader2, Mail, Lock, Eye, EyeOff, KeyRound } from "lucide-react"
 import type { z } from "zod"
 import { useLoginMutation } from "@/lib/api/auth"
 import type { AuthViewProps } from "./types"
@@ -122,33 +122,35 @@ export default function LoginView({ onSwitchView }: AuthViewProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1.5">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome back</h1>
-        <p className="text-sm text-muted-foreground">
-          Sign in to continue to your workspace.
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <h1 className="text-[24px] font-semibold tracking-tight text-slate-900 leading-tight">
+          Sign in
+        </h1>
+        <p className="text-[13px] text-slate-500">
+          to access your Nessco ERP workspace
         </p>
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3.5">
           <FormField
             control={form.control}
             name="email"
             render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Email
+              <FormItem className="space-y-1.5">
+                <FormLabel className="text-[13px] font-medium text-slate-700">
+                  Email address
                 </FormLabel>
                 <FormControl>
                   <div className="relative">
-                    <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input
                       {...field}
                       type="email"
-                      placeholder="you@company.com"
+                      placeholder="name@yourcompany.com"
                       autoComplete="email"
-                      className="pl-10 h-11"
+                      className="pl-10 h-10 bg-white border-slate-200 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
                       disabled={isLoading}
                       onChange={(e) => {
                         clearErrors("email")
@@ -166,28 +168,28 @@ export default function LoginView({ onSwitchView }: AuthViewProps) {
             control={form.control}
             name="password"
             render={({ field }) => (
-              <FormItem>
+              <FormItem className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <FormLabel className="text-[13px] font-medium text-slate-700">
                     Password
                   </FormLabel>
                   <button
                     type="button"
                     onClick={() => onSwitchView("forgot-password")}
-                    className="text-xs font-medium text-primary hover:underline"
+                    className="text-[12.5px] font-medium text-primary hover:underline underline-offset-2"
                   >
-                    Forgot?
+                    Forgot password?
                   </button>
                 </div>
                 <FormControl>
                   <div className="relative">
-                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input
                       {...field}
                       type={showPassword ? "text" : "password"}
-                      placeholder="Leave empty for OTP login"
+                      placeholder="Enter your password"
                       autoComplete="current-password"
-                      className="pl-10 pr-10 h-11"
+                      className="pl-10 pr-10 h-10 bg-white border-slate-200 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
                       disabled={isLoading}
                       onChange={(e) => {
                         clearErrors("password")
@@ -198,7 +200,7 @@ export default function LoginView({ onSwitchView }: AuthViewProps) {
                       type="button"
                       tabIndex={-1}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -212,7 +214,7 @@ export default function LoginView({ onSwitchView }: AuthViewProps) {
 
           <Button
             type="submit"
-            className="w-full h-11 font-medium"
+            className="w-full h-10 font-medium text-[14px] mt-1"
             disabled={isLoading}
           >
             {isLoading ? (
@@ -221,40 +223,40 @@ export default function LoginView({ onSwitchView }: AuthViewProps) {
                 Signing in…
               </>
             ) : (
-              <>
-                <LogIn className="h-4 w-4 mr-2" />
-                Sign in
-              </>
+              "Sign in"
             )}
           </Button>
+
+          <button
+            type="button"
+            onClick={() => form.handleSubmit(onSubmit)()}
+            disabled={isLoading}
+            className="w-full inline-flex items-center justify-center gap-2 text-[12.5px] font-medium text-slate-600 hover:text-primary transition-colors disabled:opacity-60"
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            Sign in with a one-time code instead
+          </button>
         </form>
       </Form>
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
+          <span className="w-full border-t border-slate-200" />
         </div>
-        <div className="relative flex justify-center text-[11px] uppercase tracking-wider">
-          <span className="bg-background px-2 text-muted-foreground">
-            or use a one-time code
+        <div className="relative flex justify-center">
+          <span className="bg-white px-3 text-[12px] text-slate-400">
+            New to Nessco?
           </span>
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground text-center leading-relaxed">
-        Leave the password field empty and we&apos;ll email a 6-digit code.
-      </p>
-
-      <p className="text-sm text-center text-muted-foreground">
-        Don&apos;t have an account?{" "}
-        <button
-          type="button"
-          onClick={() => onSwitchView("register")}
-          className="font-medium text-primary hover:underline"
-        >
-          Create one
-        </button>
-      </p>
+      <button
+        type="button"
+        onClick={() => onSwitchView("register")}
+        className="w-full h-10 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-[14px] font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors"
+      >
+        Create a free account
+      </button>
     </div>
   )
 }

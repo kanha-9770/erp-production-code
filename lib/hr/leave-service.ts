@@ -343,19 +343,11 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
 
   const year = yearOf(input.startDate);
 
-  // Atomic: ensure balance row, optionally check available, increment pending,
-  // create the request, write an allocation audit row.
+  // Atomic: ensure balance row, increment pending, create the request.
+  // Balance is no longer gated at apply-time — employees can request any
+  // amount; any overrun is settled by payroll / approver discretion.
   const created = await prisma.$transaction(async (tx: any) => {
     const balance = await ensureBalance(tx, input.organizationId, input.userId, input.leaveTypeId, year);
-    if (lt.rule.isPaid) {
-      const avail = balanceAvailable(balance);
-      if (avail < totalDays) {
-        throw new LeaveError(
-          'INSUFFICIENT_BALANCE',
-          `Not enough ${lt.type.name} balance: ${avail} available, ${totalDays} requested.`,
-        );
-      }
-    }
 
     const req = await tx.leaveRequest.create({
       data: {
