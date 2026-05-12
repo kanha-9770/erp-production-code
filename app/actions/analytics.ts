@@ -29,26 +29,70 @@ async function getOrgFormIds(orgId: string | null | undefined, selectedModuleIds
   return modules.flatMap((m) => m.forms.map((f) => f.id));
 }
 
-// Helper: count records across all 15 FormRecord tables scoped by formIds
+// Prisma @@map means actual PG table names are snake_case.
+// Field @map means actual PG column names are also snake_case.
+const FR_TABLE = (n: number) => `form_records_${n}`;
+
+// Helper: count records across all 15 FormRecord tables in ONE round-trip.
+// Uses UNION ALL instead of 15 parallel queries so a single connection handles
+// everything — critical for staying inside Supabase's session-mode pool limit.
 async function getFormRecordCounts(startDate: Date, endDate: Date, formIds: string[]) {
   if (formIds.length === 0) return { total: 0, byTable: Array.from({ length: 15 }, (_, i) => ({ table: i + 1, count: 0 })) };
 
-  const counts = await Promise.all(
-    Array.from({ length: 15 }, (_, i) => {
-      const model = `formRecord${i + 1}` as keyof typeof prisma;
-      return (prisma[model] as any).count({
-        where: {
-          formId: { in: formIds },
-          submittedAt: { gte: startDate, lte: endDate },
-        },
-      });
-    })
-  );
+  const union = Array.from({ length: 15 }, (_, i) =>
+    `SELECT ${i + 1}::int AS tbl, COUNT(*)::bigint AS cnt FROM "${FR_TABLE(i + 1)}" WHERE "form_id" = ANY($1::text[]) AND "submitted_at" >= $2 AND "submitted_at" <= $3`
+  ).join(' UNION ALL ');
 
-  return {
-    total: counts.reduce((a: number, b: number) => a + b, 0),
-    byTable: counts.map((count: number, i: number) => ({ table: i + 1, count })),
-  };
+  const rows = await prisma.$queryRawUnsafe<{ tbl: number; cnt: bigint }[]>(union, formIds, startDate, endDate);
+  const byTable = Array.from({ length: 15 }, (_, i) => ({
+    table: i + 1,
+    count: Number(rows.find((r) => r.tbl === i + 1)?.cnt ?? 0),
+  }));
+  return { total: byTable.reduce((a, b) => a + b.count, 0), byTable };
+}
+
+// Maps the camelCase Prisma field names to their actual PG column names.
+const COL_DB: Record<'formId' | 'userId', string> = { formId: 'form_id', userId: 'user_id' };
+
+// Helper: sum records grouped by formId or userId across all 15 tables — one query.
+// Replaces N×15 count() calls with a single aggregated SQL round-trip.
+async function countRecordsGroupedBy(
+  col: 'formId' | 'userId',
+  ids: string[],
+  startDate: Date,
+  endDate: Date,
+): Promise<Record<string, number>> {
+  if (ids.length === 0) return {};
+  const dbCol = COL_DB[col];
+  const inner = Array.from({ length: 15 }, (_, i) =>
+    `SELECT "${dbCol}" AS gkey, COUNT(*)::bigint AS cnt FROM "${FR_TABLE(i + 1)}" WHERE "${dbCol}" = ANY($1::text[]) AND "submitted_at" >= $2 AND "submitted_at" <= $3 GROUP BY "${dbCol}"`
+  ).join(' UNION ALL ');
+  const rows = await prisma.$queryRawUnsafe<{ gkey: string; total: bigint }[]>(
+    `SELECT gkey, SUM(cnt)::bigint AS total FROM (${inner}) sub GROUP BY gkey`,
+    ids, startDate, endDate,
+  );
+  return Object.fromEntries(rows.map((r) => [r.gkey, Number(r.total)]));
+}
+
+// Helper: fetch record rows from all 15 tables in one UNION ALL, keyed by formId.
+// Replaces forms.length × 15 findMany() calls with a single SQL round-trip.
+async function fetchRecordsByForm(
+  formIds: string[],
+  startDate: Date,
+  endDate: Date,
+): Promise<Map<string, Array<{ id: string; formId: string; status: string; submittedAt: Date; submittedBy: string | null; userId: string | null; amount: string | null }>>> {
+  const map = new Map<string, any[]>();
+  if (formIds.length === 0) return map;
+  // Alias snake_case PG columns back to camelCase so downstream code is unchanged.
+  const union = Array.from({ length: 15 }, (_, i) =>
+    `SELECT "id", "form_id" AS "formId", "status", "submitted_at" AS "submittedAt", "submitted_by" AS "submittedBy", "user_id" AS "userId", "amount"::text AS amount FROM "${FR_TABLE(i + 1)}" WHERE "form_id" = ANY($1::text[]) AND "submitted_at" >= $2 AND "submitted_at" <= $3`
+  ).join(' UNION ALL ');
+  const rows = await prisma.$queryRawUnsafe<any[]>(union, formIds, startDate, endDate);
+  for (const row of rows) {
+    if (!map.has(row.formId)) map.set(row.formId, []);
+    map.get(row.formId)!.push({ ...row, submittedAt: new Date(row.submittedAt) });
+  }
+  return map;
 }
 
 // ============================================================
@@ -239,30 +283,13 @@ export async function getModuleDeepAnalytics(moduleId: string, dateRange: string
   // Verify module belongs to user's org
   if (orgId && module.organizationId && module.organizationId !== orgId) return null;
 
-  const formsWithStats = await Promise.all(
-    module.forms.map(async (form) => {
-      const recordsByTable = await Promise.all(
-        Array.from({ length: 15 }, (_, i) => {
-          const model = `formRecord${i + 1}` as keyof typeof prisma;
-          return (prisma[model] as any).findMany({
-            where: {
-              formId: form.id,
-              submittedAt: { gte: startDate, lte: endDate },
-            },
-            select: {
-              id: true,
-              status: true,
-              submittedAt: true,
-              submittedBy: true,
-              userId: true,
-              amount: true,
-            },
-            orderBy: { submittedAt: 'desc' },
-          });
-        })
-      );
+  const formIds = module.forms.map((f) => f.id);
+  const recordsByFormMap = await fetchRecordsByForm(formIds, startDate, endDate);
 
-      const allRecords = recordsByTable.flat();
+  const formsWithStats = module.forms.map((form) => {
+      const allRecords = (recordsByFormMap.get(form.id) ?? []).sort(
+        (a, b) => b.submittedAt.getTime() - a.submittedAt.getTime(),
+      );
 
       const dailyMap: Record<string, number> = {};
       allRecords.forEach((r: any) => {
@@ -295,8 +322,7 @@ export async function getModuleDeepAnalytics(moduleId: string, dateRange: string
           .sort((a, b) => a.date.localeCompare(b.date)),
         statusBreakdown: Object.entries(statusMap).map(([status, count]) => ({ status, count })),
       };
-    })
-  );
+  });
 
   return {
     moduleId: module.id,
@@ -340,28 +366,21 @@ export async function getFormMetrics(dateRange: string, selectedModuleIds?: stri
 
   const performance = await Promise.all(
     modules.map(async (mod) => {
-      let total = 0;
+      const modFormIds = mod.forms.map((f) => f.id);
       const dailyMap: Record<string, number> = {};
+      let total = 0;
       let completed = 0;
 
-      for (const form of mod.forms) {
-        for (let t = 1; t <= 15; t++) {
-          const model = `formRecord${t}` as keyof typeof prisma;
-          const records = await (prisma[model] as any).findMany({
-            where: {
-              formId: form.id,
-              submittedAt: { gte: startDate, lte: endDate },
-            },
-            select: { submittedAt: true, status: true },
-          });
-          total += records.length;
-          records.forEach((r: any) => {
-            const d = new Date(r.submittedAt).toISOString().split('T')[0];
-            dailyMap[d] = (dailyMap[d] || 0) + 1;
-            if (r.status === 'submitted' || r.status === 'completed' || r.status === 'approved') {
-              completed++;
-            }
-          });
+      if (modFormIds.length > 0) {
+        const union = Array.from({ length: 15 }, (_, i) =>
+          `SELECT "status", "submitted_at"::text AS sat FROM "${FR_TABLE(i + 1)}" WHERE "form_id" = ANY($1::text[]) AND "submitted_at" >= $2 AND "submitted_at" <= $3`
+        ).join(' UNION ALL ');
+        const rows = await prisma.$queryRawUnsafe<{ status: string; sat: string }[]>(union, modFormIds, startDate, endDate);
+        for (const r of rows) {
+          total++;
+          const d = r.sat.split('T')[0];
+          dailyMap[d] = (dailyMap[d] || 0) + 1;
+          if (r.status === 'submitted' || r.status === 'completed' || r.status === 'approved') completed++;
         }
       }
 
@@ -405,50 +424,38 @@ export async function getUserAnalytics(dateRange: string) {
     take: 100,
   });
 
-  const userAnalytics = await Promise.all(
-    users.map(async (user) => {
-      const loginCount = await prisma.loginHistory.count({
-        where: {
-          userId: user.id,
-          status: 'Success',
-          createdAt: { gte: startDate, lte: endDate },
-        },
-      });
+  const userIds = users.map((u) => u.id);
 
-      const activityCount = await prisma.auditLog.count({
-        where: {
-          userId: user.id,
-          createdAt: { gte: startDate, lte: endDate },
-        },
-      });
+  // Replace N×17 sequential queries with 3 bulk queries.
+  const [loginGroups, activityGroups, submissionsMap] = await Promise.all([
+    prisma.loginHistory.groupBy({
+      by: ['userId'],
+      where: { userId: { in: userIds }, status: 'Success', createdAt: { gte: startDate, lte: endDate } },
+      _count: { id: true },
+    }),
+    prisma.auditLog.groupBy({
+      by: ['userId'],
+      where: { userId: { in: userIds }, createdAt: { gte: startDate, lte: endDate } },
+      _count: { id: true },
+    }),
+    countRecordsGroupedBy('userId', userIds, startDate, endDate),
+  ]);
 
-      let submissions = 0;
-      for (let t = 1; t <= 15; t++) {
-        const model = `formRecord${t}` as keyof typeof prisma;
-        submissions += await (prisma[model] as any).count({
-          where: {
-            userId: user.id,
-            submittedAt: { gte: startDate, lte: endDate },
-          },
-        });
-      }
+  const loginMap = Object.fromEntries(loginGroups.map((g) => [g.userId!, g._count.id]));
+  const activityMap = Object.fromEntries(activityGroups.map((g) => [g.userId, g._count.id]));
 
-      const roleName = user.unitAssignments[0]?.role?.name || 'No Role';
-
-      return {
-        userId: user.id,
-        email: user.email,
-        name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.email,
-        role: roleName,
-        status: user.status,
-        department: user.employee?.department || user.department || '-',
-        submissions,
-        loginCount,
-        activityCount,
-        joinedDate: user.createdAt.toLocaleDateString(),
-      };
-    })
-  );
+  const userAnalytics = users.map((user) => ({
+    userId: user.id,
+    email: user.email,
+    name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.email,
+    role: user.unitAssignments[0]?.role?.name || 'No Role',
+    status: user.status,
+    department: user.employee?.department || user.department || '-',
+    submissions: submissionsMap[user.id] ?? 0,
+    loginCount: loginMap[user.id] ?? 0,
+    activityCount: activityMap[user.id] ?? 0,
+    joinedDate: user.createdAt.toLocaleDateString(),
+  }));
 
   return userAnalytics;
 }
@@ -610,19 +617,13 @@ export async function getSubmissionTimeSeries(dateRange: string, selectedModuleI
 
   const timeSeries: Record<string, number> = {};
 
-  for (let t = 1; t <= 15; t++) {
-    const model = `formRecord${t}` as keyof typeof prisma;
-    const records = await (prisma[model] as any).findMany({
-      where: {
-        formId: { in: orgFormIds },
-        submittedAt: { gte: startDate, lte: endDate },
-      },
-      select: { submittedAt: true },
-    });
-    records.forEach((r: any) => {
-      const d = new Date(r.submittedAt).toISOString().split('T')[0];
-      timeSeries[d] = (timeSeries[d] || 0) + 1;
-    });
+  const tsUnion = Array.from({ length: 15 }, (_, i) =>
+    `SELECT "submitted_at"::text AS sat FROM "${FR_TABLE(i + 1)}" WHERE "form_id" = ANY($1::text[]) AND "submitted_at" >= $2 AND "submitted_at" <= $3`
+  ).join(' UNION ALL ');
+  const tsRows = await prisma.$queryRawUnsafe<{ sat: string }[]>(tsUnion, orgFormIds, startDate, endDate);
+  for (const r of tsRows) {
+    const d = r.sat.split('T')[0];
+    timeSeries[d] = (timeSeries[d] || 0) + 1;
   }
 
   return Object.entries(timeSeries)

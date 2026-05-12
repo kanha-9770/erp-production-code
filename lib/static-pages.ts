@@ -45,8 +45,10 @@ export type StaticPageGroup =
   | 'Leave Management'
   | 'Payroll'
   | 'HR & Employees'
+  | 'Performance'
   | 'Real Estate'
   | 'Inventory'
+  | 'Asset & Admin'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -508,7 +510,9 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Leave Management',
   'Payroll',
   'HR & Employees',
+  'Performance',
   'Real Estate',
+  'Asset & Admin',
   'Settings',
   'Profile',
   'AI & Tools',

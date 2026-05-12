@@ -106,6 +106,9 @@ const STATIC_PAGES = [
   { href: "/real-estate/reports/point-history", icon: Activity, label: "Wallet Activity" },
   { href: "/real-estate/admin/sub-admins", icon: ShieldCheck, label: "Sub-Admins" },
   { href: "/real-estate/admin/fund-credit", icon: Coins, label: "Fund Credit (admin)" },
+  { href: "/real-estate/admin/settings", icon: Sparkles, label: "Module Settings (RERA, Plan Engine)" },
+  { href: "/real-estate/admin/plan-designer", icon: Sparkles, label: "Plan Designer" },
+  { href: "/real-estate/my-team", icon: Users, label: "My Team" },
   // Inventory module — listed in the real-estate palette so Cmd+K reaches
   // it from anywhere; it isn't part of REBM but it's a convenience hop.
   { href: "/inventory", icon: Boxes, label: "Inventory: Products" },
