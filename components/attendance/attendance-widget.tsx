@@ -11,6 +11,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Plane,
+  RefreshCw,
+  MapPin,
+  MapPinOff,
 } from "lucide-react";
 import {
   Popover,
@@ -84,7 +87,16 @@ interface AttendanceStatusPayload {
 }
 
 const REFRESH_MS = 60_000;
-const GEO_TIMEOUT_MS = 15_000;
+// Two-stage geo budget: try GPS-grade accuracy first with a tight timeout,
+// then fall back to coarse positioning. Total upper bound stays close to the
+// original 15s so the UI doesn't feel hung.
+const GEO_HIGH_ACCURACY_TIMEOUT_MS = 8_000;
+const GEO_LOW_ACCURACY_TIMEOUT_MS = 12_000;
+const GEO_TIMEOUT_MS = GEO_HIGH_ACCURACY_TIMEOUT_MS;
+// Anything worse than this means the device is using cell-tower / IP / Wi-Fi
+// triangulation, not real GPS, so we surface a warning before the user trusts
+// the reading for a punch.
+const GEO_LOW_ACCURACY_WARN_M = 200;
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -125,7 +137,7 @@ function distanceMeters(
 }
 
 type GeoResult =
-  | { ok: true; lat: number; lng: number }
+  | { ok: true; lat: number; lng: number; accuracy: number }
   | { ok: false; reason: GeoFailureReason; message: string };
 
 type GeoFailureReason =
@@ -156,27 +168,7 @@ function isInsecureOrigin(): boolean {
   return false;
 }
 
-async function captureGeo(): Promise<GeoResult> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return {
-      ok: false,
-      reason: "unsupported",
-      message: "Your browser does not support location services.",
-    };
-  }
-  // Geolocation only works on a secure origin. On plain HTTP the browser
-  // throws PERMISSION_DENIED with the misleading message "User denied
-  // Geolocation: Only secure origins are allowed" — even though the user
-  // never saw a prompt. Detect this up front so the popup tells the admin
-  // "you're on HTTP" instead of accusing the user of denying the prompt.
-  if (isInsecureOrigin()) {
-    return {
-      ok: false,
-      reason: "insecure",
-      message:
-        "This site is being served over HTTP. Browsers only allow location on https:// (or localhost). Ask your admin to put the site behind HTTPS.",
-    };
-  }
+function tryGetPosition(opts: PositionOptions): Promise<GeoResult> {
   return new Promise<GeoResult>((resolve) => {
     let settled = false;
     const finish = (r: GeoResult) => {
@@ -184,7 +176,9 @@ async function captureGeo(): Promise<GeoResult> {
       settled = true;
       resolve(r);
     };
-    const timeout = setTimeout(
+    // Belt-and-suspenders timeout: some browsers ignore the PositionOptions
+    // timeout and hang. Add a hard ceiling slightly past the requested one.
+    const hardTimeout = setTimeout(
       () =>
         finish({
           ok: false,
@@ -192,19 +186,20 @@ async function captureGeo(): Promise<GeoResult> {
           message:
             "Location request timed out. Check your GPS/Wi-Fi and try again.",
         }),
-      GEO_TIMEOUT_MS,
+      (opts.timeout ?? GEO_HIGH_ACCURACY_TIMEOUT_MS) + 500,
     );
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        clearTimeout(timeout);
+        clearTimeout(hardTimeout);
         finish({
           ok: true,
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
         });
       },
       (err) => {
-        clearTimeout(timeout);
+        clearTimeout(hardTimeout);
         // Surface the raw browser message alongside our hint so anyone
         // diagnosing in production can see the underlying cause (e.g.
         // "Only secure origins are allowed", "User denied Geolocation").
@@ -256,9 +251,67 @@ async function captureGeo(): Promise<GeoResult> {
           message: `Couldn't read your location.${raw}`,
         });
       },
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: GEO_TIMEOUT_MS },
+      opts,
     );
   });
+}
+
+async function captureGeo(): Promise<GeoResult> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return {
+      ok: false,
+      reason: "unsupported",
+      message: "Your browser does not support location services.",
+    };
+  }
+  // Geolocation only works on a secure origin. On plain HTTP the browser
+  // throws PERMISSION_DENIED with the misleading message "User denied
+  // Geolocation: Only secure origins are allowed" — even though the user
+  // never saw a prompt. Detect this up front so the popup tells the admin
+  // "you're on HTTP" instead of accusing the user of denying the prompt.
+  if (isInsecureOrigin()) {
+    return {
+      ok: false,
+      reason: "insecure",
+      message:
+        "This site is being served over HTTP. Browsers only allow location on https:// (or localhost). Ask your admin to put the site behind HTTPS.",
+    };
+  }
+
+  // Stage 1: GPS-grade fix. maximumAge: 0 forces a fresh reading instead of
+  // a cached one (the most common source of "wrong location" reports).
+  const high = await tryGetPosition({
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: GEO_HIGH_ACCURACY_TIMEOUT_MS,
+  });
+  if (high.ok) return high;
+
+  // Permission/secure-origin/unsupported failures won't be cured by another
+  // attempt — short-circuit so the user sees the real reason instead of a
+  // duplicated error after another long wait.
+  if (
+    high.reason === "denied" ||
+    high.reason === "insecure" ||
+    high.reason === "unsupported"
+  ) {
+    return high;
+  }
+
+  // Stage 2: coarse fallback. enableHighAccuracy: false uses cell-tower /
+  // Wi-Fi positioning, which works indoors and through walls where GPS
+  // cannot get a fix. Accuracy will be worse (often hundreds of metres) but
+  // a coarse reading beats no reading at all — and the UI surfaces the
+  // accuracy so the user knows.
+  const low = await tryGetPosition({
+    enableHighAccuracy: false,
+    maximumAge: 0,
+    timeout: GEO_LOW_ACCURACY_TIMEOUT_MS,
+  });
+  if (low.ok) return low;
+  // Surface the original (more informative) timeout/unavailable message
+  // rather than the fallback's, since they're typically the same shape.
+  return high;
 }
 
 interface UseAttendanceState {
@@ -464,6 +517,55 @@ export function AttendanceWidget({
     geo: { lat: number; lng: number } | null;
     message: string;
   } | null>(null);
+
+  // Live location check shown in the popover. Lets the user verify in real
+  // time whether their current GPS reading is inside the configured radius
+  // before they commit to a punch — avoids the "I checked in but it logged
+  // me as outside" surprise.
+  type LiveGeo =
+    | { state: "idle" }
+    | { state: "checking" }
+    | {
+        state: "ok";
+        lat: number;
+        lng: number;
+        accuracy: number;
+        distanceM: number | null;
+        inside: boolean | null;
+        at: number;
+      }
+    | { state: "error"; message: string; at: number };
+  const [liveGeo, setLiveGeo] = useState<LiveGeo>({ state: "idle" });
+
+  const refreshLiveLocation = useCallback(async () => {
+    setLiveGeo({ state: "checking" });
+    const r = await captureGeo();
+    if (!r.ok) {
+      setLiveGeo({ state: "error", message: r.message, at: Date.now() });
+      return;
+    }
+    const fence = status?.geofence;
+    const haveFence =
+      !!fence &&
+      fence.mode !== "OFF" &&
+      fence.lat != null &&
+      fence.lng != null &&
+      fence.radiusM != null;
+    const distanceM = haveFence
+      ? distanceMeters(r.lat, r.lng, fence!.lat!, fence!.lng!)
+      : null;
+    const inside =
+      haveFence && distanceM != null ? distanceM <= fence!.radiusM! : null;
+    setLiveGeo({
+      state: "ok",
+      lat: r.lat,
+      lng: r.lng,
+      accuracy: r.accuracy,
+      distanceM,
+      inside,
+      at: Date.now(),
+    });
+  }, [status?.geofence]);
 
   const punchWithGeoCheck = useCallback(
     async (type: "IN" | "OUT", photoUrl: string | null) => {
@@ -744,9 +846,98 @@ export function AttendanceWidget({
             />
           )}
           {status.geofence.mode !== "OFF" && (
-            <div className="text-[11px] text-gray-500 pt-1 border-t mt-2">
-              Geofence: {status.geofence.mode.toLowerCase()}
-              {status.geofence.radiusM ? ` · ${status.geofence.radiusM}m` : ""}
+            <div className="pt-2 border-t mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-gray-500">
+                  Geofence: {status.geofence.mode.toLowerCase()}
+                  {status.geofence.radiusM
+                    ? ` · ${status.geofence.radiusM}m`
+                    : ""}
+                </div>
+                <button
+                  type="button"
+                  onClick={refreshLiveLocation}
+                  disabled={liveGeo.state === "checking"}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {liveGeo.state === "checking" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" />
+                  )}
+                  {liveGeo.state === "checking"
+                    ? "Checking…"
+                    : liveGeo.state === "idle"
+                      ? "Check location"
+                      : "Refresh"}
+                </button>
+              </div>
+
+              {liveGeo.state === "ok" && (
+                <div
+                  className={cn(
+                    "rounded-md border px-2.5 py-2 text-[11px]",
+                    liveGeo.inside === true &&
+                      "border-emerald-200 bg-emerald-50 text-emerald-800",
+                    liveGeo.inside === false &&
+                      "border-red-200 bg-red-50 text-red-800",
+                    liveGeo.inside === null &&
+                      "border-gray-200 bg-gray-50 text-gray-700",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 font-medium">
+                    {liveGeo.inside === true && (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        You are inside the office radius
+                      </>
+                    )}
+                    {liveGeo.inside === false && (
+                      <>
+                        <MapPinOff className="h-3.5 w-3.5" />
+                        You are outside the office radius
+                      </>
+                    )}
+                    {liveGeo.inside === null && (
+                      <>
+                        <MapPin className="h-3.5 w-3.5" />
+                        Location captured
+                      </>
+                    )}
+                  </div>
+                  {liveGeo.distanceM != null && (
+                    <div className="mt-1">
+                      {Math.round(liveGeo.distanceM)}m from office
+                      {status.geofence.radiusM != null &&
+                        ` · allowed ${status.geofence.radiusM}m`}
+                    </div>
+                  )}
+                  <div className="mt-0.5 text-[10px] opacity-80">
+                    Accuracy ±{Math.round(liveGeo.accuracy)}m · updated{" "}
+                    {formatTimeShort(new Date(liveGeo.at).toISOString())}
+                  </div>
+                  {liveGeo.accuracy > GEO_LOW_ACCURACY_WARN_M && (
+                    <div className="mt-1.5 flex items-start gap-1 text-[10px] text-amber-700">
+                      <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                      <span>
+                        Reading is approximate (±
+                        {Math.round(liveGeo.accuracy)}m). Your device is using
+                        Wi-Fi/cell-tower positioning instead of GPS — move
+                        outdoors or enable GPS for an exact fix.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {liveGeo.state === "error" && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                    <span>{liveGeo.message}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
