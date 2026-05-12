@@ -133,6 +133,50 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'settings',
   },
 
+  // ── HR & Employees ─────────────────────────────────────────────────────
+  {
+    path: '/employee-master',
+    label: 'Employee Master',
+    group: 'HR & Employees',
+    description: 'Directory of all employees — list, filters, inline edit',
+    icon: 'users',
+  },
+  {
+    path: '/staffing-plan',
+    label: 'Staffing Plan',
+    group: 'HR & Employees',
+    description: 'Workforce planning — vacancies, profile and cost estimation',
+    icon: 'briefcase',
+  },
+  {
+    path: '/job-opening',
+    label: 'Job Opening',
+    group: 'HR & Employees',
+    description: 'Live recruitment postings — publish jobs and track vacancies',
+    icon: 'megaphone',
+  },
+  {
+    path: '/job-application',
+    label: 'Job Application',
+    group: 'HR & Employees',
+    description: 'Applicants for live job openings — screening and ratings',
+    icon: 'user-plus',
+  },
+  {
+    path: '/job-offer',
+    label: 'Job Offer',
+    group: 'HR & Employees',
+    description: 'Formal offers to shortlisted candidates — terms and status',
+    icon: 'file-signature',
+  },
+  {
+    path: '/appointment-letter',
+    label: 'Appointment Letter',
+    group: 'HR & Employees',
+    description: 'Appointment letters issued to accepted candidates',
+    icon: 'scroll-text',
+  },
+
   // ── Inventory (Module #3) ──────────────────────────────────────────────
   // Product catalog with a structured form **and** a Webflow-style page
   // builder for the storefront detail page.
