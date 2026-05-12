@@ -552,27 +552,71 @@ export function AttendanceFormDialog({
   const [submitCheckout] = useSubmitAttendanceCheckoutMutation()
   const [triggerGetAttendanceStatus] = useLazyGetAttendanceStatusQuery()
 
-  const getCurrentLocation = (): Promise<{ latitude: number; longitude: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error("Geolocation is not supported"))
-        return
-      }
+  const getCurrentLocation = (): Promise<{ latitude: number; longitude: number; accuracy: number }> => {
+    if (!navigator.geolocation) {
+      return Promise.reject(new Error("Geolocation is not supported"))
+    }
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          })
+    // Helper: single getCurrentPosition call wrapped as a promise.
+    const tryOnce = (opts: PositionOptions) =>
+      new Promise<{ latitude: number; longitude: number; accuracy: number }>(
+        (resolve, reject) => {
+          let settled = false
+          // Belt-and-suspenders timeout — some browsers ignore the
+          // PositionOptions timeout and hang indefinitely.
+          const hard = setTimeout(() => {
+            if (settled) return
+            settled = true
+            const e: any = new Error("Location request timed out")
+            e.code = 3
+            reject(e)
+          }, (opts.timeout ?? 8000) + 500)
+
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              if (settled) return
+              settled = true
+              clearTimeout(hard)
+              resolve({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+              })
+            },
+            (error) => {
+              if (settled) return
+              settled = true
+              clearTimeout(hard)
+              reject(error)
+            },
+            opts,
+          )
         },
-        (error) => {
-          reject(error)
-        },
-        { timeout: 10000, enableHighAccuracy: true }
       )
-    })
+
+    // Stage 1: GPS-grade fix. maximumAge: 0 forces a fresh reading instead
+    // of returning a cached position (common cause of "wrong location"
+    // reports from users who moved recently).
+    return tryOnce({ enableHighAccuracy: true, maximumAge: 0, timeout: 8000 })
+      .catch((err) => {
+        // Permission/insecure-origin failures won't be cured by retrying.
+        if (err?.code === 1) throw err
+        // Stage 2: coarse fallback. enableHighAccuracy: false uses cell-
+        // tower / Wi-Fi positioning, which works indoors and through walls
+        // where GPS cannot get a fix. Worse accuracy but a reading beats
+        // no reading at all.
+        return tryOnce({
+          enableHighAccuracy: false,
+          maximumAge: 0,
+          timeout: 12000,
+        })
+      })
   }
+
+  // Anything worse than this means the device is using cell-tower / Wi-Fi
+  // triangulation, not real GPS. We surface a console warning so anyone
+  // diagnosing a wrong-location report can correlate with the accuracy.
+  const LOW_ACCURACY_WARN_M = 200
 
   const getDeviceInfo = () => {
     return {
@@ -636,6 +680,15 @@ export function AttendanceFormDialog({
       try {
         const coords = await getCurrentLocation()
         location = `${coords.latitude}, ${coords.longitude}`
+        if (coords.accuracy > LOW_ACCURACY_WARN_M) {
+          console.warn(
+            `Check-in location captured with low accuracy (±${Math.round(coords.accuracy)}m) — device likely using Wi-Fi/cell-tower positioning, not GPS`,
+          )
+          toast({
+            title: "Location is approximate",
+            description: `Captured ±${Math.round(coords.accuracy)}m. For an exact fix, enable GPS or move outdoors.`,
+          })
+        }
       } catch (error) {
         console.warn("Location access denied or unavailable:", error)
       }
@@ -712,6 +765,15 @@ export function AttendanceFormDialog({
       try {
         const coords = await getCurrentLocation()
         location = `${coords.latitude}, ${coords.longitude}`
+        if (coords.accuracy > LOW_ACCURACY_WARN_M) {
+          console.warn(
+            `Check-out location captured with low accuracy (±${Math.round(coords.accuracy)}m) — device likely using Wi-Fi/cell-tower positioning, not GPS`,
+          )
+          toast({
+            title: "Location is approximate",
+            description: `Captured ±${Math.round(coords.accuracy)}m. For an exact fix, enable GPS or move outdoors.`,
+          })
+        }
       } catch (error) {
         console.warn("Location access denied or unavailable:", error)
       }
