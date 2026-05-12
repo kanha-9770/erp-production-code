@@ -14,6 +14,11 @@ import "./api/settings"
 import "./api/upload"
 import "./api/payroll"
 import "./api/employees"
+import "./api/staffing-plans"
+import "./api/job-openings"
+import "./api/job-applications"
+import "./api/job-offers"
+import "./api/appointment-letters"
 
 export const store = configureStore({
   reducer: {

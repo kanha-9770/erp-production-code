@@ -32,6 +32,8 @@ import {
   CalendarDays,
   Inbox,
   CalendarHeart,
+  Package,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -232,6 +234,14 @@ function staticPageIcon(name?: string) {
       return Sparkles;
     case "shield":
       return Settings;
+    case "package":
+      return Package;
+    case "smartphone":
+      return Smartphone;
+    case "target":
+      return Target;
+    case "trending-up":
+      return TrendingUp;
     default:
       return Folder;
   }

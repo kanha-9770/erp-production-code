@@ -62,6 +62,70 @@ enum EmployeeStatus {
   TERMINATED
 }
 
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  TEMPORARY
+  CONSULTANT
+}
+
+enum StaffingPlanStatus {
+  DRAFT
+  OPEN
+  ON_HOLD
+  FILLED
+  CANCELLED
+}
+
+enum JobOpeningStatus {
+  DRAFT
+  OPEN
+  ON_HOLD
+  CLOSED
+  CANCELLED
+}
+
+enum JobApplicationStatus {
+  NEW
+  SCREENING
+  INTERVIEWING
+  SHORTLISTED
+  OFFERED
+  HIRED
+  REJECTED
+  WITHDRAWN
+  ON_HOLD
+}
+
+enum ApplicantSource {
+  REFERRAL
+  JOB_PORTAL
+  COMPANY_WEBSITE
+  LINKEDIN
+  AGENCY
+  WALK_IN
+  CAMPUS
+  OTHER
+}
+
+enum JobOfferStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum AppointmentLetterStatus {
+  DRAFT
+  ISSUED
+  SIGNED
+  REVOKED
+}
+
 enum LeaveTypeCategory {
   FULL_DAY
   HALF_DAY
@@ -168,6 +232,11 @@ model User {
   notifications       Notification[]           @relation("NotificationRecipient")
   agentProfile        AgentProfile?
   reWallet            Wallet?
+  staffingPlans       StaffingPlan[]           @relation("StaffingPlanCreator")
+  jobOpenings         JobOpening[]             @relation("JobOpeningCreator")
+  jobApplications     JobApplication[]         @relation("JobApplicationCreator")
+  jobOffers           JobOffer[]               @relation("JobOfferCreator")
+  appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -244,6 +313,11 @@ model Organization {
   functionExecutions FunctionExecution[]
   functionBindings  FunctionBinding[]
   notifications     Notification[]
+  staffingPlans     StaffingPlan[]
+  jobOpenings       JobOpening[]
+  jobApplications   JobApplication[]
+  jobOffers           JobOffer[]
+  appointmentLetters  AppointmentLetter[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1293,6 +1367,234 @@ model Employee {
   @@index([dateOfJoining])
   @@index([dateOfLeaving])
   @@map("employees")
+}
+
+// Workforce planning record — represents the intent to hire N people for a
+// specific profile. Created by HR ahead of recruitment so vacancies and cost
+// can be tracked centrally. Total estimated cost is stored (not derived) so
+// list queries can sort / filter on it cheaply.
+model StaffingPlan {
+  id                    String              @id @default(cuid())
+  planCode              String?             @unique @map("plan_code")
+  profileName           String              @map("profile_name")
+  company               String
+  department            String
+  designation           String
+  employmentType        EmploymentType      @map("employment_type")
+  vacancies             Int                 @default(1)
+  estimatedCostPerPerson Decimal?           @map("estimated_cost_per_person")
+  totalEstimatedCost    Decimal?            @map("total_estimated_cost")
+  status                StaffingPlanStatus  @default(DRAFT)
+  notes                 String?
+
+  organizationId        String?             @map("organization_id")
+  organization          Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById           String?             @map("created_by_id")
+  createdBy             User?               @relation("StaffingPlanCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  jobOpenings           JobOpening[]
+  jobApplications       JobApplication[]
+  jobOffers             JobOffer[]
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([department])
+  @@index([status])
+  @@index([employmentType])
+  @@index([createdAt])
+  @@map("staffing_plans")
+}
+
+// Live job posting derived (usually) from a StaffingPlan. Fields like
+// profileName / company / department are duplicated so the posting keeps its
+// own snapshot even if the parent plan is later edited or deleted.
+model JobOpening {
+  id                String           @id @default(cuid())
+  jobCode           String?          @unique @map("job_code")
+
+  staffingPlanId    String?          @map("staffing_plan_id")
+  staffingPlan      StaffingPlan?    @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+
+  profileName       String           @map("profile_name")
+  company           String
+  department        String
+  designation       String
+  employmentType    EmploymentType   @map("employment_type")
+  vacancies         Int              @default(1)
+
+  status            JobOpeningStatus @default(OPEN)
+  publishOnWebsite  Boolean          @default(false) @map("publish_on_website")
+  salaryApprox      String?          @map("salary_approx")
+  jobDescription    String           @map("job_description")
+
+  organizationId    String?          @map("organization_id")
+  organization      Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById       String?          @map("created_by_id")
+  createdBy         User?            @relation("JobOpeningCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  applications      JobApplication[]
+  offers            JobOffer[]
+
+  @@index([organizationId])
+  @@index([staffingPlanId])
+  @@index([department])
+  @@index([status])
+  @@index([employmentType])
+  @@index([publishOnWebsite])
+  @@index([createdAt])
+  @@map("job_openings")
+}
+
+// Candidate application to a JobOpening. Most fields snapshot from the
+// opening at create time so audits stay accurate even after the opening is
+// closed/edited.
+model JobApplication {
+  id                String               @id @default(cuid())
+  applicationCode   String?              @unique @map("application_code")
+
+  jobOpeningId      String?              @map("job_opening_id")
+  jobOpening        JobOpening?          @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
+  staffingPlanId    String?              @map("staffing_plan_id")
+  staffingPlan      StaffingPlan?        @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+
+  department        String?
+  designation       String?
+  employmentType    EmploymentType?      @map("employment_type")
+
+  applicantName     String               @map("applicant_name")
+  applicantEmail    String               @map("applicant_email")
+  applicantMobile   String               @map("applicant_mobile")
+  applicantSource   ApplicantSource?     @map("applicant_source")
+
+  applicantResumeUrl  String?            @map("applicant_resume_url")
+  applicantResumeName String?            @map("applicant_resume_name")
+
+  coverLetter       String?              @map("cover_letter")
+  salaryExpectation String?              @map("salary_expectation")
+  jobDescription    String?              @map("job_description")
+
+  applicantRating   Int?                 @map("applicant_rating")
+  status            JobApplicationStatus @default(NEW)
+
+  organizationId    String?              @map("organization_id")
+  organization      Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById       String?              @map("created_by_id")
+  createdBy         User?                @relation("JobApplicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  offers              JobOffer[]
+  appointmentLetters  AppointmentLetter[]
+
+  @@index([organizationId])
+  @@index([jobOpeningId])
+  @@index([staffingPlanId])
+  @@index([status])
+  @@index([applicantSource])
+  @@index([applicantEmail])
+  @@index([createdAt])
+  @@map("job_applications")
+}
+
+// Formal offer extended to a candidate, almost always derived from an
+// accepted JobApplication. Applicant identity is snapshotted so the offer
+// stays meaningful even if the application is later deleted or anonymised.
+model JobOffer {
+  id                  String           @id @default(cuid())
+  offerCode           String?          @unique @map("offer_code")
+
+  jobApplicationId    String?          @map("job_application_id")
+  jobApplication      JobApplication?  @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+  jobOpeningId        String?          @map("job_opening_id")
+  jobOpening          JobOpening?      @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
+  staffingPlanId      String?          @map("staffing_plan_id")
+  staffingPlan        StaffingPlan?    @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+
+  applicantName       String           @map("applicant_name")
+  applicantEmail      String?          @map("applicant_email")
+
+  offerDate           DateTime         @map("offer_date")
+  status              JobOfferStatus   @default(DRAFT)
+
+  jobOfferTerm        String?          @map("job_offer_term")
+  valueDescription    String?          @map("value_description")
+  termsAndConditions  String?          @map("terms_and_conditions")
+
+  organizationId      String?          @map("organization_id")
+  organization        Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById         String?          @map("created_by_id")
+  createdBy           User?            @relation("JobOfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  appointmentLetters  AppointmentLetter[]
+
+  @@index([organizationId])
+  @@index([jobApplicationId])
+  @@index([jobOpeningId])
+  @@index([staffingPlanId])
+  @@index([status])
+  @@index([offerDate])
+  @@index([createdAt])
+  @@map("job_offers")
+}
+
+// Formal appointment letter generated after an offer is accepted. Mirrors
+// the offer's applicant snapshot so revoking/deleting upstream records
+// doesn't leave the letter dangling.
+model AppointmentLetter {
+  id                  String                   @id @default(cuid())
+  letterCode          String?                  @unique @map("letter_code")
+
+  jobOfferId          String?                  @map("job_offer_id")
+  jobOffer            JobOffer?                @relation(fields: [jobOfferId], references: [id], onDelete: SetNull)
+  jobApplicationId    String?                  @map("job_application_id")
+  jobApplication      JobApplication?          @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+
+  applicantName       String                   @map("applicant_name")
+  applicantEmail      String?                  @map("applicant_email")
+  company             String?
+
+  appointmentDate     DateTime                 @map("appointment_date")
+  templateName        String?                  @map("template_name")
+  status              AppointmentLetterStatus  @default(DRAFT)
+
+  title               String?
+  introduction        String?
+  description         String?
+  closingNotes        String?                  @map("closing_notes")
+
+  signed              Boolean                  @default(false)
+  signedDate          DateTime?                @map("signed_date")
+
+  organizationId      String?                  @map("organization_id")
+  organization        Organization?            @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById         String?                  @map("created_by_id")
+  createdBy           User?                    @relation("AppointmentLetterCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([jobOfferId])
+  @@index([jobApplicationId])
+  @@index([status])
+  @@index([signed])
+  @@index([appointmentDate])
+  @@index([createdAt])
+  @@map("appointment_letters")
 }
 
 model Activity {
