@@ -21,9 +21,18 @@ import {
   useGetEmployeeListQuery,
   useGetEmployeeQuery,
   useUpdateEmployeeMutation,
+  useCreateEmployeeMutation,
   type EmployeeListItem,
   type EmployeeStatus,
 } from "@/lib/api/employees";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { EmployeeForm } from "@/components/employee/employee-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -130,6 +139,8 @@ export default function EmployeeMasterListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createEmployee, { isLoading: creating }] = useCreateEmployeeMutation();
 
   const views = useSavedViews<Filters>("employees");
 
@@ -407,6 +418,7 @@ export default function EmployeeMasterListPage() {
   );
 
   return (
+    <>
     <WorkspaceShell
       scope="employees"
       selectedId={selectedId}
@@ -437,10 +449,12 @@ export default function EmployeeMasterListPage() {
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
-            <Button asChild size="sm" className="h-8">
-              <Link href="/employee-master/new">
-                <Plus className="h-3.5 w-3.5 mr-1" /> New employee
-              </Link>
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" /> New employee
             </Button>
           </WorkspaceHeader>
 
@@ -567,6 +581,45 @@ export default function EmployeeMasterListPage() {
       preview={selectedId ? <EmployeePreview id={selectedId} /> : null}
       previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
     />
+
+    <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl overflow-y-auto p-0"
+      >
+        <SheetHeader className="px-5 sm:px-6 py-4 border-b sticky top-0 bg-background z-10">
+          <SheetTitle>New employee</SheetTitle>
+          <SheetDescription>
+            Capture the basics now — bank, IDs and shift details can be filled
+            in later from the employee profile.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="px-5 sm:px-6 py-5">
+          <EmployeeForm
+            submitLabel="Create employee"
+            submitting={creating}
+            onCancel={() => setCreateOpen(false)}
+            onSubmit={async (payload) => {
+              try {
+                await createEmployee(payload).unwrap();
+                toast({ title: "Employee created" });
+                setCreateOpen(false);
+              } catch (e: any) {
+                toast({
+                  title: "Could not create employee",
+                  description:
+                    e?.data?.error ||
+                    e?.message ||
+                    "Server rejected the request",
+                  variant: "destructive",
+                });
+              }
+            }}
+          />
+        </div>
+      </SheetContent>
+    </Sheet>
+    </>
   );
 }
 

@@ -49,6 +49,21 @@ export const baseApi = createApi({
     // Employee master
     "Employees",
     "Employee",
+    // Staffing plans
+    "StaffingPlans",
+    "StaffingPlan",
+    // Job openings
+    "JobOpenings",
+    "JobOpening",
+    // Job applications
+    "JobApplications",
+    "JobApplication",
+    // Job offers
+    "JobOffers",
+    "JobOffer",
+    // Appointment letters
+    "AppointmentLetters",
+    "AppointmentLetter",
     // Settings
     "MasterData",
     // Route Permissions
