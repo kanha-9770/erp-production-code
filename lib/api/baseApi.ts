@@ -64,6 +64,9 @@ export const baseApi = createApi({
     // Appointment letters
     "AppointmentLetters",
     "AppointmentLetter",
+    // Employee referrals
+    "EmployeeReferrals",
+    "EmployeeReferral",
     // Settings
     "MasterData",
     // Route Permissions

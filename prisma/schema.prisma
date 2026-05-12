@@ -126,6 +126,14 @@ enum AppointmentLetterStatus {
   REVOKED
 }
 
+enum EmployeeReferralStatus {
+  NEW
+  REVIEWED
+  INTERVIEWING
+  HIRED
+  REJECTED
+}
+
 enum LeaveTypeCategory {
   FULL_DAY
   HALF_DAY
@@ -237,6 +245,7 @@ model User {
   jobApplications     JobApplication[]         @relation("JobApplicationCreator")
   jobOffers           JobOffer[]               @relation("JobOfferCreator")
   appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
+  employeeReferrals   EmployeeReferral[]       @relation("EmployeeReferralCreator")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -318,6 +327,7 @@ model Organization {
   jobApplications   JobApplication[]
   jobOffers           JobOffer[]
   appointmentLetters  AppointmentLetter[]
+  employeeReferrals   EmployeeReferral[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1357,6 +1367,7 @@ model Employee {
   oneHourExtra               Decimal?        @map("one_hour_extra")
   companySimIssue            Boolean?        @default(false) @map("company_sim_issue")
   formRecords14              FormRecord14[]
+  referralsMade              EmployeeReferral[]
   createdAt                  DateTime        @default(now()) @map("created_at")
   updatedAt                  DateTime        @updatedAt @map("updated_at")
 
@@ -1595,6 +1606,49 @@ model AppointmentLetter {
   @@index([appointmentDate])
   @@index([createdAt])
   @@map("appointment_letters")
+}
+
+// Referral submitted by an existing Employee. The referrer is a hard link
+// to Employee (you can't refer someone if you don't work here yet); the
+// applicant is just a captured snapshot — they don't exist as a User until
+// recruitment proper begins.
+model EmployeeReferral {
+  id                    String                  @id @default(cuid())
+  referralCode          String?                 @unique @map("referral_code")
+
+  applicantName         String                  @map("applicant_name")
+  applicantEmail        String                  @map("applicant_email")
+  applicantMobile       String                  @map("applicant_mobile")
+  applicantResumeUrl    String?                 @map("applicant_resume_url")
+  applicantResumeName   String?                 @map("applicant_resume_name")
+
+  referralDate          DateTime                @map("referral_date")
+  designation           String?
+
+  referringEmployeeId   String                  @map("referring_employee_id")
+  referringEmployee     Employee                @relation(fields: [referringEmployeeId], references: [id], onDelete: Cascade)
+  referrerFirstName     String                  @map("referrer_first_name")
+  referrerDepartment    String?                 @map("referrer_department")
+
+  remark                String?
+  status                EmployeeReferralStatus  @default(NEW)
+
+  organizationId        String?                 @map("organization_id")
+  organization          Organization?           @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById           String?                 @map("created_by_id")
+  createdBy             User?                   @relation("EmployeeReferralCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([referringEmployeeId])
+  @@index([applicantEmail])
+  @@index([status])
+  @@index([referralDate])
+  @@index([createdAt])
+  @@map("employee_referrals")
 }
 
 model Activity {

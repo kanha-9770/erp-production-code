@@ -176,6 +176,13 @@ export const STATIC_PAGES: StaticPage[] = [
     description: 'Appointment letters issued to accepted candidates',
     icon: 'scroll-text',
   },
+  {
+    path: '/employee-referral',
+    label: 'Employee Referral',
+    group: 'HR & Employees',
+    description: 'Candidate referrals submitted by existing employees',
+    icon: 'user-plus',
+  },
 
   // ── Inventory (Module #3) ──────────────────────────────────────────────
   // Product catalog with a structured form **and** a Webflow-style page
