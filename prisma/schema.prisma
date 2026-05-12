@@ -126,6 +126,14 @@ enum AppointmentLetterStatus {
   REVOKED
 }
 
+enum EmployeeReferralStatus {
+  NEW
+  REVIEWED
+  INTERVIEWING
+  HIRED
+  REJECTED
+}
+
 enum LeaveTypeCategory {
   FULL_DAY
   HALF_DAY
@@ -237,6 +245,7 @@ model User {
   jobApplications     JobApplication[]         @relation("JobApplicationCreator")
   jobOffers           JobOffer[]               @relation("JobOfferCreator")
   appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
+  employeeReferrals   EmployeeReferral[]       @relation("EmployeeReferralCreator")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -318,6 +327,7 @@ model Organization {
   jobApplications   JobApplication[]
   jobOffers           JobOffer[]
   appointmentLetters  AppointmentLetter[]
+  employeeReferrals   EmployeeReferral[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1357,6 +1367,7 @@ model Employee {
   oneHourExtra               Decimal?        @map("one_hour_extra")
   companySimIssue            Boolean?        @default(false) @map("company_sim_issue")
   formRecords14              FormRecord14[]
+  referralsMade              EmployeeReferral[]
   createdAt                  DateTime        @default(now()) @map("created_at")
   updatedAt                  DateTime        @updatedAt @map("updated_at")
 
@@ -1595,6 +1606,49 @@ model AppointmentLetter {
   @@index([appointmentDate])
   @@index([createdAt])
   @@map("appointment_letters")
+}
+
+// Referral submitted by an existing Employee. The referrer is a hard link
+// to Employee (you can't refer someone if you don't work here yet); the
+// applicant is just a captured snapshot — they don't exist as a User until
+// recruitment proper begins.
+model EmployeeReferral {
+  id                    String                  @id @default(cuid())
+  referralCode          String?                 @unique @map("referral_code")
+
+  applicantName         String                  @map("applicant_name")
+  applicantEmail        String                  @map("applicant_email")
+  applicantMobile       String                  @map("applicant_mobile")
+  applicantResumeUrl    String?                 @map("applicant_resume_url")
+  applicantResumeName   String?                 @map("applicant_resume_name")
+
+  referralDate          DateTime                @map("referral_date")
+  designation           String?
+
+  referringEmployeeId   String                  @map("referring_employee_id")
+  referringEmployee     Employee                @relation(fields: [referringEmployeeId], references: [id], onDelete: Cascade)
+  referrerFirstName     String                  @map("referrer_first_name")
+  referrerDepartment    String?                 @map("referrer_department")
+
+  remark                String?
+  status                EmployeeReferralStatus  @default(NEW)
+
+  organizationId        String?                 @map("organization_id")
+  organization          Organization?           @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  createdById           String?                 @map("created_by_id")
+  createdBy             User?                   @relation("EmployeeReferralCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([referringEmployeeId])
+  @@index([applicantEmail])
+  @@index([status])
+  @@index([referralDate])
+  @@index([createdAt])
+  @@map("employee_referrals")
 }
 
 model Activity {
@@ -2993,6 +3047,7 @@ model AgentProfile {
 
   promotions          RankPromotionLog[]
   complianceDocuments ComplianceDocument[]
+  reraProfile         AgentReraProfile?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -3742,4 +3797,289 @@ model InventoryProduct {
   @@index([organizationId, status])
   @@index([organizationId, sku])
   @@map("inventory_products")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REBM PHASE 4 — Plan Designer, RERA, Team Self-Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Module-level settings for Real Estate Brokerage (one row per org).
+model RebmSettings {
+  id             String  @id @default(cuid())
+  organizationId String  @unique @map("organization_id")
+
+  // RERA gate — when true, transaction close is blocked unless both agents
+  // are RERA-verified. Configurable so orgs can onboard before enforcement.
+  isReraRequired Boolean @default(false) @map("is_rera_required")
+
+  // Which plan engine to use: "LEGACY" (% of sale price) or "SLAB" (₹/sq.yd).
+  planEngine String @default("LEGACY") @map("plan_engine")
+
+  // ID of the currently active CompPlan (null = use legacy CommissionRule).
+  activePlanId String? @map("active_plan_id")
+
+  // Area unit used by the slab engine.
+  areaUnit String @default("SQYD") @map("area_unit") // SQYD | SQFT | SQM
+
+  // Hold period override (days) — applies to slab plan payouts.
+  holdPeriodDays Int @default(7) @map("hold_period_days")
+
+  // Company / brokerage residual percent kept by house after plan payouts.
+  companyResidualPercent Decimal @default(0) @map("company_residual_percent") @db.Decimal(7, 4)
+
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@map("rebm_settings")
+}
+
+// ─── RERA fields patched onto AgentProfile via separate model ────────────────
+// (AgentProfile itself is not changed to avoid a full migration on existing
+//  rows; this is a 1-1 extension table.)
+model AgentReraProfile {
+  id      String       @id @default(cuid())
+  agentId String       @unique @map("agent_id")
+  agent   AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  reraNumber     String?   @map("rera_number")
+  reraState      String?   @map("rera_state")      // state issuing the certificate
+  reraExpiresAt  DateTime? @map("rera_expires_at")
+  reraVerifiedAt DateTime? @map("rera_verified_at")
+  reraVerifiedBy String?   @map("rera_verified_by") // User.id of admin who verified
+  reraDocUrl     String?   @map("rera_doc_url")     // uploaded certificate URL
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("re_agent_rera_profiles")
+}
+
+// ─── Compensation Plan (Plan Designer) ───────────────────────────────────────
+
+enum CompPlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// Top-level plan document. One ACTIVE plan per org at a time. Plans are
+// immutable once ACTIVE — edits produce a new DRAFT version.
+model CompPlan {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  name           String
+  description    String?       @db.Text
+  version        Int           @default(1)
+  status         CompPlanStatus @default(DRAFT)
+
+  // Area unit for all slabs in this plan (SQYD / SQFT / SQM).
+  areaUnit String @default("SQYD") @map("area_unit")
+
+  // Company residual % kept after all slab/override payouts.
+  companyResidualPercent Decimal @default(0) @map("company_residual_percent") @db.Decimal(7, 4)
+
+  // Compression: skip SUSPENDED/TERMINATED agents when walking overrides.
+  compressionEnabled Boolean @default(true) @map("compression_enabled")
+
+  // Whether Plan 3 override uses the absolute level-factor amounts (₹/sq.yd)
+  // or percentage of the rate difference. "DIFF_FACTOR" = use the factor column
+  // from CompPlanOverrideLevel directly as ₹/sq.yd absolute; "DIFF_RATE" =
+  // factor is % multiplied onto (uplineRate − sellerRate).
+  overrideMode String @default("DIFF_RATE") @map("override_mode")
+
+  // Slab counter scope: "LIFETIME" or "ANNUAL" (resets each April 1 in India).
+  slabCounterScope String @default("LIFETIME") @map("slab_counter_scope")
+
+  createdById String   @map("created_by_id")
+  activatedAt DateTime? @map("activated_at")
+  activatedBy String?  @map("activated_by")
+  archivedAt  DateTime? @map("archived_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  slabs        CompPlanSlab[]
+  overrideLevels CompPlanOverrideLevel[]
+  designations CompPlanDesignation[]
+  guarantees   CompPlanGuarantee[]
+  areaLedgerEntries AgentAreaLedger[]
+
+  @@index([organizationId, status])
+  @@map("re_comp_plans")
+}
+
+// Plan 1 & 2 — direct income slab table. One row per slab.
+// Rate = ₹ per sq.yd (or configured area unit).
+model CompPlanSlab {
+  id     String   @id @default(cuid())
+  planId String   @map("plan_id")
+  plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  sortOrder  Int     @map("sort_order") // 0-based; determines slab boundary order
+  minArea    Decimal @map("min_area") @db.Decimal(14, 2) // inclusive lower bound
+  maxArea    Decimal? @map("max_area") @db.Decimal(14, 2) // null = unlimited (last slab)
+  ratePerUnit Decimal @map("rate_per_unit") @db.Decimal(14, 4) // ₹ per sq.yd
+
+  @@index([planId, sortOrder])
+  @@map("re_comp_plan_slabs")
+}
+
+// Plan 3 — override ladder. One row per depth level (1..10).
+// factor: when overrideMode=DIFF_RATE it is a multiplier on (uplineRate−sellerRate).
+//         when overrideMode=DIFF_FACTOR it is a flat ₹/sq.yd absolute amount.
+model CompPlanOverrideLevel {
+  id     String   @id @default(cuid())
+  planId String   @map("plan_id")
+  plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  level  Int     // 1 = immediate upline, 10 = deepest
+  factor Decimal @db.Decimal(10, 4) // see overrideMode
+
+  @@unique([planId, level])
+  @@map("re_comp_plan_override_levels")
+}
+
+// Plan 4 — designation milestones. Cumulative area threshold → designation + reward.
+model CompPlanDesignation {
+  id     String   @id @default(cuid())
+  planId String   @map("plan_id")
+  plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  sortOrder         Int     @map("sort_order")
+  minCumulativeArea Decimal @map("min_cumulative_area") @db.Decimal(14, 2)
+  designationCode   String  @map("designation_code") // e.g. BP, SBP, RBP
+  designationName   String  @map("designation_name") // e.g. Business Partner
+  rewardType        String  @map("reward_type") // TRAVEL | CASH | NONE | SURPRISE
+  rewardDescription String? @map("reward_description") @db.Text // e.g. "International Tour — Malaysia, Thailand"
+  rewardCashAmount  Decimal? @map("reward_cash_amount") @db.Decimal(14, 2) // if CASH
+
+  @@index([planId, sortOrder])
+  @@map("re_comp_plan_designations")
+}
+
+// Plan 5 — leader guarantee. Designation → monthly guaranteed amount.
+model CompPlanGuarantee {
+  id     String   @id @default(cuid())
+  planId String   @map("plan_id")
+  plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  designationCode String  @map("designation_code") // must match CompPlanDesignation.designationCode
+  monthlyAmount   Decimal @map("monthly_amount") @db.Decimal(14, 2)
+  currency        String  @default("INR")
+
+  @@unique([planId, designationCode])
+  @@map("re_comp_plan_guarantees")
+}
+
+// ─── Area Ledger (append-only sq.yd tracking per agent) ──────────────────────
+
+model AgentAreaLedger {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  agentId        String  @map("agent_id")  // AgentProfile.id
+  planId         String  @map("plan_id")   // CompPlan under which the deal was counted
+  plan           CompPlan @relation(fields: [planId], references: [id])
+
+  transactionId  String  @map("transaction_id") // re_transactions.id
+  dealArea       Decimal @map("deal_area") @db.Decimal(14, 2) // area of this deal
+  cumulativeArea Decimal @map("cumulative_area") @db.Decimal(14, 2) // running total after this entry
+  rateApplied    Decimal @map("rate_applied") @db.Decimal(14, 4) // ₹/unit used for this deal
+  directIncome   Decimal @map("direct_income") @db.Decimal(14, 2) // = dealArea × rateApplied
+
+  // Reversal flag — set when the transaction is cancelled
+  isReversed     Boolean  @default(false) @map("is_reversed")
+  reversedAt     DateTime? @map("reversed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, agentId, createdAt])
+  @@index([transactionId])
+  @@map("re_agent_area_ledger")
+}
+
+// ─── Reward Grants (Plan 4 milestone gifts) ───────────────────────────────────
+
+enum RewardGrantStatus {
+  PENDING    // milestone crossed; reward not yet fulfilled
+  FULFILLED  // admin marked as fulfilled
+  CANCELLED  // transaction reversed before fulfilment
+}
+
+model RewardGrant {
+  id             String            @id @default(cuid())
+  organizationId String            @map("organization_id")
+  agentId        String            @map("agent_id")
+  planId         String            @map("plan_id")
+  designationCode String           @map("designation_code")
+  designationName String           @map("designation_name")
+  rewardType      String           @map("reward_type")
+  rewardDescription String?        @map("reward_description") @db.Text
+  rewardCashAmount  Decimal?       @map("reward_cash_amount") @db.Decimal(14, 2)
+  status          RewardGrantStatus @default(PENDING)
+  triggeredByArea Decimal          @map("triggered_by_area") @db.Decimal(14, 2)
+  fulfilledAt     DateTime?        @map("fulfilled_at")
+  fulfilledById   String?          @map("fulfilled_by_id")
+  notes           String?          @db.Text
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  @@index([organizationId, agentId])
+  @@index([organizationId, status])
+  @@map("re_reward_grants")
+}
+
+// ─── Guarantee Payouts (Plan 5 monthly credits) ───────────────────────────────
+
+model GuaranteePayout {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  agentId        String  @map("agent_id")
+  planId         String  @map("plan_id")
+  designationCode String @map("designation_code")
+  periodYear     Int     @map("period_year")  // e.g. 2026
+  periodMonth    Int     @map("period_month") // 1-12
+  amount         Decimal @map("amount") @db.Decimal(14, 2)
+  currency       String  @default("INR")
+  ledgerEntryId  String? @map("ledger_entry_id") // LedgerEntry.id
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, agentId, planId, periodYear, periodMonth])
+  @@index([organizationId, periodYear, periodMonth])
+  @@map("re_guarantee_payouts")
+}
+
+// ─── Invite Tokens (agent self-onboarding) ───────────────────────────────────
+
+enum InviteTokenStatus {
+  PENDING   // created, not yet used
+  USED      // redeemed — AgentProfile created
+  EXPIRED   // past expiresAt without use
+  CANCELLED // admin revoked
+}
+
+model InviteToken {
+  id             String            @id @default(cuid())
+  organizationId String            @map("organization_id")
+  token          String            @unique // URL-safe random string
+  sponsorAgentId String            @map("sponsor_agent_id") // AgentProfile.id of inviter
+  // parentAgentId defaults to sponsorAgentId but admin can override
+  parentAgentId  String?           @map("parent_agent_id")
+
+  status         InviteTokenStatus @default(PENDING)
+  expiresAt      DateTime          @map("expires_at")
+
+  // Pre-filled fields shown on the join form
+  prefillName  String? @map("prefill_name")
+  prefillEmail String? @map("prefill_email")
+  prefillPhone String? @map("prefill_phone")
+
+  // Redemption
+  redeemedByUserId  String?   @map("redeemed_by_user_id")
+  redeemedByAgentId String?   @map("redeemed_by_agent_id")
+  redeemedAt        DateTime? @map("redeemed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, sponsorAgentId])
+  @@index([token])
+  @@map("re_invite_tokens")
 }
