@@ -62,6 +62,7 @@ type AssetType =
   | "SIM"
   | "OTHER";
 type AssetStatus = "AVAILABLE" | "ASSIGNED" | "UNDER_REPAIR" | "RETIRED";
+type PlanType = "CORPORATE" | "INDIVIDUAL";
 
 interface Asset {
   id: string;
@@ -76,17 +77,75 @@ interface Asset {
   // SIM-only fields. Used when type === "SIM" so a single asset register can
   // hold both physical assets and corporate SIMs without splitting tables.
   // Non-SIM rows leave these blank/zero.
-  simNumber?: string;
+  countryCode?: string; // ISD prefix, e.g. "+91" — paired with simNumber
+  simNumber?: string; // local number without the prefix
   imei?: string;
   carrier?: string;
-  plan?: string;
+  plan?: PlanType;
   monthlyCost?: number;
 }
 
-// v2 schema introduces SIM-specific fields. v1 data still loads fine because
-// the new fields are all optional — old rows simply read as undefined.
-const STORAGE_KEY = "asset-management:v2";
-const LEGACY_STORAGE_KEY = "asset-management:v1";
+// Common Indian-market carriers. Free-text fallback isn't necessary — admins
+// can edit the constant when a new MNO enters the market.
+const CARRIER_OPTIONS = ["Airtel", "Jio", "Vi", "BSNL", "MTNL"] as const;
+
+// Plan type captures who owns the contract — corporate billing vs. employee-
+// reimbursed personal plans. The actual tariff (Postpaid 999, etc.) goes in
+// the Notes field if needed.
+const PLAN_TYPE_LABEL: Record<PlanType, string> = {
+  CORPORATE: "Corporate",
+  INDIVIDUAL: "Individual",
+};
+
+// ISD codes for the markets this product currently ships in. Add more as
+// needed; the dropdown stays single-select so accidental concatenation
+// ("+91 +91 …") can't happen.
+const COUNTRY_CODE_OPTIONS = [
+  { code: "+91", label: "🇮🇳 +91 India" },
+  { code: "+1", label: "🇺🇸 +1 US/Canada" },
+  { code: "+44", label: "🇬🇧 +44 UK" },
+  { code: "+971", label: "🇦🇪 +971 UAE" },
+  { code: "+65", label: "🇸🇬 +65 Singapore" },
+  { code: "+61", label: "🇦🇺 +61 Australia" },
+  { code: "+966", label: "🇸🇦 +966 Saudi Arabia" },
+] as const;
+const DEFAULT_COUNTRY_CODE = "+91";
+
+// v3 schema: countryCode is split out, plan is a PlanType enum. Migration
+// from v2 parses the leading ISD prefix out of simNumber and best-effort
+// maps free-text plan to the new enum.
+const STORAGE_KEY = "asset-management:v3";
+const LEGACY_V2_KEY = "asset-management:v2";
+const LEGACY_V1_KEY = "asset-management:v1";
+
+function migrateAsset(raw: any): Asset {
+  // Pull out ISD prefix if the legacy simNumber was stored with one.
+  let countryCode: string | undefined;
+  let simNumber: string | undefined = raw?.simNumber;
+  if (typeof simNumber === "string") {
+    const match = COUNTRY_CODE_OPTIONS.find((o) =>
+      simNumber!.trim().startsWith(o.code),
+    );
+    if (match) {
+      countryCode = match.code;
+      simNumber = simNumber.slice(match.code.length).trim();
+    }
+  }
+  // Best-effort plan migration. Anything containing "corp" → CORPORATE,
+  // otherwise INDIVIDUAL. Unset plans stay unset.
+  let plan: PlanType | undefined;
+  if (typeof raw?.plan === "string" && raw.plan.length > 0) {
+    plan = /corp/i.test(raw.plan) ? "CORPORATE" : "INDIVIDUAL";
+  } else if (raw?.plan === "CORPORATE" || raw?.plan === "INDIVIDUAL") {
+    plan = raw.plan;
+  }
+  return {
+    ...raw,
+    countryCode: countryCode ?? raw?.countryCode,
+    simNumber,
+    plan,
+  } as Asset;
+}
 
 const ASSET_TYPE_LABEL: Record<AssetType, string> = {
   LAPTOP: "Laptop",
@@ -156,7 +215,7 @@ const SEED: Asset[] = [
   },
   {
     id: "AST-0004",
-    name: "Corporate SIM — Airtel Postpaid",
+    name: "Sales team primary line",
     type: "SIM",
     serialNo: "",
     status: "ASSIGNED",
@@ -164,10 +223,11 @@ const SEED: Asset[] = [
     purchaseDate: "2024-08-15",
     value: 0,
     notes: "Unlimited data + roaming",
-    simNumber: "+91 98765 43210",
+    countryCode: "+91",
+    simNumber: "98765 43210",
     imei: "356938035643809",
     carrier: "Airtel",
-    plan: "Postpaid 999",
+    plan: "CORPORATE",
     monthlyCost: 999,
   },
 ];
@@ -180,14 +240,17 @@ function loadAssets(): Asset[] {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? (parsed as Asset[]) : SEED;
     }
-    // One-time migration: pick up data written under the v1 key so existing
-    // users don't lose their asset list when the SIM merge ships.
-    const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy) {
+    // One-time migration cascade: try v2 first (had SIM fields), fall back
+    // to v1 (had no SIM fields). Either way the rows pass through
+    // migrateAsset to split country code + remap free-text plan.
+    for (const legacyKey of [LEGACY_V2_KEY, LEGACY_V1_KEY]) {
+      const legacy = window.localStorage.getItem(legacyKey);
+      if (!legacy) continue;
       const parsed = JSON.parse(legacy);
       if (Array.isArray(parsed)) {
-        window.localStorage.setItem(STORAGE_KEY, legacy);
-        return parsed as Asset[];
+        const migrated = parsed.map(migrateAsset);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        return migrated;
       }
     }
     return SEED;
@@ -211,6 +274,20 @@ function nextAssetId(items: Asset[]): string {
 
 function formatINR(n: number): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
+}
+
+// What to show as the row's primary label. For SIMs, the user-provided Name
+// is optional (since Carrier + Plan type + Number already identify the SIM),
+// so we fall back to "SIM · Airtel · ●●●● 3210" so the table never displays
+// an empty row.
+function displayName(a: Asset): string {
+  if (a.name?.trim()) return a.name.trim();
+  if (a.type === "SIM") {
+    const last4 = (a.simNumber ?? "").replace(/\D/g, "").slice(-4);
+    const tail = last4 ? `●●●● ${last4}` : "(no number)";
+    return a.carrier ? `SIM · ${a.carrier} · ${tail}` : `SIM · ${tail}`;
+  }
+  return ASSET_TYPE_LABEL[a.type];
 }
 
 const EMPTY: Asset = {
@@ -277,7 +354,12 @@ export default function AssetManagementPage() {
   }, [items]);
 
   const onSave = (draft: Asset) => {
-    if (!draft.name.trim()) {
+    if (draft.type === "SIM") {
+      if (!draft.simNumber?.trim()) {
+        toast({ title: "SIM number is required", variant: "destructive" });
+        return;
+      }
+    } else if (!draft.name.trim()) {
       toast({ title: "Name is required", variant: "destructive" });
       return;
     }
@@ -294,14 +376,17 @@ export default function AssetManagementPage() {
     setEditing(null);
     toast({
       title: existing ? "Asset updated" : "Asset added",
-      description: `${finalAsset.id} · ${finalAsset.name}`,
+      description: `${finalAsset.id} · ${displayName(finalAsset)}`,
     });
   };
 
   const onDelete = (asset: Asset) => {
     setItems((prev) => prev.filter((a) => a.id !== asset.id));
     setDeleting(null);
-    toast({ title: "Asset deleted", description: `${asset.id} · ${asset.name}` });
+    toast({
+      title: "Asset deleted",
+      description: `${asset.id} · ${displayName(asset)}`,
+    });
   };
 
   return (
@@ -416,13 +501,15 @@ export default function AssetManagementPage() {
                   <TableRow key={a.id}>
                     <TableCell className="font-mono text-xs">{a.id}</TableCell>
                     <TableCell>
-                      <div className="font-medium">{a.name}</div>
+                      <div className="font-medium">{displayName(a)}</div>
                       {a.type === "SIM" ? (
                         (a.simNumber || a.carrier) && (
                           <div className="text-[11px] text-muted-foreground tabular-nums">
-                            {a.simNumber || "—"}
+                            {a.simNumber
+                              ? `${a.countryCode ?? DEFAULT_COUNTRY_CODE} ${a.simNumber}`
+                              : "—"}
                             {a.carrier ? ` · ${a.carrier}` : ""}
-                            {a.plan ? ` · ${a.plan}` : ""}
+                            {a.plan ? ` · ${PLAN_TYPE_LABEL[a.plan]}` : ""}
                           </div>
                         )
                       ) : (
@@ -507,7 +594,7 @@ export default function AssetManagementPage() {
               {deleting && (
                 <>
                   This will permanently remove <strong>{deleting.id}</strong> ·{" "}
-                  {deleting.name} from the register. This cannot be undone.
+                  {displayName(deleting)} from the register. This cannot be undone.
                 </>
               )}
             </AlertDialogDescription>
@@ -592,7 +679,20 @@ function AssetDialog({
             <Label className="text-xs">Type</Label>
             <Select
               value={form.type}
-              onValueChange={(v) => setForm({ ...form, type: v as AssetType })}
+              onValueChange={(v) => {
+                const next = v as AssetType;
+                setForm({
+                  ...form,
+                  type: next,
+                  // First time switching to SIM, pre-fill the country code so
+                  // the user doesn't see the dropdown sitting on an empty
+                  // value and forget to pick one.
+                  countryCode:
+                    next === "SIM" && !form.countryCode
+                      ? DEFAULT_COUNTRY_CODE
+                      : form.countryCode,
+                });
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -626,47 +726,96 @@ function AssetDialog({
           </div>
 
           <div className="col-span-2">
-            <Label className="text-xs">Name</Label>
+            <Label className="text-xs">
+              {isSim ? "Label (optional)" : "Name"}
+            </Label>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder={
                 isSim
-                  ? "e.g. Corporate SIM — Airtel Postpaid"
+                  ? "e.g. Sales team primary line · Field engineer (Mumbai)"
                   : "e.g. Dell Latitude 7430"
               }
             />
+            {isSim && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Carrier + plan type + number already identify the SIM. Use this
+                field for a purpose label — leave blank and we'll auto-display
+                "SIM · {`{carrier}`} · ●●●● {`{last 4}`}".
+              </p>
+            )}
           </div>
 
           {isSim ? (
             <>
               <div className="col-span-2">
                 <Label className="text-xs">SIM number</Label>
-                <Input
-                  value={form.simNumber ?? ""}
-                  onChange={(e) =>
-                    setForm({ ...form, simNumber: e.target.value })
-                  }
-                  placeholder="+91 98765 43210"
-                />
+                <div className="flex gap-2">
+                  <Select
+                    value={form.countryCode ?? DEFAULT_COUNTRY_CODE}
+                    onValueChange={(v) =>
+                      setForm({ ...form, countryCode: v })
+                    }
+                  >
+                    <SelectTrigger className="w-[120px] shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COUNTRY_CODE_OPTIONS.map((o) => (
+                        <SelectItem key={o.code} value={o.code}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className="flex-1"
+                    value={form.simNumber ?? ""}
+                    onChange={(e) =>
+                      setForm({ ...form, simNumber: e.target.value })
+                    }
+                    placeholder="98765 43210"
+                  />
+                </div>
               </div>
               <div>
                 <Label className="text-xs">Carrier</Label>
-                <Input
+                <Select
                   value={form.carrier ?? ""}
-                  onChange={(e) =>
-                    setForm({ ...form, carrier: e.target.value })
-                  }
-                  placeholder="Airtel / Jio / Vi"
-                />
+                  onValueChange={(v) => setForm({ ...form, carrier: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select carrier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CARRIER_OPTIONS.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
-                <Label className="text-xs">Plan</Label>
-                <Input
+                <Label className="text-xs">Plan type</Label>
+                <Select
                   value={form.plan ?? ""}
-                  onChange={(e) => setForm({ ...form, plan: e.target.value })}
-                  placeholder="Postpaid 999"
-                />
+                  onValueChange={(v) =>
+                    setForm({ ...form, plan: v as PlanType })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Corporate / Individual" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(PLAN_TYPE_LABEL) as PlanType[]).map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {PLAN_TYPE_LABEL[p]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label className="text-xs">Monthly cost (₹)</Label>
