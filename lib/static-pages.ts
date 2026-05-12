@@ -459,6 +459,31 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'activity',
   },
 
+  // ── REBM Module #4 — Plan Designer, Settings, Team ─────────────────────
+  {
+    path: '/real-estate/admin/plan-designer',
+    label: 'Plan Designer',
+    group: 'Real Estate',
+    description: 'Design compensation plans — slabs, overrides, designations, guarantees',
+    adminOnly: true,
+    icon: 'sparkles',
+  },
+  {
+    path: '/real-estate/admin/settings',
+    label: 'Module Settings',
+    group: 'Real Estate',
+    description: 'RERA toggle, plan engine, hold period, residual %',
+    adminOnly: true,
+    icon: 'settings',
+  },
+  {
+    path: '/real-estate/my-team',
+    label: 'My Team',
+    group: 'Real Estate',
+    description: 'Downline, invite links, team performance',
+    icon: 'users',
+  },
+
   // ── Profile ────────────────────────────────────────────────────────────
   {
     path: '/profile',
