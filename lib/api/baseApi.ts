@@ -105,6 +105,14 @@ export const baseApi = createApi({
     // Inventory (Module #3)
     "InventoryProducts",
     "InventoryProduct",
+    // Plan Designer + Settings + Team (Phase 4)
+    "CompPlans",
+    "RebmSettings",
+    "AgentRera",
+    "MyTeam",
+    "InviteTokens",
+    "RewardGrants",
+    "GuaranteePayouts",
   ],
   endpoints: () => ({}),
 })

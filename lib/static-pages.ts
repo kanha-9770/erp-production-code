@@ -406,6 +406,31 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'activity',
   },
 
+  // ── Real Estate Phase 4 — Plan Designer, Settings, Team ──────────────
+  {
+    path: '/real-estate/admin/settings',
+    label: 'Module Settings',
+    group: 'Real Estate',
+    description: 'RERA toggle, plan engine, hold period',
+    adminOnly: true,
+    icon: 'settings',
+  },
+  {
+    path: '/real-estate/admin/plan-designer',
+    label: 'Plan Designer',
+    group: 'Real Estate',
+    description: 'Create and activate compensation plans (slab engine)',
+    adminOnly: true,
+    icon: 'sparkles',
+  },
+  {
+    path: '/real-estate/my-team',
+    label: 'My Team',
+    group: 'Real Estate',
+    description: 'My downline, invite links, team performance',
+    icon: 'users',
+  },
+
   // ── Profile ────────────────────────────────────────────────────────────
   {
     path: '/profile',
