@@ -45,8 +45,10 @@ export type StaticPageGroup =
   | 'Leave Management'
   | 'Payroll'
   | 'HR & Employees'
+  | 'Performance'
   | 'Real Estate'
   | 'Inventory'
+  | 'Asset & Admin'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -406,6 +408,39 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'activity',
   },
 
+  // ── Performance ────────────────────────────────────────────────────────
+  // KRA tracking + periodic appraisals. Both pages persist to localStorage
+  // until a backend table is added — replace with API hooks when ready.
+  {
+    path: '/performance/kra',
+    label: 'Key Result Areas',
+    group: 'Performance',
+    description: 'Set, weight, and track measurable objectives per employee',
+    icon: 'target',
+  },
+  {
+    path: '/performance/appraisal',
+    label: 'Performance Appraisal',
+    group: 'Performance',
+    description: 'Quarterly / annual review with rating, strengths, growth areas',
+    adminOnly: true,
+    icon: 'trending-up',
+  },
+
+  // ── Asset & Admin ──────────────────────────────────────────────────────
+  // Single physical-asset register — laptops, monitors, phones, accessories,
+  // and corporate SIMs (SIM is an asset type, not a separate module).
+  // Persists to localStorage until a backend table is added — replace with
+  // API hooks when ready.
+  {
+    path: '/asset-management',
+    label: 'Asset Management',
+    group: 'Asset & Admin',
+    description: 'Laptops, phones, monitors, and SIM cards — assignment + status',
+    adminOnly: true,
+    icon: 'package',
+  },
+
   // ── Profile ────────────────────────────────────────────────────────────
   {
     path: '/profile',
@@ -457,7 +492,9 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Leave Management',
   'Payroll',
   'HR & Employees',
+  'Performance',
   'Real Estate',
+  'Asset & Admin',
   'Settings',
   'Profile',
   'AI & Tools',
