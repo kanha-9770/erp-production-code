@@ -418,8 +418,81 @@ export const UserManagementHandlers = {
       }
 
       const data = sanitizeEmployeePayload(body) as any;
+
+      // The list query (`getEmployees`) filters by the linked user's
+      // organizationId — Employee has no organization column of its own. If
+      // we create an Employee with `userId: null`, it ends up orphaned and
+      // invisible to every admin in every org. Attach a placeholder User in
+      // the creator's org so the row immediately shows up in the table.
+      if (!data.userId) {
+        const nameParts = String(body.employeeName).trim().split(/\s+/);
+        const firstName = nameParts[0] ?? "";
+        const lastName = nameParts.slice(1).join(" ") || null;
+
+        // Prefer the email the admin typed (so a later real-user signup can
+        // claim this account); fall back to a deterministic placeholder so
+        // the unique constraint on User.email never collides.
+        const candidateEmail =
+          (typeof body.emailAddress1 === "string" && body.emailAddress1.trim()) ||
+          `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`;
+
+        // Resolve a User to attach this Employee to:
+        //   - email matches a user in the same org → reuse (1:1 unique would
+        //     otherwise prevent this user from holding any Employee row, but
+        //     reuse is still the right move if the slot is free)
+        //   - email matches a user in a *different* org → don't leak across
+        //     tenants; mint a fresh placeholder address instead
+        //   - no match → mint a fresh placeholder User
+        const existing = await prisma.user.findUnique({
+          where: { email: candidateEmail },
+          select: { id: true, organizationId: true },
+        });
+
+        let userId: string;
+        if (existing && existing.organizationId === authUser.organizationId) {
+          // Reuse only if the user doesn't already own an Employee row —
+          // Employee.userId has @unique, so reusing a taken slot would 500.
+          const taken = await prisma.employee.findUnique({
+            where: { userId: existing.id },
+            select: { id: true },
+          });
+          if (taken) {
+            const placeholderEmail = `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`;
+            const newUser = await prisma.user.create({
+              data: {
+                email: placeholderEmail,
+                organizationId: authUser.organizationId,
+                status: "PENDING",
+                first_name: firstName,
+                last_name: lastName,
+              },
+            });
+            userId = newUser.id;
+          } else {
+            userId = existing.id;
+          }
+        } else {
+          // Either no user with that email, or the email belongs to another
+          // org — mint a fresh placeholder so we never cross tenants.
+          const email = existing
+            ? `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`
+            : candidateEmail;
+          const newUser = await prisma.user.create({
+            data: {
+              email,
+              organizationId: authUser.organizationId,
+              status: "PENDING",
+              first_name: firstName,
+              last_name: lastName,
+            },
+          });
+          userId = newUser.id;
+        }
+
+        data.userId = userId;
+      }
+
       const employee = await prisma.employee.create({ data });
-      void authUser;
       return NextResponse.json({ success: true, employee }, { status: 201 });
     }, "createEmployee");
   },
