@@ -18,7 +18,6 @@ export interface JobOpening {
     planCode: string | null;
   } | null;
   profileName: string;
-  company: string;
   department: string;
   designation: string;
   employmentType: EmploymentType;

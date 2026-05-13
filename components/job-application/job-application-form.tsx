@@ -482,7 +482,7 @@ export function JobApplicationForm({
                     {uploading ? "Uploading…" : "Choose files…"}
                   </Button>
                   <span className="text-[11px] text-muted-foreground">
-                    PDF / DOC up to ~10 MB
+                    PDF / DOC
                   </span>
                 </div>
               )}

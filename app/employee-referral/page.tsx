@@ -7,7 +7,6 @@
  * inline-edit status, filter chips, saved views, in-page create Sheet.
  */
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   useGetEmployeeReferralsQuery,
@@ -37,7 +36,6 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Pencil,
   Trash2,
   Mail,
@@ -131,6 +129,7 @@ export default function EmployeeReferralListPage() {
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [createReferral, { isLoading: creating }] =
     useCreateEmployeeReferralMutation();
 
@@ -578,6 +577,7 @@ export default function EmployeeReferralListPage() {
           selectedId ? (
             <PreviewHeader
               id={selectedId}
+              onEdit={() => setEditId(selectedId)}
               onDeleted={() => setSelectedId(null)}
             />
           ) : null
@@ -623,15 +623,91 @@ export default function EmployeeReferralListPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <Sheet open={!!editId} onOpenChange={(o) => !o && setEditId(null)}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-2xl overflow-y-auto p-0"
+        >
+          <SheetHeader className="px-5 sm:px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle>Edit employee referral</SheetTitle>
+            <SheetDescription>
+              Update the referred candidate and screening status.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-5 sm:px-6 py-5">
+            {editId && (
+              <EditReferralForm
+                id={editId}
+                employees={employees}
+                onDone={() => setEditId(null)}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </>
+  );
+}
+
+function EditReferralForm({
+  id,
+  employees,
+  onDone,
+}: {
+  id: string;
+  employees: any[];
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const { data, isLoading } = useGetEmployeeReferralQuery(id);
+  const [updateReferral, { isLoading: saving }] =
+    useUpdateEmployeeReferralMutation();
+
+  if (isLoading || !data?.referral) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <EmployeeReferralForm
+      initial={data.referral}
+      submitLabel="Save changes"
+      submitting={saving}
+      employees={employees}
+      onCancel={onDone}
+      onSubmit={async (payload) => {
+        try {
+          await updateReferral({ id, body: payload }).unwrap();
+          toast({ title: "Employee referral updated" });
+          onDone();
+        } catch (e: any) {
+          toast({
+            title: "Could not save changes",
+            description:
+              e?.data?.error ||
+              e?.message ||
+              "Server rejected the request",
+            variant: "destructive",
+          });
+        }
+      }}
+    />
   );
 }
 
 function PreviewHeader({
   id,
+  onEdit,
   onDeleted,
 }: {
   id: string;
+  onEdit: () => void;
   onDeleted: () => void;
 }) {
   const { toast } = useToast();
@@ -667,15 +743,14 @@ function PreviewHeader({
         {STATUS_LABEL[r.status]}
       </Badge>
       <span className="font-semibold truncate text-sm">{r.applicantName}</span>
-      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
-        <Link href={`/employee-referral/${r.id}`} title="Open full page">
-          <ExternalLink className="h-3.5 w-3.5" />
-        </Link>
-      </Button>
-      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0">
-        <Link href={`/employee-referral/${r.id}/edit`} title="Edit">
-          <Pencil className="h-3.5 w-3.5" />
-        </Link>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 ml-auto"
+        title="Edit"
+        onClick={onEdit}
+      >
+        <Pencil className="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="ghost"

@@ -1429,7 +1429,6 @@ model JobOpening {
   staffingPlan      StaffingPlan?    @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
 
   profileName       String           @map("profile_name")
-  company           String
   department        String
   designation       String
   employmentType    EmploymentType   @map("employment_type")
