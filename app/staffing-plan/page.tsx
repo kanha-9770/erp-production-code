@@ -15,6 +15,7 @@ import {
   useGetStaffingPlanQuery,
   useUpdateStaffingPlanMutation,
   useCreateStaffingPlanMutation,
+  useDeleteStaffingPlanMutation,
   type StaffingPlan,
   type StaffingPlanStatus,
   type EmploymentType,
@@ -41,7 +42,7 @@ import {
   ChevronRight,
   ExternalLink,
   Pencil,
-  Building2,
+  Trash2,
   Layers,
   Users as UsersIcon,
   Calculator,
@@ -203,7 +204,6 @@ export default function StaffingPlanListPage() {
       if (!q) return true;
       return (
         p.profileName?.toLowerCase().includes(q) ||
-        p.company?.toLowerCase().includes(q) ||
         p.department?.toLowerCase().includes(q) ||
         p.designation?.toLowerCase().includes(q) ||
         (p.planCode ?? "").toLowerCase().includes(q) ||
@@ -331,14 +331,6 @@ export default function StaffingPlanListPage() {
         ),
       },
       {
-        id: "company",
-        header: "Company",
-        width: 160,
-        sortKey: "company",
-        copyValue: (p) => p.company,
-        cell: (p) => <span className="truncate text-sm">{p.company}</span>,
-      },
-      {
         id: "department",
         header: "Department",
         width: 150,
@@ -429,7 +421,7 @@ export default function StaffingPlanListPage() {
             <div className="relative">
               <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search profile, designation, company…"
+                placeholder="Search profile, designation…"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -574,7 +566,14 @@ export default function StaffingPlanListPage() {
         </div>
       }
       preview={selectedId ? <PlanPreview id={selectedId} /> : null}
-      previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
+      previewHeader={
+        selectedId ? (
+          <PreviewHeader
+            id={selectedId}
+            onDeleted={() => setSelectedId(null)}
+          />
+        ) : null
+      }
     />
 
     <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -619,10 +618,35 @@ export default function StaffingPlanListPage() {
   );
 }
 
-function PreviewHeader({ id }: { id: string }) {
+function PreviewHeader({
+  id,
+  onDeleted,
+}: {
+  id: string;
+  onDeleted: () => void;
+}) {
+  const { toast } = useToast();
   const { data } = useGetStaffingPlanQuery(id);
+  const [removePlan, { isLoading: deleting }] = useDeleteStaffingPlanMutation();
   const p = data?.plan;
   if (!p) return <Skeleton className="h-5 w-40" />;
+
+  const onDelete = async () => {
+    if (!confirm(`Delete staffing plan "${p.profileName}"? This cannot be undone.`))
+      return;
+    try {
+      await removePlan(p.id).unwrap();
+      toast({ title: "Staffing plan deleted" });
+      onDeleted();
+    } catch (e: any) {
+      toast({
+        title: "Could not delete",
+        description: e?.data?.error || e?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Badge variant={STATUS_VARIANT[p.status]} className="text-[10px] shrink-0">
@@ -638,6 +662,16 @@ function PreviewHeader({ id }: { id: string }) {
         <Link href={`/staffing-plan/${p.id}/edit`} title="Edit">
           <Pencil className="h-3.5 w-3.5" />
         </Link>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+        title="Delete"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );
@@ -696,7 +730,6 @@ function PlanPreview({ id }: { id: string }) {
             </Badge>
           }
         />
-        <Fact icon={Building2} label="Company" value={p.company} />
         <Fact icon={Layers} label="Department" value={p.department} />
         <Fact icon={Briefcase} label="Designation" value={p.designation} />
         <Fact

@@ -62,7 +62,6 @@ export const STATUS_OPTIONS: Array<{
 
 export interface StaffingPlanFormValues {
   profileName: string;
-  company: string;
   department: string;
   designation: string;
   employmentType: EmploymentType;
@@ -74,7 +73,6 @@ export interface StaffingPlanFormValues {
 
 const EMPTY: StaffingPlanFormValues = {
   profileName: "",
-  company: "",
   department: "",
   designation: "",
   employmentType: "FULL_TIME",
@@ -89,7 +87,6 @@ export function fromPlan(p: StaffingPlan): StaffingPlanFormValues {
     v === null || v === undefined ? "" : String(v);
   return {
     profileName: p.profileName ?? "",
-    company: p.company ?? "",
     department: p.department ?? "",
     designation: p.designation ?? "",
     employmentType: (p.employmentType ?? "FULL_TIME") as EmploymentType,
@@ -103,7 +100,6 @@ export function fromPlan(p: StaffingPlan): StaffingPlanFormValues {
 export function toApiPayload(v: StaffingPlanFormValues): Record<string, any> {
   return {
     profileName: v.profileName.trim(),
-    company: v.company.trim(),
     department: v.department.trim(),
     designation: v.designation.trim(),
     employmentType: v.employmentType,
@@ -170,7 +166,6 @@ export function StaffingPlanForm({
     e.preventDefault();
     setError(null);
     if (!values.profileName.trim()) return setError("Profile Name is required");
-    if (!values.company.trim()) return setError("Company is required");
     if (!values.department.trim()) return setError("Department is required");
     if (!values.designation.trim()) return setError("Designation is required");
     if (!values.employmentType) return setError("Employment Type is required");
@@ -221,13 +216,6 @@ export function StaffingPlanForm({
             />
           </Field>
 
-          <Field label="Company *">
-            <Input
-              value={values.company}
-              onChange={(e) => set("company", e.target.value)}
-              placeholder="e.g. Acme Corp"
-            />
-          </Field>
           <Field label="Department *">
             {showDeptSelect ? (
               <div className="flex gap-1">

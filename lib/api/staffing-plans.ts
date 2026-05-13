@@ -19,7 +19,6 @@ export interface StaffingPlan {
   id: string;
   planCode: string | null;
   profileName: string;
-  company: string;
   department: string;
   designation: string;
   employmentType: EmploymentType;

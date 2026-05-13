@@ -1388,7 +1388,6 @@ model StaffingPlan {
   id                    String              @id @default(cuid())
   planCode              String?             @unique @map("plan_code")
   profileName           String              @map("profile_name")
-  company               String
   department            String
   designation           String
   employmentType        EmploymentType      @map("employment_type")

@@ -22,6 +22,7 @@ import {
   useGetEmployeeQuery,
   useUpdateEmployeeMutation,
   useCreateEmployeeMutation,
+  useDeleteEmployeeMutation,
   type EmployeeListItem,
   type EmployeeStatus,
 } from "@/lib/api/employees";
@@ -46,6 +47,7 @@ import {
   ChevronRight,
   ExternalLink,
   Pencil,
+  Trash2,
   Mail,
   Phone,
   Calendar,
@@ -579,7 +581,14 @@ export default function EmployeeMasterListPage() {
         </div>
       }
       preview={selectedId ? <EmployeePreview id={selectedId} /> : null}
-      previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
+      previewHeader={
+        selectedId ? (
+          <PreviewHeader
+            id={selectedId}
+            onDeleted={() => setSelectedId(null)}
+          />
+        ) : null
+      }
     />
 
     <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -623,11 +632,41 @@ export default function EmployeeMasterListPage() {
   );
 }
 
-function PreviewHeader({ id }: { id: string }) {
+function PreviewHeader({
+  id,
+  onDeleted,
+}: {
+  id: string;
+  onDeleted: () => void;
+}) {
+  const { toast } = useToast();
   const { data } = useGetEmployeeQuery(id);
+  const [removeEmployee, { isLoading: deleting }] =
+    useDeleteEmployeeMutation();
   const e = data?.employee;
   if (!e) return <Skeleton className="h-5 w-40" />;
   const status = (e.status ?? "ACTIVE") as EmployeeStatus;
+
+  const onDelete = async () => {
+    if (
+      !confirm(
+        `Delete employee "${e.employeeName}"? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await removeEmployee(e.id).unwrap();
+      toast({ title: "Employee deleted" });
+      onDeleted();
+    } catch (err: any) {
+      toast({
+        title: "Could not delete",
+        description: err?.data?.error || err?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Badge variant={STATUS_VARIANT[status]} className="text-[10px] shrink-0">
@@ -643,6 +682,16 @@ function PreviewHeader({ id }: { id: string }) {
         <Link href={`/employee-master/${e.id}/edit`} title="Edit">
           <Pencil className="h-3.5 w-3.5" />
         </Link>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+        title="Delete"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );

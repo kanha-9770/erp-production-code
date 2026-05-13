@@ -15,6 +15,7 @@ import {
   useGetJobApplicationQuery,
   useUpdateJobApplicationMutation,
   useCreateJobApplicationMutation,
+  useDeleteJobApplicationMutation,
   type JobApplication,
   type JobApplicationStatus,
   type ApplicantSource,
@@ -41,6 +42,7 @@ import {
   ChevronRight,
   ExternalLink,
   Pencil,
+  Trash2,
   Mail,
   Phone,
   FileText,
@@ -640,7 +642,14 @@ export default function JobApplicationListPage() {
           </div>
         }
         preview={selectedId ? <ApplicationPreview id={selectedId} /> : null}
-        previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
+        previewHeader={
+          selectedId ? (
+            <PreviewHeader
+              id={selectedId}
+              onDeleted={() => setSelectedId(null)}
+            />
+          ) : null
+        }
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -685,10 +694,40 @@ export default function JobApplicationListPage() {
   );
 }
 
-function PreviewHeader({ id }: { id: string }) {
+function PreviewHeader({
+  id,
+  onDeleted,
+}: {
+  id: string;
+  onDeleted: () => void;
+}) {
+  const { toast } = useToast();
   const { data } = useGetJobApplicationQuery(id);
+  const [removeApplication, { isLoading: deleting }] =
+    useDeleteJobApplicationMutation();
   const a = data?.application;
   if (!a) return <Skeleton className="h-5 w-40" />;
+
+  const onDelete = async () => {
+    if (
+      !confirm(
+        `Delete job application from "${a.applicantName}"? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await removeApplication(a.id).unwrap();
+      toast({ title: "Job application deleted" });
+      onDeleted();
+    } catch (e: any) {
+      toast({
+        title: "Could not delete",
+        description: e?.data?.error || e?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Badge variant={STATUS_VARIANT[a.status]} className="text-[10px] shrink-0">
@@ -704,6 +743,16 @@ function PreviewHeader({ id }: { id: string }) {
         <Link href={`/job-application/${a.id}/edit`} title="Edit">
           <Pencil className="h-3.5 w-3.5" />
         </Link>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+        title="Delete"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );

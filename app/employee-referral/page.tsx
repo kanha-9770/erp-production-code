@@ -14,6 +14,7 @@ import {
   useGetEmployeeReferralQuery,
   useUpdateEmployeeReferralMutation,
   useCreateEmployeeReferralMutation,
+  useDeleteEmployeeReferralMutation,
   type EmployeeReferral,
   type EmployeeReferralStatus,
 } from "@/lib/api/employee-referrals";
@@ -38,6 +39,7 @@ import {
   ChevronRight,
   ExternalLink,
   Pencil,
+  Trash2,
   Mail,
   Phone,
   FileText,
@@ -572,7 +574,14 @@ export default function EmployeeReferralListPage() {
           </div>
         }
         preview={selectedId ? <ReferralPreview id={selectedId} /> : null}
-        previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
+        previewHeader={
+          selectedId ? (
+            <PreviewHeader
+              id={selectedId}
+              onDeleted={() => setSelectedId(null)}
+            />
+          ) : null
+        }
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -618,10 +627,40 @@ export default function EmployeeReferralListPage() {
   );
 }
 
-function PreviewHeader({ id }: { id: string }) {
+function PreviewHeader({
+  id,
+  onDeleted,
+}: {
+  id: string;
+  onDeleted: () => void;
+}) {
+  const { toast } = useToast();
   const { data } = useGetEmployeeReferralQuery(id);
+  const [removeReferral, { isLoading: deleting }] =
+    useDeleteEmployeeReferralMutation();
   const r = data?.referral;
   if (!r) return <Skeleton className="h-5 w-40" />;
+
+  const onDelete = async () => {
+    if (
+      !confirm(
+        `Delete referral for "${r.applicantName}"? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await removeReferral(r.id).unwrap();
+      toast({ title: "Employee referral deleted" });
+      onDeleted();
+    } catch (e: any) {
+      toast({
+        title: "Could not delete",
+        description: e?.data?.error || e?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Badge variant={STATUS_VARIANT[r.status]} className="text-[10px] shrink-0">
@@ -637,6 +676,16 @@ function PreviewHeader({ id }: { id: string }) {
         <Link href={`/employee-referral/${r.id}/edit`} title="Edit">
           <Pencil className="h-3.5 w-3.5" />
         </Link>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+        title="Delete"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );

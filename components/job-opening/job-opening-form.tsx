@@ -161,7 +161,6 @@ export function JobOpeningForm({
       ...prev,
       staffingPlanId: plan.id,
       profileName: plan.profileName,
-      company: plan.company,
       department: plan.department,
       designation: plan.designation,
       employmentType: plan.employmentType,

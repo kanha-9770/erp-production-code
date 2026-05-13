@@ -14,6 +14,7 @@ import {
   useGetAppointmentLetterQuery,
   useUpdateAppointmentLetterMutation,
   useCreateAppointmentLetterMutation,
+  useDeleteAppointmentLetterMutation,
   type AppointmentLetter,
   type AppointmentLetterStatus,
 } from "@/lib/api/appointment-letters";
@@ -39,6 +40,7 @@ import {
   ChevronRight,
   ExternalLink,
   Pencil,
+  Trash2,
   Mail,
   Calendar,
   Briefcase,
@@ -542,7 +544,14 @@ export default function AppointmentLetterListPage() {
           </div>
         }
         preview={selectedId ? <LetterPreview id={selectedId} /> : null}
-        previewHeader={selectedId ? <PreviewHeader id={selectedId} /> : null}
+        previewHeader={
+          selectedId ? (
+            <PreviewHeader
+              id={selectedId}
+              onDeleted={() => setSelectedId(null)}
+            />
+          ) : null
+        }
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
@@ -588,10 +597,40 @@ export default function AppointmentLetterListPage() {
   );
 }
 
-function PreviewHeader({ id }: { id: string }) {
+function PreviewHeader({
+  id,
+  onDeleted,
+}: {
+  id: string;
+  onDeleted: () => void;
+}) {
+  const { toast } = useToast();
   const { data } = useGetAppointmentLetterQuery(id);
+  const [removeLetter, { isLoading: deleting }] =
+    useDeleteAppointmentLetterMutation();
   const l = data?.letter;
   if (!l) return <Skeleton className="h-5 w-40" />;
+
+  const onDelete = async () => {
+    if (
+      !confirm(
+        `Delete appointment letter for "${l.applicantName}"? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await removeLetter(l.id).unwrap();
+      toast({ title: "Appointment letter deleted" });
+      onDeleted();
+    } catch (e: any) {
+      toast({
+        title: "Could not delete",
+        description: e?.data?.error || e?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 min-w-0">
       <Badge variant={STATUS_VARIANT[l.status]} className="text-[10px] shrink-0">
@@ -616,6 +655,16 @@ function PreviewHeader({ id }: { id: string }) {
         <Link href={`/appointment-letter/${l.id}/edit`} title="Edit">
           <Pencil className="h-3.5 w-3.5" />
         </Link>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+        title="Delete"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );
