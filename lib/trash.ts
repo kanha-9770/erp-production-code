@@ -230,21 +230,41 @@ async function restoreSubform(data: any, db: Tx) {
  * FormRecord is sharded across formRecord1..formRecord15 plus a unified
  * `formRecord` table — the delete walks all shards to find the live row,
  * the restore puts it back into the same shard. We tag the snapshot with
- * `__shard` so restore knows where to land.
+ * `__shard` so restore knows where to land. `__indexedFields` carries the
+ * companion rows from `form_record_fields` so the record's searchable values
+ * survive the round-trip (without them, restored records would be invisible
+ * to indexed filters even though `recordData` is intact).
  */
 async function serializeFormRecord(id: string, db: Tx): Promise<Snapshot | null> {
+  // Always capture indexed-field rows first so they survive whichever shard
+  // the record lives in. `findMany` is safe when none exist — returns [].
+  let indexedFields: any[] = [];
+  try {
+    indexedFields = await (db as any).formRecordField.findMany({ where: { recordId: id } });
+  } catch {
+    // form_record_fields table absent — fine, the snapshot just won't carry indexed rows
+  }
+
   for (let i = 1; i <= 15; i++) {
     const model = `formRecord${i}`;
     try {
       const r = await (db as any)[model].findUnique({ where: { id } });
-      if (r) return { name: r.id, organizationId: r.organizationId ?? null, data: { ...r, __shard: i } };
+      if (r) return {
+        name: r.id,
+        organizationId: r.organizationId ?? null,
+        data: { ...r, __shard: i, __indexedFields: indexedFields },
+      };
     } catch {
       // shard may not exist in this deployment — keep walking
     }
   }
   try {
     const r = await (db as any).formRecord.findUnique({ where: { id } });
-    if (r) return { name: r.id, organizationId: r.organizationId ?? null, data: { ...r, __shard: 0 } };
+    if (r) return {
+      name: r.id,
+      organizationId: r.organizationId ?? null,
+      data: { ...r, __shard: 0, __indexedFields: indexedFields },
+    };
   } catch {
     // unified table absent — fall through
   }
@@ -263,7 +283,7 @@ async function deleteFormRecord(id: string, snapshot: any, db: Tx) {
 }
 
 async function restoreFormRecord(data: any, db: Tx) {
-  const { __shard, ...record } = data;
+  const { __shard, __indexedFields = [], ...record } = data;
   if (__shard && __shard >= 1 && __shard <= 15) {
     await (db as any)[`formRecord${__shard}`].create({ data: clean(record) });
     try { await (db as any).formRecord.create({ data: clean(record) }); } catch {
@@ -271,6 +291,18 @@ async function restoreFormRecord(data: any, db: Tx) {
     }
   } else {
     await (db as any).formRecord.create({ data: clean(record) });
+  }
+
+  // Re-create the indexed-field rows. Without these, indexed filters and
+  // sorts won't see the restored record even though recordData is intact.
+  if (Array.isArray(__indexedFields) && __indexedFields.length > 0) {
+    for (const f of __indexedFields) {
+      try { await (db as any).formRecordField.create({ data: clean(f) }); }
+      catch (err) {
+        // Best-effort: a single bad row shouldn't sink the whole restore.
+        console.warn("[trash] formRecordField restore skipped row", f?.id, err);
+      }
+    }
   }
 }
 
@@ -407,32 +439,81 @@ export async function moveToTrash(
  * TrashBin row. Restores fail if a record with the same id already exists
  * (someone may have re-created it manually) — caller should surface that as
  * a user-facing error.
+ *
+ * Transaction limits are bumped well above the 5 s default: a Form with many
+ * sections/subforms/fields can issue dozens of writes, and the default budget
+ * occasionally trips, leaving the trash row in place and the user staring at
+ * "Restore failed" with no obvious cause.
  */
 export async function restoreFromTrash(
   trashId: string,
   ctx: TrashContext = {},
 ): Promise<{ resourceType: string; resourceId: string }> {
   assertTrashBinAvailable();
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.trashBin.findUnique({ where: { id: trashId } });
-    if (!row) throw new Error("Trash entry not found");
 
-    if (ctx.organizationId && row.organizationId && row.organizationId !== ctx.organizationId) {
-      throw new Error("Trash entry belongs to another organization");
+  // Pre-read the row outside the transaction so we can give specific error
+  // messages (404 vs cross-org) without waking up a tx slot.
+  const row = await prisma.trashBin.findUnique({ where: { id: trashId } });
+  if (!row) throw new Error("Trash entry not found");
+  if (ctx.organizationId && row.organizationId && row.organizationId !== ctx.organizationId) {
+    throw new Error("Trash entry belongs to another organization");
+  }
+
+  const cfg = getTrashConfig(row.resourceType);
+  if (!cfg) throw new Error(`Unknown resourceType "${row.resourceType}"`);
+
+  // Guard against double-restore: if the original row was already re-created
+  // (manually, or via a second click while the first was in flight), the
+  // create below would throw "Unique constraint failed on the fields: (`id`)"
+  // and abort the whole tx. Detecting it up front lets us return a clear
+  // user-facing message AND clean up the orphaned trash row.
+  try {
+    const existing = await (prisma as any)[cfg.model].findUnique({
+      where: { id: row.resourceId },
+      select: { id: true },
+    });
+    if (existing) {
+      await prisma.trashBin.delete({ where: { id: trashId } });
+      throw new Error(
+        `A ${row.resourceType} with id "${row.resourceId}" already exists. The trash entry has been cleared.`,
+      );
     }
+  } catch (err: any) {
+    // Re-throw our own "already exists" error; swallow lookup errors (e.g.
+    // sharded FormRecord doesn't support findUnique on the unified accessor
+    // for every shard — restoreForm/Record handle that themselves).
+    if (err?.message?.startsWith("A ")) throw err;
+  }
 
-    const cfg = getTrashConfig(row.resourceType);
-    if (!cfg) throw new Error(`Unknown resourceType "${row.resourceType}"`);
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        if (cfg.customRestore) {
+          await cfg.customRestore(row.snapshot, tx);
+        } else {
+          await defaultRestore(cfg, row.snapshot, tx);
+        }
+        // `deleteMany` instead of `delete` so a racing second click (or a
+        // concurrent purge) doesn't blow up the whole tx with P2025 after
+        // the entity has already been re-created.
+        await tx.trashBin.deleteMany({ where: { id: trashId } });
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    );
+  } catch (err: any) {
+    // Surface the real Prisma error so the route handler can pass it back
+    // to the UI. Logging the snapshot type + resource id gives operators a
+    // fighting chance to reproduce.
+    console.error(
+      `[trash] restore failed for ${row.resourceType} (resourceId=${row.resourceId}, trashId=${trashId}):`,
+      err,
+    );
+    throw new Error(
+      `Failed to restore ${row.resourceType}: ${err?.message ?? "unknown error"}`,
+    );
+  }
 
-    if (cfg.customRestore) {
-      await cfg.customRestore(row.snapshot, tx);
-    } else {
-      await defaultRestore(cfg, row.snapshot, tx);
-    }
-
-    await tx.trashBin.delete({ where: { id: trashId } });
-    return { resourceType: row.resourceType, resourceId: row.resourceId };
-  });
+  return { resourceType: row.resourceType, resourceId: row.resourceId };
 }
 
 /** Permanently remove a single trash entry without restoring. */

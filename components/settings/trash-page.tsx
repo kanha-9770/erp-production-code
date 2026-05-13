@@ -203,13 +203,22 @@ export function TrashPage() {
   const restore = async (item: TrashItem) => {
     setBusy(item.id, true);
     try {
-      const res = await fetch(`/api/trash/${item.id}/restore`, { method: "POST" });
+      const res = await fetch(`/api/trash/${item.id}/restore`, {
+        method: "POST",
+        // Same-origin by default, but be explicit so the auth-token cookie
+        // always rides along — without it, the route returns 401 and the
+        // user sees a generic "Restore failed (401)" with no clue why.
+        credentials: "include",
+      });
       const json = await safeJson(res);
       if (!res.ok || !json?.success) {
         throw new Error(json?.error || json?._raw || `Restore failed (${res.status})`);
       }
       toast({ title: "Restored", description: `${friendlyType(item.resourceType)} "${item.resourceName ?? item.resourceId}" is back.` });
-      setItems((prev) => prev.filter((x) => x.id !== item.id));
+      // Re-fetch from the server rather than just filtering locally — if the
+      // restore created cascading side-effects (e.g. expired items got purged
+      // alongside), the list should reflect the authoritative state.
+      await refresh();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Couldn't restore", description: e?.message ?? "Unknown error" });
     } finally {

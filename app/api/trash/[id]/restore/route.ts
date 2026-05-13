@@ -29,6 +29,10 @@ export async function POST(
     });
     return NextResponse.json({ success: true, data: result }, { headers: NO_STORE });
   } catch (err: any) {
+    // Without server-side logging, restore failures show as a generic toast
+    // and the underlying Prisma error (FK violation, unique conflict, etc.)
+    // is lost. Log it so it's visible in `pnpm dev` output.
+    console.error(`[POST /api/trash/${params.id}/restore]`, err);
     return NextResponse.json(
       { success: false, error: err?.message ?? "Failed to restore" },
       { status: 500, headers: NO_STORE },
