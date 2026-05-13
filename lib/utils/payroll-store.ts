@@ -74,16 +74,42 @@ const DEFAULT_POLICY: PayrollPolicy = {
 // Mirrors the shapes in components/payroll/payroll-enterprise-config.tsx.
 // The engine reads these to compute Basic/HRA/PF/ESI/PT/TDS instead of the
 // legacy flat 12%/5%/₹500 constants.
+//
+// Every optional component carries an `*Enabled` boolean. Disabled rows
+// contribute zero even if the amount is non-zero — admins can pre-stage a
+// value then flip the toggle later without re-entering it. Legacy configs
+// (pre-toggle) come through with the flag undefined; the engine treats that
+// as "inferred from value > 0" so old data behaves the same as before.
 export interface PayrollSalaryStructure {
   basicPercent: number;
   hraPercent: number;
+  // Existing optional allowances ─────────────────────────────────────────
+  daEnabled?: boolean;
   daPercent: number;
   specialAllowanceMode: 'auto' | 'manual';
   specialAllowanceAmount: number;
+  conveyanceEnabled?: boolean;
   conveyanceAllowance: number;
+  medicalEnabled?: boolean;
   medicalAllowance: number;
+  ltaEnabled?: boolean;
   lta: number;
   ltaMonthly: boolean;
+  // Top-company allowances (food cards, telephone reimbursement, fuel,
+  // children's education, books, uniform). All default off; the engine
+  // honors `*Enabled` to decide inclusion.
+  foodEnabled?: boolean;
+  foodAllowance?: number;
+  telephoneEnabled?: boolean;
+  telephoneAllowance?: number;
+  educationEnabled?: boolean;
+  educationAllowance?: number;
+  fuelEnabled?: boolean;
+  fuelAllowance?: number;
+  booksEnabled?: boolean;
+  booksAllowance?: number;
+  uniformEnabled?: boolean;
+  uniformAllowance?: number;
 }
 
 export interface PayrollStatutory {
@@ -109,6 +135,41 @@ export interface PayrollStatutory {
   lwfAmount: number; // monthly flat amount (state-dependent)
   npsEnabled: boolean;
   npsEmployeePercent: number; // % of basic — typical voluntary range 5–10%
+  // Gratuity — Payment of Gratuity Act, 1972. Employer-side accrual; paid
+  // out only on exit ≥ 5 years. Engine surfaces it as a CTC line so admins
+  // can see true employer cost without affecting employee net.
+  gratuityEnabled?: boolean;
+  gratuityPercent?: number; // typically 4.81% of (Basic + DA)
+}
+
+// Bonus / variable-pay rules. Each block is independently toggleable; the
+// engine reports MONTHLY ACCRUALS so admins see true CTC cost. Disbursement
+// (whether actually paid this month) is a separate concern handled by the
+// run-payroll workflow, not by this pure calculator.
+export interface PayrollBonus {
+  // Statutory bonus — Payment of Bonus Act, 1965. Mandatory for employees
+  // earning ≤ statutoryBonusSalaryCeiling (Basic+DA, default ₹21k). Bonus is
+  // computed on min(Basic+DA, statutoryBonusCalcCeiling) (default ₹7k).
+  statutoryBonusEnabled?: boolean;
+  statutoryBonusPercent?: number; // 8.33 - 20
+  statutoryBonusSalaryCeiling?: number;
+  statutoryBonusCalcCeiling?: number;
+  // Performance bonus — annual variable pay as % of annual CTC.
+  performanceBonusEnabled?: boolean;
+  performanceBonusPercent?: number;
+  performanceBonusFrequency?: 'annual' | 'half-yearly' | 'quarterly';
+  // Festival bonus — flat once-a-year amount.
+  festivalBonusEnabled?: boolean;
+  festivalBonusAmount?: number;
+  // Joining / sign-on bonus — one-time, amortised over the clawback period
+  // for CTC accounting.
+  joiningBonusEnabled?: boolean;
+  joiningBonusAmount?: number;
+  joiningBonusClawbackMonths?: number;
+  // Retention bonus — periodic.
+  retentionBonusEnabled?: boolean;
+  retentionBonusAmount?: number;
+  retentionBonusFrequency?: 'annual' | 'half-yearly' | 'one-time';
 }
 
 export interface PayrollOvertime {
@@ -124,19 +185,36 @@ export interface PayrollFormulas {
   salaryStructure: PayrollSalaryStructure;
   statutory: PayrollStatutory;
   overtime: PayrollOvertime;
+  bonus?: PayrollBonus;
 }
 
 export const DEFAULT_FORMULAS: PayrollFormulas = {
   salaryStructure: {
     basicPercent: 50,
     hraPercent: 50,
+    daEnabled: false,
     daPercent: 0,
     specialAllowanceMode: 'auto',
     specialAllowanceAmount: 0,
+    conveyanceEnabled: true,
     conveyanceAllowance: 1600,
+    medicalEnabled: true,
     medicalAllowance: 1250,
+    ltaEnabled: false,
     lta: 0,
     ltaMonthly: true,
+    foodEnabled: false,
+    foodAllowance: 2200,
+    telephoneEnabled: false,
+    telephoneAllowance: 1500,
+    educationEnabled: false,
+    educationAllowance: 200,
+    fuelEnabled: false,
+    fuelAllowance: 0,
+    booksEnabled: false,
+    booksAllowance: 0,
+    uniformEnabled: false,
+    uniformAllowance: 0,
   },
   statutory: {
     pfEnabled: true,
@@ -160,6 +238,8 @@ export const DEFAULT_FORMULAS: PayrollFormulas = {
     lwfAmount: 25,
     npsEnabled: false,
     npsEmployeePercent: 10,
+    gratuityEnabled: false,
+    gratuityPercent: 4.81,
   },
   overtime: {
     enabled: false,
@@ -168,6 +248,23 @@ export const DEFAULT_FORMULAS: PayrollFormulas = {
     weekendMultiplier: 2,
     holidayMultiplier: 2,
     maxOvertimeHoursPerMonth: 50,
+  },
+  bonus: {
+    statutoryBonusEnabled: false,
+    statutoryBonusPercent: 8.33,
+    statutoryBonusSalaryCeiling: 21000,
+    statutoryBonusCalcCeiling: 7000,
+    performanceBonusEnabled: false,
+    performanceBonusPercent: 10,
+    performanceBonusFrequency: 'annual',
+    festivalBonusEnabled: false,
+    festivalBonusAmount: 0,
+    joiningBonusEnabled: false,
+    joiningBonusAmount: 0,
+    joiningBonusClawbackMonths: 12,
+    retentionBonusEnabled: false,
+    retentionBonusAmount: 0,
+    retentionBonusFrequency: 'annual',
   },
 };
 
@@ -181,8 +278,26 @@ export interface PayrollEarnings {
   conveyance: number;
   medical: number;
   lta: number;
+  food: number;
+  telephone: number;
+  education: number;
+  fuel: number;
+  books: number;
+  uniform: number;
   specialAllowance: number;
   overtime: number;
+}
+
+// Bonus accruals emitted alongside the payslip. These are MONTHLY ACCRUAL
+// figures for CTC accounting (smoothed across the bonus period); the engine
+// does NOT add them to net salary. Real disbursement is a separate run.
+export interface PayrollBonusAccrual {
+  statutory: number;
+  performance: number;
+  festival: number;
+  joining: number;
+  retention: number;
+  total: number;
 }
 
 // Per-component deduction breakdown. Distinct from the legacy 4-slot
@@ -220,6 +335,18 @@ export interface PayrollRecord {
   earnings: PayrollEarnings;
   deductionsDetail: PayrollDeductionsDetail;
   netSalary: number;
+  // Employer-side cost lines (above net). These don't reduce the employee's
+  // take-home — they're surfaced so admins can see true CTC per employee.
+  // Bonus accrual is the smoothed monthly cost of all enabled bonuses;
+  // gratuity is the Payment-of-Gratuity-Act accrual; employer PF is the
+  // company contribution shown separately from the employee deduction.
+  bonusAccrual?: PayrollBonusAccrual;
+  gratuityAccrual?: number;
+  employerPfContribution?: number;
+  employerEsiContribution?: number;
+  // Total employer cost = gross + employer PF + employer ESI + bonus
+  // accruals + gratuity accrual. Useful for budget reports.
+  totalCtcCost?: number;
   status: 'pending' | 'processed';
   month: string;
   designation?: string;
@@ -552,6 +679,7 @@ export async function getPayrollFormulas(organizationId: string): Promise<Payrol
         salaryStructure: { ...DEFAULT_FORMULAS.salaryStructure, ...(m.salaryStructure || {}) },
         statutory: { ...DEFAULT_FORMULAS.statutory, ...(m.statutory || {}) },
         overtime: { ...DEFAULT_FORMULAS.overtime, ...(m.overtime || {}) },
+        bonus: { ...(DEFAULT_FORMULAS.bonus ?? {}), ...(m.bonus || {}) },
       };
     }
   } catch (err) {

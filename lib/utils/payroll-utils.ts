@@ -265,6 +265,13 @@ export interface PayrollComputeResult {
     conveyance: number;
     medical: number;
     lta: number;
+    // New optional allowances. Zero when their `*Enabled` flag is off.
+    food: number;
+    telephone: number;
+    education: number;
+    fuel: number;
+    books: number;
+    uniform: number;
     specialAllowance: number;
     overtime: number;
   };
@@ -280,6 +287,20 @@ export interface PayrollComputeResult {
   totalDeductions: number;
   netSalary: number;
   cappedOtHours: number;
+  // Employer-side cost lines (above-the-line). Populated unconditionally so
+  // callers can reliably read them; zero when the corresponding feature is off.
+  bonusAccrual: {
+    statutory: number;
+    performance: number;
+    festival: number;
+    joining: number;
+    retention: number;
+    total: number;
+  };
+  gratuityAccrual: number;
+  employerPfContribution: number;
+  employerEsiContribution: number;
+  totalCtcCost: number;
 }
 
 export function computePayrollFromInputs(
@@ -297,19 +318,48 @@ export function computePayrollFromInputs(
   const hourlyRate = perDay / STANDARD_HOURS_PER_DAY;
   const proRationFactor = divisor > 0 ? payableDays / divisor : 0;
 
-  // Monthly component split (full-month figures).
+  // Monthly component split (full-month figures). Each optional allowance
+  // is gated by its `*Enabled` flag — disabled rows contribute zero even if
+  // an amount is stored (admins can pre-stage a value then flip it on).
+  // Legacy configs (pre-toggle) come through with flags inferred from the
+  // saved amount, so the engine behavior matches what they had before.
+  const ssAny = ss as any;
+  const isOn = (flag: string, fallback: boolean) =>
+    ssAny[flag] === undefined ? fallback : Boolean(ssAny[flag]);
   const monthlyBasic = (baseSalary * ss.basicPercent) / 100;
   const monthlyHra = (monthlyBasic * ss.hraPercent) / 100;
-  const monthlyDa = (monthlyBasic * ss.daPercent) / 100;
-  const monthlyConv = ss.conveyanceAllowance;
-  const monthlyMed = ss.medicalAllowance;
-  const monthlyLta = ss.ltaMonthly ? ss.lta / 12 : 0;
+  const monthlyDa = isOn('daEnabled', (ss.daPercent ?? 0) > 0)
+    ? (monthlyBasic * ss.daPercent) / 100
+    : 0;
+  const monthlyConv = isOn('conveyanceEnabled', true) ? ss.conveyanceAllowance : 0;
+  const monthlyMed = isOn('medicalEnabled', true) ? ss.medicalAllowance : 0;
+  const monthlyLta = isOn('ltaEnabled', (ss.lta ?? 0) > 0) && ss.ltaMonthly
+    ? ss.lta / 12
+    : 0;
+  // New top-company allowances, all opt-in (default off when the flag is
+  // missing). Amounts read from the same shape but only contribute when
+  // enabled.
+  const monthlyFood = isOn('foodEnabled', false) ? Number(ssAny.foodAllowance ?? 0) : 0;
+  const monthlyPhone = isOn('telephoneEnabled', false)
+    ? Number(ssAny.telephoneAllowance ?? 0)
+    : 0;
+  const monthlyEdu = isOn('educationEnabled', false)
+    ? Number(ssAny.educationAllowance ?? 0)
+    : 0;
+  const monthlyFuel = isOn('fuelEnabled', false) ? Number(ssAny.fuelAllowance ?? 0) : 0;
+  const monthlyBooks = isOn('booksEnabled', false) ? Number(ssAny.booksAllowance ?? 0) : 0;
+  const monthlyUniform = isOn('uniformEnabled', false)
+    ? Number(ssAny.uniformAllowance ?? 0)
+    : 0;
   const monthlyFixedSum =
-    monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta;
+    monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta +
+    monthlyFood + monthlyPhone + monthlyEdu + monthlyFuel + monthlyBooks + monthlyUniform;
+  // Manual special allowance cannot be negative — a sign-error in config
+  // shouldn't silently reduce gross below the sum of fixed components.
   const monthlySpecial =
     ss.specialAllowanceMode === 'auto'
       ? Math.max(0, baseSalary - monthlyFixedSum)
-      : ss.specialAllowanceAmount;
+      : Math.max(0, ss.specialAllowanceAmount);
   const monthlyGross = monthlyFixedSum + monthlySpecial;
 
   // Pro-rated earned components.
@@ -319,6 +369,12 @@ export function computePayrollFromInputs(
   const earnedConv = monthlyConv * proRationFactor;
   const earnedMed = monthlyMed * proRationFactor;
   const earnedLta = monthlyLta * proRationFactor;
+  const earnedFood = monthlyFood * proRationFactor;
+  const earnedPhone = monthlyPhone * proRationFactor;
+  const earnedEdu = monthlyEdu * proRationFactor;
+  const earnedFuel = monthlyFuel * proRationFactor;
+  const earnedBooks = monthlyBooks * proRationFactor;
+  const earnedUniform = monthlyUniform * proRationFactor;
   const earnedSpecial = monthlySpecial * proRationFactor;
 
   // Overtime pay capped at maxOvertimeHoursPerMonth across buckets in
@@ -338,7 +394,9 @@ export function computePayrollFromInputs(
   }
 
   const grossSalary =
-    earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta + earnedSpecial + overtimePay;
+    earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta +
+    earnedFood + earnedPhone + earnedEdu + earnedFuel + earnedBooks + earnedUniform +
+    earnedSpecial + overtimePay;
 
   // Deductions.
   let pf = 0;
@@ -383,6 +441,107 @@ export function computePayrollFromInputs(
   const totalDeductions = pf + tds + esi + pt + lwf + nps;
   const netSalary = Math.max(0, Math.round(grossSalary - totalDeductions));
 
+  // ── Employer-side cost lines ────────────────────────────────────────────
+  // These don't reduce the employee's net — they're surfaced for true CTC
+  // accounting. Each is pro-rated by the same factor used for earnings so a
+  // half-month employee shows half the monthly accrual.
+
+  // Employer PF: 12% of the same PF base used for the employee deduction.
+  // Skipped when PF is disabled at the org level.
+  let employerPf = 0;
+  if (st.pfEnabled) {
+    const pfBase = st.pfCapEnabled ? Math.min(earnedBasic, st.pfCapAmount) : earnedBasic;
+    employerPf = Math.floor((pfBase * (st.employerPfPercent ?? st.pfPercent)) / 100);
+  }
+  // Employer ESI: 3.25% of earned gross when the employee is eligible.
+  let employerEsi = 0;
+  if (st.esiEnabled && monthlyGross <= st.esiThreshold) {
+    employerEsi = Math.floor((grossSalary * st.esiEmployerPercent) / 100);
+  }
+  // Gratuity: 4.81% of (Basic+DA) accrued monthly. Pre-pro-rated via
+  // earnedBasic + earnedDa so part-month employees accrue less.
+  const stAny = st as any;
+  const gratuityEnabled = Boolean(stAny.gratuityEnabled);
+  const gratuityPct = Number(stAny.gratuityPercent ?? 4.81);
+  const gratuityAccrual = gratuityEnabled
+    ? Math.round(((earnedBasic + earnedDa) * gratuityPct) / 100)
+    : 0;
+
+  // ── Bonus accruals ──────────────────────────────────────────────────────
+  // Smoothed monthly cost view. Statutory eligibility is checked on the
+  // FULL-MONTH (Basic+DA) so an employee doesn't lose statutory bonus just
+  // because they had LOP days. Frequency-based bonuses are amortised across
+  // their period so admins see steady-state cost.
+  const bonus = formulas.bonus;
+  const bonusAccrual = {
+    statutory: 0,
+    performance: 0,
+    festival: 0,
+    joining: 0,
+    retention: 0,
+    total: 0,
+  };
+  if (bonus) {
+    if (
+      bonus.statutoryBonusEnabled &&
+      monthlyBasic + monthlyDa <= (bonus.statutoryBonusSalaryCeiling ?? 21000)
+    ) {
+      const base = Math.min(
+        monthlyBasic + monthlyDa,
+        bonus.statutoryBonusCalcCeiling ?? 7000,
+      );
+      // Pro-rate so LOP months accrue less. (You could argue statutory bonus
+      // shouldn't pro-rate on LOP — the Bonus Act is silent on this — but
+      // matching the rest of payroll's pro-ration is the consistent default.)
+      bonusAccrual.statutory = Math.round(
+        base * ((bonus.statutoryBonusPercent ?? 8.33) / 100) * proRationFactor,
+      );
+    }
+    if (bonus.performanceBonusEnabled) {
+      const annual = baseSalary * 12 * ((bonus.performanceBonusPercent ?? 0) / 100);
+      bonusAccrual.performance = Math.round((annual / 12) * proRationFactor);
+    }
+    if (bonus.festivalBonusEnabled) {
+      // Annualised so the CTC view shows steady-state cost. The actual
+      // disbursement happens in the festival month (handled outside this
+      // calculator).
+      bonusAccrual.festival = Math.round(
+        ((bonus.festivalBonusAmount ?? 0) / 12) * proRationFactor,
+      );
+    }
+    if (bonus.joiningBonusEnabled && (bonus.joiningBonusClawbackMonths ?? 0) > 0) {
+      // Amortise the joining bonus over the clawback period — that's the
+      // honest monthly cost until the clawback expires.
+      bonusAccrual.joining = Math.round(
+        ((bonus.joiningBonusAmount ?? 0) / (bonus.joiningBonusClawbackMonths ?? 12)) *
+          proRationFactor,
+      );
+    }
+    if (bonus.retentionBonusEnabled) {
+      const months =
+        bonus.retentionBonusFrequency === 'half-yearly'
+          ? 6
+          : bonus.retentionBonusFrequency === 'annual'
+            ? 12
+            : 24; // one-time: smoothed over 2 years for CTC math
+      bonusAccrual.retention = Math.round(
+        ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
+      );
+    }
+    bonusAccrual.total =
+      bonusAccrual.statutory +
+      bonusAccrual.performance +
+      bonusAccrual.festival +
+      bonusAccrual.joining +
+      bonusAccrual.retention;
+  }
+
+  // True monthly employer cost. The component groupings mirror what HR /
+  // finance use in CTC letters.
+  const totalCtcCost = Math.round(
+    grossSalary + employerPf + employerEsi + gratuityAccrual + bonusAccrual.total,
+  );
+
   return {
     perDay,
     hourlyRate,
@@ -395,6 +554,12 @@ export function computePayrollFromInputs(
       conveyance: Math.round(earnedConv),
       medical: Math.round(earnedMed),
       lta: Math.round(earnedLta),
+      food: Math.round(earnedFood),
+      telephone: Math.round(earnedPhone),
+      education: Math.round(earnedEdu),
+      fuel: Math.round(earnedFuel),
+      books: Math.round(earnedBooks),
+      uniform: Math.round(earnedUniform),
       specialAllowance: Math.round(earnedSpecial),
       overtime: Math.round(overtimePay),
     },
@@ -403,6 +568,11 @@ export function computePayrollFromInputs(
     totalDeductions,
     netSalary,
     cappedOtHours: Math.round(cappedOtHours * 10) / 10,
+    bonusAccrual,
+    gratuityAccrual,
+    employerPfContribution: employerPf,
+    employerEsiContribution: employerEsi,
+    totalCtcCost,
   };
 }
 
@@ -673,7 +843,11 @@ function calculateForEmployee(
     formulas,
   );
 
-  const { earnings, deductionsDetail, grossSalary, netSalary, hourlyRate, cappedOtHours } = result;
+  const {
+    earnings, deductionsDetail, grossSalary, netSalary, hourlyRate, cappedOtHours,
+    bonusAccrual, gratuityAccrual, employerPfContribution, employerEsiContribution,
+    totalCtcCost,
+  } = result;
   // Map labelled deductions onto the legacy 4-slot shape so older UI surfaces
   // (and the saved DB column) keep working without a schema change.
   const insurance = deductionsDetail.esi;
@@ -694,6 +868,11 @@ function calculateForEmployee(
     earnings,
     deductionsDetail,
     netSalary,
+    bonusAccrual,
+    gratuityAccrual,
+    employerPfContribution,
+    employerEsiContribution,
+    totalCtcCost,
     status: breakdown.payableDays > 0 ? 'processed' : 'pending',
     month,
     designation: employee.designation,

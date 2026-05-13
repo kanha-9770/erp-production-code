@@ -7,12 +7,16 @@ import {
   SalaryStructureSection,
   StatutoryComplianceSection,
   OvertimePolicySection,
+  BonusSection,
+  LiveSalaryPreview,
   DEFAULT_SALARY_STRUCTURE,
   DEFAULT_STATUTORY,
   DEFAULT_OVERTIME,
+  DEFAULT_BONUS,
   type SalaryStructureConfig,
   type StatutoryConfig,
   type OvertimeConfig,
+  type BonusConfig,
 } from '@/components/payroll/payroll-enterprise-config';
 import PageBackLink from '@/components/shared/page-back-link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -121,6 +125,7 @@ interface Setup {
   salaryStructure: SalaryStructureConfig;
   statutory: StatutoryConfig;
   overtime: OvertimeConfig;
+  bonus: BonusConfig;
   policy: {
     weeklyOffDays: number[];
     payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
@@ -161,6 +166,7 @@ const EMPTY_SETUP: Setup = {
   salaryStructure: { ...DEFAULT_SALARY_STRUCTURE },
   statutory: { ...DEFAULT_STATUTORY },
   overtime: { ...DEFAULT_OVERTIME },
+  bonus: { ...DEFAULT_BONUS },
   policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
 
@@ -1210,11 +1216,17 @@ export default function PayrollConfigurePage() {
                 onChange={(c) => setSetup((p) => ({ ...p, salaryStructure: c }))}
                 defaultCTC={setup.defaultBaseSalary}
                 statutory={setup.statutory}
+                bonus={setup.bonus}
               />
 
               <StatutoryComplianceSection
                 config={setup.statutory}
                 onChange={(c) => setSetup((p) => ({ ...p, statutory: c }))}
+              />
+
+              <BonusSection
+                config={setup.bonus}
+                onChange={(c) => setSetup((p) => ({ ...p, bonus: c }))}
               />
 
               <OvertimePolicySection
@@ -1294,6 +1306,20 @@ export default function PayrollConfigurePage() {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+
+            {/*
+             * Live preview pinned at the bottom of the Rules tab so the
+             * breakdown is always visible while the admin edits any section
+             * above (salary, statutory, bonus, overtime, working days).
+             * Owns its own Preview-CTC state so a stress-test value doesn't
+             * affect the saved config.
+             */}
+            <LiveSalaryPreview
+              salary={setup.salaryStructure}
+              statutory={setup.statutory}
+              bonus={setup.bonus}
+              defaultCTC={setup.defaultBaseSalary}
+            />
           </TabsContent>
         </Tabs>
 

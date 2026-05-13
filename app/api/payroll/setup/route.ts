@@ -67,13 +67,32 @@ export interface PayrollSetup {
   salaryStructure?: {
     basicPercent: number;
     hraPercent: number;
+    // All optional — preserves backwards compatibility with v2 configs
+    // saved before the SIM/bonus/allowance expansion landed. extractSetup
+    // merges with the EMPTY_SETUP defaults below.
+    daEnabled?: boolean;
     daPercent: number;
     specialAllowanceMode: 'auto' | 'manual';
     specialAllowanceAmount: number;
+    conveyanceEnabled?: boolean;
     conveyanceAllowance: number;
+    medicalEnabled?: boolean;
     medicalAllowance: number;
+    ltaEnabled?: boolean;
     lta: number;
     ltaMonthly: boolean;
+    foodEnabled?: boolean;
+    foodAllowance?: number;
+    telephoneEnabled?: boolean;
+    telephoneAllowance?: number;
+    educationEnabled?: boolean;
+    educationAllowance?: number;
+    fuelEnabled?: boolean;
+    fuelAllowance?: number;
+    booksEnabled?: boolean;
+    booksAllowance?: number;
+    uniformEnabled?: boolean;
+    uniformAllowance?: number;
   };
   statutory?: {
     pfEnabled: boolean;
@@ -97,6 +116,8 @@ export interface PayrollSetup {
     lwfAmount: number;
     npsEnabled: boolean;
     npsEmployeePercent: number;
+    gratuityEnabled?: boolean;
+    gratuityPercent?: number;
   };
   overtime?: {
     enabled: boolean;
@@ -105,6 +126,25 @@ export interface PayrollSetup {
     weekendMultiplier: number;
     holidayMultiplier: number;
     maxOvertimeHoursPerMonth: number;
+  };
+  // Bonus block — all sub-fields optional so a v2 record that predates the
+  // bonus rollout loads cleanly through the EMPTY_SETUP merge in extractSetup.
+  bonus?: {
+    statutoryBonusEnabled?: boolean;
+    statutoryBonusPercent?: number;
+    statutoryBonusSalaryCeiling?: number;
+    statutoryBonusCalcCeiling?: number;
+    performanceBonusEnabled?: boolean;
+    performanceBonusPercent?: number;
+    performanceBonusFrequency?: 'annual' | 'half-yearly' | 'quarterly';
+    festivalBonusEnabled?: boolean;
+    festivalBonusAmount?: number;
+    joiningBonusEnabled?: boolean;
+    joiningBonusAmount?: number;
+    joiningBonusClawbackMonths?: number;
+    retentionBonusEnabled?: boolean;
+    retentionBonusAmount?: number;
+    retentionBonusFrequency?: 'annual' | 'half-yearly' | 'one-time';
   };
   policy: {
     weeklyOffDays: number[];
@@ -144,10 +184,18 @@ const EMPTY_SETUP: PayrollSetup = {
   },
   holiday: { formId: null, fields: { date: null, name: null } },
   salaryStructure: {
-    basicPercent: 50, hraPercent: 50, daPercent: 0,
+    basicPercent: 50, hraPercent: 50,
+    daEnabled: false, daPercent: 0,
     specialAllowanceMode: 'auto', specialAllowanceAmount: 0,
-    conveyanceAllowance: 1600, medicalAllowance: 1250,
-    lta: 0, ltaMonthly: true,
+    conveyanceEnabled: true, conveyanceAllowance: 1600,
+    medicalEnabled: true, medicalAllowance: 1250,
+    ltaEnabled: false, lta: 0, ltaMonthly: true,
+    foodEnabled: false, foodAllowance: 2200,
+    telephoneEnabled: false, telephoneAllowance: 1500,
+    educationEnabled: false, educationAllowance: 200,
+    fuelEnabled: false, fuelAllowance: 0,
+    booksEnabled: false, booksAllowance: 0,
+    uniformEnabled: false, uniformAllowance: 0,
   },
   statutory: {
     pfEnabled: true, pfPercent: 12, pfCapEnabled: true, pfCapAmount: 15000,
@@ -157,10 +205,28 @@ const EMPTY_SETUP: PayrollSetup = {
     tdsEnabled: true, tdsMode: 'flat', tdsFlatPercent: 5,
     taxRegime: 'new', lwfEnabled: false, lwfAmount: 25,
     npsEnabled: false, npsEmployeePercent: 10,
+    gratuityEnabled: false, gratuityPercent: 4.81,
   },
   overtime: {
     enabled: false, rateMultiplier: 1.5, weekdayThresholdHours: 8,
     weekendMultiplier: 2, holidayMultiplier: 2, maxOvertimeHoursPerMonth: 50,
+  },
+  bonus: {
+    statutoryBonusEnabled: false,
+    statutoryBonusPercent: 8.33,
+    statutoryBonusSalaryCeiling: 21000,
+    statutoryBonusCalcCeiling: 7000,
+    performanceBonusEnabled: false,
+    performanceBonusPercent: 10,
+    performanceBonusFrequency: 'annual',
+    festivalBonusEnabled: false,
+    festivalBonusAmount: 0,
+    joiningBonusEnabled: false,
+    joiningBonusAmount: 0,
+    joiningBonusClawbackMonths: 12,
+    retentionBonusEnabled: false,
+    retentionBonusAmount: 0,
+    retentionBonusFrequency: 'annual',
   },
   policy: { weeklyOffDays: [0], payableBasis: 'monthDays' },
 };
@@ -201,13 +267,41 @@ function extractSetup(mappings: any): PayrollSetup {
         formId: mappings.holiday?.formId ?? null,
         fields: { ...EMPTY_SETUP.holiday.fields, ...(mappings.holiday?.fields || {}) },
       },
-      salaryStructure: { ...EMPTY_SETUP.salaryStructure!, ...(mappings.salaryStructure || {}) },
+      salaryStructure: migrateSalaryStructure(mappings.salaryStructure),
       statutory: { ...EMPTY_SETUP.statutory!, ...(mappings.statutory || {}) },
       overtime: { ...EMPTY_SETUP.overtime!, ...(mappings.overtime || {}) },
+      bonus: { ...EMPTY_SETUP.bonus!, ...(mappings.bonus || {}) },
       policy: { weeklyOffDays, payableBasis },
     };
   }
   return EMPTY_SETUP;
+}
+
+// Legacy configs predate per-allowance enable toggles. For each component
+// that used to be unconditionally paid, infer the new `*Enabled` flag from
+// the legacy amount so a freshly-migrated config keeps paying what it used
+// to. Once the admin saves once, the flags are explicit and this inference
+// becomes a no-op.
+function migrateSalaryStructure(raw: any) {
+  const merged: any = {
+    ...EMPTY_SETUP.salaryStructure!,
+    ...(raw || {}),
+  };
+  if (raw && typeof raw === 'object') {
+    const inferEnabled = (legacyKey: string, sourceValue: number) =>
+      raw[legacyKey] === undefined ? sourceValue > 0 : Boolean(raw[legacyKey]);
+    merged.daEnabled = inferEnabled('daEnabled', Number(merged.daPercent ?? 0));
+    merged.conveyanceEnabled = inferEnabled(
+      'conveyanceEnabled',
+      Number(merged.conveyanceAllowance ?? 0),
+    );
+    merged.medicalEnabled = inferEnabled(
+      'medicalEnabled',
+      Number(merged.medicalAllowance ?? 0),
+    );
+    merged.ltaEnabled = inferEnabled('ltaEnabled', Number(merged.lta ?? 0));
+  }
+  return merged;
 }
 
 export async function GET(request: NextRequest) {
