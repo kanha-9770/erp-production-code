@@ -462,7 +462,12 @@ export const UserManagementHandlers = {
               data: {
                 email: placeholderEmail,
                 organizationId: authUser.organizationId,
-                status: "PENDING",
+                // Admin-created users skip the email-verification flow —
+                // the login route rejects sign-in with "Please verify your
+                // email first" otherwise. ACTIVE + email_verified:true is
+                // the same combo used by /api/create-user-from-employee.
+                status: "ACTIVE",
+                email_verified: true,
                 first_name: firstName,
                 last_name: lastName,
               },
@@ -481,7 +486,12 @@ export const UserManagementHandlers = {
             data: {
               email,
               organizationId: authUser.organizationId,
-              status: "PENDING",
+              // Admin-created users skip the email-verification flow —
+              // the login route rejects sign-in with "Please verify your
+              // email first" otherwise. ACTIVE + email_verified:true is
+              // the same combo used by /api/create-user-from-employee.
+              status: "ACTIVE",
+              email_verified: true,
               first_name: firstName,
               last_name: lastName,
             },
