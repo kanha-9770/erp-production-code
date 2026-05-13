@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,17 +21,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2 } from "lucide-react";
+import { Loader2, Settings2 } from "lucide-react";
 import type { EmployeeDetail } from "@/lib/api/employees";
+import { useToast } from "@/hooks/use-toast";
 
-// Drop the employee form's builder ID here when you have it; the
-// "Customize form" button below targets /builder/<this-id>. Leave empty to
-// fall back to the form list so a user can still get to the builder.
-const EMPLOYEE_BUILDER_FORM_ID = "";
-
-const customizeHref = EMPLOYEE_BUILDER_FORM_ID
-  ? `/builder/${EMPLOYEE_BUILDER_FORM_ID}`
-  : "/forms";
+/**
+ * Resolve the org's Employee form id, seeding one if it doesn't exist yet.
+ * The /api/forms/ensure-employee-form endpoint is idempotent — calling it
+ * twice still returns the same form. We hit it lazily (on Customize click)
+ * rather than on mount so a user who never customizes incurs zero cost.
+ */
+async function ensureEmployeeBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-employee-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 export interface EmployeeFormValues {
   employeeName: string;
@@ -236,14 +247,38 @@ export function EmployeeForm({
   submitting,
   submitLabel,
 }: EmployeeFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
   const [values, setValues] = useState<EmployeeFormValues>(() =>
     initial ? fromEmployee(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
+  const [openingBuilder, setOpeningBuilder] = useState(false);
 
   useEffect(() => {
     if (initial) setValues(fromEmployee(initial));
   }, [initial]);
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureEmployeeBuilderHref();
+      if (created) {
+        toast({
+          title: "Employee form created",
+          description: "Add or rearrange fields here — they'll appear in the employee form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
 
   const set = <K extends keyof EmployeeFormValues>(
     k: K,
@@ -611,11 +646,21 @@ export function EmployeeForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (
