@@ -5,9 +5,9 @@
  * /job-opening (and the future edit page).
  *
  * Live job postings are usually spawned from a StaffingPlan — when one is
- * picked the static fields (profile, company, department, designation, type,
- * vacancies) auto-fill from the plan but stay editable so HR can override
- * anything before publishing.
+ * picked the static fields (profile, department, designation, type,
+ * vacancies, salary) auto-fill from the plan but stay editable so HR can
+ * override anything before publishing.
  */
 
 import { useEffect, useState } from "react";
@@ -52,7 +52,6 @@ export const STATUS_OPTIONS: Array<{
 export interface JobOpeningFormValues {
   staffingPlanId: string;
   profileName: string;
-  company: string;
   department: string;
   designation: string;
   employmentType: EmploymentType;
@@ -66,7 +65,6 @@ export interface JobOpeningFormValues {
 const EMPTY: JobOpeningFormValues = {
   staffingPlanId: "",
   profileName: "",
-  company: "",
   department: "",
   designation: "",
   employmentType: "FULL_TIME",
@@ -81,7 +79,6 @@ export function fromOpening(o: JobOpening): JobOpeningFormValues {
   return {
     staffingPlanId: o.staffingPlanId ?? "",
     profileName: o.profileName ?? "",
-    company: o.company ?? "",
     department: o.department ?? "",
     designation: o.designation ?? "",
     employmentType: (o.employmentType ?? "FULL_TIME") as EmploymentType,
@@ -97,7 +94,6 @@ export function toApiPayload(v: JobOpeningFormValues): Record<string, any> {
   return {
     staffingPlanId: v.staffingPlanId || null,
     profileName: v.profileName.trim(),
-    company: v.company.trim(),
     department: v.department.trim(),
     designation: v.designation.trim(),
     employmentType: v.employmentType,
@@ -107,6 +103,15 @@ export function toApiPayload(v: JobOpeningFormValues): Record<string, any> {
     salaryApprox: v.salaryApprox.trim() || null,
     jobDescription: v.jobDescription.trim(),
   };
+}
+
+function formatTotalCostAsSalary(
+  total: string | number | null | undefined,
+): string {
+  if (total === null || total === undefined || total === "") return "";
+  const n = typeof total === "string" ? parseFloat(total) : Number(total);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `₹${new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n)}`;
 }
 
 export interface JobOpeningFormProps {
@@ -157,6 +162,7 @@ export function JobOpeningForm({
       set("staffingPlanId", planId);
       return;
     }
+    const salaryFromPlan = formatTotalCostAsSalary(plan.totalEstimatedCost);
     setValues((prev) => ({
       ...prev,
       staffingPlanId: plan.id,
@@ -165,6 +171,7 @@ export function JobOpeningForm({
       designation: plan.designation,
       employmentType: plan.employmentType,
       vacancies: String(plan.vacancies ?? 1),
+      salaryApprox: salaryFromPlan || prev.salaryApprox,
     }));
   };
 
@@ -172,7 +179,6 @@ export function JobOpeningForm({
     e.preventDefault();
     setError(null);
     if (!values.profileName.trim()) return setError("Profile Name is required");
-    if (!values.company.trim()) return setError("Company is required");
     if (!values.department.trim()) return setError("Department is required");
     if (!values.designation.trim()) return setError("Designation is required");
     if (!values.jobDescription.trim())
@@ -254,12 +260,6 @@ export function JobOpeningForm({
             />
           </Field>
 
-          <Field label="Company *">
-            <Input
-              value={values.company}
-              onChange={(e) => set("company", e.target.value)}
-            />
-          </Field>
           <Field label="No. of Vacancies *">
             <Input
               type="number"

@@ -95,7 +95,6 @@ function sanitize(body: Record<string, any>, opts: { partial?: boolean } = {}) {
   };
 
   strRequired("profileName");
-  strRequired("company");
   strRequired("department");
   strRequired("designation");
   strRequired("jobDescription");

@@ -8,7 +8,6 @@
  * and a row preview drawer. "+ New opening" opens an in-page Sheet.
  */
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   useGetJobOpeningsQuery,
@@ -41,10 +40,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Pencil,
   Trash2,
-  Building2,
   Layers,
   Users as UsersIcon,
   Calendar,
@@ -140,6 +137,7 @@ export default function JobOpeningListPage() {
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [createOpening, { isLoading: creating }] = useCreateJobOpeningMutation();
 
   const views = useSavedViews<Filters>("job-openings");
@@ -193,7 +191,6 @@ export default function JobOpeningListPage() {
       if (!q) return true;
       return (
         o.profileName?.toLowerCase().includes(q) ||
-        o.company?.toLowerCase().includes(q) ||
         o.department?.toLowerCase().includes(q) ||
         o.designation?.toLowerCase().includes(q) ||
         (o.jobCode ?? "").toLowerCase().includes(q) ||
@@ -331,14 +328,6 @@ export default function JobOpeningListPage() {
         ),
       },
       {
-        id: "company",
-        header: "Company",
-        width: 160,
-        sortKey: "company",
-        copyValue: (o) => o.company,
-        cell: (o) => <span className="truncate text-sm">{o.company}</span>,
-      },
-      {
         id: "department",
         header: "Department",
         width: 150,
@@ -446,7 +435,7 @@ export default function JobOpeningListPage() {
               <div className="relative">
                 <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search profile, designation, company…"
+                  placeholder="Search profile, designation…"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -604,6 +593,7 @@ export default function JobOpeningListPage() {
           selectedId ? (
             <PreviewHeader
               id={selectedId}
+              onEdit={() => setEditId(selectedId)}
               onDeleted={() => setSelectedId(null)}
             />
           ) : null
@@ -648,15 +638,90 @@ export default function JobOpeningListPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <Sheet open={!!editId} onOpenChange={(o) => !o && setEditId(null)}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-2xl overflow-y-auto p-0"
+        >
+          <SheetHeader className="px-5 sm:px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle>Edit job opening</SheetTitle>
+            <SheetDescription>
+              Update the role, description and publication settings.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-5 sm:px-6 py-5">
+            {editId && (
+              <EditOpeningForm
+                id={editId}
+                staffingPlans={plans}
+                onDone={() => setEditId(null)}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </>
+  );
+}
+
+function EditOpeningForm({
+  id,
+  staffingPlans,
+  onDone,
+}: {
+  id: string;
+  staffingPlans: any[];
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const { data, isLoading } = useGetJobOpeningQuery(id);
+  const [updateOpening, { isLoading: saving }] = useUpdateJobOpeningMutation();
+
+  if (isLoading || !data?.opening) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <JobOpeningForm
+      initial={data.opening}
+      submitLabel="Save changes"
+      submitting={saving}
+      staffingPlans={staffingPlans}
+      onCancel={onDone}
+      onSubmit={async (payload) => {
+        try {
+          await updateOpening({ id, body: payload }).unwrap();
+          toast({ title: "Job opening updated" });
+          onDone();
+        } catch (e: any) {
+          toast({
+            title: "Could not save changes",
+            description:
+              e?.data?.error ||
+              e?.message ||
+              "Server rejected the request",
+            variant: "destructive",
+          });
+        }
+      }}
+    />
   );
 }
 
 function PreviewHeader({
   id,
+  onEdit,
   onDeleted,
 }: {
   id: string;
+  onEdit: () => void;
   onDeleted: () => void;
 }) {
   const { toast } = useToast();
@@ -701,15 +766,14 @@ function PreviewHeader({
           Public
         </Badge>
       )}
-      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
-        <Link href={`/job-opening/${o.id}`} title="Open full page">
-          <ExternalLink className="h-3.5 w-3.5" />
-        </Link>
-      </Button>
-      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0">
-        <Link href={`/job-opening/${o.id}/edit`} title="Edit">
-          <Pencil className="h-3.5 w-3.5" />
-        </Link>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0 ml-auto"
+        title="Edit"
+        onClick={onEdit}
+      >
+        <Pencil className="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="ghost"
@@ -773,7 +837,6 @@ function OpeningPreview({ id }: { id: string }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm">
-        <Fact icon={Building2} label="Company" value={o.company} />
         <Fact icon={Layers} label="Department" value={o.department} />
         <Fact icon={UsersIcon} label="Vacancies" value={String(o.vacancies)} />
         <Fact label="Salary approx" value={o.salaryApprox ?? "—"} />

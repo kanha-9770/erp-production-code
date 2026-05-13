@@ -4,29 +4,37 @@ import { uploadToHostinger } from "@/lib/hostinger-upload"
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
-    const image = formData.get("image") as File
-    const type = formData.get("type") as string
+    // Accept either field name — older callers (image/camera widgets) use
+    // "image", newer ones (resume, document uploaders) use "file".
+    const upload = (formData.get("file") || formData.get("image")) as File | null
+    const type = (formData.get("type") as string) || "upload"
 
-    if (!image) {
-      return NextResponse.json({ success: false, error: "No image provided" }, { status: 400 })
+    if (!upload) {
+      return NextResponse.json(
+        { success: false, error: "No file provided" },
+        { status: 400 },
+      )
     }
-    const arrayBuffer = await image.arrayBuffer()
+    const arrayBuffer = await upload.arrayBuffer()
     if (arrayBuffer.byteLength === 0) {
       console.error("[API] Empty array buffer")
-      return NextResponse.json({ success: false, error: "Empty image data" }, { status: 400 })
+      return NextResponse.json(
+        { success: false, error: "Empty file data" },
+        { status: 400 },
+      )
     }
 
     const buffer = Buffer.from(arrayBuffer)
-    const filename = `${type}_${Date.now()}_${image.name}`
+    const filename = `${type}_${Date.now()}_${upload.name}`
     const imageUrl = await uploadToHostinger(buffer, filename)
 
-    return NextResponse.json({ imageUrl })
+    return NextResponse.json({ success: true, imageUrl })
   } catch (error) {
     console.error("[API] Upload error:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Failed to upload image",
+        error: "Failed to upload file",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
