@@ -45,6 +45,7 @@ export type StaticPageGroup =
   | 'Leave Management'
   | 'Payroll'
   | 'HR & Employees'
+  | 'Employee Engagement'
   | 'Performance'
   | 'Real Estate'
   | 'Inventory'
@@ -184,6 +185,50 @@ export const STATIC_PAGES: StaticPage[] = [
     group: 'HR & Employees',
     description: 'Candidate referrals submitted by existing employees',
     icon: 'user-plus',
+  },
+
+  // ── Employee Engagement ───────────────────────────────────────────────
+  {
+    path: '/employee-engagement',
+    label: 'Employee Engagement',
+    group: 'Employee Engagement',
+    description: 'Module home — engagement dashboard and quick links',
+    icon: 'users',
+  },
+  {
+    path: '/employee-engagement/self-target',
+    label: 'Self Target',
+    group: 'Employee Engagement',
+    description: 'Set and track personal performance targets',
+    icon: 'target',
+  },
+  {
+    path: '/employee-engagement/self-initiative',
+    label: 'Self Initiative',
+    group: 'Employee Engagement',
+    description: 'Document and manage self-initiated improvement projects',
+    icon: 'lightbulb',
+  },
+  {
+    path: '/employee-engagement/problem-registration',
+    label: 'Problem Registration',
+    group: 'Employee Engagement',
+    description: 'Register and track workplace problems for resolution',
+    icon: 'alert-circle',
+  },
+  {
+    path: '/employee-engagement/kaizen',
+    label: 'Kaizen',
+    group: 'Employee Engagement',
+    description: 'Continuous improvement suggestions and implementation',
+    icon: 'trending-up',
+  },
+  {
+    path: '/employee-engagement/employee-suggestion',
+    label: 'Employee Suggestion',
+    group: 'Employee Engagement',
+    description: 'Submit and track employee suggestions for improvement',
+    icon: 'message-square',
   },
 
   // ── Performance ────────────────────────────────────────────────────────
@@ -568,6 +613,7 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Leave Management',
   'Payroll',
   'HR & Employees',
+  'Employee Engagement',
   'Performance',
   'Real Estate',
   'Asset & Admin',
