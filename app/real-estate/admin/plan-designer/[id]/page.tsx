@@ -868,6 +868,7 @@ export default function PlanEditorPage() {
                     <GuaranteeEditor
                       guarantees={state.guarantees}
                       designationCodes={designationCodes}
+                      planId={id}
                       onChange={(guarantees) =>
                         setState((s) =>
                           s ? { ...s, guarantees } : s,
