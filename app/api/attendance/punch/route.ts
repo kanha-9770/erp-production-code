@@ -16,6 +16,14 @@ interface PunchBody {
   source?: string;
   idempotencyKey?: string;
   photoUrl?: string | null;
+  // Optional face-match score recorded by /api/attendance/photo. Lower is
+  // a better match. The punch service stores this on the Attendance row
+  // so admins can audit verification confidence per punch.
+  faceMatch?: number | null;
+  // Liveness check outcome from the capture sequence. True = motion
+  // detected (real face), false = static (rejected), null = check not
+  // run. Persisted on the Attendance row for audit / reporting.
+  livenessPassed?: boolean | null;
 }
 
 function parseGeo(raw: PunchBody['geo']): { lat: number; lng: number } | null {
@@ -84,6 +92,17 @@ export async function POST(request: NextRequest) {
       ? body.photoUrl
       : null;
 
+  // Accept finite numeric faceMatch only — anything else is treated as
+  // "no verification ran" (consistent with how the photo route returns
+  // null when verification is OFF).
+  const faceMatch =
+    typeof body.faceMatch === 'number' && Number.isFinite(body.faceMatch)
+      ? body.faceMatch
+      : null;
+
+  const livenessPassed =
+    typeof body.livenessPassed === 'boolean' ? body.livenessPassed : null;
+
   try {
     const { status, deduplicated } = await recordPunch({
       userId: authUser.id,
@@ -95,6 +114,8 @@ export async function POST(request: NextRequest) {
       source: parseSource(body.source),
       idempotencyKey,
       photoUrl,
+      faceMatch,
+      livenessPassed,
     });
 
     // The punch changed the day's attendance row, which means the cached

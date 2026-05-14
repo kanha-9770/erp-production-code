@@ -56,6 +56,15 @@ export interface PunchInput {
   // Public URL of the captured face photo, if any. Required-mode rejects
   // when missing; optional-mode passes it through; off-mode ignores.
   photoUrl?: string | null;
+  // Euclidean distance between the captured selfie and the user's stored
+  // face enrollment, computed by /api/attendance/photo. Lower is better.
+  // null when face verification didn't run (mode OFF, user not enrolled,
+  // or no descriptor sent by the client).
+  faceMatch?: number | null;
+  // Anti-spoofing motion check result. True = real face (motion seen),
+  // false = static (would have been rejected upstream unless WARN), null
+  // = not checked. Persisted for audit even when not enforced.
+  livenessPassed?: boolean | null;
 }
 
 export interface AttendanceStatus {
@@ -90,6 +99,17 @@ export interface AttendanceStatus {
   faceCapture: {
     mode: 'OFF' | 'OPTIONAL' | 'REQUIRED';
     maxKb: number;
+  };
+  faceVerify: {
+    mode: 'OFF' | 'WARN' | 'ENFORCE';
+    threshold: number;
+    // Whether the current user has a FaceEnrollment row. Drives a banner
+    // in the widget so users see "enroll first" *before* spending time
+    // on the camera flow when ENFORCE mode is on.
+    enrolled: boolean;
+  };
+  faceLiveness: {
+    mode: 'OFF' | 'PERMISSIVE' | 'STRICT';
   };
   geofence: {
     mode: GeofenceMode;
@@ -458,6 +478,22 @@ export async function getStatus(
       mode: cfg.faceCaptureMode,
       maxKb: cfg.facePhotoMaxKb,
     },
+    faceVerify: {
+      mode: cfg.faceVerifyMode,
+      threshold: cfg.faceMatchThreshold,
+      // Only run the lookup when verification might actually need it —
+      // saves a query in OFF mode (the common default).
+      enrolled:
+        cfg.faceVerifyMode === 'OFF'
+          ? false
+          : !!(await (prisma as any).faceEnrollment.findUnique({
+              where: { userId },
+              select: { id: true },
+            })),
+    },
+    faceLiveness: {
+      mode: cfg.faceLivenessMode,
+    },
     geofence: {
       mode: cfg.geofenceMode,
       lat: cfg.geofenceLat,
@@ -822,6 +858,14 @@ export async function recordPunch(
     const graceEnd = new Date(expectedIn.getTime() + cfg.graceMinutes * 60_000);
     const lateMinutes = Math.max(0, diffMinutes(now, graceEnd));
 
+    // Annotate the source with FACE_VERIFIED when a real match score
+    // came back. Keeps the existing source values intact ('WEB' etc.)
+    // and lets audit / reporting filter on `LIKE 'WEB+FACE_VERIFIED%'`.
+    const inSource =
+      typeof input.faceMatch === 'number'
+        ? `${source}+FACE_VERIFIED`
+        : source;
+
     const punchData = {
       checkedIn: true,
       checkInAt: now,
@@ -831,8 +875,10 @@ export async function recordPunch(
       checkInIp: input.ip ?? null,
       ipAddress: input.ip ?? null, // legacy column kept in sync
       checkInDevice: input.userAgent ?? null,
-      checkInSource: source,
+      checkInSource: inSource,
       checkInPhoto: input.photoUrl ?? null,
+      checkInFaceMatch: input.faceMatch ?? null,
+      checkInLivenessPassed: input.livenessPassed ?? null,
       lateMinutes,
       organizationId: input.organizationId ?? null,
       idempotencyKey: input.idempotencyKey ?? null,
@@ -924,6 +970,11 @@ export async function recordPunch(
       overtimeMinutes = Math.max(0, workedMinutes - overtimeThreshold);
     }
 
+    const outSource =
+      typeof input.faceMatch === 'number'
+        ? `${source}+FACE_VERIFIED`
+        : source;
+
     // Conditional update — only if still checked-in-not-out. Catches the
     // race where two checkout requests land at the same instant.
     const result = await prisma.attendance.updateMany({
@@ -936,8 +987,10 @@ export async function recordPunch(
         checkOutLng: input.geo?.lng ?? null,
         checkOutIp: input.ip ?? null,
         checkOutDevice: input.userAgent ?? null,
-        checkOutSource: source,
+        checkOutSource: outSource,
         checkOutPhoto: input.photoUrl ?? null,
+        checkOutFaceMatch: input.faceMatch ?? null,
+        checkOutLivenessPassed: input.livenessPassed ?? null,
         earlyOutMinutes,
         overtimeMinutes,
         idempotencyKey: input.idempotencyKey ?? null,

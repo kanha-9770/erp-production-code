@@ -11,11 +11,7 @@
  * Backed by /api/employees (GET/POST) and /api/employees/[id] (GET/PUT/DELETE).
  */
 
-<<<<<<< HEAD
-import { useMemo, useState } from "react";
-=======
 import { useState } from "react";
->>>>>>> f4dc3c5d72d52d953b0dcb8bdae8aa7e4df6523e
 import {
   useGetEmployeeListQuery,
   useGetEmployeeQuery,
@@ -32,41 +28,15 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { EmployeeForm } from "@/components/employee/employee-form";
+import {
+  EmployeeForm,
+  type EmployeeFormExtras,
+} from "@/components/employee/employee-form";
+import { descriptorToBase64 } from "@/lib/face/descriptor";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-<<<<<<< HEAD
-import { Card } from "@/components/ui/card";
-import {
-  Users,
-  Plus,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  Pencil,
-  Trash2,
-  Mail,
-  Phone,
-  Calendar,
-  Briefcase,
-  IndianRupee,
-  Building2,
-} from "lucide-react";
-import {
-  WorkspaceShell,
-  WorkspaceHeader,
-  DataTable,
-  type ColumnDef,
-  FilterChips,
-  ActiveFilterPills,
-  ViewsBar,
-  useSavedViews,
-  InlineEditCell,
-} from "@/components/real-estate/workspace";
-=======
 import { Plus, Users } from "lucide-react";
->>>>>>> f4dc3c5d72d52d953b0dcb8bdae8aa7e4df6523e
 import { useToast } from "@/hooks/use-toast";
 import {
   EmployeeMasterTable,
@@ -275,39 +245,6 @@ const COLUMNS: EMColumn<EmployeeListItem>[] = [
 
 export default function EmployeeMasterListPage() {
   const { toast } = useToast();
-<<<<<<< HEAD
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [searchInput, setSearchInput] = useState("");
-  const [page, setPage] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [createEmployee, { isLoading: creating }] = useCreateEmployeeMutation();
-
-  const views = useSavedViews<Filters>("employees");
-
-  const onSelectView = (id: string | null) => {
-    views.select(id);
-    if (id == null) {
-      setFilters(EMPTY_FILTERS);
-      setSearchInput("");
-    } else {
-      const v = views.views.find((x) => x.id === id);
-      if (v) {
-        setFilters(v.filters);
-        setSearchInput(v.filters.search);
-      }
-    }
-    setPage(0);
-  };
-
-  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
-    setFilters((f) => ({ ...f, [key]: value }));
-    setPage(0);
-  };
-
-=======
->>>>>>> f4dc3c5d72d52d953b0dcb8bdae8aa7e4df6523e
   const { data, isLoading, isFetching } = useGetEmployeeListQuery();
   const employees = data?.employees ?? [];
 
@@ -382,10 +319,56 @@ export default function EmployeeMasterListPage() {
               submitLabel="Create employee"
               submitting={creating}
               onCancel={() => setCreateOpen(false)}
-              onSubmit={async (payload) => {
+              onSubmit={async (payload, extras) => {
                 try {
-                  await createEmployee(payload).unwrap();
-                  toast({ title: "Employee created" });
+                  const result = await createEmployee(payload).unwrap();
+                  const userId = result?.employee?.userId ?? null;
+
+                  // Best-effort face enrollment for the newly created
+                  // employee. We swallow failures here so the create flow
+                  // never fails just because enrollment had a hiccup —
+                  // HR can re-enroll later from the employee detail page.
+                  if (userId && extras?.facePhoto && extras?.faceDescriptor) {
+                    try {
+                      const fd = new FormData();
+                      fd.append("photo", extras.facePhoto);
+                      fd.append(
+                        "descriptor",
+                        descriptorToBase64(extras.faceDescriptor),
+                      );
+                      fd.append("targetUserId", userId);
+                      fd.append("consent", "true");
+                      const res = await fetch("/api/face/enroll", {
+                        method: "POST",
+                        credentials: "include",
+                        body: fd,
+                      });
+                      const json = await res.json().catch(() => null);
+                      if (!res.ok || !json?.success) {
+                        toast({
+                          title: "Employee created, but face enrollment failed",
+                          description:
+                            json?.error ??
+                            "You can retry from the employee profile.",
+                          variant: "destructive",
+                        });
+                      } else {
+                        toast({
+                          title: "Employee created",
+                          description: "Face enrolled for attendance verification.",
+                        });
+                      }
+                    } catch (err: any) {
+                      toast({
+                        title: "Employee created, but face enrollment failed",
+                        description: err?.message ?? "Try again later.",
+                        variant: "destructive",
+                      });
+                    }
+                  } else {
+                    toast({ title: "Employee created" });
+                  }
+
                   setCreateOpen(false);
                 } catch (e: any) {
                   toast({
@@ -415,194 +398,6 @@ export default function EmployeeMasterListPage() {
               }}
             />
           )}
-<<<<<<< HEAD
-        </div>
-      }
-      preview={selectedId ? <EmployeePreview id={selectedId} /> : null}
-      previewHeader={
-        selectedId ? (
-          <PreviewHeader
-            id={selectedId}
-            onEdit={() => setEditId(selectedId)}
-            onDeleted={() => setSelectedId(null)}
-          />
-        ) : null
-      }
-    />
-
-    <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-2xl overflow-y-auto p-0"
-      >
-        <SheetHeader className="px-5 sm:px-6 py-4 border-b sticky top-0 bg-background z-10">
-          <SheetTitle>New employee</SheetTitle>
-          <SheetDescription>
-            Capture the basics now — bank, IDs and shift details can be filled
-            in later from the employee profile.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="px-5 sm:px-6 py-5">
-          <EmployeeForm
-            submitLabel="Create employee"
-            submitting={creating}
-            onCancel={() => setCreateOpen(false)}
-            onSubmit={async (payload) => {
-              try {
-                await createEmployee(payload).unwrap();
-                toast({ title: "Employee created" });
-                setCreateOpen(false);
-              } catch (e: any) {
-                toast({
-                  title: "Could not create employee",
-                  description:
-                    e?.data?.error ||
-                    e?.message ||
-                    "Server rejected the request",
-                  variant: "destructive",
-                });
-              }
-            }}
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
-
-    <Sheet open={!!editId} onOpenChange={(o) => !o && setEditId(null)}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-2xl overflow-y-auto p-0"
-      >
-        <SheetHeader className="px-5 sm:px-6 py-4 border-b sticky top-0 bg-background z-10">
-          <SheetTitle>Edit employee</SheetTitle>
-          <SheetDescription>
-            Update employee details.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="px-5 sm:px-6 py-5">
-          {editId && (
-            <EditEmployeeForm
-              id={editId}
-              onDone={() => setEditId(null)}
-            />
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
-    </>
-  );
-}
-
-function EditEmployeeForm({
-  id,
-  onDone,
-}: {
-  id: string;
-  onDone: () => void;
-}) {
-  const { toast } = useToast();
-  const { data, isLoading } = useGetEmployeeQuery(id);
-  const [updateEmployee, { isLoading: saving }] = useUpdateEmployeeMutation();
-
-  if (isLoading || !data?.employee) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-8 w-2/3" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-32 w-full" />
-      </div>
-    );
-  }
-
-  return (
-    <EmployeeForm
-      initial={data.employee}
-      submitLabel="Save changes"
-      submitting={saving}
-      onCancel={onDone}
-      onSubmit={async (payload) => {
-        try {
-          await updateEmployee({ id, body: payload }).unwrap();
-          toast({ title: "Employee updated" });
-          onDone();
-        } catch (e: any) {
-          toast({
-            title: "Could not save changes",
-            description:
-              e?.data?.error ||
-              e?.message ||
-              "Server rejected the request",
-            variant: "destructive",
-          });
-        }
-      }}
-    />
-  );
-}
-
-function PreviewHeader({
-  id,
-  onEdit,
-  onDeleted,
-}: {
-  id: string;
-  onEdit: () => void;
-  onDeleted: () => void;
-}) {
-  const { toast } = useToast();
-  const { data } = useGetEmployeeQuery(id);
-  const [removeEmployee, { isLoading: deleting }] =
-    useDeleteEmployeeMutation();
-  const e = data?.employee;
-  if (!e) return <Skeleton className="h-5 w-40" />;
-  const status = (e.status ?? "ACTIVE") as EmployeeStatus;
-
-  const onDelete = async () => {
-    if (
-      !confirm(
-        `Delete employee "${e.employeeName}"? This cannot be undone.`,
-      )
-    )
-      return;
-    try {
-      await removeEmployee(e.id).unwrap();
-      toast({ title: "Employee deleted" });
-      onDeleted();
-    } catch (err: any) {
-      toast({
-        title: "Could not delete",
-        description: err?.data?.error || err?.message,
-        variant: "destructive",
-      });
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <Badge variant={STATUS_VARIANT[status]} className="text-[10px] shrink-0">
-        {STATUS_LABEL[status]}
-      </Badge>
-      <span className="font-semibold truncate text-sm">{e.employeeName}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 ml-auto"
-        title="Edit"
-        onClick={onEdit}
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-        title="Delete"
-        disabled={deleting}
-        onClick={onDelete}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
-=======
         </SheetContent>
       </Sheet>
 
@@ -617,7 +412,6 @@ function PreviewHeader({
           )}
         </SheetContent>
       </Sheet>
->>>>>>> f4dc3c5d72d52d953b0dcb8bdae8aa7e4df6523e
     </div>
   );
 }
@@ -688,10 +482,52 @@ function EditEmployeeSheet({ id, onClose }: { id: string; onClose: () => void })
           submitLabel="Save changes"
           submitting={saving}
           onCancel={onClose}
-          onSubmit={async (payload) => {
+          onSubmit={async (payload, extras) => {
             try {
               await updateEmployee({ id, body: payload }).unwrap();
-              toast({ title: "Employee updated" });
+
+              // Re-enroll face if HR attached a new photo and consent.
+              // Failure is non-fatal — the update has already succeeded.
+              const userId = e.userId;
+              if (userId && extras?.facePhoto && extras?.faceDescriptor) {
+                try {
+                  const fd = new FormData();
+                  fd.append("photo", extras.facePhoto);
+                  fd.append(
+                    "descriptor",
+                    descriptorToBase64(extras.faceDescriptor),
+                  );
+                  fd.append("targetUserId", userId);
+                  fd.append("consent", "true");
+                  const res = await fetch("/api/face/enroll", {
+                    method: "POST",
+                    credentials: "include",
+                    body: fd,
+                  });
+                  const json = await res.json().catch(() => null);
+                  if (!res.ok || !json?.success) {
+                    toast({
+                      title: "Saved, but face re-enrollment failed",
+                      description: json?.error ?? "Try again later.",
+                      variant: "destructive",
+                    });
+                  } else {
+                    toast({
+                      title: "Employee updated",
+                      description: "Face re-enrolled.",
+                    });
+                  }
+                } catch (err: any) {
+                  toast({
+                    title: "Saved, but face re-enrollment failed",
+                    description: err?.message ?? "Try again later.",
+                    variant: "destructive",
+                  });
+                }
+              } else {
+                toast({ title: "Employee updated" });
+              }
+
               onClose();
             } catch (err: any) {
               toast({

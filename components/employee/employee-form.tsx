@@ -6,7 +6,7 @@
  * handles navigation.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,9 +21,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Settings2 } from "lucide-react";
+import {
+  Loader2,
+  Settings2,
+  Upload,
+  CheckCircle2,
+  AlertTriangle,
+  X,
+} from "lucide-react";
 import type { EmployeeDetail } from "@/lib/api/employees";
 import { useToast } from "@/hooks/use-toast";
+import { computeDescriptorFromBlobWithTimeout } from "@/lib/face/descriptor";
 
 /**
  * Resolve the org's Employee form id, seeding one if it doesn't exist yet.
@@ -232,9 +240,22 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
   };
 }
 
+// Side-channel data the form produces when the user attaches a face photo.
+// The parent receives this alongside the JSON payload so it can run the
+// face-enrollment call once the employee (and therefore the User row)
+// exists. Kept separate from the JSON payload because File objects don't
+// belong in JSON bodies.
+export interface EmployeeFormExtras {
+  facePhoto?: File;
+  faceDescriptor?: Float32Array; // 128 floats — only set when a face was detected client-side
+}
+
 export interface EmployeeFormProps {
   initial?: EmployeeDetail | null;
-  onSubmit: (payload: Record<string, any>) => Promise<void> | void;
+  onSubmit: (
+    payload: Record<string, any>,
+    extras?: EmployeeFormExtras,
+  ) => Promise<void> | void;
   onCancel?: () => void;
   submitting?: boolean;
   submitLabel?: string;
@@ -254,6 +275,85 @@ export function EmployeeForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [openingBuilder, setOpeningBuilder] = useState(false);
+
+  // Face enrollment: the user (HR) can attach a photo here so the new
+  // employee is auto-enrolled into face recognition. Descriptor is
+  // computed in the browser as soon as a photo is picked, giving
+  // immediate "face detected / not detected" feedback before submit.
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoDescriptor, setPhotoDescriptor] = useState<Float32Array | null>(
+    null,
+  );
+  const [photoStatus, setPhotoStatus] = useState<
+    "idle" | "analyzing" | "ok" | "no_face" | "multiple_faces" | "error"
+  >("idle");
+  const [photoFaceCount, setPhotoFaceCount] = useState<number>(0);
+  const [photoConsent, setPhotoConsent] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Revoke any object URL when the preview changes or the form unmounts
+  // so we don't leak memory across re-picks.
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
+
+  const onPhotoPicked = async (file: File | null) => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    if (!file) {
+      setPhotoFile(null);
+      setPhotoPreview(null);
+      setPhotoDescriptor(null);
+      setPhotoFaceCount(0);
+      setPhotoStatus("idle");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file",
+        description: "Please choose an image (JPG, PNG, or WebP).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoDescriptor(null);
+    setPhotoFaceCount(0);
+    setPhotoStatus("analyzing");
+    try {
+      // Bounded so a slow/frozen tfjs init can't lock the form for minutes.
+      // Falls back to "no_face" on timeout — HR can save the photo as a
+      // plain avatar and re-enroll later.
+      const result = await computeDescriptorFromBlobWithTimeout(file);
+      setPhotoFaceCount(result.faceCount);
+      if (result.faceCount === 0) {
+        setPhotoStatus("no_face");
+      } else if (result.faceCount > 1) {
+        // Anti-proxy: never enroll a group photo. If the baseline has
+        // two faces, the matcher gets confused and either person could
+        // pass verification.
+        setPhotoStatus("multiple_faces");
+        setPhotoDescriptor(null);
+      } else if (result.descriptor) {
+        setPhotoDescriptor(result.descriptor);
+        setPhotoStatus("ok");
+      } else {
+        setPhotoStatus("no_face");
+      }
+    } catch (e) {
+      console.error("[employee-form] face detection failed:", e);
+      setPhotoStatus("error");
+    }
+  };
+
+  const clearPhoto = () => {
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    onPhotoPicked(null);
+    setPhotoConsent(false);
+  };
 
   useEffect(() => {
     if (initial) setValues(fromEmployee(initial));
@@ -302,7 +402,14 @@ export function EmployeeForm({
     )
       return setError("Total salary must be a non-negative number");
 
-    await onSubmit(toApiPayload(values));
+    // Only forward the face photo if (a) a usable descriptor was extracted
+    // and (b) the consent box is ticked. Without consent we still keep the
+    // photo as a regular avatar candidate but skip biometric enrollment.
+    const extras: EmployeeFormExtras = {};
+    if (photoFile) extras.facePhoto = photoFile;
+    if (photoDescriptor && photoConsent) extras.faceDescriptor = photoDescriptor;
+
+    await onSubmit(toApiPayload(values), extras);
   };
 
   return (
@@ -374,6 +481,114 @@ export function EmployeeForm({
               onChange={(e) => set("country", e.target.value)}
             />
           </Field>
+        </CardContent>
+      </Card>
+
+      {/* Profile photo + face enrollment */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Profile photo</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Optional. Used as the employee's avatar everywhere. If a face is
+            detected and the consent box is ticked, the photo is also used to
+            enroll this employee into face-recognition attendance verification.
+          </p>
+          <div className="flex items-start gap-4">
+            <div className="flex h-28 w-28 flex-none items-center justify-center overflow-hidden rounded-md border bg-gray-50">
+              {photoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={photoPreview}
+                  alt="Selected employee photo"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <Upload className="h-6 w-6 text-gray-400" />
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => onPhotoPicked(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => photoInputRef.current?.click()}
+                >
+                  <Upload className="mr-1.5 h-3.5 w-3.5" />
+                  {photoFile ? "Replace photo" : "Choose photo"}
+                </Button>
+                {photoFile && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearPhoto}
+                  >
+                    <X className="mr-1.5 h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {photoStatus === "analyzing" && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Analyzing face…
+                </div>
+              )}
+              {photoStatus === "ok" && (
+                <div className="flex items-center gap-1.5 text-xs text-green-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Face detected — eligible for enrollment
+                </div>
+              )}
+              {photoStatus === "no_face" && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-700">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  No face detected. Photo will be saved as avatar only; the
+                  employee can self-enroll later from the attendance widget.
+                </div>
+              )}
+              {photoStatus === "multiple_faces" && (
+                <div className="flex items-center gap-1.5 text-xs text-red-700">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {photoFaceCount} faces detected. Choose a solo photo —
+                  group photos can't be used for verification.
+                </div>
+              )}
+              {photoStatus === "error" && (
+                <div className="flex items-center gap-1.5 text-xs text-red-700">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Couldn't analyze photo. Try a different image.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {photoStatus === "ok" && (
+            <label className="flex items-start gap-2 rounded-md border bg-amber-50/40 p-3 text-xs">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={photoConsent}
+                onChange={(e) => setPhotoConsent(e.target.checked)}
+              />
+              <span>
+                I confirm this employee consents to face-recognition for
+                attendance verification. A 128-number face fingerprint will be
+                stored (the original photo is kept as the avatar). Consent
+                timestamp is recorded for audit.
+              </span>
+            </label>
+          )}
         </CardContent>
       </Card>
 

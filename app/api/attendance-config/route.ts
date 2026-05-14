@@ -185,6 +185,32 @@ export async function PUT(request: NextRequest) {
     patch.facePhotoMaxKb = Math.floor(fpKb);
   }
 
+  // Face verification mode + threshold. Mode follows the same OFF/WARN/
+  // ENFORCE shape used internally; threshold is clamped to the band the
+  // coercer in attendance-config.ts accepts so a typo can't lock anyone
+  // out (threshold=0 would reject every match).
+  if (
+    body.faceVerifyMode === 'OFF' ||
+    body.faceVerifyMode === 'WARN' ||
+    body.faceVerifyMode === 'ENFORCE'
+  ) {
+    patch.faceVerifyMode = body.faceVerifyMode;
+  }
+  const fmt = pickOptionalNumber(body.faceMatchThreshold);
+  if (fmt !== undefined && fmt >= 0.3 && fmt <= 1.0) {
+    patch.faceMatchThreshold = fmt;
+  }
+
+  // Liveness mode. Plain enum coerce — anything else falls through as
+  // "no change" so existing rows aren't accidentally reset.
+  if (
+    body.faceLivenessMode === 'OFF' ||
+    body.faceLivenessMode === 'PERMISSIVE' ||
+    body.faceLivenessMode === 'STRICT'
+  ) {
+    patch.faceLivenessMode = body.faceLivenessMode;
+  }
+
   // Anchor module: empty string / null disables the sidebar link. Anything
   // else is trimmed and passed through; the tenant scope is enforced via
   // the upsert (organizationId is implicit).

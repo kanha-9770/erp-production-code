@@ -77,6 +77,7 @@
     "dagre": "^0.8.5",
     "date-fns": "latest",
     "embla-carousel-react": "8.5.1",
+    "face-api.js": "^0.22.2",
     "framer-motion": "^12.24.11",
     "input-otp": "1.4.1",
     "ioredis": "^5.7.0",

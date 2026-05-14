@@ -14,6 +14,8 @@ import {
   ImageOff,
   Clock,
   AlertTriangle,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
 import {
   formatDateLong,
@@ -43,6 +45,16 @@ export interface AttendanceRecord {
   status: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
+  // Face-match score recorded at each punch (Euclidean distance — lower is
+  // better). Null when face verification was off or the user wasn't
+  // enrolled. Compared against the org's configured threshold to display
+  // a "verified" badge on the photo.
+  checkInFaceMatch?: number | null;
+  checkOutFaceMatch?: number | null;
+  // Snapshot of the org's configured threshold at view time. Passed in
+  // by the parent (my-attendance / team-attendance) since it doesn't live
+  // on the record itself.
+  faceMatchThreshold?: number | null;
   checkInLat: number | null;
   checkInLng: number | null;
   checkOutLat: number | null;
@@ -142,6 +154,8 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 distanceM={record.checkInDistanceM ?? null}
                 outsideRadius={record.checkInOutsideRadius ?? null}
                 locationMissing={record.checkInLocationMissing ?? null}
+                faceMatch={record.checkInFaceMatch ?? null}
+                faceMatchThreshold={record.faceMatchThreshold ?? null}
               />
               <PunchPanel
                 title="Check-Out"
@@ -155,6 +169,8 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 distanceM={record.checkOutDistanceM ?? null}
                 outsideRadius={record.checkOutOutsideRadius ?? null}
                 locationMissing={record.checkOutLocationMissing ?? null}
+                faceMatch={record.checkOutFaceMatch ?? null}
+                faceMatchThreshold={record.faceMatchThreshold ?? null}
               />
             </div>
           </>
@@ -205,6 +221,8 @@ function PunchPanel({
   distanceM,
   outsideRadius,
   locationMissing,
+  faceMatch,
+  faceMatchThreshold,
 }: {
   title: string;
   time: string | null;
@@ -217,6 +235,8 @@ function PunchPanel({
   distanceM: number | null;
   outsideRadius: boolean | null;
   locationMissing: boolean | null;
+  faceMatch: number | null;
+  faceMatchThreshold: number | null;
 }) {
   const accentClass =
     accent === "emerald"
@@ -258,6 +278,46 @@ function PunchPanel({
           </div>
         )}
       </div>
+      {/* Face verification badge — only shown when a match score was
+          recorded at punch time. Threshold may be null on historical
+          rows captured before verification was enabled. */}
+      {typeof faceMatch === "number" && (
+        <div
+          className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
+            faceMatchThreshold != null && faceMatch <= faceMatchThreshold
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-amber-200 bg-amber-50 text-amber-900"
+          }`}
+        >
+          {faceMatchThreshold != null && faceMatch <= faceMatchThreshold ? (
+            <>
+              <ShieldCheck className="h-3 w-3" />
+              <span>
+                Face verified · score {faceMatch.toFixed(2)}
+                {faceMatchThreshold != null && (
+                  <span className="opacity-70">
+                    {" "}
+                    (≤ {faceMatchThreshold.toFixed(2)})
+                  </span>
+                )}
+              </span>
+            </>
+          ) : (
+            <>
+              <ShieldAlert className="h-3 w-3" />
+              <span>
+                Match score {faceMatch.toFixed(2)}
+                {faceMatchThreshold != null && (
+                  <span className="opacity-70">
+                    {" "}
+                    · threshold {faceMatchThreshold.toFixed(2)}
+                  </span>
+                )}
+              </span>
+            </>
+          )}
+        </div>
+      )}
       {link ? (
         <a
           href={link}

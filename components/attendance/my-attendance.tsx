@@ -22,6 +22,10 @@ interface HistoryResponse {
     totalWorkedMinutes: number;
     totalOvertimeMinutes: number;
   };
+  // Sent only when face verification is enabled for the org. Used by the
+  // record detail panel to render the "verified" badge against the
+  // org-configured threshold.
+  faceVerify?: { mode: string; threshold: number };
   records: AttendanceRecord[];
   error?: string;
 }
@@ -191,7 +195,17 @@ export function MyAttendance() {
         </Link>
       </div>
 
-      <AttendanceRecordDetail record={selected} onClose={() => setSelected(null)} />
+      <AttendanceRecordDetail
+        record={
+          selected
+            ? {
+                ...selected,
+                faceMatchThreshold: data?.faceVerify?.threshold ?? null,
+              }
+            : null
+        }
+        onClose={() => setSelected(null)}
+      />
       <RegularizationDialog
         open={!!regularizing}
         onOpenChange={(o) => !o && setRegularizing(null)}

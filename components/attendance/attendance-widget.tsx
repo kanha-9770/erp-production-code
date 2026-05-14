@@ -36,6 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
 import { formatTimeShort } from "@/components/attendance/attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
+import { descriptorToBase64 } from "@/lib/face/descriptor";
 
 type WidgetState =
   | "PRE_SHIFT"
@@ -76,6 +77,14 @@ interface AttendanceStatusPayload {
   faceCapture: {
     mode: "OFF" | "OPTIONAL" | "REQUIRED";
     maxKb: number;
+  };
+  faceVerify: {
+    mode: "OFF" | "WARN" | "ENFORCE";
+    threshold: number;
+    enrolled: boolean;
+  };
+  faceLiveness: {
+    mode: "OFF" | "PERMISSIVE" | "STRICT";
   };
   geofence: {
     mode: "OFF" | "CAPTURE" | "ENFORCE";
@@ -323,16 +332,43 @@ interface UseAttendanceState {
     type: "IN" | "OUT",
     photoUrl?: string | null,
     geo?: { lat: number; lng: number } | null,
+    faceMatch?: number | null,
+    livenessPassed?: boolean | null,
   ) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
-async function uploadFacePhoto(blob: Blob, type: "IN" | "OUT"): Promise<string> {
+interface UploadFacePhotoResult {
+  url: string;
+  // Verification fields. Null when face verification is OFF or the user
+  // isn't enrolled (in WARN mode). Always populated when the server
+  // accepted the photo under WARN/ENFORCE mode with a stored enrollment.
+  faceMatch: number | null;
+  verified: boolean;
+}
+
+async function uploadFacePhoto(
+  blob: Blob,
+  type: "IN" | "OUT",
+  descriptor: Float32Array | null,
+  faceCount: number,
+  livenessPassed: boolean | null,
+): Promise<UploadFacePhotoResult> {
   const fd = new FormData();
   // The server is permissive about extension; the inferred MIME is what
   // it actually validates against.
   fd.append("photo", blob, `attendance_${type}_${Date.now()}.jpg`);
   fd.append("type", type);
+  if (descriptor) fd.append("descriptor", descriptorToBase64(descriptor));
+  // faceCount is the anti-proxy signal — server uses it to reject multi-
+  // face frames even if the client UI somehow allowed them through.
+  fd.append("faceCount", String(faceCount));
+  // livenessPassed: omitted when liveness was disabled, "true" / "false"
+  // when the client ran the check. Server uses faceLivenessMode to
+  // decide whether to enforce.
+  if (livenessPassed !== null) {
+    fd.append("livenessPassed", livenessPassed ? "true" : "false");
+  }
   const res = await fetch("/api/attendance/photo", {
     method: "POST",
     credentials: "include",
@@ -340,9 +376,20 @@ async function uploadFacePhoto(blob: Blob, type: "IN" | "OUT"): Promise<string> 
   });
   const json = await res.json();
   if (!res.ok || !json?.success || !json.url) {
-    throw new Error(json?.error ?? "Photo upload failed");
+    // Surface the structured error code so callers can show a tailored
+    // toast (e.g. "Please enroll your face first" for FACE_NOT_ENROLLED).
+    const err = new Error(json?.error ?? "Photo upload failed");
+    (err as any).code = json?.code ?? null;
+    throw err;
   }
-  return json.url as string;
+  return {
+    url: json.url as string,
+    faceMatch:
+      typeof json.faceMatch === "number" && Number.isFinite(json.faceMatch)
+        ? json.faceMatch
+        : null,
+    verified: !!json.verified,
+  };
 }
 
 function useAttendance(enabled: boolean): UseAttendanceState {
@@ -407,6 +454,8 @@ function useAttendance(enabled: boolean): UseAttendanceState {
       type: "IN" | "OUT",
       photoUrl: string | null = null,
       preCapturedGeo: { lat: number; lng: number } | null = null,
+      faceMatch: number | null = null,
+      livenessPassed: boolean | null = null,
     ) => {
       if (busy) return;
       setBusy(true);
@@ -455,6 +504,8 @@ function useAttendance(enabled: boolean): UseAttendanceState {
             idempotencyKey,
             source: "WEB",
             photoUrl,
+            faceMatch,
+            livenessPassed,
           }),
         });
         const json = await res.json();
@@ -515,6 +566,8 @@ export function AttendanceWidget({
     type: "IN" | "OUT";
     photoUrl: string | null;
     geo: { lat: number; lng: number } | null;
+    faceMatch: number | null;
+    livenessPassed: boolean | null;
     message: string;
   } | null>(null);
 
@@ -568,7 +621,12 @@ export function AttendanceWidget({
   }, [status?.geofence]);
 
   const punchWithGeoCheck = useCallback(
-    async (type: "IN" | "OUT", photoUrl: string | null) => {
+    async (
+      type: "IN" | "OUT",
+      photoUrl: string | null,
+      faceMatch: number | null = null,
+      livenessPassed: boolean | null = null,
+    ) => {
       const fence = status?.geofence;
       const inFenceMode =
         !!fence &&
@@ -588,6 +646,8 @@ export function AttendanceWidget({
             type,
             photoUrl,
             geo: null,
+            faceMatch,
+            livenessPassed,
             message: `${geoResult.ok ? "" : geoResult.message + " "}Do you want to continue with check-${type === "IN" ? "in" : "out"} anyway?`,
           });
           return;
@@ -598,13 +658,15 @@ export function AttendanceWidget({
             type,
             photoUrl,
             geo,
+            faceMatch,
+            livenessPassed,
             message: `You are ${Math.round(dist)}m away from the office (allowed radius: ${fence!.radiusM}m). Do you want to continue?`,
           });
           return;
         }
       }
 
-      await punch(type, photoUrl, geo);
+      await punch(type, photoUrl, geo, faceMatch, livenessPassed);
       toast({
         title:
           type === "IN"
@@ -650,6 +712,23 @@ export function AttendanceWidget({
       // Face-capture flow: if the org has it on, defer the actual punch
       // until the dialog produces (or skips) a photo.
       const mode = status?.faceCapture.mode ?? "OFF";
+      // Preflight: if verification is ENFORCE and this user has no
+      // FaceEnrollment, the upload will be rejected with FACE_NOT_ENROLLED.
+      // Catch it here so the user doesn't sit through the camera flow
+      // first. Friendly toast pointing at where to enroll.
+      if (
+        (mode === "OPTIONAL" || mode === "REQUIRED") &&
+        status?.faceVerify?.mode === "ENFORCE" &&
+        status?.faceVerify?.enrolled === false
+      ) {
+        toast({
+          title: "Your face is not enrolled yet",
+          description:
+            "Ask your admin to add your profile photo from Employee Master, then try again.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (mode === "OPTIONAL" || mode === "REQUIRED") {
         setCaptureType(type);
         return;
@@ -668,25 +747,73 @@ export function AttendanceWidget({
   );
 
   const handleCapturedPhoto = useCallback(
-    async (blob: Blob) => {
+    async (
+      blob: Blob,
+      descriptor: Float32Array | null,
+      faceCount: number,
+      livenessPassed: boolean | null,
+    ) => {
       const type = captureType;
       if (!type) return;
       setCaptureBusy(true);
       try {
-        const photoUrl = await uploadFacePhoto(blob, type);
+        const result = await uploadFacePhoto(
+          blob,
+          type,
+          descriptor,
+          faceCount,
+          livenessPassed,
+        );
         setCaptureType(null);
-        await punchWithGeoCheck(type, photoUrl);
+        // Optional toast when verification ran — gives the user feedback
+        // that face check actually happened. We only show in WARN mode
+        // here; in ENFORCE the success itself implies verification.
+        if (
+          status?.faceVerify?.mode === "WARN" &&
+          result.faceMatch != null
+        ) {
+          toast({
+            title: result.verified
+              ? "Identity verified"
+              : "Face did not match enrollment",
+            description: `Match score ${result.faceMatch.toFixed(2)} (lower is better).`,
+          });
+        }
+        await punchWithGeoCheck(
+          type,
+          result.url,
+          result.faceMatch,
+          livenessPassed,
+        );
       } catch (e: any) {
-        toast({
-          title: "Punch failed",
-          description: e?.message ?? "Try again",
-          variant: "destructive",
-        });
+        // Tailor the message for the structured error codes the photo
+        // route emits under ENFORCE.
+        const code = e?.code as string | undefined;
+        let title = "Punch failed";
+        let description = e?.message ?? "Try again";
+        if (code === "FACE_NOT_ENROLLED") {
+          title = "Please enroll your face first";
+          description =
+            "Ask your admin to add a profile photo, or capture one from your settings.";
+        } else if (code === "FACE_MISMATCH") {
+          title = "Face does not match enrollment";
+          description =
+            "Make sure your face is well-lit and centered, then retake.";
+        } else if (code === "MULTIPLE_FACES") {
+          title = "Multiple faces detected";
+          description =
+            "Only you should be in the frame. Ask others to step aside and retake.";
+        } else if (code === "LIVENESS_FAILED") {
+          title = "Liveness check failed";
+          description =
+            "The photo appears static. Real selfies have natural micro-motion — please retake while looking at the camera.";
+        }
+        toast({ title, description, variant: "destructive" });
       } finally {
         setCaptureBusy(false);
       }
     },
-    [captureType, punchWithGeoCheck, toast],
+    [captureType, punchWithGeoCheck, toast, status?.faceVerify?.mode],
   );
 
   const handleSkipCapture = useCallback(async () => {
@@ -976,6 +1103,23 @@ export function AttendanceWidget({
           mode={status.faceCapture.mode === "REQUIRED" ? "REQUIRED" : "OPTIONAL"}
           actionLabel={captureType === "IN" ? "Check In" : "Check Out"}
           busy={captureBusy || busy}
+          // When face verification is ENFORCE, refuse to confirm a frame
+          // with no detected face — saves a round-trip and gives the user
+          // immediate feedback before they hit the upload endpoint.
+          requireFaceDetected={status.faceVerify?.mode === "ENFORCE"}
+          // Only run face-api descriptor extraction when verification is
+          // actually on. With mode OFF (today's default), there's no
+          // point computing a fingerprint nobody will check, and the
+          // 7MB-models / tfjs-init cost would just delay every punch.
+          extractDescriptor={
+            !!status.faceVerify && status.faceVerify.mode !== "OFF"
+          }
+          // Anti-spoofing motion check. PERMISSIVE/STRICT both run the
+          // check; STRICT also blocks on detector errors.
+          requireLiveness={
+            !!status.faceLiveness && status.faceLiveness.mode !== "OFF"
+          }
+          strictLiveness={status.faceLiveness?.mode === "STRICT"}
           onCapture={handleCapturedPhoto}
           onSkip={
             status.faceCapture.mode === "OPTIONAL" ? handleSkipCapture : undefined
@@ -1008,7 +1152,13 @@ export function AttendanceWidget({
                 if (!c) return;
                 setGeoConfirm(null);
                 try {
-                  await punch(c.type, c.photoUrl, c.geo);
+                  await punch(
+                    c.type,
+                    c.photoUrl,
+                    c.geo,
+                    c.faceMatch,
+                    c.livenessPassed,
+                  );
                   toast({
                     title:
                       c.type === "IN"
