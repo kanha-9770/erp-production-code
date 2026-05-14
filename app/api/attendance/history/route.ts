@@ -130,6 +130,13 @@ export async function GET(request: NextRequest) {
         lng: cfg.geofenceLng,
         radiusM: cfg.geofenceRadiusM,
       },
+      // Face-verification config snapshot — clients render the "verified"
+      // badge against this threshold. Sent at the response level (not
+      // per-row) since it doesn't vary across the date range.
+      faceVerify: {
+        mode: cfg.faceVerifyMode,
+        threshold: cfg.faceMatchThreshold,
+      },
       records: records.map((r) => {
         const inGeo = annotateGeo(
           (r as any).checkInLat ?? null,
@@ -157,6 +164,8 @@ export async function GET(request: NextRequest) {
           status: (r as any).status ?? null,
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
+          checkInFaceMatch: (r as any).checkInFaceMatch ?? null,
+          checkOutFaceMatch: (r as any).checkOutFaceMatch ?? null,
           checkInLat: (r as any).checkInLat ?? null,
           checkInLng: (r as any).checkInLng ?? null,
           checkOutLat: (r as any).checkOutLat ?? null,

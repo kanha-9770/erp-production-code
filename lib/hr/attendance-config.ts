@@ -12,6 +12,8 @@ import { prisma } from '@/lib/prisma';
 export type GeofenceMode = 'OFF' | 'CAPTURE' | 'ENFORCE';
 export type PayableBasis = 'monthDays' | 'fixed26' | 'fixed30';
 export type FaceCaptureMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
+export type FaceVerifyMode = 'OFF' | 'WARN' | 'ENFORCE';
+export type FaceLivenessMode = 'OFF' | 'PERMISSIVE' | 'STRICT';
 
 export interface AttendanceConfig {
   id: string | null;
@@ -36,6 +38,9 @@ export interface AttendanceConfig {
   minPunchGapSeconds: number;
   faceCaptureMode: FaceCaptureMode;
   facePhotoMaxKb: number;
+  faceVerifyMode: FaceVerifyMode;
+  faceMatchThreshold: number;
+  faceLivenessMode: FaceLivenessMode;
   attendanceModuleId: string | null;
   notifyOnPunch: boolean;
   attendanceApproverRoleIds: string[];
@@ -71,6 +76,9 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   minPunchGapSeconds: 5,
   faceCaptureMode: 'OFF',
   facePhotoMaxKb: 800,
+  faceVerifyMode: 'OFF',
+  faceMatchThreshold: 0.55,
+  faceLivenessMode: 'OFF',
   attendanceModuleId: null,
   notifyOnPunch: true,
   attendanceApproverRoleIds: [],
@@ -106,6 +114,22 @@ function coercePayableBasis(raw: unknown): PayableBasis {
 
 function coerceFaceCaptureMode(raw: unknown): FaceCaptureMode {
   return raw === 'OPTIONAL' || raw === 'REQUIRED' ? raw : 'OFF';
+}
+
+function coerceFaceVerifyMode(raw: unknown): FaceVerifyMode {
+  return raw === 'WARN' || raw === 'ENFORCE' ? raw : 'OFF';
+}
+
+function coerceFaceLivenessMode(raw: unknown): FaceLivenessMode {
+  return raw === 'PERMISSIVE' || raw === 'STRICT' ? raw : 'OFF';
+}
+
+function coerceFaceMatchThreshold(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_ATTENDANCE_CONFIG.faceMatchThreshold;
+  // face-api.js descriptors live in [0, ~1.5]; clamp to a sensible band
+  // so an admin can't accidentally save a useless 0 or 99.
+  return Math.min(1.0, Math.max(0.3, n));
 }
 
 function coerceRoleIds(raw: unknown): string[] {
@@ -180,6 +204,9 @@ export async function getAttendanceConfig(
       facePhotoMaxKb: Number.isFinite(row.facePhotoMaxKb)
         ? Math.max(50, Number(row.facePhotoMaxKb))
         : 800,
+      faceVerifyMode: coerceFaceVerifyMode(row.faceVerifyMode),
+      faceMatchThreshold: coerceFaceMatchThreshold(row.faceMatchThreshold),
+      faceLivenessMode: coerceFaceLivenessMode(row.faceLivenessMode),
       attendanceModuleId:
         typeof row.attendanceModuleId === 'string' && row.attendanceModuleId.length > 0
           ? row.attendanceModuleId
@@ -224,6 +251,9 @@ export interface AttendanceConfigUpdate {
   minPunchGapSeconds?: number;
   faceCaptureMode?: FaceCaptureMode;
   facePhotoMaxKb?: number;
+  faceVerifyMode?: FaceVerifyMode;
+  faceMatchThreshold?: number;
+  faceLivenessMode?: FaceLivenessMode;
   attendanceModuleId?: string | null;
   notifyOnPunch?: boolean;
   attendanceApproverRoleIds?: string[];

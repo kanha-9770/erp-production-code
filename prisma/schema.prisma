@@ -214,6 +214,7 @@ model User {
   auditLogs           AuditLog[]
   employee            Employee?
   attendances         Attendance[]             @relation("UserAttendance")
+  faceEnrollment      FaceEnrollment?
   activities          Activity[]
   formRecords         FormRecord[]             @relation("FormRecordUser")
   formRecords1        FormRecord1[]            @relation("FormRecord1User")
@@ -1805,6 +1806,19 @@ model Attendance {
   checkInPhoto  String? @map("check_in_photo")
   checkOutPhoto String? @map("check_out_photo")
 
+  // Face verification scores recorded by /api/attendance/photo when
+  // faceVerifyMode is WARN or ENFORCE. Lower = better match (Euclidean
+  // distance between the captured selfie's 128-dim descriptor and the
+  // enrolled descriptor). Null when verification was off / no enrollment.
+  checkInFaceMatch  Float? @map("check_in_face_match")
+  checkOutFaceMatch Float? @map("check_out_face_match")
+
+  // Liveness check result recorded by /api/attendance/photo when
+  // faceLivenessMode is PERMISSIVE or STRICT. True = motion detected
+  // (real person), false = static frame rejected, null = check not run.
+  checkInLivenessPassed  Boolean? @map("check_in_liveness_passed")
+  checkOutLivenessPassed Boolean? @map("check_out_liveness_passed")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1886,6 +1900,36 @@ model AttendanceConfiguration {
   // for high-resolution kiosks, lower for cheap data plans.
   facePhotoMaxKb Int @default(800) @map("face_photo_max_kb")
 
+  // Face LIVENESS (anti-spoofing — refuses static photo / phone-screen
+  // captures by requiring measurable face movement across 3 quick frames).
+  //   OFF        = no liveness check.
+  //   PERMISSIVE = run the check; on detector errors / timeouts, accept.
+  //                Right setting for dev/testing — protects against the
+  //                common "hold up a photo" attack without locking out
+  //                users when face-api hits a transient hiccup.
+  //   STRICT     = run the check; any error or "no motion" answer blocks.
+  //                Right for production once you trust the detector.
+  faceLivenessMode String @default("OFF") @map("face_liveness_mode") // OFF | PERMISSIVE | STRICT
+
+  // Face VERIFICATION (separate axis from face CAPTURE above).
+  //   OFF      = capture only, no identity check (today's behavior).
+  //   WARN     = run verification, record the score, but never block —
+  //              used during pilot / threshold tuning.
+  //   ENFORCE  = reject the punch if the captured face does not match the
+  //              user's stored enrollment within faceMatchThreshold.
+  // Requires a FaceEnrollment row for the user; without one, ENFORCE
+  // blocks with FACE_NOT_ENROLLED, WARN passes the punch through with a
+  // null match score.
+  faceVerifyMode String @default("OFF") @map("face_verify_mode") // OFF | WARN | ENFORCE
+
+  // Euclidean distance threshold for face-api.js 128-dim descriptors.
+  // Lower = stricter. Empirical guidance:
+  //   < 0.45  very strict (false rejects on lighting changes)
+  //   0.50–0.60  practical default range
+  //   > 0.65  loose (false accepts on similar-looking people)
+  // Default 0.55 is the face-api.js recommended starting point.
+  faceMatchThreshold Float @default(0.55) @map("face_match_threshold")
+
   // The FormModule under which the sidebar should nest the synthetic
   // Attendance leaf. Mirrors PayrollConfiguration's anchor logic so the
   // user sees Attendance live inside their HR module. Null = sidebar
@@ -1921,6 +1965,42 @@ model AttendanceConfiguration {
   @@index([organizationId])
   @@index([isActive])
   @@map("attendance_configurations")
+}
+
+// One row per user, holding the 128-dim face descriptor used to verify
+// that a check-in / check-out selfie actually belongs to the logged-in
+// user. The descriptor is computed in the browser via face-api.js and
+// stored here as raw bytes (Float32Array — 128 floats × 4 = 512 bytes).
+//
+// referencePhoto is the URL of the photo the descriptor was computed from
+// (usually the same image as User.avatar). Keeping it lets admins re-
+// review the enrollment baseline without re-running detection.
+//
+// consentAt records when the user (or HR on their behalf) acknowledged
+// the biometric-data consent — needed for GDPR / India DPDP compliance
+// even in dev/testing.
+model FaceEnrollment {
+  id             String  @id @default(cuid())
+  userId         String  @unique @map("user_id")
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String? @map("organization_id")
+
+  descriptor     Bytes
+  referencePhoto String? @map("reference_photo")
+
+  // The userId of the HR / admin who enrolled this user, or the user's
+  // own id for self-enrollment. Null for legacy rows.
+  enrolledBy String? @map("enrolled_by")
+
+  // Consent timestamp. Null = consent not recorded; ENFORCE mode should
+  // refuse to run verification without it once the consent UI ships.
+  consentAt DateTime? @map("consent_at")
+
+  enrolledAt DateTime @default(now()) @map("enrolled_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@map("face_enrollments")
 }
 
 // Regularization requests — the way users (or admins on their behalf) ask

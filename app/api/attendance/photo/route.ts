@@ -3,6 +3,12 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { uploadToHostinger } from '@/lib/hostinger-upload';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { todayKey } from '@/lib/hr/attendance-service';
+import { prisma } from '@/lib/prisma';
+import {
+  bytesToDescriptor,
+  decodeDescriptor,
+  euclideanDistance,
+} from '@/lib/face/verify';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -86,6 +92,146 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ─── Anti-spoofing: liveness check ───────────────────────────────────
+  // The client posts livenessPassed: "true" | "false" when faceLivenessMode
+  // is enabled. We enforce based on the org's mode:
+  //   OFF        → never check this field, accept anything.
+  //   PERMISSIVE → reject only when client explicitly says "false". A
+  //                missing field (older client, detector errored) is
+  //                accepted on the assumption that it's a transient
+  //                client issue, not a spoof attempt.
+  //   STRICT     → reject "false" AND missing — the client must affirm
+  //                liveness was checked and passed.
+  const rawLiveness = formData.get('livenessPassed');
+  const livenessSent =
+    rawLiveness === 'true'
+      ? true
+      : rawLiveness === 'false'
+        ? false
+        : null;
+  if (cfg.faceLivenessMode !== 'OFF') {
+    const blockFalse = livenessSent === false;
+    const blockMissing = cfg.faceLivenessMode === 'STRICT' && livenessSent === null;
+    if (blockFalse || blockMissing) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: blockFalse
+            ? 'Liveness check failed — the photo appears static. Retake while looking at the camera.'
+            : 'Liveness check is required but the client did not run it. Try again.',
+          code: 'LIVENESS_FAILED',
+        },
+        { status: 403 },
+      );
+    }
+  }
+
+  // ─── Anti-proxy: refuse multi-face frames ────────────────────────────
+  // The client tells us how many faces it detected in the captured frame.
+  // We refuse anything with 2+ faces because the most common proxy attack
+  // is "user holds a colleague's phone next to their own face." This guard
+  // runs whenever face capture is on, independent of faceVerifyMode — even
+  // an org that hasn't enrolled anyone yet benefits from "exactly one
+  // person in the photo."
+  const rawFaceCount = formData.get('faceCount');
+  const reportedFaceCount =
+    typeof rawFaceCount === 'string' && /^\d+$/.test(rawFaceCount)
+      ? Math.min(99, parseInt(rawFaceCount, 10))
+      : null;
+  if (reportedFaceCount !== null && reportedFaceCount > 1) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: `Multiple faces detected (${reportedFaceCount}). Only one person can be in the frame at a time.`,
+        code: 'MULTIPLE_FACES',
+        faceCount: reportedFaceCount,
+      },
+      { status: 403 },
+    );
+  }
+
+  // ─── Face verification (gated by faceVerifyMode) ──────────────────────
+  //
+  // OFF      → never look at the descriptor, behave like today.
+  // WARN     → if descriptor + enrollment exist, compute the score and
+  //            return it. Mismatches are logged but the upload proceeds.
+  // ENFORCE  → require an enrollment AND a descriptor that matches within
+  //            faceMatchThreshold. Block (403) on missing enrollment or
+  //            mismatch.
+  //
+  // Note: descriptor extraction happens in the browser. The server never
+  // runs face-api.js — it just compares two Float32Arrays.
+  let faceMatch: number | null = null;
+  let verified = false;
+  if (cfg.faceVerifyMode !== 'OFF') {
+    const submitted = decodeDescriptor(formData.get('descriptor'));
+    const enrollment = await (prisma as any).faceEnrollment.findUnique({
+      where: { userId: authUser.id },
+      select: { descriptor: true },
+    });
+
+    if (!enrollment) {
+      if (cfg.faceVerifyMode === 'ENFORCE') {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'No face enrollment on file. Please ask your admin to add a profile photo first.',
+            code: 'FACE_NOT_ENROLLED',
+          },
+          { status: 403 },
+        );
+      }
+      // WARN mode + no enrollment → let the photo through, no score
+      // available. The user will see a hint in the widget to enroll.
+    } else if (!submitted) {
+      // Client didn't (or couldn't) compute a descriptor. In ENFORCE we
+      // must refuse; in WARN we tolerate (older clients / no-face frames).
+      if (cfg.faceVerifyMode === 'ENFORCE') {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'No face detected in the captured photo. Please retake with your face fully visible.',
+            code: 'FACE_NOT_DETECTED',
+          },
+          { status: 400 },
+        );
+      }
+    } else {
+      try {
+        const stored = bytesToDescriptor(enrollment.descriptor as Buffer);
+        faceMatch = euclideanDistance(stored, submitted);
+        verified = faceMatch <= cfg.faceMatchThreshold;
+        if (!verified && cfg.faceVerifyMode === 'ENFORCE') {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Face does not match enrollment (score ${faceMatch.toFixed(2)}, threshold ${cfg.faceMatchThreshold}).`,
+              code: 'FACE_MISMATCH',
+              faceMatch,
+            },
+            { status: 403 },
+          );
+        }
+      } catch (err) {
+        console.error('[attendance/photo] face compare failed:', err);
+        // Treat as a soft failure: in WARN we let the upload through with
+        // no score; in ENFORCE we refuse since we can't prove identity.
+        if (cfg.faceVerifyMode === 'ENFORCE') {
+          return NextResponse.json(
+            {
+              success: false,
+              error: 'Face verification could not be completed. Please retake.',
+              code: 'FACE_VERIFY_FAILED',
+            },
+            { status: 500 },
+          );
+        }
+      }
+    }
+  }
+
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
@@ -99,7 +245,19 @@ export async function POST(request: NextRequest) {
 
   try {
     const url = await uploadToHostinger(buffer, filename);
-    return NextResponse.json({ success: true, url });
+    return NextResponse.json({
+      success: true,
+      url,
+      // Verification context. Always present in the response so the widget
+      // can show a uniform UI; faceMatch is null when verification didn't
+      // run (OFF / no enrollment / no descriptor).
+      faceMatch,
+      verified,
+      // Echo liveness result back so the widget can include it on the
+      // punch row for audit. null when liveness wasn't part of this
+      // capture (faceLivenessMode === OFF or older client).
+      livenessPassed: livenessSent,
+    });
   } catch (err) {
     console.error('[attendance/photo] upload failed:', err);
     return NextResponse.json(

@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils";
 type GeofenceMode = "OFF" | "CAPTURE" | "ENFORCE";
 type PayableBasis = "monthDays" | "fixed26" | "fixed30";
 type FaceCaptureMode = "OFF" | "OPTIONAL" | "REQUIRED";
+type FaceVerifyMode = "OFF" | "WARN" | "ENFORCE";
+type FaceLivenessMode = "OFF" | "PERMISSIVE" | "STRICT";
 
 interface AttendanceConfig {
   id: string | null;
@@ -50,6 +52,9 @@ interface AttendanceConfig {
   minPunchGapSeconds: number;
   faceCaptureMode: FaceCaptureMode;
   facePhotoMaxKb: number;
+  faceVerifyMode: FaceVerifyMode;
+  faceMatchThreshold: number;
+  faceLivenessMode: FaceLivenessMode;
   attendanceModuleId: string | null;
   notifyOnPunch: boolean;
   attendanceApproverRoleIds: string[];
@@ -89,6 +94,9 @@ export function AttendanceConfigForm() {
     minPunchGapSeconds: string;
     faceCaptureMode: FaceCaptureMode;
     facePhotoMaxKb: string;
+    faceVerifyMode: FaceVerifyMode;
+    faceMatchThreshold: string;
+    faceLivenessMode: FaceLivenessMode;
     attendanceModuleId: string;
     notifyOnPunch: boolean;
     attendanceApproverRoleIds: string[];
@@ -136,6 +144,9 @@ export function AttendanceConfigForm() {
         minPunchGapSeconds: String(c.minPunchGapSeconds ?? 5),
         faceCaptureMode: c.faceCaptureMode ?? "OFF",
         facePhotoMaxKb: String(c.facePhotoMaxKb ?? 800),
+        faceVerifyMode: c.faceVerifyMode ?? "OFF",
+        faceMatchThreshold: String(c.faceMatchThreshold ?? 0.55),
+        faceLivenessMode: c.faceLivenessMode ?? "OFF",
         attendanceModuleId: c.attendanceModuleId ?? "",
         notifyOnPunch: c.notifyOnPunch ?? true,
         attendanceApproverRoleIds: Array.isArray(c.attendanceApproverRoleIds)
@@ -237,6 +248,9 @@ export function AttendanceConfigForm() {
       Number(form.minPunchGapSeconds) !== config.minPunchGapSeconds ||
       form.faceCaptureMode !== config.faceCaptureMode ||
       Number(form.facePhotoMaxKb) !== config.facePhotoMaxKb ||
+      form.faceVerifyMode !== config.faceVerifyMode ||
+      Number(form.faceMatchThreshold) !== config.faceMatchThreshold ||
+      form.faceLivenessMode !== config.faceLivenessMode ||
       form.attendanceModuleId !== (config.attendanceModuleId ?? "") ||
       form.notifyOnPunch !== !!config.notifyOnPunch ||
       JSON.stringify([...form.attendanceApproverRoleIds].sort()) !==
@@ -319,6 +333,10 @@ export function AttendanceConfigForm() {
       const minPunchGapSeconds = Math.max(0, Math.floor(Number(form.minPunchGapSeconds) || 0));
       const trimmedWorkflowModule = form.workflowModuleName.trim();
       const facePhotoMaxKb = Math.max(50, Math.min(10_000, Math.floor(Number(form.facePhotoMaxKb) || 800)));
+      const faceMatchThreshold = Math.max(
+        0.3,
+        Math.min(1.0, Number(form.faceMatchThreshold) || 0.55),
+      );
 
       const payload = {
         defaultShiftStart: form.defaultShiftStart,
@@ -343,6 +361,9 @@ export function AttendanceConfigForm() {
         minPunchGapSeconds,
         faceCaptureMode: form.faceCaptureMode,
         facePhotoMaxKb,
+        faceVerifyMode: form.faceVerifyMode,
+        faceMatchThreshold,
+        faceLivenessMode: form.faceLivenessMode,
         attendanceModuleId: form.attendanceModuleId.trim() || null,
         notifyOnPunch: form.notifyOnPunch,
         attendanceApproverRoleIds: form.attendanceApproverRoleIds,
@@ -688,6 +709,93 @@ export function AttendanceConfigForm() {
                     }
                     className="w-full sm:w-40"
                   />
+                </Field>
+              )}
+
+              {/* Face verification — runs identity check against the
+                  user's stored enrollment. Requires faceCaptureMode to
+                  be on (no photo → nothing to verify). */}
+              {form.faceCaptureMode !== "OFF" && (
+                <>
+                  <Field
+                    label="Verification"
+                    htmlFor="faceVerifyMode"
+                    hint="Off / Warn (log only) / Enforce (block mismatches)."
+                  >
+                    <Select
+                      value={form.faceVerifyMode}
+                      onValueChange={(v: string) =>
+                        updateForm("faceVerifyMode", v as FaceVerifyMode)
+                      }
+                    >
+                      <SelectTrigger id="faceVerifyMode" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="OFF">
+                          Off — no identity check
+                        </SelectItem>
+                        <SelectItem value="WARN">
+                          Warn — verify, log scores, never block
+                        </SelectItem>
+                        <SelectItem value="ENFORCE">
+                          Enforce — reject punch on mismatch
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {form.faceVerifyMode !== "OFF" && (
+                    <Field
+                      label="Match threshold"
+                      htmlFor="faceMatchThreshold"
+                      hint="Lower = stricter. 0.55 is a balanced default; tune after observing WARN-mode scores."
+                    >
+                      <Input
+                        id="faceMatchThreshold"
+                        type="number"
+                        min={0.3}
+                        max={1.0}
+                        step={0.01}
+                        value={form.faceMatchThreshold}
+                        onChange={(e) =>
+                          updateForm("faceMatchThreshold", e.target.value)
+                        }
+                        className="w-full sm:w-40"
+                      />
+                    </Field>
+                  )}
+                </>
+              )}
+
+              {/* Anti-spoofing motion check. Captures 3 frames and
+                  requires intra-face landmark motion — defeats the
+                  "hold up a printed photo or phone screen" attack.
+                  Adds ~1.5s to every punch. */}
+              {form.faceCaptureMode !== "OFF" && (
+                <Field
+                  label="Liveness check"
+                  htmlFor="faceLivenessMode"
+                  hint="Captures 3 frames and requires natural face motion. Stops held-up photos / phone screens."
+                >
+                  <Select
+                    value={form.faceLivenessMode}
+                    onValueChange={(v: string) =>
+                      updateForm("faceLivenessMode", v as FaceLivenessMode)
+                    }
+                  >
+                    <SelectTrigger id="faceLivenessMode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="OFF">Off — no liveness check</SelectItem>
+                      <SelectItem value="PERMISSIVE">
+                        Permissive — block static photos, allow on detector errors
+                      </SelectItem>
+                      <SelectItem value="STRICT">
+                        Strict — block static photos AND detector errors
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
               )}
             </div>
