@@ -4213,3 +4213,4 @@ model InviteToken {
   @@index([token])
   @@map("re_invite_tokens")
 }
+
