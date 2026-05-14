@@ -11,11 +11,60 @@ export interface LeadListParams {
   status?: string;
   score?: string;
   source?: string;
+  /** "AGENT" | "COMPANY" — pre-filter by capture origin. */
+  origin?: string;
+  /**
+   * Coarse visibility filter for the agent UI:
+   *   "mine"    — leads I own (assigned to me / created by me / won by me)
+   *   "company" — open company-pool leads only
+   *   "all"     — both
+   * Defaults server-side: "mine" for regular agents, "all" for admin.
+   */
+  pool?: "mine" | "company" | "all";
   assignedAgentId?: string;
   search?: string;
   followupBefore?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface DuplicateCapturedBy {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
+
+export interface LeadDuplicateGroup {
+  original: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    photoUrl: string | null;
+    photoPhash: string | null;
+    assignedAgentId: string | null;
+    createdById: string | null;
+    createdAt: string;
+    status: string;
+    /** Best-effort "who captured this" (assigned agent, or creator). */
+    capturedBy: DuplicateCapturedBy | null;
+  };
+  duplicates: Array<
+    Lead & {
+      duplicateOfLeadId: string | null;
+      capturedBy: DuplicateCapturedBy | null;
+      /** Which signal made this pair match; null if no signal currently agrees. */
+      matchedBy: "phone" | "email" | "photo" | null;
+      /** Hamming distance when matchedBy === "photo"; null otherwise. */
+      phashDistance: number | null;
+      /**
+       * Which half of the compound hash signalled the photo match —
+       * "dhash" (byte-level / re-encode) or "phash" (perceptual DCT).
+       * null when matchedBy isn't "photo".
+       */
+      phashSignal: "dhash" | "phash" | null;
+    }
+  >;
 }
 
 export interface ViewingListParams {
@@ -122,6 +171,38 @@ export const leadsApi = baseApi.injectEndpoints({
       ],
     }),
 
+    // ─── Pool / duplicates ──────────────────────────────────────────────────
+
+    /**
+     * POST /api/real-estate/leads/:id/claim — pick up a company-pool lead.
+     * Server-side refuses if the lead is AGENT-origin or already claimed
+     * by someone else.
+     */
+    claimLead: builder.mutation<SingleResponse<Lead>, string>({
+      query: (id) => ({
+        url: `/real-estate/leads/${id}/claim`,
+        method: "POST",
+      }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Lead", id },
+        { type: "Leads", id: "LIST" },
+        { type: "LeadActivities", id },
+      ],
+    }),
+
+    /**
+     * GET /api/real-estate/admin/lead-duplicates — admin-only. Surfaces
+     * every silent-duplicate group (original lead + every later capture
+     * of the same person). Regular agents will see a 403 if they try.
+     */
+    getLeadDuplicates: builder.query<
+      { success: boolean; data: LeadDuplicateGroup[] },
+      void
+    >({
+      query: () => "/real-estate/admin/lead-duplicates",
+      providesTags: [{ type: "Leads", id: "DUPLICATES" }],
+    }),
+
     // ─── Lead Activities ────────────────────────────────────────────────────
     getLeadActivities: builder.query<{ success: boolean; data: LeadActivity[] }, string>({
       query: (id) => `/real-estate/leads/${id}/activities`,
@@ -209,6 +290,8 @@ export const {
   useUpdateLeadMutation,
   useDeleteLeadMutation,
   useConvertLeadMutation,
+  useClaimLeadMutation,
+  useGetLeadDuplicatesQuery,
   useGetLeadActivitiesQuery,
   useAddLeadActivityMutation,
   useGetViewingsQuery,

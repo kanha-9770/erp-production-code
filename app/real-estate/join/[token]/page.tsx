@@ -2,13 +2,21 @@
 
 /**
  * Public join / onboarding page. An invited user lands here via a shared
- * invite link. They confirm their details and hit "Join Now" to redeem the
- * invite and create their agent profile.
+ * invite link.
+ *
+ * Two flows:
+ *   1. Unauthenticated visitor (someone pasting the link before signing up) —
+ *      we redirect to /register?ref=<token> on mount so they go through the
+ *      regular create-account flow with the agent toggle pre-on. The /register
+ *      page reads ?ref / ?invite and pre-fills the referral code.
+ *   2. Authenticated visitor — they confirm details and hit "Join Now" to
+ *      redeem the invite and create their agent profile (the existing flow).
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useGetUserQuery } from "@/lib/api/auth";
 import {
   useLookupInviteQuery,
   useRedeemInviteMutation,
@@ -34,11 +42,37 @@ export default function JoinPage() {
   const router = useRouter();
   const { toast } = useToast();
 
+  // Detect auth state. If the visitor isn't signed in, hand off to the
+  // registration page with the token as ?ref= so they go through the
+  // standard create-account flow with the agent toggle pre-on. The
+  // /register page picks up `ref` (or `invite`) from the URL.
+  const { data: userData, isLoading: userLoading } = useGetUserQuery();
+  const isAuthenticated = useMemo(() => Boolean(userData?.user?.id), [userData]);
+
+  // Guard the redirect with a ref so it fires AT MOST ONCE per mount, even
+  // if the effect re-runs because of an unstable router reference. Without
+  // this, repeated router.replace calls created an updateDepth loop in
+  // certain Next.js + react-redux combinations.
+  const redirectedRef = useRef(false);
+  useEffect(() => {
+    if (userLoading) return;
+    if (redirectedRef.current) return;
+    if (!isAuthenticated && token) {
+      redirectedRef.current = true;
+      router.replace(`/register?ref=${encodeURIComponent(token)}`);
+    }
+    // `router` intentionally omitted from deps — useRouter() doesn't
+    // guarantee referential stability across renders in every Next.js
+    // version, and including it caused the effect to re-fire on every
+    // render. The redirect is a one-shot operation, guarded by the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLoading, isAuthenticated, token]);
+
   const {
     data: inviteData,
     isLoading: loadingInvite,
     isError: inviteError,
-  } = useLookupInviteQuery(token, { skip: !token });
+  } = useLookupInviteQuery(token, { skip: !token || !isAuthenticated });
 
   const [redeemInvite] = useRedeemInviteMutation();
 
@@ -89,7 +123,10 @@ export default function JoinPage() {
   };
 
   // ── Loading ──────────────────────────────────────────────────────────────
-  if (loadingInvite) {
+  // Includes the auth check and the unauthenticated-redirect window. We
+  // never want to flash "Invite not found" while we're still deciding
+  // whether to hand off to /register.
+  if (userLoading || !isAuthenticated || loadingInvite) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-md space-y-4">

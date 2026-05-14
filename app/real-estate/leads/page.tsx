@@ -14,7 +14,20 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  useGetLeadsQuery, useGetLeadQuery, useUpdateLeadMutation,
+  DndContext,
+  type DragEndEvent,
+  type DragStartEvent,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  useGetLeadsQuery, useGetLeadQuery, useUpdateLeadMutation, useClaimLeadMutation,
+  useGetLeadDuplicatesQuery,
 } from "@/lib/api/real-estate/leads";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,7 +41,9 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Inbox, Plus, Search, LayoutGrid, List, Phone, Mail,
   Calendar, Flame, Snowflake, Sun, ChevronLeft, ChevronRight,
-  ExternalLink, Pencil, Building2,
+  ExternalLink, Pencil, Building2, ShieldAlert,
+  AlertCircle, TrendingUp, Target, Users as UsersIcon, GripVertical,
+  Coins,
 } from "lucide-react";
 import {
   LEAD_PIPELINE, LEAD_STATUS_LABEL, LEAD_STATUS_OPTIONS, LEAD_STATUS_TINT,
@@ -44,6 +59,9 @@ import {
   ViewsBar, useSavedViews,
   InlineEditCell,
   useLocalStorage,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 
 const PAGE_SIZE = 50;
@@ -53,8 +71,14 @@ interface Filters {
   status: string;
   score: string;
   source: string;
+  /** "mine" | "company" | "all" — toggles between the agent's own leads
+   *  and the company pool. Defaults to "mine" so agents land on their
+   *  own work first. */
+  pool: "mine" | "company" | "all";
 }
-const EMPTY_FILTERS: Filters = { search: "", status: "", score: "", source: "" };
+const EMPTY_FILTERS: Filters = {
+  search: "", status: "", score: "", source: "", pool: "mine",
+};
 
 export default function LeadsListPage() {
   const [viewMode, setViewMode] = useLocalStorage<"list" | "kanban">("rebm:leads:view", "list");
@@ -71,6 +95,7 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   const views = useSavedViews<Filters>("leads");
 
@@ -99,13 +124,61 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
     status: filters.status || undefined,
     score: filters.score || undefined,
     source: filters.source || undefined,
+    pool: filters.pool,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   });
 
-  const items = data?.data ?? [];
+  const rawItems = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      { id: "name", label: "Name", type: "text" },
+      { id: "email", label: "Email", type: "text" },
+      { id: "phone", label: "Phone", type: "text" },
+      {
+        id: "status",
+        label: "Stage",
+        type: "select",
+        options: LEAD_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+      {
+        id: "score",
+        label: "Score",
+        type: "select",
+        options: [
+          { value: "HOT", label: "Hot" },
+          { value: "WARM", label: "Warm" },
+          { value: "COLD", label: "Cold" },
+        ],
+      },
+      {
+        id: "source",
+        label: "Source",
+        type: "select",
+        options: LEAD_SOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+      {
+        id: "city",
+        label: "Preferred city",
+        type: "text",
+        getValue: (l: Lead) => l.preferredCities?.[0] ?? "",
+      },
+      { id: "budgetMin", label: "Budget min", type: "number" },
+      { id: "budgetMax", label: "Budget max", type: "number" },
+      { id: "nextFollowUpAt", label: "Next follow-up", type: "date" },
+      { id: "lastContactedAt", label: "Last contact", type: "date" },
+      { id: "createdAt", label: "Created", type: "date" },
+    ],
+    [],
+  );
+
+  const items = useMemo(
+    () => applyAdvancedFilters(rawItems, conditions, filterFields),
+    [rawItems, conditions, filterFields],
+  );
 
   const isDirty = useMemo(() => {
     if (views.activeId == null) return Object.values(filters).some(Boolean);
@@ -123,6 +196,33 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
   }, [filters]);
 
   const [updateLead] = useUpdateLeadMutation();
+  const [claimLead, { isLoading: isClaiming }] = useClaimLeadMutation();
+
+  // Admin-only convenience: query the duplicate-review endpoint to
+  // surface a "Duplicates (N)" badge in the header that jumps straight
+  // to /real-estate/admin/duplicates.
+  //
+  // The endpoint enforces the admin gate server-side. For regular
+  // agents the request comes back 403 → `data` stays undefined →
+  // `canSeeDuplicates` is false → button hidden. Safe to call from
+  // every leads-list render.
+  const dupsQ = useGetLeadDuplicatesQuery();
+  const duplicateCount =
+    dupsQ.data?.data.reduce((n, g) => n + g.duplicates.length, 0) ?? 0;
+  const canSeeDuplicates = Boolean(dupsQ.data);
+
+  const handleClaim = async (id: string) => {
+    try {
+      await claimLead(id).unwrap();
+      toast({ title: "Lead claimed", description: "This lead is now assigned to you." });
+    } catch (e: any) {
+      toast({
+        title: "Could not claim lead",
+        description: e?.data?.error ?? e?.message,
+        variant: "destructive",
+      });
+    }
+  };
 
   const columns: ColumnDef<Lead>[] = useMemo(() => [
     {
@@ -212,14 +312,51 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
       id: "source",
       header: "Source",
       width: 110,
-      defaultHidden: false,
+      defaultHidden: true,
       copyValue: (l) => LEAD_SOURCE_LABEL[l.source],
       cell: (l) => <Badge variant="outline" className="text-[10px]">{LEAD_SOURCE_LABEL[l.source]}</Badge>,
+    },
+    {
+      id: "origin",
+      header: "Origin",
+      width: 130,
+      copyValue: (l) => (l.origin === "COMPANY" ? "Company pool" : "Agent"),
+      cell: (l) => {
+        const isCompany = l.origin === "COMPANY";
+        const isUnclaimed = isCompany && !l.assignedAgentId;
+        return (
+          <div className="flex items-center gap-1.5">
+            <Badge
+              variant={isCompany ? "secondary" : "outline"}
+              className="text-[10px]"
+            >
+              {isCompany ? "Company pool" : "Agent"}
+            </Badge>
+            {isUnclaimed && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                disabled={isClaiming}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClaim(l.id);
+                }}
+              >
+                Claim
+              </Button>
+            )}
+          </div>
+        );
+      },
     },
     {
       id: "followup",
       header: "Follow-up",
       width: 120,
+      // Keep follow-up visible by default — it's the action column most reps
+      // open the leads list for.
       sortKey: "nextFollowUpAt",
       copyValue: (l) => formatDate(l.nextFollowUpAt),
       cell: (l) => {
@@ -278,6 +415,34 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
+            {/* Pool selector — toggles between the agent's own leads
+                and the company pool. Admin/MD callers can still see
+                "All" to get the unified view. */}
+            <div className="flex border rounded-md p-0.5 bg-muted/30 text-xs">
+              {(["mine", "company", "all"] as const).map((p) => {
+                const label = p === "mine" ? "Mine" : p === "company" ? "Company pool" : "All";
+                const isActive = filters.pool === p;
+                return (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant={isActive ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2.5 text-[11px]"
+                    aria-pressed={isActive}
+                    onClick={() => updateFilter("pool", p)}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+            <AdvancedFilter
+              fields={filterFields}
+              value={conditions}
+              onChange={setConditions}
+            />
+            <ManageColumnsButton tableId="rebm-leads" columns={columns} />
             <div className="flex border rounded-md p-0.5 bg-muted/30">
               <Button
                 variant={"secondary"}
@@ -292,6 +457,28 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
                 <LayoutGrid className="h-3.5 w-3.5" />
               </Button>
             </div>
+            {canSeeDuplicates && (
+              <Button
+                asChild
+                variant={duplicateCount > 0 ? "outline" : "ghost"}
+                size="sm"
+                className="h-8"
+                title="Review silently-flagged duplicate leads (admin only)"
+              >
+                <Link href="/real-estate/admin/duplicates">
+                  <ShieldAlert className="h-3.5 w-3.5 mr-1.5 opacity-70" />
+                  Duplicates
+                  {duplicateCount > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className="ml-1.5 h-4 min-w-4 px-1 text-[10px] font-semibold"
+                    >
+                      {duplicateCount}
+                    </Badge>
+                  )}
+                </Link>
+              </Button>
+            )}
             <Button asChild size="sm" className="h-8">
               <Link href="/real-estate/leads/new"><Plus className="h-3.5 w-3.5 mr-1" /> Capture lead</Link>
             </Button>
@@ -535,55 +722,210 @@ function Fact({ label, value, icon: Icon }: { label: string; value: React.ReactN
 
 // ─── Kanban view ─────────────────────────────────────────────────────────────
 
+// ─── Kanban view ────────────────────────────────────────────────────────────
+//
+// Pipeline-shaped leads board with:
+//   - Drag-and-drop between stages (mouse + touch + keyboard). The drop
+//     fires an optimistic updateLead mutation; toast on failure.
+//   - KPI strip across the top (total · hot · overdue · pipeline value
+//     · avg deal). Computed from the SAME slice we render.
+//   - Inline filters: pool toggle (Mine / Company / All), score chips,
+//     and a debounced search input matching the list view.
+//   - Per-column header with status dot, count, and Σ budget for the
+//     column — owners can see "how much money is parked in Negotiating"
+//     at a glance.
+//   - Score-coloured stripe down the left of each card. Phone / email
+//     icons, follow-up badge that flips red when overdue, source pill.
+//
+// Responsive strategy:
+//   - On every viewport the columns share a single horizontal scroll
+//     container with `snap-x` so the user can flick across stages. That
+//     scales from a 320px phone to a 4K monitor without re-layout
+//     gymnastics, and beats the 7-col grid that crammed unreadable
+//     30-px-wide cards on tablets.
+//   - On xl+ screens (≥ 1280 px) we widen each column from 280→320 px
+//     so the full pipeline fits without scrolling for most agents.
+
+interface KanbanColumnMeta {
+  status: LeadStatus;
+  leads: Lead[];
+  pipelineValue: number;
+}
+
 function KanbanView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void }) {
+  const { toast } = useToast();
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const { data, isLoading } = useGetLeadsQuery({
-    search: search || undefined,
-    limit: 200,
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) =>
+    setFilters((f) => ({ ...f, [key]: value }));
+
+  // Same query the list view uses — pool / search / score / source all
+  // apply server-side so the Kanban reflects exactly what the agent
+  // would see in the list. `limit: 250` keeps the board snappy even
+  // on huge pipelines; the user can narrow with filters if they need
+  // to see more.
+  const { data, isLoading, isFetching } = useGetLeadsQuery({
+    search: filters.search || undefined,
+    score: filters.score || undefined,
+    source: filters.source || undefined,
+    pool: filters.pool,
+    limit: 250,
   });
+
+  const [updateLead] = useUpdateLeadMutation();
+
+  // Optimistic move state — when the user drops a lead onto a new
+  // column we shove it into `overrides` so the UI updates instantly,
+  // then issue the PUT in the background. On failure we revert.
+  const [overrides, setOverrides] = useState<Record<string, LeadStatus>>({});
+  // Currently-dragged lead — used by DragOverlay so the floating card
+  // looks identical to the source card on every browser.
+  const [draggingLead, setDraggingLead] = useState<Lead | null>(null);
 
   const items = data?.data ?? [];
   const total = data?.meta.total ?? 0;
-  const grouped = useMemo(() => {
-    const m = new Map<LeadStatus, Lead[]>();
-    LEAD_PIPELINE.forEach((s) => m.set(s, []));
-    for (const l of items) {
-      const list = m.get(l.status) ?? [];
-      list.push(l);
-      m.set(l.status, list);
+
+  // Apply overrides to the server slice before grouping.
+  const displayLeads = useMemo(
+    () =>
+      items.map((l) =>
+        overrides[l.id] && overrides[l.id] !== l.status
+          ? { ...l, status: overrides[l.id] }
+          : l,
+      ),
+    [items, overrides],
+  );
+
+  const columns: KanbanColumnMeta[] = useMemo(() => {
+    const buckets = new Map<LeadStatus, Lead[]>();
+    LEAD_PIPELINE.forEach((s) => buckets.set(s, []));
+    for (const l of displayLeads) {
+      const arr = buckets.get(l.status);
+      if (arr) arr.push(l);
     }
-    return m;
-  }, [items]);
+    return LEAD_PIPELINE.map((status) => {
+      const leads = buckets.get(status) ?? [];
+      const pipelineValue = leads.reduce(
+        (acc, l) => acc + (l.budgetMax ?? l.budgetMin ?? 0),
+        0,
+      );
+      return { status, leads, pipelineValue };
+    });
+  }, [displayLeads]);
+
+  // ── KPI strip ──────────────────────────────────────────────────────
+  const now = Date.now();
+  const kpi = useMemo(() => {
+    let hot = 0;
+    let overdue = 0;
+    let activeValue = 0;
+    let activeCount = 0;
+    for (const l of displayLeads) {
+      if (l.score === "HOT") hot += 1;
+      if (l.nextFollowUpAt && new Date(l.nextFollowUpAt).getTime() < now) overdue += 1;
+      // "Active" = anything not Converted/Lost — those don't represent
+      // open opportunity any more.
+      if (l.status !== "CONVERTED" && l.status !== "LOST") {
+        const v = l.budgetMax ?? l.budgetMin ?? 0;
+        activeValue += v;
+        if (v > 0) activeCount += 1;
+      }
+    }
+    const avg = activeCount > 0 ? activeValue / activeCount : 0;
+    return { hot, overdue, activeValue, avg };
+  }, [displayLeads, now]);
+
+  // ── DnD setup ──────────────────────────────────────────────────────
+  // PointerSensor with a 4px activation distance prevents accidental
+  // drags when the user just clicks the card to open it. TouchSensor
+  // mirrors that with a longer delay so swiping the horizontal column
+  // strip on mobile doesn't grab a card.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
+
+  const onDragStart = (e: DragStartEvent) => {
+    const id = String(e.active.id);
+    const lead = displayLeads.find((l) => l.id === id) ?? null;
+    setDraggingLead(lead);
+  };
+
+  const onDragEnd = async (e: DragEndEvent) => {
+    setDraggingLead(null);
+    const overId = e.over?.id;
+    if (!overId) return;
+    const next = String(overId) as LeadStatus;
+    if (!LEAD_PIPELINE.includes(next)) return;
+    const id = String(e.active.id);
+    const lead = displayLeads.find((l) => l.id === id);
+    if (!lead || lead.status === next) return;
+
+    // CONVERTED requires the /convert endpoint (creates a Buyer). We
+    // don't try to do that from a drag-and-drop — surface a hint and
+    // bail. Everything else is fair game.
+    if (next === "CONVERTED") {
+      toast({
+        title: "Use Convert to mark as won",
+        description: "Drag-and-drop can't create the Buyer record. Open the lead and use Convert.",
+      });
+      return;
+    }
+
+    const previous = lead.status;
+    setOverrides((o) => ({ ...o, [id]: next }));
+    try {
+      await updateLead({ id, body: { status: next } }).unwrap();
+      // Clear the override once the cache refresh propagates so we
+      // don't keep a stale entry forever.
+      setOverrides((o) => {
+        const { [id]: _drop, ...rest } = o;
+        return rest;
+      });
+    } catch (err: any) {
+      // Revert the optimistic move.
+      setOverrides((o) => ({ ...o, [id]: previous }));
+      toast({
+        title: "Could not move lead",
+        description: err?.data?.error ?? err?.message ?? "Try again",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="container mx-auto p-4 sm:p-6 space-y-4 max-w-[100rem]">
+      {/* Header row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Inbox className="h-6 w-6 text-primary" />
-            Leads
+            Pipeline
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {total.toLocaleString()} lead{total === 1 ? "" : "s"} · pipeline view
+            {total.toLocaleString()} lead{total === 1 ? "" : "s"} on this board
+            {isFetching && <span className="ml-1.5 opacity-70">· syncing…</span>}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search leads…"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && setSearch(searchInput.trim())}
-              className="pl-8 h-8 w-56 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") updateFilter("search", searchInput.trim());
+                if (e.key === "Escape") { setSearchInput(""); updateFilter("search", ""); }
+              }}
+              className="pl-8 h-8 w-48 sm:w-56 text-sm"
             />
           </div>
           <div className="flex border rounded-md p-0.5 bg-muted/30">
-            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setViewMode("list")}>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setViewMode("list")} aria-label="List view">
               <List className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="secondary" size="sm" className="h-7 px-2" disabled aria-pressed>
+            <Button variant="secondary" size="sm" className="h-7 px-2" disabled aria-pressed aria-label="Pipeline view">
               <LayoutGrid className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -593,55 +935,339 @@ function KanbanView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => vo
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="grid gap-3 grid-cols-1 md:grid-cols-3 lg:grid-cols-7">
-          {LEAD_PIPELINE.map((s) => <Skeleton key={s} className="h-72" />)}
-        </div>
-      ) : (
-        <div className="grid gap-3 grid-cols-1 md:grid-cols-3 lg:grid-cols-7">
-          {LEAD_PIPELINE.map((status) => {
-            const list = grouped.get(status) ?? [];
+      {/* Filter row — pool / score chips. Source filter intentionally
+          omitted to keep the bar tight on mobile; users who need it can
+          switch to list view. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex border rounded-md p-0.5 bg-muted/30 text-xs">
+          {(["mine", "company", "all"] as const).map((p) => {
+            const label = p === "mine" ? "Mine" : p === "company" ? "Company pool" : "All";
+            const isActive = filters.pool === p;
             return (
-              <div key={status} className="rounded-lg bg-muted/30 flex flex-col min-h-[300px]">
-                <div className="px-3 py-2 border-b flex items-center justify-between sticky top-0 bg-muted/50 backdrop-blur rounded-t-lg">
-                  <div className="flex items-center gap-1.5 text-xs font-medium">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: LEAD_STATUS_TINT[status] }} />
-                    {LEAD_STATUS_LABEL[status]}
-                  </div>
-                  <Badge variant="secondary" className="text-[10px] tabular-nums">{list.length}</Badge>
-                </div>
-                <div className="p-2 flex-1 space-y-2 overflow-auto max-h-[70vh]">
-                  {list.length === 0 ? (
-                    <div className="text-[11px] text-muted-foreground text-center py-6">—</div>
-                  ) : (
-                    list.map((l) => (
-                      <Link key={l.id} href={`/real-estate/leads/${l.id}`}>
-                        <Card className="p-2.5 hover:shadow-md transition-shadow group cursor-pointer">
-                          <div className="flex items-start gap-2">
-                            <ScoreBadge score={l.score} />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{l.name}</div>
-                              <div className="text-[11px] text-muted-foreground truncate">
-                                {l.budgetMax ? formatCurrency(l.budgetMax) : "—"} · {l.preferredCities[0] ?? "—"}
-                              </div>
-                              {l.nextFollowUpAt && (
-                                <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-                                  <Calendar className="h-2.5 w-2.5" />
-                                  {formatDate(l.nextFollowUpAt)}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </Card>
-                      </Link>
-                    ))
-                  )}
-                </div>
-              </div>
+              <Button
+                key={p}
+                type="button"
+                variant={isActive ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2.5 text-[11px]"
+                aria-pressed={isActive}
+                onClick={() => updateFilter("pool", p)}
+              >
+                {label}
+              </Button>
             );
           })}
         </div>
+        <div className="flex border rounded-md p-0.5 bg-muted/30 text-xs">
+          {([
+            { value: "", label: "Any score" },
+            { value: "HOT", label: "Hot", icon: <Flame className="h-3 w-3" /> },
+            { value: "WARM", label: "Warm", icon: <Sun className="h-3 w-3" /> },
+            { value: "COLD", label: "Cold", icon: <Snowflake className="h-3 w-3" /> },
+          ] as const).map((s) => {
+            const isActive = filters.score === s.value;
+            return (
+              <Button
+                key={s.value || "any"}
+                type="button"
+                variant={isActive ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2.5 text-[11px] gap-1"
+                aria-pressed={isActive}
+                onClick={() => updateFilter("score", s.value)}
+              >
+                {("icon" in s ? s.icon : null) as React.ReactNode}
+                {s.label}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <KpiTile
+          icon={<UsersIcon className="h-3.5 w-3.5" />}
+          label="Hot leads"
+          value={kpi.hot.toLocaleString()}
+          tone="rose"
+        />
+        <KpiTile
+          icon={<AlertCircle className="h-3.5 w-3.5" />}
+          label="Overdue follow-ups"
+          value={kpi.overdue.toLocaleString()}
+          tone={kpi.overdue > 0 ? "amber" : "muted"}
+        />
+        <KpiTile
+          icon={<Coins className="h-3.5 w-3.5" />}
+          label="Active pipeline ₹"
+          value={formatCurrency(kpi.activeValue)}
+          tone="indigo"
+        />
+        <KpiTile
+          icon={<TrendingUp className="h-3.5 w-3.5" />}
+          label="Avg deal size"
+          value={kpi.avg > 0 ? formatCurrency(kpi.avg) : "—"}
+          tone="emerald"
+        />
+      </div>
+
+      {/* The board itself */}
+      {isLoading ? (
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {LEAD_PIPELINE.map((s) => (
+            <Skeleton key={s} className="h-[60vh] min-w-[280px] xl:min-w-[320px]" />
+          ))}
+        </div>
+      ) : (
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory -mx-4 sm:-mx-6 px-4 sm:px-6">
+            {columns.map((col) => (
+              <KanbanColumn key={col.status} column={col} />
+            ))}
+          </div>
+
+          <DragOverlay dropAnimation={{ duration: 180 }}>
+            {draggingLead ? (
+              <div className="w-[280px] xl:w-[300px] rotate-2 opacity-95">
+                <KanbanCard lead={draggingLead} isDragging />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
+    </div>
+  );
+}
+
+// ─── Kanban column ──────────────────────────────────────────────────────────
+
+function KanbanColumn({ column }: { column: KanbanColumnMeta }) {
+  const { status, leads, pipelineValue } = column;
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const tint = LEAD_STATUS_TINT[status];
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={
+        "shrink-0 snap-start w-[80vw] sm:w-[300px] xl:w-[320px] " +
+        "rounded-lg border bg-muted/20 flex flex-col max-h-[78vh] " +
+        (isOver ? "ring-2 ring-primary/40 bg-primary/5" : "")
+      }
+    >
+      {/* Column header */}
+      <div
+        className="px-3 py-2 border-b sticky top-0 bg-muted/40 backdrop-blur rounded-t-lg z-10"
+        style={{ borderTopColor: tint, borderTopWidth: 2 }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              className="h-2 w-2 rounded-full shrink-0"
+              style={{ backgroundColor: tint }}
+            />
+            <span className="text-xs font-semibold truncate">
+              {LEAD_STATUS_LABEL[status]}
+            </span>
+          </div>
+          <Badge variant="secondary" className="text-[10px] tabular-nums shrink-0">
+            {leads.length}
+          </Badge>
+        </div>
+        <div className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+          {pipelineValue > 0 ? formatCurrency(pipelineValue) : "—"}
+        </div>
+      </div>
+
+      {/* Cards */}
+      <div className="p-2 flex-1 space-y-2 overflow-y-auto">
+        {leads.length === 0 ? (
+          <div className="text-[11px] text-muted-foreground text-center py-8 italic">
+            {isOver ? "Drop here" : "No leads in this stage"}
+          </div>
+        ) : (
+          leads.map((l) => <DraggableKanbanCard key={l.id} lead={l} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Draggable wrapper around the visual card ──────────────────────────────
+
+function DraggableKanbanCard({ lead }: { lead: Lead }) {
+  const { attributes, listeners, setNodeRef, isDragging, transform } =
+    useDraggable({ id: lead.id });
+  // We DO NOT translate the source card while dragging — DragOverlay
+  // renders a clone at the cursor, so leaving the source in place keeps
+  // the column layout stable. Hide the source instead.
+  const style: React.CSSProperties = {
+    opacity: isDragging ? 0.35 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <KanbanCard lead={lead} dragListeners={listeners} />
+    </div>
+  );
+}
+
+// ─── Visual card ────────────────────────────────────────────────────────────
+
+function KanbanCard({
+  lead,
+  isDragging,
+  dragListeners,
+}: {
+  lead: Lead;
+  isDragging?: boolean;
+  dragListeners?: any;
+}) {
+  const tint =
+    lead.score === "HOT"
+      ? "#ef4444"
+      : lead.score === "WARM"
+        ? "#f59e0b"
+        : "#94a3b8";
+
+  const followUpDue = lead.nextFollowUpAt
+    ? new Date(lead.nextFollowUpAt)
+    : null;
+  const isOverdue = !!followUpDue && followUpDue.getTime() < Date.now();
+  const isCompanyOrigin = lead.origin === "COMPANY";
+  const budgetLabel =
+    lead.budgetMin && lead.budgetMax
+      ? `${formatCurrency(lead.budgetMin)} – ${formatCurrency(lead.budgetMax)}`
+      : lead.budgetMax
+        ? `≤ ${formatCurrency(lead.budgetMax)}`
+        : lead.budgetMin
+          ? `≥ ${formatCurrency(lead.budgetMin)}`
+          : null;
+
+  return (
+    <Card
+      className={
+        "relative p-2.5 pl-3 hover:shadow-md transition-shadow group " +
+        (isDragging ? "shadow-lg ring-2 ring-primary/30" : "")
+      }
+    >
+      {/* Score stripe down the left edge — instant visual signal */}
+      <span
+        className="absolute left-0 top-0 bottom-0 w-1 rounded-l"
+        style={{ backgroundColor: tint }}
+      />
+
+      <div className="flex items-start gap-2">
+        {/* Drag handle. Pulled out into its own grip so clicking the
+            rest of the card opens it instead of starting a drag. */}
+        <button
+          type="button"
+          aria-label="Drag"
+          className="p-0.5 -ml-0.5 mt-0.5 text-muted-foreground/50 hover:text-muted-foreground cursor-grab active:cursor-grabbing touch-none shrink-0"
+          {...(dragListeners ?? {})}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Body — wraps the click-to-open Link so the whole card area
+            (other than the grip) navigates to the detail page. */}
+        <Link
+          href={`/real-estate/leads/${lead.id}`}
+          className="flex-1 min-w-0 space-y-1"
+        >
+          <div className="flex items-center justify-between gap-1.5">
+            <span className="text-sm font-medium truncate">{lead.name}</span>
+            <ScoreBadge score={lead.score} />
+          </div>
+
+          <div className="space-y-0.5 text-[11px] text-muted-foreground">
+            {lead.phone && (
+              <div className="flex items-center gap-1 min-w-0">
+                <Phone className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{lead.phone}</span>
+              </div>
+            )}
+            {lead.email && !lead.phone && (
+              <div className="flex items-center gap-1 min-w-0">
+                <Mail className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{lead.email}</span>
+              </div>
+            )}
+            {budgetLabel && (
+              <div className="flex items-center gap-1 min-w-0 tabular-nums">
+                <Coins className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{budgetLabel}</span>
+              </div>
+            )}
+            {lead.preferredCities[0] && (
+              <div className="flex items-center gap-1 min-w-0">
+                <Building2 className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{lead.preferredCities[0]}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-1.5 pt-0.5">
+            {followUpDue ? (
+              <span
+                className={
+                  "inline-flex items-center gap-1 text-[10px] tabular-nums " +
+                  (isOverdue ? "text-destructive font-medium" : "text-muted-foreground")
+                }
+              >
+                <Calendar className="h-2.5 w-2.5" />
+                {isOverdue ? "Overdue · " : ""}
+                {formatDate(lead.nextFollowUpAt)}
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground italic">
+                No follow-up
+              </span>
+            )}
+            {isCompanyOrigin && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1">
+                Pool
+              </Badge>
+            )}
+          </div>
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
+// ─── KPI tile ──────────────────────────────────────────────────────────────
+
+function KpiTile({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: "rose" | "amber" | "indigo" | "emerald" | "muted";
+}) {
+  const toneClass = {
+    rose: "bg-rose-50 text-rose-600 ring-rose-100 dark:bg-rose-950/30 dark:text-rose-300 dark:ring-rose-900/40",
+    amber: "bg-amber-50 text-amber-600 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/40",
+    indigo: "bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-950/30 dark:text-indigo-300 dark:ring-indigo-900/40",
+    emerald: "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900/40",
+    muted: "bg-muted text-muted-foreground ring-border",
+  }[tone];
+
+  return (
+    <div className="rounded-lg border bg-card p-2.5 flex items-center gap-2.5">
+      <span className={`flex h-7 w-7 items-center justify-center rounded-md ring-1 ${toneClass}`}>
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">
+          {label}
+        </div>
+        <div className="text-sm font-semibold tabular-nums truncate">{value}</div>
+      </div>
     </div>
   );
 }

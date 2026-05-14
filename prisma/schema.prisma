@@ -3121,9 +3121,37 @@ enum ViewingStatus {
   NO_SHOW
 }
 
+// Origin of a Lead in the brokerage funnel. The two paths have very
+// different visibility + ownership rules:
+//   AGENT   — captured by an individual agent. Each agent only sees the
+//             leads they own. If two agents capture the same person
+//             (matched by phone/email), the second one is silently
+//             flagged as a duplicate via `duplicateOfLeadId` — admin
+//             sees the link, the agents don't.
+//   COMPANY — opened to the org by admin/MD. Every active agent sees it
+//             in the "Company pool". Ownership lands on whoever closes
+//             the related transaction (`ownerAgentId` set then).
+enum LeadOrigin {
+  AGENT
+  COMPANY
+}
+
 model Lead {
   id             String @id @default(cuid())
   organizationId String @map("organization_id")
+
+  // Origin + ownership (see LeadOrigin doc above).
+  origin        LeadOrigin @default(AGENT)
+  // Final owner of the lead — set on transaction close for COMPANY
+  // origin, or seeded from `assignedAgentId` for AGENT origin once a
+  // capture is in flight. NULL while the lead is still in the open pool.
+  ownerAgentId  String?    @map("owner_agent_id")
+  // Self-FK pointing at the original Lead this row is a silent duplicate
+  // of. Only populated for AGENT-origin leads. Surfaced ONLY to
+  // privileged users (admin / MD); regular agents never see this field.
+  duplicateOfLeadId String? @map("duplicate_of_lead_id")
+  duplicateOf       Lead?   @relation("LeadDuplicates", fields: [duplicateOfLeadId], references: [id], onDelete: SetNull)
+  duplicates        Lead[]  @relation("LeadDuplicates")
 
   // Contact
   name     String
@@ -3166,10 +3194,34 @@ model Lead {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  // Normalised contact keys for fast duplicate-detection lookup. Indexed
+  // separately so a `[organizationId, phoneNormalized]` scan stays cheap
+  // even on a million-row table.
+  phoneNormalized String? @map("phone_normalized")
+  emailNormalized String? @map("email_normalized")
+
+  // Customer photo (passport-style snap that an agent takes on capture).
+  // Uploaded to Hostinger via /api/upload like every other image; what
+  // lives on Lead is just the URL.
+  photoUrl    String? @map("photo_url")
+  // Perceptual hash (dHash, 64-bit, stored as 16 lowercase hex chars)
+  // computed in the browser at capture time. Drives image-based silent
+  // duplicate detection — catches "agent retyped phone wrong to fool
+  // the system" because the photo bits still match within a Hamming
+  // distance ≤ 10. Indexed only by organizationId because we have to
+  // pull all candidates into JS for the bit-distance compare anyway
+  // (no native XOR/popcount in stock Prisma).
+  photoPhash  String? @map("photo_phash")
+
   @@index([organizationId, status])
   @@index([assignedAgentId, status])
   @@index([nextFollowUpAt])
   @@index([score])
+  @@index([organizationId, origin])
+  @@index([organizationId, ownerAgentId])
+  @@index([organizationId, phoneNormalized])
+  @@index([organizationId, emailNormalized])
+  @@index([duplicateOfLeadId])
   @@map("re_leads")
 }
 

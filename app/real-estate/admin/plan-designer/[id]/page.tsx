@@ -68,6 +68,7 @@ import {
   Circle,
   ClipboardCopy,
   Copy,
+  Eye,
   FileText,
   Keyboard,
   Layers,
@@ -718,6 +719,11 @@ export default function PlanEditorPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem asChild>
+                    <Link href={`/real-estate/admin/plan-designer/${id}/preview`}>
+                      <Eye className="h-3.5 w-3.5 mr-2" /> Preview & Print
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={onDuplicate}>
                     <Copy className="h-3.5 w-3.5 mr-2" /> Duplicate plan
                   </DropdownMenuItem>

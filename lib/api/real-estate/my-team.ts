@@ -109,6 +109,38 @@ const myTeamApi = baseApi.injectEndpoints({
     runGuarantee: build.mutation<{ data: { processed: number; skipped: number } }, { year: number; month: number }>({
       query: (body) => ({ url: "/real-estate/guarantee/run", method: "POST", body }),
     }),
+
+    lookupReferral: build.query<
+      {
+        data: {
+          kind: "invite" | "sponsor";
+          sponsor: {
+            id: string;
+            name: string | null;
+            email: string;
+            image: string | null;
+            rank: string | null;
+            organizationName: string | null;
+          };
+          expiresAt?: string;
+        };
+      },
+      string
+    >({
+      query: (code) => `/real-estate/referral-lookup?code=${encodeURIComponent(code)}`,
+    }),
+
+    onboardAsAgent: build.mutation<
+      { data: { id: string; status: string }; alreadyExists?: boolean },
+      { referralCode: string }
+    >({
+      query: (body) => ({
+        url: "/real-estate/onboard-as-agent",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["MyTeam"],
+    }),
   }),
   overrideExisting: false,
 });
@@ -121,4 +153,6 @@ export const {
   useLookupInviteQuery,
   useRedeemInviteMutation,
   useRunGuaranteeMutation,
+  useLookupReferralQuery,
+  useOnboardAsAgentMutation,
 } = myTeamApi;

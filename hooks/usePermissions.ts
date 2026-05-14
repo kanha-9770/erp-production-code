@@ -97,20 +97,42 @@ export function usePermissions(): PermissionsState {
   const user = (userData?.user as unknown as UserInfo) ?? null
   const isAdmin = user?.isAdmin ?? false
 
-  const unitAssignments = user?.unitAssignments || []
-  const roleIds = useMemo(
-    () => [...new Set(unitAssignments.map((ua) => ua.role.id))],
-    [unitAssignments]
-  )
+  // Stable array of role IDs derived from the user object.
+  //
+  // ── Why this is written so carefully ─────────────────────────────────────
+  // The naive `user?.unitAssignments || []` returns a brand-new `[]` on
+  // every render when `user` (or `unitAssignments`) is null/undefined,
+  // because `||` evaluates its right-hand side every time. Feeding that
+  // into the `useMemo` below — and then into the effect's dep array —
+  // makes the effect re-fire on every render, which in turn calls
+  // `setPermissions([]) / setUserPermissions([])` with fresh empty-array
+  // references on every render, triggering a re-render, and so on. That's
+  // the "Maximum update depth exceeded" loop we hit on /real-estate/my-team
+  // after creating an invite: the createInvite mutation churned the redux
+  // store enough that this unstable-reference cascade compounded over
+  // React's update-depth limit.
+  //
+  // The fix: derive `roleIds` from `user` directly, sort the ids so a
+  // re-ordered (but equal) assignments list doesn't produce a different
+  // key, and key the effect on the joined string instead of the array
+  // reference.
+  const roleIds = useMemo<string[]>(() => {
+    const ids = (user?.unitAssignments ?? []).map((ua) => ua.role.id)
+    return Array.from(new Set(ids)).sort()
+  }, [user])
+  const roleIdsKey = roleIds.join(",")
+  const userId = user?.id ?? null
 
   // Fetch role permissions AND user-level permissions in parallel
   useEffect(() => {
     if (userLoading) return
 
-    // Admin gets full access — no need to fetch permissions
+    // Admin (or signed-out) → clear permissions. Use the functional form
+    // and bail out when state is already empty, so we don't push a fresh
+    // `[]` reference into state on every effect run.
     if (!user || isAdmin) {
-      setPermissions([])
-      setUserPermissions([])
+      setPermissions((prev) => (prev.length === 0 ? prev : []))
+      setUserPermissions((prev) => (prev.length === 0 ? prev : []))
       setPermissionsLoading(false)
       return
     }
@@ -163,7 +185,14 @@ export function usePermissions(): PermissionsState {
 
     fetchAll()
     return () => { cancelled = true }
-  }, [user, userLoading, isAdmin, roleIds])
+    // ── Deps are intentionally NOT [user, ..., roleIds] ──────────────────
+    // `user` is a new object reference on every redux re-render even when
+    // contents are identical, and `roleIds` is a new array reference each
+    // time `useMemo` re-evaluates. Keying on the stable primitive `userId`
+    // and the joined-string `roleIdsKey` means the effect only refires
+    // when the *content* actually changes — which is what we want.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, userLoading, isAdmin, roleIdsKey])
 
   const isLoading = userLoading || permissionsLoading
   const error = userError ? "Failed to fetch user info" : permissionsError

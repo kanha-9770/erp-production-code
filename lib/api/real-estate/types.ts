@@ -282,9 +282,44 @@ export type ViewingStatus =
   | "CANCELLED"
   | "NO_SHOW";
 
+/**
+ * AGENT   — captured by an individual agent; visible only to them (and
+ *           privileged admin/MD). Silent-duplicate detection applies.
+ * COMPANY — open pool — every agent sees it; whoever closes wins.
+ */
+export type LeadOrigin = "AGENT" | "COMPANY";
+
 export interface Lead {
   id: string;
   organizationId: string;
+  /** Capture-side origin. Drives visibility + ownership rules. */
+  origin: LeadOrigin;
+  /**
+   * Final owner once the lead converts (= the agent who closed the
+   * related transaction). NULL while the lead is unresolved.
+   */
+  ownerAgentId: string | null;
+  /**
+   * Internal silent-duplicate pointer. Set on AGENT-origin captures
+   * when an earlier lead in the org matches on normalised phone, email,
+   * OR perceptual photo hash (Hamming ≤ 10 bits).
+   *
+   * **Only privileged users (admin/MD) receive this field** — the lead
+   * endpoints strip it from regular-agent responses, so it's safe to
+   * read but you should expect it to be `undefined` for the typical
+   * agent-side caller.
+   */
+  duplicateOfLeadId?: string | null;
+  /** Customer photo URL (Hostinger). Optional. */
+  photoUrl?: string | null;
+  /**
+   * 16-char lowercase hex dHash of `photoUrl`, computed in the browser
+   * at capture time. Used server-side as a third duplicate-detection
+   * signal so an agent who deliberately mistypes the phone still trips
+   * on the photo. Like `duplicateOfLeadId`, this is included in
+   * responses but isn't expected to be read by agent-side UIs.
+   */
+  photoPhash?: string | null;
   name: string;
   email: string | null;
   phone: string | null;

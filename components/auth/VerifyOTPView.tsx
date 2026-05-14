@@ -66,9 +66,31 @@ export default function VerifyOTPView({
     try {
       const result = await verifyOTP({ otp: data.otp, userId, type: otpType }).unwrap()
       toast({ title: "Verified", description: "Code accepted." })
+
+      const pendingReferral =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem("pendingAgentReferral")
+          : null
+
       if (otpType === "registration" && result.needsOrganization) {
+        // Agents joining via a referral inherit the sponsor's organization —
+        // skip the "create org" modal and head straight to onboarding.
+        if (pendingReferral) {
+          window.sessionStorage.removeItem("pendingAgentReferral")
+          setTimeout(() => {
+            window.location.href = `/real-estate/onboard?code=${encodeURIComponent(pendingReferral)}`
+          }, 100)
+          return
+        }
         setShowOrgModal(true)
       } else {
+        if (pendingReferral) {
+          window.sessionStorage.removeItem("pendingAgentReferral")
+          setTimeout(() => {
+            window.location.href = `/real-estate/onboard?code=${encodeURIComponent(pendingReferral)}`
+          }, 100)
+          return
+        }
         setTimeout(() => {
           window.location.href = "/profile"
         }, 100)
