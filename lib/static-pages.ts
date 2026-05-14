@@ -431,6 +431,14 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'shield',
   },
   {
+    path: '/real-estate/admin/duplicates',
+    label: 'Duplicate Leads',
+    group: 'Real Estate',
+    description: 'Silent duplicate-capture review (phone / email / photo)',
+    adminOnly: true,
+    icon: 'shield',
+  },
+  {
     path: '/real-estate/admin/rank-promotions',
     label: 'Rank Promotions',
     group: 'Real Estate',
@@ -547,6 +555,13 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'sparkles',
   },
   {
+    path: '/real-estate/comp-plan',
+    label: 'Compensation Plan',
+    group: 'Real Estate',
+    description: 'View / print the active compensation plan',
+    icon: 'file-text',
+  },
+  {
     path: '/real-estate/admin/settings',
     label: 'Module Settings',
     group: 'Real Estate',
@@ -616,6 +631,7 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Employee Engagement',
   'Performance',
   'Real Estate',
+  'Inventory',
   'Asset & Admin',
   'Settings',
   'Profile',

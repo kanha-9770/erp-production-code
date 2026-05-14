@@ -174,6 +174,12 @@ function toast({ ...props }: Toast) {
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
 
+  // Subscribe once on mount, unsubscribe on unmount. The previous `[state]`
+  // dep re-ran this effect on every dispatch — fine in isolation, but when
+  // a parent re-renders during the same tick (e.g. an RTK Query refetch
+  // following a mutation that itself toasts), the listener-churn compounds
+  // with the parent's re-render and React bails with "Maximum update depth
+  // exceeded".
   React.useEffect(() => {
     listeners.push(setState)
     return () => {
@@ -182,7 +188,7 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [state])
+  }, [])
 
   return {
     ...state,

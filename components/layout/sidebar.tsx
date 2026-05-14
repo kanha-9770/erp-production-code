@@ -34,6 +34,20 @@ import {
   CalendarHeart,
   Package,
   Smartphone,
+  Network,
+  List,
+  UserPlus,
+  Coins,
+  Receipt,
+  Banknote,
+  Trophy,
+  Shield,
+  ScrollText,
+  FileSignature,
+  Boxes,
+  User,
+  Bot,
+  Briefcase as BriefcaseIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -229,11 +243,11 @@ function staticPageIcon(name?: string) {
     case "wallet":
       return Wallet;
     case "user":
-      return Users;
+      return User;
     case "sparkles":
       return Sparkles;
     case "shield":
-      return Settings;
+      return Shield;
     case "package":
       return Package;
     case "smartphone":
@@ -242,6 +256,42 @@ function staticPageIcon(name?: string) {
       return Target;
     case "trending-up":
       return TrendingUp;
+    // Real Estate group icons
+    case "building2":
+      return Building2;
+    case "network":
+      return Network;
+    case "list":
+      return List;
+    case "user-plus":
+      return UserPlus;
+    case "coins":
+      return Coins;
+    case "file-text":
+      return FileText;
+    case "receipt":
+      return Receipt;
+    case "banknote":
+      return Banknote;
+    case "trophy":
+      return Trophy;
+    case "activity":
+      return Activity;
+    // HR / Inventory / Misc
+    case "briefcase":
+      return BriefcaseIcon;
+    case "megaphone":
+      return Megaphone;
+    case "file-signature":
+      return FileSignature;
+    case "scroll-text":
+      return ScrollText;
+    case "boxes":
+      return Boxes;
+    case "plus":
+      return Plus;
+    case "bot":
+      return Bot;
     default:
       return Folder;
   }
@@ -689,6 +739,101 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     walk(filteredTree as any);
     setExpandedModules((prev) => new Set([...Array.from(prev), ...Array.from(ids)]));
   }, [searchQuery, filteredTree]);
+
+  // ── Context-aware auto-expand ──────────────────────────────────────────
+  // 1. Whenever the URL changes, expand every ancestor of the system-route
+  //    leaf that matches the current pathname. This is the "open the
+  //    folder that contains the page I'm looking at" UX win every sidebar
+  //    should have.
+  //
+  // 2. If the signed-in user's roles are ONLY the auto-provisioned
+  //    "Real Estate Agent" role (i.e. they were onboarded via referral
+  //    and have nothing else), force-expand the Real Estate module on
+  //    first render so they don't land on an empty-looking sidebar.
+  //    This effect is intentionally additive — it never collapses a
+  //    group the user is already viewing.
+  const isRebmOnlyAgent = useMemo(() => {
+    if (isAdmin) return false;
+    const ua = (userData?.user as any)?.unitAssignments;
+    if (!Array.isArray(ua) || ua.length === 0) return false;
+    return ua.every((a: any) => a?.role?.name === "Real Estate Agent");
+  }, [isAdmin, userData]);
+
+  const autoExpandedForRebmRef = useRef(false);
+  useEffect(() => {
+    if (moduleTree.length === 0) return;
+
+    const toExpand = new Set<string>();
+
+    // (1) Find a system-route leaf whose `system_route` is a prefix of
+    //     the current pathname. The leaf's parent (and grandparents) get
+    //     expanded so the leaf is reachable on screen.
+    const ancestorsByLeaf = new Map<string, string[]>();
+    const walk = (items: any[], ancestors: string[]) => {
+      for (const it of items) {
+        const nextAncestors = it.children?.length
+          ? [...ancestors, it.id]
+          : ancestors;
+        if (it.module_type === "system-route" && it.system_route) {
+          ancestorsByLeaf.set(it.system_route, ancestors);
+        }
+        if (it.children?.length) walk(it.children, nextAncestors);
+      }
+    };
+    walk(moduleTree as any, []);
+
+    // Longest-prefix match — `/real-estate/my-team` should pick the
+    // `/real-estate/my-team` leaf over the bare `/real-estate` dashboard.
+    let bestPath: string | null = null;
+    for (const route of ancestorsByLeaf.keys()) {
+      if (pathname === route || pathname.startsWith(route + "/")) {
+        if (!bestPath || route.length > bestPath.length) bestPath = route;
+      }
+    }
+    if (bestPath) {
+      for (const id of ancestorsByLeaf.get(bestPath)!) toExpand.add(id);
+    }
+
+    // (2) MLM-agent first-load expansion of Real Estate.
+    if (isRebmOnlyAgent && !autoExpandedForRebmRef.current) {
+      const findRebmModule = (items: any[]): string | null => {
+        for (const m of items) {
+          const childIsRebm = m.children?.some(
+            (c: any) =>
+              c.module_type === "system-route" &&
+              typeof c.system_route === "string" &&
+              c.system_route.startsWith("/real-estate"),
+          );
+          if (childIsRebm) return m.id;
+          if (m.children?.length) {
+            const inner = findRebmModule(m.children);
+            if (inner) return inner;
+          }
+        }
+        return null;
+      };
+      const rebmId = findRebmModule(moduleTree as any);
+      if (rebmId) {
+        toExpand.add(rebmId);
+        autoExpandedForRebmRef.current = true;
+      }
+    }
+
+    if (toExpand.size > 0) {
+      setExpandedModules((prev) => {
+        // Only update if we'd actually add something — avoids a render loop.
+        let changed = false;
+        for (const id of toExpand) {
+          if (!prev.has(id)) {
+            changed = true;
+            break;
+          }
+        }
+        if (!changed) return prev;
+        return new Set([...Array.from(prev), ...Array.from(toExpand)]);
+      });
+    }
+  }, [moduleTree, pathname, isRebmOnlyAgent]);
 
   const handleCreateModule = async () => {
     if (!moduleData.name.trim()) {

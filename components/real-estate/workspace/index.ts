@@ -26,3 +26,14 @@ export {
   CommandPaletteProvider,
   useCommandPalette,
 } from "./command-palette";
+export {
+  AdvancedFilter,
+  type FilterField,
+  type FilterFieldType,
+  type FilterCondition,
+} from "./advanced-filter";
+export {
+  applyAdvancedFilters,
+  describeCondition,
+} from "./apply-advanced-filters";
+export { ManageColumnsButton } from "./manage-columns";

@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 
 async function requireAuth(request: NextRequest) {
@@ -18,6 +18,94 @@ async function requireAuth(request: NextRequest) {
       { status: 403 },
     );
   return user as { id: string; email: string; organizationId: string };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Viewer-scope (data isolation for MLM agents)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Regular onboarded agents must only see their OWN downline — never their
+// upline, sponsor, siblings, or unrelated agents in the org. The "Managing
+// Director" / admin / org-owner tier sees everything.
+//
+// `resolveAgentViewerScope` returns either:
+//   - { isPrivileged: true,  allowedAgentIds: null }            — see all
+//   - { isPrivileged: false, allowedAgentIds: Set<string> }     — see only
+//        the caller's own agentProfile id and every descendant of it.
+//
+// Handlers can do `where.id = { in: [...allowedAgentIds] }` (list/tree)
+// or check `allowedAgentIds.has(targetId)` (single get) to enforce the rule
+// without duplicating the BFS.
+//
+// We treat the following role names as "view-all-team" privileged, in
+// addition to the platform's isUserAdmin check:
+//   - anything containing "admin" (handled by isUserAdmin)
+//   - "managing director" / "director" — explicit business-tier override
+//   - "principal broker" — the FR-1 root-of-tree role
+const PRIVILEGED_ROLE_PATTERN = /^(managing director|director|principal broker)$/i;
+
+async function isAgentTeamPrivileged(
+  userId: string,
+  organizationId: string,
+): Promise<boolean> {
+  if (await isUserAdmin(userId, organizationId)) return true;
+  const roles = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT r.name AS name
+    FROM user_unit_assignments uua
+    JOIN roles r ON r.id = uua.role_id
+    WHERE uua.user_id = ${userId}
+  `;
+  return roles.some((r) => PRIVILEGED_ROLE_PATTERN.test((r.name ?? "").trim()));
+}
+
+/** BFS descendants — produces the inclusive set {self} ∪ {descendants}. */
+async function collectSelfAndDescendants(rootAgentId: string): Promise<Set<string>> {
+  const ids = new Set<string>([rootAgentId]);
+  const queue: string[] = [rootAgentId];
+  while (queue.length) {
+    // Batch one level at a time so we don't hammer the DB with N+1 lookups
+    // for a wide tree.
+    const layer = queue.splice(0, queue.length);
+    const children = await prisma.agentProfile.findMany({
+      where: { parentId: { in: layer } },
+      select: { id: true },
+    });
+    for (const c of children) {
+      if (!ids.has(c.id)) {
+        ids.add(c.id);
+        queue.push(c.id);
+      }
+    }
+  }
+  return ids;
+}
+
+type AgentViewerScope =
+  | { isPrivileged: true; viewerAgentId: string | null; allowedAgentIds: null }
+  | { isPrivileged: false; viewerAgentId: string; allowedAgentIds: Set<string> };
+
+async function resolveAgentViewerScope(
+  auth: { id: string; organizationId: string },
+): Promise<AgentViewerScope> {
+  const privileged = await isAgentTeamPrivileged(auth.id, auth.organizationId);
+  const viewer = await prisma.agentProfile.findFirst({
+    where: { userId: auth.id, organizationId: auth.organizationId },
+    select: { id: true },
+  });
+
+  if (privileged) {
+    return { isPrivileged: true, viewerAgentId: viewer?.id ?? null, allowedAgentIds: null };
+  }
+
+  // Unprivileged caller with NO agent profile: they have no team to see.
+  // Returning an empty Set means list/tree endpoints come back empty (404
+  // on /[id]). That's the safer default than leaking the whole org.
+  if (!viewer) {
+    return { isPrivileged: false, viewerAgentId: "", allowedAgentIds: new Set() };
+  }
+
+  const allowedAgentIds = await collectSelfAndDescendants(viewer.id);
+  return { isPrivileged: false, viewerAgentId: viewer.id, allowedAgentIds };
 }
 
 async function handle(fn: () => Promise<NextResponse>, label: string) {
@@ -88,6 +176,7 @@ export const AgentHandlers = {
   async list(request: NextRequest): Promise<NextResponse> {
     return handle(async () => {
       const auth = await requireAuth(request);
+      const scope = await resolveAgentViewerScope(auth);
       const url = new URL(request.url);
       const status = url.searchParams.get("status") ?? undefined;
       const compliance = url.searchParams.get("compliance") ?? undefined;
@@ -96,8 +185,21 @@ export const AgentHandlers = {
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 500);
       const offset = Number(url.searchParams.get("offset") ?? 0);
 
+      // ── Visibility scoping ────────────────────────────────────────────
+      // Non-privileged callers (regular onboarded agents) see ONLY their
+      // own subtree — themselves + every descendant. Privileged callers
+      // (admin / org owner / Managing Director / Principal Broker) see
+      // every agent in the org.
+      const visibilityFilter: Prisma.AgentProfileWhereInput | null =
+        scope.isPrivileged
+          ? null
+          : scope.allowedAgentIds.size === 0
+            ? { id: { in: [] } } // no agent profile → empty result
+            : { id: { in: Array.from(scope.allowedAgentIds) } };
+
       const where: Prisma.AgentProfileWhereInput = {
         organizationId: auth.organizationId,
+        ...(visibilityFilter ?? {}),
         ...(status ? { status: status as any } : {}),
         ...(compliance ? { complianceStatus: compliance as any } : {}),
         ...(rankId ? { rankId } : {}),
@@ -140,9 +242,23 @@ export const AgentHandlers = {
         prisma.agentProfile.count({ where }),
       ]);
 
+      // For non-privileged callers, strip the `sponsor` relation when it
+      // points OUT of the caller's downline (i.e. the sponsor sits upline
+      // of the caller). Without this, the list would leak the upline name
+      // through the sponsor of e.g. the caller themselves — exactly what
+      // we promised not to show.
+      const data = scope.isPrivileged
+        ? items
+        : items.map((a) => {
+            if (!a.sponsor) return a;
+            return scope.allowedAgentIds.has(a.sponsor.id)
+              ? a
+              : { ...a, sponsor: null };
+          });
+
       return NextResponse.json({
         success: true,
-        data: items,
+        data,
         meta: { total, limit, offset },
       });
     }, "list");
@@ -239,6 +355,16 @@ export const AgentHandlers = {
   async get(request: NextRequest, id: string): Promise<NextResponse> {
     return handle(async () => {
       const auth = await requireAuth(request);
+      const scope = await resolveAgentViewerScope(auth);
+
+      // ── Visibility gate ────────────────────────────────────────────────
+      // Non-privileged callers can only fetch an agent that's themselves
+      // or one of their descendants. Return 404 (NOT 403) so the endpoint
+      // doesn't acknowledge the existence of agents outside the scope.
+      if (!scope.isPrivileged && !scope.allowedAgentIds.has(id)) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+
       const agent = await prisma.agentProfile.findFirst({
         where: { id, organizationId: auth.organizationId },
         include: {
@@ -278,6 +404,25 @@ export const AgentHandlers = {
       });
       if (!agent)
         return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+      // For non-privileged callers, strip every relation that could leak
+      // upline info: parent and sponsor when they sit OUTSIDE the caller's
+      // downline. (The viewer's own parent/sponsor is always outside the
+      // viewer's subtree, so this naturally hides "who recruited me?" from
+      // a new agent.) `recruits`/`children` are descendants of the target,
+      // which is itself a descendant of the caller — safe to keep.
+      if (!scope.isPrivileged) {
+        const inScope = (rel: { id: string } | null | undefined) =>
+          rel ? scope.allowedAgentIds.has(rel.id) : false;
+        const sanitized: any = { ...agent };
+        if (!inScope(agent.parent as any)) sanitized.parent = null;
+        if (!inScope(agent.sponsor as any)) sanitized.sponsor = null;
+        // Belt-and-braces: also redact the scalar IDs so a client that
+        // ignores the relation can't reconstruct the upline by other means.
+        if (sanitized.parent == null) sanitized.parentId = null;
+        if (sanitized.sponsor == null) sanitized.sponsorId = null;
+        return NextResponse.json({ success: true, data: sanitized });
+      }
 
       return NextResponse.json({ success: true, data: agent });
     }, "get");
@@ -411,11 +556,35 @@ export const AgentHandlers = {
   async tree(request: NextRequest): Promise<NextResponse> {
     return handle(async () => {
       const auth = await requireAuth(request);
+      const scope = await resolveAgentViewerScope(auth);
       const url = new URL(request.url);
-      const rootId = url.searchParams.get("rootId") ?? null;
+      let rootId = url.searchParams.get("rootId") ?? null;
+
+      // ── Force the viewer's subtree for non-privileged callers ─────────
+      // If a regular agent supplies a rootId outside their downline,
+      // silently coerce it to their own agent id rather than 403-ing.
+      // The end UX: the tree always opens to "your team", and a
+      // non-admin can never widen the view by tweaking the URL.
+      if (!scope.isPrivileged) {
+        if (!rootId || !scope.allowedAgentIds.has(rootId)) {
+          rootId = scope.viewerAgentId;
+        }
+      }
+
+      // ── Server-side where clause ──────────────────────────────────────
+      // For non-privileged callers we narrow the rows fetched from the DB
+      // to the caller's subtree. For privileged callers we still fetch
+      // everything in the org so the client-side rootId filter (below)
+      // can pivot freely.
+      const baseWhere: Prisma.AgentProfileWhereInput = scope.isPrivileged
+        ? { organizationId: auth.organizationId }
+        : {
+            organizationId: auth.organizationId,
+            id: { in: Array.from(scope.allowedAgentIds) },
+          };
 
       const nodes = await prisma.agentProfile.findMany({
-        where: { organizationId: auth.organizationId },
+        where: baseWhere,
         select: {
           id: true,
           parentId: true,
@@ -438,20 +607,39 @@ export const AgentHandlers = {
         orderBy: { createdAt: "asc" },
       });
 
-      let filtered = nodes;
+      // For non-privileged callers, scrub upline-pointing fields on the
+      // root of their subtree (the viewer themselves). Their actual
+      // parent/sponsor sits OUTSIDE the allowed set, so the rendered tree
+      // would otherwise show "child of ???" arrows pointing to nowhere
+      // — and worse, expose the upline IDs to the client.
+      const safeNodes = scope.isPrivileged
+        ? nodes
+        : nodes.map((n) => ({
+            ...n,
+            // The viewer's parent is upline; rewrite to null so the tree
+            // renders as if the viewer were the root.
+            parentId: scope.allowedAgentIds.has(n.parentId ?? "")
+              ? n.parentId
+              : null,
+            sponsorId: scope.allowedAgentIds.has(n.sponsorId ?? "")
+              ? n.sponsorId
+              : null,
+          }));
+
+      let filtered = safeNodes;
       if (rootId) {
         // Filter to only the subtree under rootId.
-        const childMap = new Map<string | null, typeof nodes>();
-        for (const n of nodes) {
+        const childMap = new Map<string | null, typeof safeNodes>();
+        for (const n of safeNodes) {
           const list = childMap.get(n.parentId) ?? [];
           list.push(n);
           childMap.set(n.parentId, list);
         }
-        const out: typeof nodes = [];
+        const out: typeof safeNodes = [];
         const queue: string[] = [rootId];
         while (queue.length) {
           const cur = queue.shift()!;
-          const node = nodes.find((n) => n.id === cur);
+          const node = safeNodes.find((n) => n.id === cur);
           if (node) out.push(node);
           for (const c of childMap.get(cur) ?? []) queue.push(c.id);
         }

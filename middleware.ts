@@ -38,8 +38,14 @@ export function middleware(request: NextRequest) {
     "/unauthorized",
   ];
 
+  // /real-estate/join/<token> must be public so an unauthenticated visitor
+  // who pastes a shared invite URL can be redirected by the page itself to
+  // /register?ref=<token>. If we left this gated by auth, the middleware
+  // would bounce them to /login and the referral context would be lost.
   const isPublicRoute =
-    publicRoutes.includes(pathname) || pathname.startsWith("/auth");
+    publicRoutes.includes(pathname) ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/real-estate/join/");
 
   // ── 3. Read auth token ─────────────────────────────────────────────────────
   const token = request.cookies.get("auth-token")?.value;
@@ -110,6 +116,22 @@ export function middleware(request: NextRequest) {
     const response = NextResponse.next();
     response.headers.set("x-next-pathname", pathname);
     return response;
+  }
+
+  // ── 5b. MLM-only agents land on /real-estate ───────────────────────────────
+  // A user whose only role is the auto-provisioned "Real Estate Agent" has
+  // zero allowedRoutes outside `/real-estate*` and `/profile*`. If they hit
+  // the root (or any non-real-estate, non-profile page that *would* be
+  // open-by-default per rule 8), bounce them to the real-estate hub so they
+  // don't get a blank screen or a redirect loop through /unauthorized.
+  const roleNames: string[] = Array.isArray(authMeta.roleNames) ? authMeta.roleNames : [];
+  const isRebmOnly =
+    roleNames.length > 0 && roleNames.every((n) => n === "Real Estate Agent");
+  if (
+    isRebmOnly &&
+    (pathname === "/" || pathname === "")
+  ) {
+    return NextResponse.redirect(new URL("/real-estate", request.url));
   }
 
   // ── 6. Specificity-based route access check ───────────────────────────────

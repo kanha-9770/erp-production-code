@@ -34,6 +34,9 @@ import {
   DataTable, type ColumnDef,
   FilterChips, ActiveFilterPills,
   ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import type { Transaction } from "@/lib/api/real-estate/types";
 
@@ -50,6 +53,7 @@ export default function TransactionsListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   const views = useSavedViews<Filters>("transactions");
 
@@ -80,9 +84,62 @@ export default function TransactionsListPage() {
     offset: page * PAGE_SIZE,
   });
 
-  const items = data?.data ?? [];
+  const rawItems = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      { id: "code", label: "Transaction code", type: "text" },
+      {
+        id: "propertyTitle",
+        label: "Property",
+        type: "text",
+        getValue: (t: Transaction) => t.property?.title ?? "",
+      },
+      {
+        id: "propertyCity",
+        label: "City",
+        type: "text",
+        getValue: (t: Transaction) => t.property?.city ?? "",
+      },
+      {
+        id: "buyer",
+        label: "Buyer",
+        type: "text",
+        getValue: (t: Transaction) => t.buyer?.name ?? "",
+      },
+      {
+        id: "status",
+        label: "Status",
+        type: "select",
+        options: Object.entries(TRANSACTION_STATUS_LABEL).map(([value, label]) => ({
+          value,
+          label,
+        })),
+      },
+      {
+        id: "salePrice",
+        label: "Sale price",
+        type: "number",
+        getValue: (t: Transaction) => Number(t.salePrice ?? 0),
+      },
+      {
+        id: "baseCommission",
+        label: "Commission",
+        type: "number",
+        getValue: (t: Transaction) => (t.baseCommission != null ? Number(t.baseCommission) : null),
+      },
+      { id: "closedAt", label: "Closed on", type: "date" },
+      { id: "createdAt", label: "Created", type: "date" },
+    ],
+    [],
+  );
+
+  const items = useMemo(
+    () => applyAdvancedFilters(rawItems, conditions, filterFields),
+    [rawItems, conditions, filterFields],
+  );
 
   const isDirty = useMemo(() => {
     if (views.activeId == null) return Object.values(filters).some(Boolean);
@@ -227,6 +284,12 @@ export default function TransactionsListPage() {
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
+            <AdvancedFilter
+              fields={filterFields}
+              value={conditions}
+              onChange={setConditions}
+            />
+            <ManageColumnsButton tableId="rebm-transactions" columns={columns} />
             <Button asChild size="sm" className="h-8">
               <Link href="/real-estate/transactions/new">
                 <Plus className="h-3.5 w-3.5 mr-1" /> New transaction

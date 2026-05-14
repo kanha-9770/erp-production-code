@@ -40,6 +40,9 @@ import {
   FilterChips, ActiveFilterPills,
   ViewsBar, useSavedViews,
   InlineEditCell,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import type { AgentProfile } from "@/lib/api/real-estate/types";
 import { useToast } from "@/hooks/use-toast";
@@ -60,6 +63,7 @@ export default function AgentsListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   const views = useSavedViews<Filters>("agents");
   const ranksQ = useGetRanksQuery();
@@ -94,9 +98,69 @@ export default function AgentsListPage() {
     offset: page * PAGE_SIZE,
   });
 
-  const items = data?.data ?? [];
+  const rawItems = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Filter fields exposed to the AdvancedFilter popover.
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      {
+        id: "name",
+        label: "Name",
+        type: "text",
+        getValue: (a: AgentProfile) => (a.user ? fullName(a.user) : ""),
+      },
+      {
+        id: "email",
+        label: "Email",
+        type: "text",
+        getValue: (a: AgentProfile) => a.user?.email ?? "",
+      },
+      {
+        id: "status",
+        label: "Status",
+        type: "select",
+        options: AGENT_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+      {
+        id: "complianceStatus",
+        label: "Compliance",
+        type: "select",
+        options: ["PENDING_KYC", "COMPLIANT", "NON_COMPLIANT", "EXPIRED"].map((v) => ({
+          value: v,
+          label: AGENT_COMPLIANCE_LABEL[v as keyof typeof AGENT_COMPLIANCE_LABEL] ?? v,
+        })),
+      },
+      {
+        id: "rankId",
+        label: "Rank",
+        type: "select",
+        options: ranks.map((r) => ({ value: r.id, label: r.name })),
+      },
+      { id: "sponsorCode", label: "Sponsor code", type: "text" },
+      {
+        id: "directCount",
+        label: "Direct recruits",
+        type: "number",
+        getValue: (a: AgentProfile) => a._count?.children ?? 0,
+      },
+      {
+        id: "teamCount",
+        label: "Total recruits",
+        type: "number",
+        getValue: (a: AgentProfile) => a._count?.recruits ?? 0,
+      },
+      { id: "joinedAt", label: "Joined on", type: "date" },
+      { id: "licenseExpiresAt", label: "License expires", type: "date" },
+    ],
+    [ranks],
+  );
+
+  const items = useMemo(
+    () => applyAdvancedFilters(rawItems, conditions, filterFields),
+    [rawItems, conditions, filterFields],
+  );
 
   const expiringSoon = useMemo(() =>
     items.filter((a) => {
@@ -223,7 +287,9 @@ export default function AgentsListPage() {
       id: "sponsor",
       header: "Sponsor",
       width: 160,
-      defaultHidden: false,
+      // Hidden by default so the table opens with the core 5 columns
+      // (Agent, Status, Compliance, Rank, Team). User flips on from Columns.
+      defaultHidden: true,
       copyValue: (a) => a.sponsor?.user
         ? fullName({ first_name: a.sponsor.user.first_name, last_name: a.sponsor.user.last_name })
         : "",
@@ -293,6 +359,12 @@ export default function AgentsListPage() {
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
+            <AdvancedFilter
+              fields={filterFields}
+              value={conditions}
+              onChange={setConditions}
+            />
+            <ManageColumnsButton tableId="rebm-agents" columns={columns} />
             <Button asChild variant="outline" size="sm" className="h-8">
               <Link href="/real-estate/agents/tree"><Network className="h-3.5 w-3.5 mr-1" /> Tree</Link>
             </Button>

@@ -39,6 +39,9 @@ import {
   FilterChips, ActiveFilterPills,
   ViewsBar, useSavedViews,
   InlineEditCell,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import type { Property } from "@/lib/api/real-estate/types";
 import { useToast } from "@/hooks/use-toast";
@@ -64,6 +67,9 @@ export default function PropertiesListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Multi-condition filter applied client-side on top of the server's
+  // page slice. Persisted in localStorage so refresh doesn't lose it.
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   const views = useSavedViews<Filters>("properties");
 
@@ -99,9 +105,12 @@ export default function PropertiesListPage() {
     offset: page * PAGE_SIZE,
   });
 
-  const items = data?.data ?? [];
+  const rawItems = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Filter the server-paginated page locally with the AdvancedFilter
+  // conditions. `filterFields` is defined further down and is stable
+  // (useMemo with `[]`), so this is cheap.
 
   const isDirty = useMemo(() => {
     if (views.activeId == null) {
@@ -124,6 +133,50 @@ export default function PropertiesListPage() {
   }, [filters]);
 
   const [updateProperty] = useUpdatePropertyMutation();
+
+  // Filter fields exposed to the AdvancedFilter popover. The id strings
+  // line up with Property property names where possible so the default
+  // `row[id]` accessor works; the `getValue` overrides handle derived
+  // fields (price-as-number, etc).
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      { id: "title", label: "Title", type: "text" },
+      { id: "code", label: "Code", type: "text" },
+      {
+        id: "status",
+        label: "Status",
+        type: "select",
+        options: PROPERTY_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+      {
+        id: "type",
+        label: "Type",
+        type: "select",
+        options: PROPERTY_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+      { id: "city", label: "City", type: "text" },
+      { id: "state", label: "State", type: "text" },
+      {
+        id: "listingPrice",
+        label: "Price",
+        type: "number",
+        getValue: (p: Property) => Number(p.listingPrice ?? 0),
+      },
+      { id: "bedrooms", label: "Bedrooms", type: "number" },
+      { id: "bathrooms", label: "Bathrooms", type: "number" },
+      { id: "area", label: "Area", type: "number" },
+      { id: "listedAt", label: "Listed on", type: "date" },
+      { id: "expectedClosingAt", label: "Expected close", type: "date" },
+    ],
+    [],
+  );
+
+  // Final rows handed to DataTable — server-paginated slice with the
+  // AdvancedFilter conditions applied on top.
+  const items = useMemo(
+    () => applyAdvancedFilters(rawItems, conditions, filterFields),
+    [rawItems, conditions, filterFields],
+  );
 
   const columns: ColumnDef<Property>[] = useMemo(() => [
     {
@@ -240,7 +293,9 @@ export default function PropertiesListPage() {
       id: "listedAt",
       header: "Listed",
       width: 110,
-      defaultHidden: false,
+      // Default-hidden so the table opens with ~6 columns. User can flip
+      // it on from the Columns popover.
+      defaultHidden: true,
       sortKey: "listedAt",
       copyValue: (p) => formatDate(p.listedAt),
       cell: (p) => <span className="text-xs text-muted-foreground">{formatDate(p.listedAt)}</span>,
@@ -310,6 +365,12 @@ export default function PropertiesListPage() {
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
+            <AdvancedFilter
+              fields={filterFields}
+              value={conditions}
+              onChange={setConditions}
+            />
+            <ManageColumnsButton tableId="rebm-properties" columns={columns} />
             <Button asChild size="sm" className="h-8">
               <Link href="/real-estate/properties/new">
                 <Plus className="h-3.5 w-3.5 mr-1" /> New listing

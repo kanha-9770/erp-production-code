@@ -78,12 +78,16 @@ export function OverrideEditor({
   simulateResult,
 }: Props) {
   const rows: CompPlanOverrideLevel[] = useMemo(() => {
-    if (levels.length === 10) return levels;
+    const normalize = (l: CompPlanOverrideLevel): CompPlanOverrideLevel => {
+      const n = Number(l.factor);
+      return { ...l, factor: Number.isFinite(n) ? n : 0 } as CompPlanOverrideLevel;
+    };
+    if (levels.length === 10) return levels.map(normalize);
     return Array.from({ length: 10 }, (_, i) => {
       const existing = levels.find((l) => l.level === i + 1);
-      return (
-        existing ?? ({ level: i + 1, factor: defaultFactor(i + 1) } as CompPlanOverrideLevel)
-      );
+      return existing
+        ? normalize(existing)
+        : ({ level: i + 1, factor: defaultFactor(i + 1) } as CompPlanOverrideLevel);
     });
   }, [levels]);
 
