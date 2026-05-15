@@ -43,7 +43,18 @@ import {
   Clock,
   MessageSquare,
   Info,
+  LogOut,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   LeaveCalendar,
   LeaveCalendarLegend,
@@ -55,6 +66,7 @@ import { LeaveDateRangePicker } from '@/components/leave/leave-date-range-picker
 
 type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type Duration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
+type ShortenStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 interface BalanceRow {
   leaveType: { id: string; name: string; code: string; category: string; color: string | null };
@@ -83,6 +95,12 @@ interface LeaveRequest {
   decidedAt: string | null;
   decisionNote: string | null;
   cancelReason: string | null;
+  isEmergency: boolean;
+  originalEndDate: string | null;
+  shortenRequestedEndDate: string | null;
+  shortenRequestedReason: string | null;
+  shortenStatus: ShortenStatus | null;
+  shortenDecisionNote: string | null;
 }
 
 const STATUS_VARIANT: Record<LeaveStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -513,10 +531,70 @@ function RequestTable({
 }) {
   const { toast } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [shortenTarget, setShortenTarget] = useState<LeaveRequest | null>(null);
+  const [shortenDate, setShortenDate] = useState('');
+  const [shortenReason, setShortenReason] = useState('');
   const today = todayStr();
 
   const typeName = (id: string) =>
     balances.find((b) => b.leaveType.id === id)?.leaveType.name ?? '—';
+
+  const openShorten = (r: LeaveRequest) => {
+    setShortenTarget(r);
+    // Default to today if it falls inside the leave; otherwise to the day
+    // before the current end so we never propose an end date outside [start,
+    // end-1].
+    const t = todayStr();
+    const defaultDate =
+      t >= r.startDate && t < r.endDate
+        ? t
+        : (() => {
+            const [y, m, d] = r.endDate.split('-').map(Number);
+            const prev = new Date(y, m - 1, d - 1);
+            return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+          })();
+    setShortenDate(defaultDate);
+    setShortenReason('');
+  };
+
+  const closeShorten = () => {
+    setShortenTarget(null);
+    setShortenDate('');
+    setShortenReason('');
+  };
+
+  const submitShorten = async () => {
+    if (!shortenTarget) return;
+    if (!shortenDate) {
+      toast({ title: 'Pick a new end date', variant: 'destructive' });
+      return;
+    }
+    setBusyId(shortenTarget.id);
+    try {
+      const res = await fetch(`/api/leaves/${shortenTarget.id}/shorten`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ newEndDate: shortenDate, reason: shortenReason || null }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || 'Failed to request early return');
+      toast({
+        title: 'Early-return requested',
+        description: 'Your approver will review the request.',
+      });
+      closeShorten();
+      onChanged();
+    } catch (e: any) {
+      toast({
+        title: 'Could not request early return',
+        description: e?.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const cancel = async (id: string) => {
     if (!confirm('Cancel this leave request?')) return;
@@ -570,10 +648,27 @@ function RequestTable({
           {requests.map((r) => {
             const cancellable =
               r.status === 'PENDING' || (r.status === 'APPROVED' && r.startDate > today);
+            // Early-return is only meaningful while the leave hasn't fully
+            // ended (so a return-earlier-than-end still saves at least one
+            // day) and only on APPROVED requests with no in-flight shorten.
+            const shortenable =
+              r.status === 'APPROVED' &&
+              r.endDate > today &&
+              r.shortenStatus !== 'PENDING';
             return (
               <li key={r.id} className="p-3 space-y-1.5">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-medium truncate">{typeName(r.leaveTypeId)}</div>
+                  <div className="font-medium truncate flex items-center gap-1.5">
+                    {typeName(r.leaveTypeId)}
+                    {r.isEmergency && (
+                      <Badge
+                        variant="destructive"
+                        className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                      >
+                        Emergency
+                      </Badge>
+                    )}
+                  </div>
                   <Badge variant={STATUS_VARIANT[r.status]} className="shrink-0">
                     {r.status}
                   </Badge>
@@ -586,17 +681,47 @@ function RequestTable({
                 {r.reason && (
                   <div className="text-xs text-muted-foreground line-clamp-2">{r.reason}</div>
                 )}
-                {cancellable && (
-                  <div className="pt-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId === r.id}
-                      onClick={() => cancel(r.id)}
-                      className="h-8"
-                    >
-                      <X className="h-3 w-3 mr-1" /> Cancel
-                    </Button>
+                {r.shortenStatus === 'PENDING' && r.shortenRequestedEndDate && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    Early-return pending — new end:{' '}
+                    <span className="font-medium tabular-nums">{r.shortenRequestedEndDate}</span>
+                  </div>
+                )}
+                {r.shortenStatus === 'REJECTED' && (
+                  <div className="text-xs text-muted-foreground">
+                    Early-return rejected{r.shortenDecisionNote ? ` · ${r.shortenDecisionNote}` : ''}
+                  </div>
+                )}
+                {r.originalEndDate && r.originalEndDate !== r.endDate && (
+                  <div className="text-xs text-muted-foreground">
+                    Shortened from <span className="line-through">{r.originalEndDate}</span> →{' '}
+                    {r.endDate}
+                  </div>
+                )}
+                {(cancellable || shortenable) && (
+                  <div className="pt-1 flex gap-2 flex-wrap">
+                    {shortenable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === r.id}
+                        onClick={() => openShorten(r)}
+                        className="h-8"
+                      >
+                        <LogOut className="h-3 w-3 mr-1" /> Early return
+                      </Button>
+                    )}
+                    {cancellable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === r.id}
+                        onClick={() => cancel(r.id)}
+                        className="h-8"
+                      >
+                        <X className="h-3 w-3 mr-1" /> Cancel
+                      </Button>
+                    )}
                   </div>
                 )}
               </li>
@@ -623,22 +748,63 @@ function RequestTable({
                 const cancellable =
                   r.status === 'PENDING' ||
                   (r.status === 'APPROVED' && r.startDate > today);
+                const shortenable =
+                  r.status === 'APPROVED' &&
+                  r.endDate > today &&
+                  r.shortenStatus !== 'PENDING';
                 return (
                   <tr key={r.id} className="border-b hover:bg-muted/40">
-                    <td className="p-3 font-medium">{typeName(r.leaveTypeId)}</td>
+                    <td className="p-3 font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <span>{typeName(r.leaveTypeId)}</span>
+                        {r.isEmergency && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                          >
+                            Emergency
+                          </Badge>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-3 text-sm tabular-nums">
                       {r.startDate}
                       {r.startDate !== r.endDate ? ` → ${r.endDate}` : ''}
+                      {r.originalEndDate && r.originalEndDate !== r.endDate && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          shortened from <span className="line-through">{r.originalEndDate}</span>
+                        </div>
+                      )}
                     </td>
                     <td className="p-3 text-sm tabular-nums">{r.totalDays.toFixed(1)}</td>
                     <td className="p-3 text-sm">{durationLabel(r.duration)}</td>
                     <td className="p-3">
                       <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
+                      {r.shortenStatus === 'PENDING' && r.shortenRequestedEndDate && (
+                        <div className="text-[11px] text-amber-700 mt-1">
+                          Early-return pending → {r.shortenRequestedEndDate}
+                        </div>
+                      )}
+                      {r.shortenStatus === 'REJECTED' && (
+                        <div className="text-[11px] text-muted-foreground mt-1">
+                          Early-return rejected
+                        </div>
+                      )}
                     </td>
                     <td className="p-3 text-sm max-w-[300px] truncate" title={r.reason ?? ''}>
                       {r.reason || <span className="text-muted-foreground">—</span>}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right whitespace-nowrap">
+                      {shortenable && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyId === r.id}
+                          onClick={() => openShorten(r)}
+                        >
+                          <LogOut className="h-3 w-3 mr-1" /> Early return
+                        </Button>
+                      )}
                       {cancellable && (
                         <Button
                           size="sm"
@@ -657,6 +823,74 @@ function RequestTable({
           </table>
         </div>
       </CardContent>
+
+      {/* Early-return dialog — appears when an APPROVED leave's "Early return"
+          button is clicked. Date input is bounded to (startDate, endDate-1)
+          so the user can't pick a date that doesn't actually shorten the
+          leave. */}
+      <Dialog open={!!shortenTarget} onOpenChange={(o) => !o && closeShorten()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Request early return</DialogTitle>
+            <DialogDescription>
+              Submit a request to end this leave earlier. Your approver will
+              decide; on approval, the unused days will be returned to your
+              balance.
+            </DialogDescription>
+          </DialogHeader>
+          {shortenTarget && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+                Current leave:{' '}
+                <span className="font-medium tabular-nums">
+                  {shortenTarget.startDate} → {shortenTarget.endDate}
+                </span>{' '}
+                · {shortenTarget.totalDays.toFixed(1)} day
+                {shortenTarget.totalDays === 1 ? '' : 's'}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="shorten-date" className="text-xs">
+                  New end date
+                </Label>
+                <Input
+                  id="shorten-date"
+                  type="date"
+                  value={shortenDate}
+                  onChange={(e) => setShortenDate(e.target.value)}
+                  min={shortenTarget.startDate}
+                  max={(() => {
+                    // endDate - 1, so the picked date is strictly before
+                    // the original end.
+                    const [y, m, d] = shortenTarget.endDate.split('-').map(Number);
+                    const prev = new Date(y, m - 1, d - 1);
+                    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+                  })()}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="shorten-reason" className="text-xs">
+                  Reason (optional)
+                </Label>
+                <Textarea
+                  id="shorten-reason"
+                  value={shortenReason}
+                  onChange={(e) => setShortenReason(e.target.value)}
+                  placeholder="e.g. recovered early and ready to come back"
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeShorten} disabled={busyId !== null}>
+              Cancel
+            </Button>
+            <Button onClick={submitShorten} disabled={busyId !== null || !shortenDate}>
+              {busyId !== null ? 'Submitting…' : 'Submit request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -695,6 +929,9 @@ function ApplyLeaveSheet({
   });
   const [duration, setDuration] = useState<Duration>('FULL_DAY');
   const [reason, setReason] = useState('');
+  // Emergency leave: bypasses the leave type's minNoticeDays so today's date
+  // becomes eligible. Past dates remain disabled regardless.
+  const [isEmergency, setIsEmergency] = useState(false);
 
   // Reset on open so a fresh form appears each time.
   useEffect(() => {
@@ -703,6 +940,7 @@ function ApplyLeaveSheet({
       setRange({ startDate: null, endDate: null });
       setDuration('FULL_DAY');
       setReason('');
+      setIsEmergency(false);
     }
   }, [open, balances]);
 
@@ -716,12 +954,16 @@ function ApplyLeaveSheet({
   }, [duration, range.startDate, range.endDate]);
 
   const balance = balances.find((b) => b.leaveType.id === leaveTypeId);
-  const minNoticeDays = balance?.minNoticeDays ?? 0;
+  const ruleMinNoticeDays = balance?.minNoticeDays ?? 0;
+  // Emergency leaves bypass the notice rule but the picker still floors to
+  // today so users can't backdate.
+  const minNoticeDays = isEmergency ? 0 : ruleMinNoticeDays;
   const maxConsecutiveDays = balance?.maxConsecutiveDays ?? null;
 
   // Whenever the user switches leave type, drop a previously-picked range if
   // it now violates the new type's notice period — avoids the "I picked it,
-  // why is it rejected?" loop.
+  // why is it rejected?" loop. Skipped in emergency mode since the picker is
+  // already unrestricted.
   useEffect(() => {
     if (!range.startDate || !minNoticeDays) return;
     const today = new Date();
@@ -796,6 +1038,7 @@ function ApplyLeaveSheet({
           endDate,
           duration,
           reason: reason || null,
+          isEmergency,
         }),
       });
       const j = await res.json();
@@ -906,6 +1149,50 @@ function ApplyLeaveSheet({
             )}
           </div>
 
+          {/* Emergency toggle — bypasses the leave type's minNoticeDays rule
+              so today's date becomes selectable. Visible only when the chosen
+              type actually has a notice requirement, otherwise it's a no-op. */}
+          {ruleMinNoticeDays > 0 && (
+            <div
+              className={`rounded-lg border p-3 transition-colors ${
+                isEmergency
+                  ? 'border-destructive/50 bg-destructive/5'
+                  : 'bg-muted/20'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    <AlertCircle
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        isEmergency ? 'text-destructive' : 'text-muted-foreground'
+                      }`}
+                    />
+                    Emergency leave
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {isEmergency
+                      ? `Skipping the ${ruleMinNoticeDays}-day notice rule. You can pick today.`
+                      : `Normally requires ${ruleMinNoticeDays} day${
+                          ruleMinNoticeDays === 1 ? '' : 's'
+                        } notice. Turn on if it's urgent.`}
+                  </p>
+                </div>
+                <Switch
+                  checked={isEmergency}
+                  onCheckedChange={(v) => {
+                    setIsEmergency(v);
+                    // Drop a previously-picked future date so the user can
+                    // re-pick today now that the floor moved.
+                    if (v) setRange({ startDate: null, endDate: null });
+                  }}
+                  aria-label="Emergency leave"
+                  className="shrink-0 mt-0.5"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Duration as segmented control on mobile */}
           <div className="space-y-2">
             <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -952,10 +1239,15 @@ function ApplyLeaveSheet({
               minNoticeDays={minNoticeDays}
               placeholder={duration === 'FULL_DAY' ? 'Pick start and end' : 'Pick a date'}
             />
-            {minNoticeDays > 0 && (
+            {minNoticeDays > 0 ? (
               <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                 <Info className="h-3 w-3" />
                 Earliest start: {minNoticeDays} day{minNoticeDays === 1 ? '' : 's'} from today.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                Today is the earliest you can pick — past dates are disabled.
               </p>
             )}
             {exceedsMax && (
@@ -987,8 +1279,13 @@ function ApplyLeaveSheet({
           {/* Live request preview */}
           {range.startDate && balance && (
             <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-1.5">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-2">
                 Request Preview
+                {isEmergency && (
+                  <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4">
+                    Emergency
+                  </Badge>
+                )}
               </div>
               <div className="flex items-center justify-between gap-2 text-sm">
                 <span className="font-medium truncate">{balance.leaveType.name}</span>

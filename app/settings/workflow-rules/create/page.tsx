@@ -50,6 +50,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { format } from "date-fns"
+import {
+  getStaticFieldsForModule,
+  getStaticFormEntries,
+} from "@/lib/static-page-fields"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -1375,29 +1379,48 @@ export default function CreateWorkflowRulePage() {
   }, [treeData, reportFormModuleName, moduleName])
 
   const moduleFields = useMemo(() => {
-    if (!treeModule) return [] as Array<{ id: string; label: string; formId: string; formName: string; apiName: string }>
     const out: Array<{ id: string; label: string; formId: string; formName: string; apiName: string }> = []
-    for (const f of (treeModule as any).forms || []) {
-      for (const fld of f.fields || []) {
-        out.push({ id: fld.id, label: fld.label, formId: f.id, formName: f.name, apiName: fld.apiName })
+    // Dynamic form-builder fields first so they show up before the static
+    // ones — admins editing dynamic forms expect them to appear at the top.
+    if (treeModule) {
+      for (const f of (treeModule as any).forms || []) {
+        for (const fld of f.fields || []) {
+          out.push({ id: fld.id, label: fld.label, formId: f.id, formName: f.name, apiName: fld.apiName })
+        }
       }
     }
+    // Then static-page fields for this module (e.g. Employee Master). These
+    // come from the registry in lib/static-page-fields.ts and let admins
+    // wire workflow rules against pages that aren't form-builder based.
+    for (const sf of getStaticFieldsForModule(moduleName)) {
+      out.push({
+        id: sf.id,
+        label: sf.label,
+        formId: sf.formId,
+        formName: sf.formName,
+        apiName: sf.apiName,
+      })
+    }
     return out
-  }, [treeModule])
+  }, [treeModule, moduleName])
 
   // Forms in the active module — sourced from the bindings tree so the
   // System Notification dialog's form picker lists every form (including
   // unpublished ones). The permitted-modules response only attaches forms
   // that are published, which is why the picker came up empty for users
   // configuring a notification before any form was published.
+  // Static-page forms (e.g. Employee Master) are appended so admins on a
+  // page that has no form-builder form yet can still scope a rule to it.
   const moduleForms = useMemo<Array<{ id: string; name: string; isPublished: boolean }>>(() => {
-    if (!treeModule) return []
-    return ((treeModule as any).forms || []).map((f: any) => ({
-      id: f.id,
-      name: f.name,
-      isPublished: !!f.isPublished,
-    }))
-  }, [treeModule])
+    const dynamic = treeModule
+      ? ((treeModule as any).forms || []).map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          isPublished: !!f.isPublished,
+        }))
+      : []
+    return [...dynamic, ...getStaticFormEntries(moduleName)]
+  }, [treeModule, moduleName])
 
   const scheduleIsValid =
     executeBasedOn === "schedule" &&

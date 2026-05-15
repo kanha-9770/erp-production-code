@@ -127,6 +127,7 @@ interface ApplyBody {
   duration?: string;
   reason?: string | null;
   attachmentUrl?: string | null;
+  isEmergency?: boolean;
 }
 
 export async function POST(request: NextRequest) {
@@ -168,6 +169,7 @@ export async function POST(request: NextRequest) {
       duration,
       reason: typeof body.reason === 'string' ? body.reason.slice(0, 2000) : null,
       attachmentUrl,
+      isEmergency: body.isEmergency === true,
     });
     return NextResponse.json({ success: true, request: created }, { headers: NO_STORE });
   } catch (e) {

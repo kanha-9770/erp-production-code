@@ -47,6 +47,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarDays,
+  LogOut,
 } from 'lucide-react';
 import {
   LeaveCalendar,
@@ -69,6 +70,8 @@ interface UserLite {
   avatar: string | null;
 }
 
+type ShortenStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 interface Request {
   id: string;
   userId: string;
@@ -81,6 +84,11 @@ interface Request {
   appliedAt: string;
   user: UserLite | null;
   leaveType: { id: string; name: string; code: string; color: string | null } | null;
+  originalEndDate: string | null;
+  shortenRequestedEndDate: string | null;
+  shortenRequestedReason: string | null;
+  shortenStatus: ShortenStatus | null;
+  shortenRequestedAt: string | null;
 }
 
 function monthBounds(d: Date) {
@@ -94,6 +102,10 @@ function monthBounds(d: Date) {
 export default function ApprovalsPage() {
   const { toast } = useToast();
   const [pending, setPending] = useState<Request[] | null>(null);
+  // APPROVED leaves with `shortenStatus === 'PENDING'` — separate queue for
+  // early-return requests so approvers can act on them without scrolling
+  // through normal leave approvals.
+  const [pendingShorten, setPendingShorten] = useState<Request[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [forbidden, setForbidden] = useState(false);
@@ -118,8 +130,16 @@ export default function ApprovalsPage() {
     setRefreshing(true);
     try {
       const { from, to } = monthBounds(calendarMonth);
-      const [pendingRes, calRes] = await Promise.all([
+      const [pendingRes, approvedRes, calRes] = await Promise.all([
         fetch('/api/leaves?status=PENDING&withDetails=1', {
+          cache: 'no-store',
+          credentials: 'include',
+        }),
+        // Pull APPROVED leaves so we can filter to ones with pending shorten
+        // requests client-side. The list endpoint doesn't have a shorten
+        // filter — adding one for this single screen wasn't worth a new query
+        // param. APPROVED is a much smaller working set than the full list.
+        fetch('/api/leaves?status=APPROVED&withDetails=1', {
           cache: 'no-store',
           credentials: 'include',
         }),
@@ -131,11 +151,19 @@ export default function ApprovalsPage() {
       if (pendingRes.status === 401 || pendingRes.status === 403) {
         setForbidden(true);
         setPending([]);
+        setPendingShorten([]);
         return;
       }
       const pj = await pendingRes.json();
+      const aj = await approvedRes.json();
       const cj = await calRes.json();
       if (pj.success) setPending(pj.requests ?? []);
+      if (aj.success) {
+        const shortenQueue = (aj.requests ?? []).filter(
+          (r: Request) => r.shortenStatus === 'PENDING',
+        );
+        setPendingShorten(shortenQueue);
+      }
       if (cj.success) {
         setCalendarData({
           weeklyOffDays: cj.weeklyOffDays ?? [0],
@@ -175,6 +203,39 @@ export default function ApprovalsPage() {
       setPending((prev) => (prev ?? []).filter((r) => r.id !== id));
       setRejectFor(null);
       setRejectNote('');
+      refresh();
+    } catch (e: any) {
+      toast({ title: 'Action failed', description: e?.message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Approve or reject a pending early-return request. Mirrors `decide` —
+  // optimistically drops the row from the queue and re-fetches so the
+  // calendar's endDate reflects the new shortened range.
+  const decideShorten = async (
+    id: string,
+    decision: 'APPROVED' | 'REJECTED',
+    note?: string,
+  ) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/leaves/${id}/shorten/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ decision, note: note ?? null }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || 'Failed');
+      toast({
+        title:
+          decision === 'APPROVED'
+            ? 'Early return approved'
+            : 'Early return rejected',
+      });
+      setPendingShorten((prev) => (prev ?? []).filter((r) => r.id !== id));
       refresh();
     } catch (e: any) {
       toast({ title: 'Action failed', description: e?.message, variant: 'destructive' });
@@ -227,6 +288,10 @@ export default function ApprovalsPage() {
             <Inbox className="h-4 w-4 mr-2" />
             Pending ({pending?.length ?? 0})
           </TabsTrigger>
+          <TabsTrigger value="early-returns">
+            <LogOut className="h-4 w-4 mr-2" />
+            Early Returns ({pendingShorten?.length ?? 0})
+          </TabsTrigger>
           <TabsTrigger value="calendar">
             <CalendarDays className="h-4 w-4 mr-2" />
             Calendar
@@ -260,6 +325,39 @@ export default function ApprovalsPage() {
                     setRejectFor(r);
                     setRejectNote('');
                   }}
+                />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="early-returns">
+          {loading ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-28" />
+              ))}
+            </div>
+          ) : (pendingShorten ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="py-16 text-center text-muted-foreground">
+                <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-500" />
+                <p className="text-lg font-medium">No early-return requests</p>
+                <p className="text-sm">
+                  Employees can ask to end their approved leave earlier — those
+                  requests will land here for review.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {pendingShorten!.map((r) => (
+                <ShortenCard
+                  key={r.id}
+                  request={r}
+                  busy={busyId === r.id}
+                  onApprove={() => decideShorten(r.id, 'APPROVED')}
+                  onReject={() => decideShorten(r.id, 'REJECTED')}
                 />
               ))}
             </div>
@@ -627,6 +725,116 @@ function ApproverCalendar({
                 ))
               )}
             </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Early-return (shorten) request card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ShortenCard({
+  request,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  request: Request;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const r = request;
+  // Day delta the approval would refund — handy context for the approver.
+  const dayDelta = (() => {
+    if (!r.shortenRequestedEndDate) return null;
+    const [ey, em, ed] = r.endDate.split('-').map(Number);
+    const [ny, nm, nd] = r.shortenRequestedEndDate.split('-').map(Number);
+    const oldMs = new Date(ey, em - 1, ed).getTime();
+    const newMs = new Date(ny, nm - 1, nd).getTime();
+    return Math.round((oldMs - newMs) / 86_400_000);
+  })();
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              {r.user?.firstName || r.user?.lastName
+                ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
+                : r.user?.email ?? 'Unknown user'}
+              <Badge variant="outline" className="text-xs">
+                {r.leaveType?.name ?? '—'}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Early Return
+              </Badge>
+            </CardTitle>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3" /> {r.user?.email ?? '—'}
+              </span>
+              {r.user?.department && (
+                <span className="flex items-center gap-1">
+                  <Building2 className="h-3 w-3" /> {r.user.department}
+                </span>
+              )}
+              {r.shortenRequestedAt && (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Requested {new Date(r.shortenRequestedAt).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={onReject}>
+              <XCircle className="h-4 w-4 mr-1 text-destructive" />
+              Reject
+            </Button>
+            <Button size="sm" disabled={busy} onClick={onApprove}>
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              Approve
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <div className="rounded border bg-muted/30 px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Original range
+            </div>
+            <div className="font-medium tabular-nums">
+              {r.startDate} → {r.endDate}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {r.totalDays.toFixed(1)} day{r.totalDays === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div className="rounded border bg-primary/5 px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wider text-primary/80">
+              Requested end
+            </div>
+            <div className="font-medium tabular-nums">
+              {r.startDate} → {r.shortenRequestedEndDate ?? '—'}
+            </div>
+            {dayDelta != null && dayDelta > 0 && (
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Refunds approximately {dayDelta} day{dayDelta === 1 ? '' : 's'}
+              </div>
+            )}
+          </div>
+        </div>
+        {r.shortenRequestedReason && (
+          <div className="mt-3 text-sm">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Reason
+            </span>
+            <p className="mt-1 text-foreground">{r.shortenRequestedReason}</p>
           </div>
         )}
       </CardContent>
