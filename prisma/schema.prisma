@@ -1685,6 +1685,59 @@ model PayrollConfiguration {
   @@map("payroll_configurations")
 }
 
+// Named bundle of pay rules. An org typically defines 2–5 profiles
+// (e.g. "Standard", "Senior", "Probation") and assigns each employee to one.
+// The engine resolves an employee's formulas in this order:
+//   profile → org-wide setup (PayrollConfiguration) → DEFAULT_FORMULAS.
+model PayrollProfile {
+  id              String                     @id @default(cuid())
+  organizationId  String                     @map("organization_id")
+  name            String
+  description     String?
+  isDefault       Boolean                    @default(false) @map("is_default")
+  baseSalary      Decimal?                   @map("base_salary")
+  salaryStructure Json                       @default("{}") @map("salary_structure")
+  statutory       Json                       @default("{}")
+  bonus           Json                       @default("{}")
+  overtime        Json                       @default("{}")
+  policy          Json                       @default("{}")
+  assignments     PayrollProfileAssignment[]
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([isDefault])
+  @@map("payroll_profiles")
+}
+
+// Links an employee key (Employee.id when present, otherwise User.id —
+// matches the engine's canonical `employeeId`) to a PayrollProfile.
+// Absence of an assignment means "use the org's default profile, or fall
+// back to the global setup config".
+//
+// `effectiveFrom` is the "YYYY-MM" month at which the assignment starts
+// applying. The engine compares against the payroll target month and
+// ignores assignments whose effectiveFrom is in the future. Empty string
+// means "always effective" — preserved so rows written before this column
+// existed continue to apply.
+model PayrollProfileAssignment {
+  id             String         @id @default(cuid())
+  organizationId String         @map("organization_id")
+  employeeKey    String         @map("employee_key")
+  profileId      String         @map("profile_id")
+  effectiveFrom  String         @default("") @map("effective_from")
+  profile        PayrollProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@unique([organizationId, employeeKey])
+  @@index([profileId])
+  @@index([organizationId])
+  @@index([effectiveFrom])
+  @@map("payroll_profile_assignments")
+}
+
 model LeaveType {
   id          String            @id @default(cuid())
   name        String

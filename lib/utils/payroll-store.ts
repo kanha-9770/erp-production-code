@@ -352,6 +352,13 @@ export interface PayrollRecord {
   designation?: string;
   department?: string;
   generatedAt?: string;
+  // Identifies which pay-rule profile produced this record. `source` exposes
+  // whether the engine used an explicit assignment, the org default, the
+  // global setup config, or the built-in defaults — useful for the detail
+  // panel UI ("Using: Senior profile" vs "Using: org default").
+  payrollProfileId?: string | null;
+  payrollProfileName?: string | null;
+  payrollProfileSource?: string | null;
   // Day-level breakdown produced by the per-day classifier. Filled even when
   // leave/holiday forms are not configured so the UI can render zeros instead
   // of `undefined` everywhere.
@@ -686,6 +693,135 @@ export async function getPayrollFormulas(organizationId: string): Promise<Payrol
     console.warn('[payroll] failed to load formulas:', err);
   }
   return DEFAULT_FORMULAS;
+}
+
+// ── Per-employee pay-rule profiles ────────────────────────────────────────
+// Resolution order:
+//   1. Profile explicitly assigned to the employee (PayrollProfileAssignment)
+//   2. Org's default profile (PayrollProfile.isDefault = true)
+//   3. Global setup config (PayrollConfiguration.attendanceFieldMappings)
+//   4. DEFAULT_FORMULAS
+//
+// `getOrgProfilesContext` is called ONCE per org per calculation run and
+// returns everything the per-employee resolver needs — a Map of profile-id →
+// formulas, the default profile-id, the global fallback formulas, and a
+// Map of employeeKey → profileId.
+export interface ProfileResolution {
+  formulas: PayrollFormulas;
+  baseSalaryOverride: number | null;
+  source: 'profile' | 'default-profile' | 'global-setup' | 'defaults';
+  profileId: string | null;
+  profileName: string | null;
+}
+
+export interface OrgProfilesContext {
+  globalFallback: PayrollFormulas;
+  profilesById: Map<
+    string,
+    { formulas: PayrollFormulas; baseSalary: number | null; name: string; isDefault: boolean }
+  >;
+  defaultProfileId: string | null;
+  assignments: Map<string, string>; // employeeKey → profileId
+}
+
+function mergeFormulas(raw: any): PayrollFormulas {
+  return {
+    salaryStructure: { ...DEFAULT_FORMULAS.salaryStructure, ...(raw?.salaryStructure || {}) },
+    statutory: { ...DEFAULT_FORMULAS.statutory, ...(raw?.statutory || {}) },
+    overtime: { ...DEFAULT_FORMULAS.overtime, ...(raw?.overtime || {}) },
+    bonus: { ...(DEFAULT_FORMULAS.bonus ?? {}), ...(raw?.bonus || {}) },
+  };
+}
+
+export async function getOrgProfilesContext(
+  organizationId: string,
+  targetMonth?: string,
+): Promise<OrgProfilesContext> {
+  const globalFallback = await getPayrollFormulas(organizationId);
+  const profilesById = new Map<
+    string,
+    { formulas: PayrollFormulas; baseSalary: number | null; name: string; isDefault: boolean }
+  >();
+  const assignments = new Map<string, string>();
+  let defaultProfileId: string | null = null;
+
+  // Normalise the target month to "YYYY-MM" so the string comparison below
+  // is lexicographically correct.
+  const monthKey = (targetMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+
+  try {
+    const [profiles, assignmentRows] = await Promise.all([
+      (prisma as any).payrollProfile.findMany({ where: { organizationId } }),
+      (prisma as any).payrollProfileAssignment.findMany({ where: { organizationId } }),
+    ]);
+    for (const p of profiles) {
+      profilesById.set(p.id, {
+        formulas: mergeFormulas(p),
+        baseSalary:
+          p.baseSalary != null
+            ? Number((p.baseSalary as any).toString?.() ?? p.baseSalary)
+            : null,
+        name: p.name,
+        isDefault: !!p.isDefault,
+      });
+      if (p.isDefault) defaultProfileId = p.id;
+    }
+    for (const a of assignmentRows) {
+      // Honour effective-from scheduling: an assignment with effectiveFrom
+      // in the future is silently ignored — the employee falls back to the
+      // default profile (or global setup) until that month arrives. Empty
+      // string is treated as "always effective" so rows written before the
+      // column existed keep applying.
+      const eff: string = typeof a.effectiveFrom === 'string' ? a.effectiveFrom : '';
+      if (eff && eff > monthKey) continue;
+      assignments.set(a.employeeKey, a.profileId);
+    }
+  } catch (err) {
+    // Profile tables may not exist yet on a freshly cloned checkout that
+    // hasn't migrated. Silent fall-through — engine continues with the
+    // global setup as the only formula source.
+    console.warn('[payroll] profile context load failed:', err);
+  }
+
+  return { globalFallback, profilesById, defaultProfileId, assignments };
+}
+
+export function resolveEmployeeFormulas(
+  ctx: OrgProfilesContext,
+  employeeKey: string,
+): ProfileResolution {
+  const assignedId = ctx.assignments.get(employeeKey);
+  if (assignedId) {
+    const p = ctx.profilesById.get(assignedId);
+    if (p) {
+      return {
+        formulas: p.formulas,
+        baseSalaryOverride: p.baseSalary,
+        source: 'profile',
+        profileId: assignedId,
+        profileName: p.name,
+      };
+    }
+  }
+  if (ctx.defaultProfileId) {
+    const p = ctx.profilesById.get(ctx.defaultProfileId);
+    if (p) {
+      return {
+        formulas: p.formulas,
+        baseSalaryOverride: p.baseSalary,
+        source: 'default-profile',
+        profileId: ctx.defaultProfileId,
+        profileName: p.name,
+      };
+    }
+  }
+  return {
+    formulas: ctx.globalFallback,
+    baseSalaryOverride: null,
+    source: ctx.globalFallback === DEFAULT_FORMULAS ? 'defaults' : 'global-setup',
+    profileId: null,
+    profileName: null,
+  };
 }
 
 export async function getPayrollPolicy(organizationId: string): Promise<PayrollPolicy> {
