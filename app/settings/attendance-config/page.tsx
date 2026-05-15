@@ -1,5 +1,4 @@
 import { AttendanceConfigForm } from "@/components/attendance/attendance-config-form";
-import { IntegrationsCard } from "@/components/attendance/integrations-card";
 import PageBackLink from "@/components/shared/page-back-link";
 
 export const dynamic = "force-dynamic";
@@ -20,12 +19,6 @@ export default function AttendanceConfigPage() {
           </h1>
         </div>
       </header>
-      {/* Linked forms first — without these, holiday/leave detection in the
-          widget and the same in payroll both stay empty. Stays compact
-          (collapsible) so it doesn't eat the form's vertical budget. */}
-      <div className="shrink-0">
-        <IntegrationsCard />
-      </div>
       <AttendanceConfigForm />
     </div>
   );

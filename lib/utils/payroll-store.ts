@@ -1528,97 +1528,11 @@ export async function getLeavesFromDB(
   organizationId: string,
   month: string,
 ): Promise<SampleLeave[]> {
-  // Source-of-truth preference: the new schema-backed LeaveRequest table.
-  // Falls through to the form-based reader only when the table has nothing
-  // for this month — keeps form-driven tenants working without surprise.
-  const tableLeaves = await readApprovedLeavesFromTable(organizationId, month);
-  if (tableLeaves.length > 0) return tableLeaves;
-
-  const setup = await loadSetup(organizationId);
-  // Leave form is optional; loadSetup() returns the form info inside `leave`.
-  // Without a configured form, we silently return [] so existing tenants keep
-  // working — the calculator will fall back to "no approved leaves".
-  const formInfo = await resolveFromConfigOrName(
-    organizationId,
-    setup?.leave ?? null,
-    LEAVE_FORM_NAMES,
-  );
-  if (!formInfo) return [];
-
-  const fields = setup?.leave.fields ?? {};
-  const rows = await readRecords(formInfo);
-  const leaves: SampleLeave[] = [];
-
-  // Build the inclusive month window so we can clip leaves that span multiple
-  // months — only the in-month portion participates in this run's payroll.
-  const [yStr, mStr] = month.split('-');
-  const yearN = Number(yStr);
-  const monthN = Number(mStr);
-  const monthStart = `${month}-01`;
-  const lastDay = new Date(yearN, monthN, 0).getDate();
-  const monthEnd = `${month}-${String(lastDay).padStart(2, '0')}`;
-
-  for (const row of rows) {
-    const data = flattenRecordData(row.recordData, formInfo.labels);
-    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
-
-    const rawEmail = pickWithMapping(data, fields.email, formInfo.labels, EMAIL_FALLBACKS);
-    const rawEmpId = pickWithMapping(data, fields.employeeId, formInfo.labels, EMP_ID_FALLBACKS);
-    const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
-    const empId = rawEmpId ? String(rawEmpId).toLowerCase() : null;
-    const matchKey = email
-      ? `email:${email}`
-      : empId
-        ? `empId:${empId}`
-        : userEmail
-          ? `email:${userEmail}`
-          : null;
-    if (!matchKey) continue;
-
-    const startRaw = pickWithMapping(data, fields.startDate, formInfo.labels, LEAVE_START_FALLBACKS);
-    const endRaw = pickWithMapping(data, fields.endDate, formInfo.labels, LEAVE_END_FALLBACKS);
-    const start = toDateStr(startRaw);
-    if (!start) continue;
-    const end = toDateStr(endRaw) ?? start;
-
-    // Cheap month overlap test before doing any further work — most rows will
-    // belong to other months, so bail early.
-    if (end < monthStart || start > monthEnd) continue;
-
-    const leaveTypeRaw = pickWithMapping(data, fields.leaveType, formInfo.labels, LEAVE_TYPE_FALLBACKS);
-    const leaveType = leaveTypeRaw ? String(leaveTypeRaw).trim() : '';
-
-    // If the admin DID map a status field, we filter strictly. If they DIDN'T
-    // map one, we trust the form workflow's existing gate (e.g. only approved
-    // leaves get submitted) and treat every row as approved. This matches how
-    // the rest of the payroll engine treats unmapped optional fields.
-    const statusFieldMapped = !!fields.status;
-    const status = statusFieldMapped
-      ? normaliseStatus(pickWithMapping(data, fields.status, formInfo.labels, LEAVE_STATUS_FALLBACKS))
-      : 'approved';
-    if (statusFieldMapped && status !== 'approved') continue;
-
-    const halfDayRaw = pickWithMapping(data, fields.halfDay, formInfo.labels, LEAVE_HALF_DAY_FALLBACKS);
-    const isHalfDay = isTruthyHalfDay(halfDayRaw);
-
-    const daysRaw = pickWithMapping(data, fields.days, formInfo.labels, LEAVE_DAYS_FALLBACKS);
-    const days = daysRaw === undefined || daysRaw === null || daysRaw === ''
-      ? null
-      : toNumber(daysRaw, NaN);
-
-    leaves.push({
-      matchKey,
-      email: email ?? '',
-      leaveType,
-      startDate: start,
-      endDate: end,
-      isHalfDay,
-      days: Number.isFinite(days as number) ? (days as number) : null,
-      status,
-    });
-  }
-
-  return leaves;
+  // Source of truth: the schema-backed LeaveRequest table populated by the
+  // /leave flow. The old form-record fallback has been removed — admins no
+  // longer link a leave form on the Attendance Configuration page, so the
+  // table is the only place approved leaves can live.
+  return readApprovedLeavesFromTable(organizationId, month);
 }
 
 /**
@@ -1657,202 +1571,19 @@ export async function getHolidaysFromDB(
   organizationId: string,
   month: string,
 ): Promise<SampleHoliday[]> {
-  const tableHolidays = await readHolidaysFromTable(organizationId, month);
-  if (tableHolidays.length > 0) return tableHolidays;
-
-  const setup = await loadSetup(organizationId);
-  const formInfo = await resolveFromConfigOrName(
-    organizationId,
-    setup?.holiday ?? null,
-    HOLIDAY_FORM_NAMES,
-  );
-  if (!formInfo) return [];
-
-  const fields = setup?.holiday.fields ?? {};
-  const rows = await readRecords(formInfo);
-  const holidays: SampleHoliday[] = [];
-  const seen = new Set<string>();
-
-  for (const row of rows) {
-    const data = flattenRecordData(row.recordData, formInfo.labels);
-    const dateValue = pickWithMapping(data, fields.date, formInfo.labels, HOLIDAY_DATE_FALLBACKS) ?? row.date;
-    const dateStr = toDateStr(dateValue);
-    if (!dateStr) continue;
-    if (!inMonth(dateStr, month)) continue;
-    if (seen.has(dateStr)) continue; // de-dupe duplicate rows for the same date
-    seen.add(dateStr);
-
-    const nameRaw = pickWithMapping(data, fields.name, formInfo.labels, HOLIDAY_NAME_FALLBACKS);
-    holidays.push({
-      date: dateStr,
-      name: nameRaw ? String(nameRaw) : '',
-    });
-  }
-
-  return holidays;
+  // Source of truth: the Holiday table managed by the static Holiday admin
+  // page. The form-record fallback has been removed along with the linked-
+  // forms section on /settings/attendance-config.
+  return readHolidaysFromTable(organizationId, month);
 }
 
 export async function getAttendanceFromDB(organizationId: string, month: string): Promise<SampleAttendance[]> {
-  const setup = await loadSetup(organizationId);
-  const checkInForm = await resolveFromConfigOrName(organizationId, setup?.checkIn ?? null, CHECK_IN_FORM_NAMES);
-  const checkOutForm = await resolveFromConfigOrName(organizationId, setup?.checkOut ?? null, CHECK_OUT_FORM_NAMES);
-
-  // Removed the historical "no check-in form configured → return []" early
-  // exit. The native Attendance table is now a valid source on its own, so
-  // even orgs without an attendance form get their widget punches into payroll.
-  const checkInFields = setup?.checkIn.fields ?? {};
-  const checkOutFields = setup?.checkOut.fields ?? {};
-
-  const checkInRows = checkInForm ? await readRecords(checkInForm) : [];
-  const checkOutRows = checkOutForm ? await readRecords(checkOutForm) : [];
-
-  const dailyMap = new Map<string, SampleAttendance>();
-
-  const buildMatchKey = (
-    data: any,
-    fields: Record<string, string | null>,
-    formLabels: Record<string, string>,
-    userEmail: string | null,
-  ): { matchKey: string; email: string } | null => {
-    const rawEmail = pickWithMapping(data, fields.email, formLabels, EMAIL_FALLBACKS);
-    const rawEmpId = pickWithMapping(data, fields.employeeId, formLabels, EMP_ID_FALLBACKS);
-    const email = rawEmail ? String(rawEmail).toLowerCase() : userEmail;
-    const empId = rawEmpId ? String(rawEmpId).toLowerCase() : null;
-    if (email) return { matchKey: `email:${email}`, email };
-    if (empId) return { matchKey: `empId:${empId}`, email: '' };
-    if (userEmail) return { matchKey: `email:${userEmail}`, email: userEmail };
-    return null;
-  };
-
-  if (checkInForm) {
-    for (const row of checkInRows) {
-      const data = flattenRecordData(row.recordData, checkInForm.labels);
-      const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
-      const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
-
-      const dateValue =
-        pickWithMapping(
-          data,
-          checkInFields.date,
-          checkInForm.labels,
-          CHECKIN_DATE_FALLBACKS,
-        ) ?? row.date;
-      const checkInTime = pickWithMapping(
-        data,
-        checkInFields.checkInTime,
-        checkInForm.labels,
-        CHECKIN_TIME_FALLBACKS,
-      );
-
-      const dateStr = toDateStr(dateValue);
-      const inTime = toTimeStr(checkInTime);
-
-      if (!id || !dateStr || !inTime) continue;
-      if (!inMonth(dateStr, month)) continue;
-
-      const key = `${id.matchKey}_${dateStr}`;
-      if (!dailyMap.has(key)) {
-        dailyMap.set(key, {
-          email: id.email,
-          matchKey: id.matchKey,
-          date: dateStr,
-          checkInTime: inTime,
-          checkOutTime: '',
-        });
-      }
-    }
-  }
-
-  if (checkOutForm) {
-    for (const row of checkOutRows) {
-      const data = flattenRecordData(row.recordData, checkOutForm.labels);
-      const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
-      const id = buildMatchKey(data, checkOutFields, checkOutForm.labels, userEmail);
-
-      const dateValue =
-        pickWithMapping(
-          data,
-          checkOutFields.date,
-          checkOutForm.labels,
-          CHECKOUT_DATE_FALLBACKS,
-        ) ?? row.date;
-      const checkOutTime = pickWithMapping(
-        data,
-        checkOutFields.checkOutTime,
-        checkOutForm.labels,
-        CHECKOUT_TIME_FALLBACKS,
-      );
-
-      const dateStr = toDateStr(dateValue);
-      const outTime = toTimeStr(checkOutTime);
-
-      if (!id || !dateStr || !outTime) continue;
-      if (!inMonth(dateStr, month)) continue;
-
-      const key = `${id.matchKey}_${dateStr}`;
-      const existing = dailyMap.get(key);
-      if (existing) {
-        existing.checkOutTime = outTime;
-      } else {
-        dailyMap.set(key, {
-          email: id.email,
-          matchKey: id.matchKey,
-          date: dateStr,
-          checkInTime: '09:00',
-          checkOutTime: outTime,
-        });
-      }
-    }
-  }
-
-  if (checkInForm) for (const row of checkInRows) {
-    const data = flattenRecordData(row.recordData, checkInForm.labels);
-    const userEmail = row.user?.email ? String(row.user.email).toLowerCase() : null;
-    const id = buildMatchKey(data, checkInFields, checkInForm.labels, userEmail);
-    const dateValue =
-      pickWithMapping(
-        data,
-        checkInFields.date,
-        checkInForm.labels,
-        CHECKIN_DATE_FALLBACKS,
-      ) ?? row.date;
-    const checkOutTime = pickValue(data, CHECKOUT_TIME_FALLBACKS);
-    const dateStr = toDateStr(dateValue);
-    const outTime = toTimeStr(checkOutTime);
-
-    if (!id || !dateStr || !outTime) continue;
-    if (!inMonth(dateStr, month)) continue;
-
-    const key = `${id.matchKey}_${dateStr}`;
-    const existing = dailyMap.get(key);
-    if (existing && !existing.checkOutTime) {
-      existing.checkOutTime = outTime;
-    }
-  }
-
-  // Merge in native Attendance table rows. The widget at /api/attendance/punch
-  // writes here. We let native rows OVERRIDE form-based rows for the same
-  // (user, date) because native has real server-stamped timestamps while the
-  // form path often has hand-typed strings.
+  // Source of truth: the Attendance table populated by the /attendance widget
+  // (via POST /api/attendance/punch). The previous form-record path has been
+  // removed along with the linked-forms section on /settings/attendance-config
+  // — every tenant goes through the native widget now.
   const nativeRows = await getNativeAttendanceForMonth(organizationId, month);
-  for (const n of nativeRows) {
-    const key = `${n.matchKey}_${n.date}`;
-    const prior = dailyMap.get(key);
-    if (!prior) {
-      dailyMap.set(key, n);
-      continue;
-    }
-    // Prefer non-empty native fields; fall back to whatever the form had.
-    dailyMap.set(key, {
-      email: n.email || prior.email,
-      matchKey: n.matchKey,
-      date: n.date,
-      checkInTime: n.checkInTime || prior.checkInTime,
-      checkOutTime: n.checkOutTime || prior.checkOutTime,
-    });
-  }
-
-  return Array.from(dailyMap.values()).filter((r) => r.checkInTime || r.checkOutTime);
+  return nativeRows.filter((r) => r.checkInTime || r.checkOutTime);
 }
 
 export async function getEmployeeFormsStatus(organizationId: string): Promise<{
