@@ -23,7 +23,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { MessageSquare, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { usePermissions } from '@/hooks/usePermissions';
+import { MessageSquare, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List, Tag, Type, FileText } from 'lucide-react';
+import { useGetEmployeeListQuery } from '@/lib/api/employees';
 import {
   Table,
   TableBody,
@@ -41,9 +44,13 @@ interface EmployeeSuggestion {
   status: 'submitted' | 'under-review' | 'accepted' | 'rejected' | 'implemented';
   submissionDate: string;
   feedback?: string;
+  userId: string;
+  employeeId: string;
 }
 
 export default function EmployeeSuggestionPage() {
+  const { user, isLoading: userLoading } = useCurrentUser();
+  const { isAdmin } = usePermissions();
   const [suggestions, setSuggestions] = useState<EmployeeSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'list' | 'form'>('list');
@@ -51,6 +58,7 @@ export default function EmployeeSuggestionPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     title: '',
     suggestion: '',
@@ -60,14 +68,24 @@ export default function EmployeeSuggestionPage() {
   });
   const { toast } = useToast();
 
+  // Employee Master lookup
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const employeeLookup = new Map(employees.map(e => [e.id, e]));
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
   useEffect(() => {
-    loadSuggestions();
-  }, []);
+    if (user?.id) {
+      loadSuggestions();
+    }
+  }, [user?.id, isAdmin, employees.length]);
 
   const loadSuggestions = async () => {
     try {
+      if (!user?.id) return;
       setLoading(false);
-      const mockSuggestions: EmployeeSuggestion[] = [
+      const allSuggestions: EmployeeSuggestion[] = [
         {
           id: '1',
           title: 'Flexible Work Hours Policy',
@@ -76,6 +94,8 @@ export default function EmployeeSuggestionPage() {
           status: 'accepted',
           submissionDate: '2026-04-10',
           feedback: 'Great idea! We are planning to implement this next quarter.',
+          userId: user.id,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -85,6 +105,8 @@ export default function EmployeeSuggestionPage() {
           status: 'implemented',
           submissionDate: '2026-03-15',
           feedback: 'Implemented! First tech talk is scheduled for next week.',
+          userId: user.id,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
         {
           id: '3',
@@ -93,6 +115,8 @@ export default function EmployeeSuggestionPage() {
           category: 'facilities',
           status: 'under-review',
           submissionDate: '2026-04-28',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
         {
           id: '4',
@@ -101,6 +125,8 @@ export default function EmployeeSuggestionPage() {
           category: 'benefits',
           status: 'submitted',
           submissionDate: '2026-05-05',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
         {
           id: '5',
@@ -110,9 +136,16 @@ export default function EmployeeSuggestionPage() {
           status: 'rejected',
           submissionDate: '2026-04-20',
           feedback: 'Budget constraints prevent this at the moment.',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
       ];
-      setSuggestions(mockSuggestions);
+      if (isAdmin) {
+        setSuggestions(allSuggestions);
+      } else {
+        const userSuggestions = allSuggestions.filter(s => s.employeeId === currentEmployee?.id);
+        setSuggestions(userSuggestions);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -136,7 +169,15 @@ export default function EmployeeSuggestionPage() {
       setSuggestions(
         suggestions.map((s) =>
           s.id === editingId
-            ? { ...s, ...formData, submissionDate: s.submissionDate }
+            ? {
+                ...s,
+                title: formData.title,
+                suggestion: formData.suggestion,
+                category: formData.category,
+                status: formData.status as 'submitted' | 'under-review' | 'accepted' | 'rejected' | 'implemented',
+                feedback: formData.feedback,
+                submissionDate: s.submissionDate,
+              }
             : s
         )
       );
@@ -147,8 +188,14 @@ export default function EmployeeSuggestionPage() {
     } else {
       const newSuggestion: EmployeeSuggestion = {
         id: Date.now().toString(),
-        ...formData,
+        title: formData.title,
+        suggestion: formData.suggestion,
+        category: formData.category,
+        status: formData.status as 'submitted' | 'under-review' | 'accepted' | 'rejected' | 'implemented',
+        feedback: formData.feedback,
         submissionDate: new Date().toISOString().split('T')[0],
+        userId: user?.id || '',
+        employeeId: currentEmployee?.id || '',
       };
       setSuggestions([newSuggestion, ...suggestions]);
       toast({
@@ -231,20 +278,25 @@ export default function EmployeeSuggestionPage() {
     return labels[category] || category;
   };
 
+  const uniqueEmployees = Array.from(
+    new Set(suggestions.map((s) => s.employeeId).filter(Boolean))
+  ).sort();
+
   const filteredSuggestions = suggestions.filter((suggestion) => {
     const matchesSearch = suggestion.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' || suggestion.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesEmployee = employeeFilter === 'all' || suggestion.employeeId === employeeFilter;
+    return matchesSearch && matchesStatus && matchesEmployee;
   });
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
             <MessageSquare className="w-8 h-8 text-purple-600" />
             Employee Suggestion
           </h1>
@@ -295,8 +347,8 @@ export default function EmployeeSuggestionPage() {
 
       {layout === 'list' ? (
         <>
-          <div className="mb-6 flex gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-64">
+          <div className="mb-6 flex gap-3 sm:gap-4 items-end flex-wrap">
+            <div className="flex-1 min-w-[180px] sm:min-w-64">
               <Label htmlFor="search" className="text-sm font-medium">
                 Search
               </Label>
@@ -308,7 +360,7 @@ export default function EmployeeSuggestionPage() {
                 className="mt-1"
               />
             </div>
-            <div className="w-48">
+            <div className="w-36 sm:w-48">
               <Label htmlFor="status-filter" className="text-sm font-medium">
                 Status
               </Label>
@@ -326,6 +378,26 @@ export default function EmployeeSuggestionPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin && (
+              <div className="w-36 sm:w-48">
+                <Label htmlFor="employee-filter" className="text-sm font-medium">
+                  Employee
+                </Label>
+                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {uniqueEmployees.map((empId) => (
+                      <SelectItem key={empId} value={empId}>
+                        {getEmployeeName(empId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -342,6 +414,7 @@ export default function EmployeeSuggestionPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Suggestion</TableHead>
                     <TableHead>Category</TableHead>
@@ -353,6 +426,9 @@ export default function EmployeeSuggestionPage() {
                 <TableBody>
                   {filteredSuggestions.map((suggestion) => (
                     <TableRow key={suggestion.id}>
+                      <TableCell className="text-sm font-medium">
+                        {getEmployeeName(suggestion.employeeId)}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {suggestion.title}
                       </TableCell>
@@ -466,111 +542,142 @@ export default function EmployeeSuggestionPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Suggestion' : 'New Suggestion'}
-            </DialogTitle>
-            <DialogDescription>
-              Share your ideas for organizational improvement.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-r from-purple-600 to-indigo-500 p-5 text-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
+                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                  <MessageSquare className="w-5 h-5 text-white" />
+                </div>
+                {editingId ? 'Edit Suggestion' : 'New Suggestion'}
+              </DialogTitle>
+              <DialogDescription className="text-purple-50 text-sm mt-0.5">
+                Your ideas shape our future. Share your suggestions for growth.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Suggestion Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Flexible Work Hours Policy"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="grid gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Type className="w-4 h-4 text-purple-600" />
+                    Suggestion Title <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., Flexible Work Hours Policy"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-purple-500 focus:ring-purple-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-purple-600" />
+                    Category
+                  </Label>
+                  <Select
+                    value={formData.category}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, category: value })
+                    }
+                  >
+                    <SelectTrigger id="category" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="general">General</SelectItem>
+                      <SelectItem value="hr-policy">HR Policy</SelectItem>
+                      <SelectItem value="learning">Learning & Development</SelectItem>
+                      <SelectItem value="facilities">Office Facilities</SelectItem>
+                      <SelectItem value="benefits">Employee Benefits</SelectItem>
+                      <SelectItem value="team-building">Team Building</SelectItem>
+                      <SelectItem value="process">Internal Processes</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="suggestion">Your Suggestion *</Label>
-              <Textarea
-                id="suggestion"
-                placeholder="Describe your suggestion in detail"
-                value={formData.suggestion}
-                onChange={(e) =>
-                  setFormData({ ...formData, suggestion: e.target.value })
-                }
-                className="mt-1"
-                rows={5}
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggestion" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  Detailed Suggestion <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="suggestion"
+                  placeholder="Describe your suggestion in detail..."
+                  value={formData.suggestion}
+                  onChange={(e) =>
+                    setFormData({ ...formData, suggestion: e.target.value })
+                  }
+                  className="min-h-[100px] border-gray-200 focus:border-purple-500 focus:ring-purple-500 transition-all resize-none"
+                />
+              </div>
 
-            <div>
-              <Label htmlFor="category">Category</Label>
-              <Select
-                value={formData.category}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, category: value })
-                }
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
-                  <SelectItem value="hr-policy">HR Policy</SelectItem>
-                  <SelectItem value="learning">Learning</SelectItem>
-                  <SelectItem value="facilities">Facilities</SelectItem>
-                  <SelectItem value="benefits">Benefits</SelectItem>
-                  <SelectItem value="team-building">Team Building</SelectItem>
-                  <SelectItem value="process">Process</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value as any })
-                }
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="submitted">Submitted</SelectItem>
-                  <SelectItem value="under-review">Under Review</SelectItem>
-                  <SelectItem value="accepted">Accepted</SelectItem>
-                  <SelectItem value="implemented">Implemented</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="feedback">Feedback</Label>
-              <Textarea
-                id="feedback"
-                placeholder="Add any feedback (optional)"
-                value={formData.feedback}
-                onChange={(e) =>
-                  setFormData({ ...formData, feedback: e.target.value })
-                }
-                className="mt-1"
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-purple-600" />
+                    Current Status
+                  </Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, status: value as any })
+                    }
+                  >
+                    <SelectTrigger id="status" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="submitted">Submitted</SelectItem>
+                      <SelectItem value="under-review">Under Review</SelectItem>
+                      <SelectItem value="accepted">Accepted</SelectItem>
+                      <SelectItem value="implemented">Implemented</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="feedback" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-blue-500" />
+                    Reviewer Feedback
+                  </Label>
+                  <Textarea
+                    id="feedback"
+                    placeholder="Notes from the review team..."
+                    value={formData.feedback}
+                    onChange={(e) =>
+                      setFormData({ ...formData, feedback: e.target.value })
+                    }
+                    className="min-h-[40px] bg-gray-50 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all resize-none"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              className="h-10 px-6 font-medium"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Submit'} Suggestion
+            <Button 
+              onClick={handleSubmit} 
+              className="h-10 px-8 font-bold bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-200 transition-all active:scale-95 flex gap-2"
+            >
+              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {editingId ? 'Save Changes' : 'Submit Suggestion'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

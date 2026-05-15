@@ -31,7 +31,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Target, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { usePermissions } from '@/hooks/usePermissions';
+import { Target, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List, Type, FileText, Calendar, Zap } from 'lucide-react';
+import { useGetEmployeeListQuery } from '@/lib/api/employees';
 
 interface SelfTarget {
   id: string;
@@ -41,9 +44,13 @@ interface SelfTarget {
   status: 'not-started' | 'in-progress' | 'completed';
   progress: number;
   createdAt: string;
+  userId: string;
+  employeeId: string;
 }
 
 export default function SelfTargetPage() {
+  const { user, isLoading: userLoading } = useCurrentUser();
+  const { isAdmin } = usePermissions();
   const [targets, setTargets] = useState<SelfTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'list' | 'form'>('list');
@@ -51,6 +58,7 @@ export default function SelfTargetPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -60,14 +68,24 @@ export default function SelfTargetPage() {
   });
   const { toast } = useToast();
 
+  // Employee Master lookup
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const employeeLookup = new Map(employees.map(e => [e.id, e]));
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
   useEffect(() => {
-    loadTargets();
-  }, []);
+    if (user?.id) {
+      loadTargets();
+    }
+  }, [user?.id, isAdmin, employees.length]);
 
   const loadTargets = async () => {
     try {
+      if (!user?.id) return;
       setLoading(false);
-      const mockTargets: SelfTarget[] = [
+      const allTargets: SelfTarget[] = [
         {
           id: '1',
           title: 'Complete Advanced TypeScript Course',
@@ -76,6 +94,8 @@ export default function SelfTargetPage() {
           status: 'in-progress',
           progress: 65,
           createdAt: '2026-04-10',
+          userId: user.id,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -85,6 +105,8 @@ export default function SelfTargetPage() {
           status: 'in-progress',
           progress: 45,
           createdAt: '2026-04-15',
+          userId: user.id,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
         {
           id: '3',
@@ -94,9 +116,16 @@ export default function SelfTargetPage() {
           status: 'not-started',
           progress: 0,
           createdAt: '2026-05-01',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
       ];
-      setTargets(mockTargets);
+      if (isAdmin) {
+        setTargets(allTargets);
+      } else {
+        const userTargets = allTargets.filter(t => t.employeeId === currentEmployee?.id);
+        setTargets(userTargets);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -129,8 +158,14 @@ export default function SelfTargetPage() {
     } else {
       const newTarget: SelfTarget = {
         id: Date.now().toString(),
-        ...formData,
+        title: formData.title,
+        description: formData.description,
+        targetDate: formData.targetDate,
+        status: formData.status as 'not-started' | 'in-progress' | 'completed',
+        progress: formData.progress,
         createdAt: new Date().toISOString().split('T')[0],
+        userId: user?.id || '',
+        employeeId: currentEmployee?.id || '',
       };
       setTargets([newTarget, ...targets]);
       toast({
@@ -211,14 +246,19 @@ export default function SelfTargetPage() {
       .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' || target.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesEmployee = employeeFilter === 'all' || target.employeeId === employeeFilter;
+    return matchesSearch && matchesStatus && matchesEmployee;
   });
 
+  const uniqueEmployees = Array.from(
+    new Set(targets.map(t => t.employeeId).filter(Boolean))
+  ).sort();
+
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
             <Target className="w-8 h-8 text-blue-600" />
             Self Target
           </h1>
@@ -269,8 +309,8 @@ export default function SelfTargetPage() {
 
       {layout === 'list' ? (
         <>
-          <div className="mb-6 flex gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-64">
+          <div className="mb-6 flex gap-3 sm:gap-4 items-end flex-wrap">
+            <div className="flex-1 min-w-[180px] sm:min-w-64">
               <Label htmlFor="search" className="text-sm font-medium">
                 Search
               </Label>
@@ -282,7 +322,7 @@ export default function SelfTargetPage() {
                 className="mt-1"
               />
             </div>
-            <div className="w-48">
+            <div className="w-36 sm:w-48">
               <Label htmlFor="status-filter" className="text-sm font-medium">
                 Status
               </Label>
@@ -298,6 +338,26 @@ export default function SelfTargetPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin && (
+              <div className="w-36 sm:w-48">
+                <Label htmlFor="employee-filter" className="text-sm font-medium">
+                  Employee
+                </Label>
+                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {uniqueEmployees.map((empId) => (
+                      <SelectItem key={empId} value={empId}>
+                        {getEmployeeName(empId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -314,6 +374,7 @@ export default function SelfTargetPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Status</TableHead>
@@ -325,6 +386,9 @@ export default function SelfTargetPage() {
                 <TableBody>
                   {filteredTargets.map((target) => (
                     <TableRow key={target.id}>
+                      <TableCell className="text-sm font-medium">
+                        {getEmployeeName(target.employeeId)}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {target.title}
                       </TableCell>
@@ -448,104 +512,137 @@ export default function SelfTargetPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Target' : 'New Target'}
-            </DialogTitle>
-            <DialogDescription>
-              Set a personal performance target and track your progress.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-r from-blue-600 to-cyan-500 p-5 text-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
+                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                  <Target className="w-5 h-5 text-white" />
+                </div>
+                {editingId ? 'Edit Target' : 'New Target'}
+              </DialogTitle>
+              <DialogDescription className="text-blue-50 text-sm mt-0.5">
+                Aim high. Set personal performance targets and track your journey.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Target Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Complete Advanced TypeScript Course"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="grid gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Type className="w-4 h-4 text-blue-600" />
+                    Target Title <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., Achieve 95% Code Coverage"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="targetDate" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-blue-600" />
+                    Completion Date <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="targetDate"
+                    type="date"
+                    value={formData.targetDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, targetDate: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all"
+                  />
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe your target in detail"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="targetDate">Target Date *</Label>
-              <Input
-                id="targetDate"
-                type="date"
-                value={formData.targetDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, targetDate: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value as any })
-                }
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="not-started">Not Started</SelectItem>
-                  <SelectItem value="in-progress">In Progress</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="progress">Progress (%)</Label>
-              <div className="flex gap-2 mt-1">
-                <Input
-                  id="progress"
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={formData.progress}
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  Detailed Description
+                </Label>
+                <Textarea
+                  id="description"
+                  placeholder="Break down your target into actionable steps..."
+                  value={formData.description}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      progress: parseInt(e.target.value) || 0,
-                    })
+                    setFormData({ ...formData, description: e.target.value })
                   }
+                  className="min-h-[80px] border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all resize-none"
                 />
-                <span className="text-sm text-gray-600 self-center">%</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                    Status
+                  </Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, status: value as any })
+                    }
+                  >
+                    <SelectTrigger id="status" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="not-started">Not Started</SelectItem>
+                      <SelectItem value="in-progress">In Progress</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+                  <div className="flex justify-between items-center mb-4">
+                    <Label htmlFor="progress" className="text-xs font-bold text-blue-900 flex items-center gap-2">
+                      <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                      PROGRESS: {formData.progress}%
+                    </Label>
+                  </div>
+                  <Input
+                    id="progress"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={formData.progress}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        progress: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="h-1.5 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600 w-full"
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              className="h-10 px-6 font-medium"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Create'} Target
+            <Button 
+              onClick={handleSubmit} 
+              className="h-10 px-8 font-bold bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all active:scale-95 flex gap-2"
+            >
+              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {editingId ? 'Save Changes' : 'Create Target'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
