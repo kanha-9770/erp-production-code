@@ -31,7 +31,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Lightbulb, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { usePermissions } from '@/hooks/usePermissions';
+import { Lightbulb, Plus, Trash2, Edit2, CheckCircle2, Calendar, LayoutGrid, List, Type, FileText, Tag } from 'lucide-react';
+import { useGetEmployeeListQuery } from '@/lib/api/employees';
 
 interface SelfInitiative {
   id: string;
@@ -42,9 +45,13 @@ interface SelfInitiative {
   status: 'planning' | 'in-progress' | 'completed' | 'on-hold';
   category: string;
   createdAt: string;
+  userId: string;
+  employeeId: string;
 }
 
 export default function SelfInitiativePage() {
+  const { user, isLoading: userLoading } = useCurrentUser();
+  const { isAdmin } = usePermissions();
   const [initiatives, setInitiatives] = useState<SelfInitiative[]>([]);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'list' | 'form'>('list');
@@ -52,6 +59,7 @@ export default function SelfInitiativePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -62,14 +70,24 @@ export default function SelfInitiativePage() {
   });
   const { toast } = useToast();
 
+  // Employee Master lookup
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const employeeLookup = new Map(employees.map(e => [e.id, e]));
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
   useEffect(() => {
-    loadInitiatives();
-  }, []);
+    if (user?.id) {
+      loadInitiatives();
+    }
+  }, [user?.id, isAdmin, employees.length]);
 
   const loadInitiatives = async () => {
     try {
+      if (!user?.id) return;
       setLoading(false);
-      const mockInitiatives: SelfInitiative[] = [
+      const allInitiatives: SelfInitiative[] = [
         {
           id: '1',
           title: 'Mentorship Program for Juniors',
@@ -79,6 +97,8 @@ export default function SelfInitiativePage() {
           status: 'in-progress',
           category: 'mentoring',
           createdAt: '2026-03-20',
+          userId: user.id,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -89,6 +109,8 @@ export default function SelfInitiativePage() {
           status: 'in-progress',
           category: 'process-improvement',
           createdAt: '2026-04-25',
+          userId: user.id,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
         {
           id: '3',
@@ -99,9 +121,16 @@ export default function SelfInitiativePage() {
           status: 'planning',
           category: 'team-building',
           createdAt: '2026-05-10',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
       ];
-      setInitiatives(mockInitiatives);
+      if (isAdmin) {
+        setInitiatives(allInitiatives);
+      } else {
+        const userInitiatives = allInitiatives.filter(i => i.employeeId === currentEmployee?.id);
+        setInitiatives(userInitiatives);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -134,8 +163,15 @@ export default function SelfInitiativePage() {
     } else {
       const newInitiative: SelfInitiative = {
         id: Date.now().toString(),
-        ...formData,
+        title: formData.title,
+        description: formData.description,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        status: formData.status as 'planning' | 'in-progress' | 'completed' | 'on-hold',
+        category: formData.category,
         createdAt: new Date().toISOString().split('T')[0],
+        userId: user?.id || '',
+        employeeId: currentEmployee?.id || '',
       };
       setInitiatives([newInitiative, ...initiatives]);
       toast({
@@ -220,13 +256,19 @@ export default function SelfInitiativePage() {
     return labels[category] || category;
   };
 
+  const uniqueEmployees = Array.from(
+    new Set(initiatives.map((i) => i.employeeId).filter(Boolean))
+  ).sort();
+
   const filteredInitiatives = initiatives.filter((initiative) => {
     const matchesSearch = initiative.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' || initiative.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesEmployee =
+      employeeFilter === 'all' || initiative.employeeId === employeeFilter;
+    return matchesSearch && matchesStatus && matchesEmployee;
   });
 
   return (
@@ -315,6 +357,26 @@ export default function SelfInitiativePage() {
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin && (
+              <div className="w-48">
+                <Label htmlFor="employee-filter" className="text-sm font-medium">
+                  Employee
+                </Label>
+                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {uniqueEmployees.map((empId) => (
+                      <SelectItem key={empId} value={empId}>
+                        {getEmployeeName(empId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -331,6 +393,7 @@ export default function SelfInitiativePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Category</TableHead>
@@ -342,6 +405,9 @@ export default function SelfInitiativePage() {
                 <TableBody>
                   {filteredInitiatives.map((initiative) => (
                     <TableRow key={initiative.id}>
+                      <TableCell className="text-sm font-medium">
+                        {getEmployeeName(initiative.employeeId)}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {initiative.title}
                       </TableCell>
@@ -447,126 +513,156 @@ export default function SelfInitiativePage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Initiative' : 'New Initiative'}
-            </DialogTitle>
-            <DialogDescription>
-              Document a self-initiated improvement project.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-r from-yellow-500 to-amber-600 p-5 text-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
+                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                  <Lightbulb className="w-5 h-5 text-white" />
+                </div>
+                {editingId ? 'Edit Initiative' : 'New Initiative'}
+              </DialogTitle>
+              <DialogDescription className="text-yellow-50 text-sm mt-0.5">
+                Take the lead. Document your self-initiated projects and growth.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Initiative Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Mentorship Program for Juniors"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="grid gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Type className="w-4 h-4 text-amber-600" />
+                    Initiative Title <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., Implementing a New Onboarding Guide"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-amber-500 focus:ring-amber-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-amber-600" />
+                    Category
+                  </Label>
+                  <Select
+                    value={formData.category}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, category: value })
+                    }
+                  >
+                    <SelectTrigger id="category" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="learning">Skill Learning</SelectItem>
+                      <SelectItem value="mentoring">Mentoring Others</SelectItem>
+                      <SelectItem value="process-improvement">Process Improvement</SelectItem>
+                      <SelectItem value="team-building">Team Building</SelectItem>
+                      <SelectItem value="innovation">Product Innovation</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe your initiative"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="startDate">Start Date *</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={formData.startDate}
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-600" />
+                  Description & Scope
+                </Label>
+                <Textarea
+                  id="description"
+                  placeholder="What are you planning to achieve?..."
+                  value={formData.description}
                   onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
+                    setFormData({ ...formData, description: e.target.value })
                   }
-                  className="mt-1"
+                  className="min-h-[80px] border-gray-200 focus:border-amber-500 focus:ring-amber-500 transition-all resize-none"
                 />
               </div>
 
-              <div>
-                <Label htmlFor="endDate">End Date</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
-                  }
-                  className="mt-1"
-                />
-              </div>
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="startDate" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-amber-600" />
+                    Start Date <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    value={formData.startDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, startDate: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-amber-500 focus:ring-amber-500 transition-all"
+                  />
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={formData.category}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, category: value })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="learning">Learning</SelectItem>
-                    <SelectItem value="mentoring">Mentoring</SelectItem>
-                    <SelectItem value="process-improvement">
-                      Process Improvement
-                    </SelectItem>
-                    <SelectItem value="team-building">Team Building</SelectItem>
-                    <SelectItem value="innovation">Innovation</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="endDate" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-amber-600" />
+                    Target End Date
+                  </Label>
+                  <Input
+                    id="endDate"
+                    type="date"
+                    value={formData.endDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, endDate: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-amber-500 focus:ring-amber-500 transition-all"
+                  />
+                </div>
 
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, status: value as any })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="planning">Planning</SelectItem>
-                    <SelectItem value="in-progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="on-hold">On Hold</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-amber-600" />
+                    Status
+                  </Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, status: value as any })
+                    }
+                  >
+                    <SelectTrigger id="status" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="planning">Planning</SelectItem>
+                      <SelectItem value="in-progress">In Progress</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="on-hold">On Hold</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              className="h-10 px-6 font-medium"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Create'} Initiative
+            <Button 
+              onClick={handleSubmit} 
+              className="h-10 px-8 font-bold bg-amber-500 hover:bg-amber-600 shadow-lg shadow-amber-200 transition-all active:scale-95 flex gap-2 text-white"
+            >
+              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {editingId ? 'Save Changes' : 'Create Initiative'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

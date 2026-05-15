@@ -23,7 +23,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { AlertCircle, Plus, Trash2, Edit2, CheckCircle2, AlertTriangle, LayoutGrid, List } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { usePermissions } from '@/hooks/usePermissions';
+import { AlertCircle, Plus, Trash2, Edit2, CheckCircle2, AlertTriangle, LayoutGrid, List, Type, FileText, Tag } from 'lucide-react';
+import { useGetEmployeeListQuery } from '@/lib/api/employees';
 import {
   Table,
   TableBody,
@@ -42,9 +45,13 @@ interface ProblemRegistration {
   registrationDate: string;
   status: 'open' | 'in-review' | 'resolved' | 'closed';
   proposedSolution: string;
+  userId: string;
+  employeeId: string;
 }
 
 export default function ProblemRegistrationPage() {
+  const { user, isLoading: userLoading } = useCurrentUser();
+  const { isAdmin } = usePermissions();
   const [problems, setProblems] = useState<ProblemRegistration[]>([]);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'list' | 'form'>('list');
@@ -52,6 +59,7 @@ export default function ProblemRegistrationPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -62,14 +70,24 @@ export default function ProblemRegistrationPage() {
   });
   const { toast } = useToast();
 
+  // Employee Master lookup
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const employeeLookup = new Map(employees.map(e => [e.id, e]));
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
   useEffect(() => {
-    loadProblems();
-  }, []);
+    if (user?.id) {
+      loadProblems();
+    }
+  }, [user?.id, isAdmin, employees.length]);
 
   const loadProblems = async () => {
     try {
+      if (!user?.id) return;
       setLoading(false);
-      const mockProblems: ProblemRegistration[] = [
+      const allProblems: ProblemRegistration[] = [
         {
           id: '1',
           title: 'Slow API Response Times',
@@ -79,6 +97,8 @@ export default function ProblemRegistrationPage() {
           registrationDate: '2026-05-01',
           status: 'in-review',
           proposedSolution: 'Implement caching and database optimization',
+          userId: user.id,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -89,6 +109,8 @@ export default function ProblemRegistrationPage() {
           registrationDate: '2026-04-28',
           status: 'open',
           proposedSolution: 'Schedule documentation review and update sessions',
+          userId: user.id,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
         {
           id: '3',
@@ -99,9 +121,16 @@ export default function ProblemRegistrationPage() {
           registrationDate: '2026-05-05',
           status: 'resolved',
           proposedSolution: 'Integrate with calendar system for automatic blocking',
+          userId: user.id,
+          employeeId: currentEmployee?.id || '',
         },
       ];
-      setProblems(mockProblems);
+      if (isAdmin) {
+        setProblems(allProblems);
+      } else {
+        const userProblems = allProblems.filter(p => p.employeeId === currentEmployee?.id);
+        setProblems(userProblems);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -136,8 +165,15 @@ export default function ProblemRegistrationPage() {
     } else {
       const newProblem: ProblemRegistration = {
         id: Date.now().toString(),
-        ...formData,
+        title: formData.title,
+        description: formData.description,
+        severity: formData.severity as 'low' | 'medium' | 'high' | 'critical',
+        category: formData.category,
+        status: formData.status as 'open' | 'in-review' | 'resolved' | 'closed',
+        proposedSolution: formData.proposedSolution,
         registrationDate: new Date().toISOString().split('T')[0],
+        userId: user?.id || '',
+        employeeId: currentEmployee?.id || '',
       };
       setProblems([newProblem, ...problems]);
       toast({
@@ -232,13 +268,19 @@ export default function ProblemRegistrationPage() {
     );
   };
 
+  const uniqueEmployees = Array.from(
+    new Set(problems.map((p) => p.employeeId).filter(Boolean))
+  ).sort();
+
   const filteredProblems = problems.filter((problem) => {
     const matchesSearch = problem.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' || problem.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesEmployee =
+      employeeFilter === 'all' || problem.employeeId === employeeFilter;
+    return matchesSearch && matchesStatus && matchesEmployee;
   });
 
   return (
@@ -327,6 +369,26 @@ export default function ProblemRegistrationPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin && (
+              <div className="w-48">
+                <Label htmlFor="employee-filter" className="text-sm font-medium">
+                  Employee
+                </Label>
+                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {uniqueEmployees.map((empId) => (
+                      <SelectItem key={empId} value={empId}>
+                        {getEmployeeName(empId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -343,6 +405,7 @@ export default function ProblemRegistrationPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Severity</TableHead>
@@ -355,6 +418,9 @@ export default function ProblemRegistrationPage() {
                 <TableBody>
                   {filteredProblems.map((problem) => (
                     <TableRow key={problem.id}>
+                      <TableCell className="text-sm font-medium">
+                        {getEmployeeName(problem.employeeId)}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {problem.title}
                       </TableCell>
@@ -464,129 +530,163 @@ export default function ProblemRegistrationPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Problem' : 'Register Problem'}
-            </DialogTitle>
-            <DialogDescription>
-              Register a workplace problem for tracking and resolution.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-r from-red-600 to-rose-500 p-5 text-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
+                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                  <AlertCircle className="w-5 h-5 text-white" />
+                </div>
+                {editingId ? 'Edit Problem' : 'Register Problem'}
+              </DialogTitle>
+              <DialogDescription className="text-red-50 text-sm mt-0.5">
+                Help us improve by identifying and documenting workplace challenges.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Problem Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Slow API Response Times"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="description">Description *</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe the problem in detail"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="severity">Severity</Label>
-                <Select
-                  value={formData.severity}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, severity: value as any })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
+          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="grid gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Type className="w-4 h-4 text-red-600" />
+                    Problem Title <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., Equipment Malfunction in Lab B"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-red-500 focus:ring-red-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="severity" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    Severity Level
+                  </Label>
+                  <Select
+                    value={formData.severity}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, severity: value as any })
+                    }
+                  >
+                    <SelectTrigger id="severity" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select severity" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low Impact</SelectItem>
+                      <SelectItem value="medium">Medium Impact</SelectItem>
+                      <SelectItem value="high">High Impact</SelectItem>
+                      <SelectItem value="critical">Critical / Emergency</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              <div>
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={formData.category}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, category: value })
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-red-600" />
+                  Problem Description <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="description"
+                  placeholder="What happened? When? Where?..."
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
                   }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="technical">Technical</SelectItem>
-                    <SelectItem value="operational">Operational</SelectItem>
-                    <SelectItem value="process">Process</SelectItem>
-                    <SelectItem value="communication">Communication</SelectItem>
-                    <SelectItem value="resource">Resource</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                  className="min-h-[100px] border-gray-200 focus:border-red-500 focus:ring-red-500 transition-all resize-none"
+                />
               </div>
-            </div>
 
-            <div>
-              <Label htmlFor="proposedSolution">Proposed Solution</Label>
-              <Textarea
-                id="proposedSolution"
-                placeholder="Suggest a solution (optional)"
-                value={formData.proposedSolution}
-                onChange={(e) =>
-                  setFormData({ ...formData, proposedSolution: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-red-600" />
+                    Problem Category
+                  </Label>
+                  <Select
+                    value={formData.category}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, category: value })
+                    }
+                  >
+                    <SelectTrigger id="category" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="technical">Technical Issue</SelectItem>
+                      <SelectItem value="operational">Operational</SelectItem>
+                      <SelectItem value="process">Process Related</SelectItem>
+                      <SelectItem value="communication">Communication</SelectItem>
+                      <SelectItem value="resource">Resource Shortage</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div>
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value as any })
-                }
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in-review">In Review</SelectItem>
-                  <SelectItem value="resolved">Resolved</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                </SelectContent>
-              </Select>
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-gray-400" />
+                    Resolution Status
+                  </Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, status: value as any })
+                    }
+                  >
+                    <SelectTrigger id="status" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="in-review">In Review</SelectItem>
+                      <SelectItem value="resolved">Resolved</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="proposedSolution" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  Your Suggested Solution
+                </Label>
+                <Textarea
+                  id="proposedSolution"
+                  placeholder="How can we fix this? (Optional)..."
+                  value={formData.proposedSolution}
+                  onChange={(e) =>
+                    setFormData({ ...formData, proposedSolution: e.target.value })
+                  }
+                  className="min-h-[80px] border-gray-200 focus:border-green-500 focus:ring-green-500 transition-all resize-none"
+                />
+              </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              className="h-10 px-6 font-medium"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Register'} Problem
+            <Button 
+              onClick={handleSubmit} 
+              className="h-10 px-8 font-bold bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200 transition-all active:scale-95 flex gap-2"
+            >
+              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {editingId ? 'Save Changes' : 'Register Problem'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

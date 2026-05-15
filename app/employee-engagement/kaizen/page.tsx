@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { TrendingUp, Plus, Trash2, Edit2, ThumbsUp, CheckCircle2, LayoutGrid, List } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { usePermissions } from '@/hooks/usePermissions';
+import { TrendingUp, Plus, Trash2, Edit2, ThumbsUp, CheckCircle2, LayoutGrid, List, Type, FileText, Layout, Lightbulb, Zap, ArrowRight, Save, X, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useGetEmployeeListQuery } from '@/lib/api/employees';
 import {
   Table,
   TableBody,
@@ -44,9 +48,12 @@ interface Kaizen {
   submissionDate: string;
   votes: number;
   hasVoted: boolean;
+  employeeId: string;
 }
 
 export default function KaizenPage() {
+  const { user, isLoading: userLoading } = useCurrentUser();
+  const { isAdmin } = usePermissions();
   const [kaizens, setKaizens] = useState<Kaizen[]>([]);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<'list' | 'form'>('list');
@@ -54,6 +61,7 @@ export default function KaizenPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -64,14 +72,24 @@ export default function KaizenPage() {
   });
   const { toast } = useToast();
 
+  // Employee Master lookup
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const employeeLookup = new Map(employees.map(e => [e.id, e]));
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
   useEffect(() => {
-    loadKaizens();
-  }, []);
+    if (user?.id) {
+      loadKaizens();
+    }
+  }, [user?.id, isAdmin, employees.length]);
 
   const loadKaizens = async () => {
     try {
+      if (!user?.id) return;
       setLoading(false);
-      const mockKaizens: Kaizen[] = [
+      const allKaizens: Kaizen[] = [
         {
           id: '1',
           title: 'Implement Automated Testing Pipeline',
@@ -83,6 +101,7 @@ export default function KaizenPage() {
           submissionDate: '2026-04-15',
           votes: 12,
           hasVoted: false,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -95,6 +114,7 @@ export default function KaizenPage() {
           submissionDate: '2026-04-20',
           votes: 8,
           hasVoted: true,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
         {
           id: '3',
@@ -107,6 +127,7 @@ export default function KaizenPage() {
           submissionDate: '2026-05-05',
           votes: 5,
           hasVoted: false,
+          employeeId: currentEmployee?.id || '',
         },
         {
           id: '4',
@@ -119,9 +140,15 @@ export default function KaizenPage() {
           submissionDate: '2026-03-01',
           votes: 10,
           hasVoted: true,
+          employeeId: currentEmployee?.id || '',
         },
       ];
-      setKaizens(mockKaizens);
+      if (isAdmin) {
+        setKaizens(allKaizens);
+      } else {
+        const userKaizens = allKaizens.filter(k => k.employeeId === currentEmployee?.id);
+        setKaizens(userKaizens);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -156,10 +183,16 @@ export default function KaizenPage() {
     } else {
       const newKaizen: Kaizen = {
         id: Date.now().toString(),
-        ...formData,
+        title: formData.title,
+        description: formData.description,
+        currentState: formData.currentState,
+        proposedState: formData.proposedState,
+        benefits: formData.benefits,
+        status: formData.status as 'idea' | 'approved' | 'in-implementation' | 'implemented',
         submissionDate: new Date().toISOString().split('T')[0],
         votes: 0,
         hasVoted: false,
+        employeeId: currentEmployee?.id || '',
       };
       setKaizens([newKaizen, ...kaizens]);
       toast({
@@ -241,13 +274,19 @@ export default function KaizenPage() {
     );
   };
 
+  const uniqueEmployees = Array.from(
+    new Set(kaizens.map((k) => k.employeeId).filter(Boolean))
+  ).sort();
+
   const filteredKaizens = kaizens.filter((kaizen) => {
     const matchesSearch = kaizen.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' || kaizen.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesEmployee =
+      employeeFilter === 'all' || kaizen.employeeId === employeeFilter;
+    return matchesSearch && matchesStatus && matchesEmployee;
   });
 
   return (
@@ -336,6 +375,26 @@ export default function KaizenPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin && (
+              <div className="w-48">
+                <Label htmlFor="employee-filter" className="text-sm font-medium">
+                  Employee
+                </Label>
+                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {uniqueEmployees.map((empId) => (
+                      <SelectItem key={empId} value={empId}>
+                        {getEmployeeName(empId)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -352,6 +411,7 @@ export default function KaizenPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Status</TableHead>
@@ -363,6 +423,9 @@ export default function KaizenPage() {
                 <TableBody>
                   {filteredKaizens.map((kaizen) => (
                     <TableRow key={kaizen.id}>
+                      <TableCell className="text-sm">
+                        <span className="font-medium">{getEmployeeName(kaizen.employeeId)}</span>
+                      </TableCell>
                       <TableCell className="font-medium">
                         {kaizen.title}
                       </TableCell>
@@ -489,113 +552,151 @@ export default function KaizenPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Kaizen' : 'New Kaizen'}
-            </DialogTitle>
-            <DialogDescription>
-              Submit a continuous improvement idea or suggestion.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[850px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-r from-green-600 to-emerald-500 p-5 text-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
+                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
+                  <TrendingUp className="w-5 h-5 text-white" />
+                </div>
+                {editingId ? 'Edit Kaizen' : 'New Kaizen'}
+              </DialogTitle>
+              <DialogDescription className="text-green-50 text-sm mt-0.5">
+                Share your innovative ideas to drive continuous improvement.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Kaizen Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Implement Automated Testing Pipeline"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="grid gap-6">
+              {/* Row 1: Title & Status */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Type className="w-4 h-4 text-green-600" />
+                    Kaizen Title <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., Implement Automated Testing Pipeline"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="h-10 border-gray-200 focus:border-green-500 focus:ring-green-500 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    Status
+                  </Label>
+                  <Select
+                    value={formData.status}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, status: value as any })
+                    }
+                  >
+                    <SelectTrigger id="status" className="h-10 border-gray-200">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="idea">Initial Idea</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="in-implementation">In Implementation</SelectItem>
+                      <SelectItem value="implemented">Implemented</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="description">Description *</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe your kaizen idea"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+              {/* Row 2: Description */}
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-green-600" />
+                  Core Description <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="description"
+                  placeholder="Explain the 'what' and 'why' of your idea..."
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  className="min-h-[80px] border-gray-200 focus:border-green-500 focus:ring-green-500 transition-all resize-none"
+                />
+              </div>
 
-            <div>
-              <Label htmlFor="currentState">Current State</Label>
-              <Textarea
-                id="currentState"
-                placeholder="Describe the current situation or process"
-                value={formData.currentState}
-                onChange={(e) =>
-                  setFormData({ ...formData, currentState: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+              {/* Row 3: Current vs Proposed */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-gray-50/50 rounded-xl border border-gray-100">
+                <div className="space-y-2">
+                  <Label htmlFor="currentState" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Layout className="w-4 h-4 text-amber-500" />
+                    Current Process
+                  </Label>
+                  <Textarea
+                    id="currentState"
+                    placeholder="How is it done currently?"
+                    value={formData.currentState}
+                    onChange={(e) =>
+                      setFormData({ ...formData, currentState: e.target.value })
+                    }
+                    className="min-h-[80px] bg-white border-gray-200 focus:border-amber-500 focus:ring-amber-500 transition-all resize-none"
+                  />
+                </div>
 
-            <div>
-              <Label htmlFor="proposedState">Proposed State</Label>
-              <Textarea
-                id="proposedState"
-                placeholder="Describe how it should be after improvement"
-                value={formData.proposedState}
-                onChange={(e) =>
-                  setFormData({ ...formData, proposedState: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="proposedState" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 text-blue-500" />
+                    Proposed Improvement
+                  </Label>
+                  <Textarea
+                    id="proposedState"
+                    placeholder="What is your suggested change?"
+                    value={formData.proposedState}
+                    onChange={(e) =>
+                      setFormData({ ...formData, proposedState: e.target.value })
+                    }
+                    className="min-h-[80px] bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all resize-none"
+                  />
+                </div>
+              </div>
 
-            <div>
-              <Label htmlFor="benefits">Expected Benefits</Label>
-              <Textarea
-                id="benefits"
-                placeholder="What benefits will this kaizen bring?"
-                value={formData.benefits}
-                onChange={(e) =>
-                  setFormData({ ...formData, benefits: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value as any })
-                }
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="idea">Idea</SelectItem>
-                  <SelectItem value="approved">Approved</SelectItem>
-                  <SelectItem value="in-implementation">
-                    In Implementation
-                  </SelectItem>
-                  <SelectItem value="implemented">Implemented</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Row 4: Benefits */}
+              <div className="space-y-2">
+                <Label htmlFor="benefits" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-yellow-500" />
+                  Expected Impact & Benefits
+                </Label>
+                <Textarea
+                  id="benefits"
+                  placeholder="Efficiency, cost savings, quality, etc."
+                  value={formData.benefits}
+                  onChange={(e) =>
+                    setFormData({ ...formData, benefits: e.target.value })
+                  }
+                  className="min-h-[80px] border-gray-200 focus:border-yellow-500 focus:ring-yellow-500 transition-all resize-none"
+                />
+              </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
+            <Button 
+              variant="outline" 
+              onClick={() => setDialogOpen(false)}
+              className="h-10 px-6 font-medium"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Submit'} Kaizen
+            <Button 
+              onClick={handleSubmit} 
+              className="h-10 px-8 font-bold bg-green-600 hover:bg-green-700 shadow-lg shadow-green-200 transition-all active:scale-95 flex gap-2"
+            >
+              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {editingId ? 'Save Changes' : 'Submit Kaizen'}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
