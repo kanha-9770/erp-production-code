@@ -144,7 +144,7 @@ export interface PayrollSetup {
     joiningBonusClawbackMonths?: number;
     retentionBonusEnabled?: boolean;
     retentionBonusAmount?: number;
-    retentionBonusFrequency?: 'annual' | 'half-yearly' | 'one-time';
+    retentionBonusFrequency?: 'monthly' | 'annual' | 'half-yearly' | 'one-time';
   };
   policy: {
     weeklyOffDays: number[];
@@ -424,17 +424,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Setup payload missing' }, { status: 400 });
     }
 
+    // Form-mapping requirements (employee profile, check-in, leave, holiday)
+    // are managed at /settings/attendance-config and have engine-side fallbacks
+    // (User table for employees, native Attendance table for punches). The
+    // Payroll Configuration page now only edits Pay Rules, so the only check
+    // here is that a salary source exists — either a mapped field on the
+    // employee form OR a Default Base Salary the pay rules can be applied to.
     const errors: string[] = [];
-    if (!setup.employee.formId) errors.push('Select an Employee Profile form');
-    if (!setup.employee.fields.email && !setup.employee.fields.employeeId) {
-      errors.push('Map at least Employee Email or Employee ID on the Employee Profile form');
-    }
     if (!setup.employee.fields.salary && !setup.defaultBaseSalary) {
       errors.push('Map a Salary field OR set a Default Base Salary');
     }
-    if (!setup.checkIn.formId) errors.push('Select a Check-In form');
-    if (!setup.checkIn.fields.checkInTime) errors.push('Map the Check-In Time field');
-    if (!setup.checkIn.fields.date) errors.push('Map the Date field on the Check-In form');
 
     if (errors.length > 0) {
       return NextResponse.json({ success: false, error: errors.join('. ') }, { status: 400 });

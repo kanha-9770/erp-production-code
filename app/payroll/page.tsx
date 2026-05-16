@@ -75,6 +75,32 @@ interface PayrollBreakdown {
   leaveByType: Record<string, number>;
 }
 
+interface PayrollEarnings {
+  basic: number;
+  hra: number;
+  da: number;
+  conveyance: number;
+  medical: number;
+  lta: number;
+  food: number;
+  telephone: number;
+  education: number;
+  fuel: number;
+  books: number;
+  uniform: number;
+  specialAllowance: number;
+  overtime: number;
+}
+
+interface PayrollDeductionsDetail {
+  pf: number;
+  esi: number;
+  pt: number;
+  tds: number;
+  lwf: number;
+  nps: number;
+}
+
 interface PayrollRecord {
   employeeId: string;
   employeeName: string;
@@ -86,12 +112,25 @@ interface PayrollRecord {
   hourlyRate: number;
   grossSalary: number;
   deductions: { pf: number; tax: number; insurance: number; other: number };
+  // Per-component breakdowns from the engine. The legacy 4-slot `deductions`
+  // can't distinguish "PF off" from "PF = ₹0 on this employee", so the side
+  // panel reads from these instead and hides rows whose value is zero —
+  // disabled components simply vanish.
+  earnings?: PayrollEarnings;
+  deductionsDetail?: PayrollDeductionsDetail;
   netSalary: number;
   status: 'pending' | 'processed';
   month?: string;
   designation?: string;
   department?: string;
   generatedAt?: string;
+  // Identifies which pay-rule profile the engine used for this row. The
+  // detail panel surfaces this so the admin always sees which rules were
+  // applied — and offers a dropdown to switch the employee to a different
+  // profile.
+  payrollProfileId?: string | null;
+  payrollProfileName?: string | null;
+  payrollProfileSource?: string | null;
   // Optional: present on records produced by the per-day classifier (post leave/holiday integration).
   // Older cached records may omit it, so all UI consumers must guard for undefined.
   breakdown?: PayrollBreakdown;
@@ -270,28 +309,136 @@ export default function PayrollPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [lastGeneratedAt, setLastGeneratedAt] = useState<Date | null>(null);
+  // Pay-rule profile catalog for the per-employee selector in the detail
+  // panel. Loaded once when the page mounts; refreshed after every assign
+  // so assignedCount badges stay in sync.
+  const [profiles, setProfiles] = useState<
+    { id: string; name: string; isDefault: boolean; assignedCount: number }[]
+  >([]);
+  const [profileAssigning, setProfileAssigning] = useState(false);
+  // Effective-from mode for the per-employee dropdown. Defaults to the
+  // current month so a quick reassignment "just works" without any extra
+  // clicks; admins who need to schedule a future change pick "next" or
+  // "specific" and provide a YYYY-MM.
+  const [panelEffMode, setPanelEffMode] = useState<'current' | 'next' | 'specific'>('current');
+  const [panelEffSpecific, setPanelEffSpecific] = useState<string>(
+    new Date().toISOString().slice(0, 7),
+  );
+
+  const loadProfiles = async () => {
+    try {
+      const res = await fetch('/api/payroll/profiles', { cache: 'no-store' });
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.profiles)) {
+        setProfiles(
+          json.profiles.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            isDefault: !!p.isDefault,
+            assignedCount: p.assignedCount ?? 0,
+          })),
+        );
+      }
+    } catch (e) {
+      // Profiles are optional — failure here shouldn't block the page.
+      console.warn('[payroll] failed to load profiles:', e);
+    }
+  };
+
+  const computeEffectiveFrom = (): string => {
+    if (panelEffMode === 'current') return new Date().toISOString().slice(0, 7);
+    if (panelEffMode === 'next') {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + 1);
+      return d.toISOString().slice(0, 7);
+    }
+    return panelEffSpecific || new Date().toISOString().slice(0, 7);
+  };
+
+  const assignProfile = async (employeeKey: string, profileId: string | null) => {
+    setProfileAssigning(true);
+    // Optimistic: flip the "currently applied" label on the selected record
+    // immediately so the dropdown reflects the user's choice within a frame.
+    // Amounts catch up when the background refresh returns. Without this the
+    // user sees no feedback for the ~1-2s the server takes to recompute.
+    const optimisticName =
+      profileId === null
+        ? null
+        : profiles.find((p) => p.id === profileId)?.name ?? null;
+    setSelected((prev) =>
+      prev && prev.employeeId === employeeKey
+        ? {
+            ...prev,
+            payrollProfileId: profileId,
+            payrollProfileName: optimisticName,
+            payrollProfileSource: profileId ? 'profile' : null,
+          }
+        : prev,
+    );
+
+    try {
+      const effectiveFrom = computeEffectiveFrom();
+      const res = await fetch('/api/payroll/profiles/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeKey, profileId, effectiveFrom }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to assign profile');
+      // Background refresh — silent (no page-wide dimmer), skips previous-
+      // month stats (those don't change when effectiveFrom is current/future).
+      // loadProfiles runs in parallel to refresh the assignedCount badges.
+      await Promise.all([
+        loadData(month, { silent: true, skipPrev: true }),
+        loadProfiles(),
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to assign profile');
+    } finally {
+      setProfileAssigning(false);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const loadData = async (targetMonth: string) => {
-    setLoading(true);
+  const loadData = async (
+    targetMonth: string,
+    opts: { silent?: boolean; skipPrev?: boolean } = {},
+  ) => {
+    // `silent` skips the page-wide loading dimmer — used for background
+    // refreshes after a profile/assignment change so the UI stays usable
+    // while amounts recompute. `skipPrev` avoids the previous-month stats
+    // fetch (a separate engine recompute) when we know prev-month numbers
+    // haven't changed (e.g. effectiveFrom = current or future month).
+    if (!opts.silent) setLoading(true);
     setError(null);
     try {
       const prev = previousMonth(targetMonth);
-      const [recordsRes, statsRes, prevStatsRes] = await Promise.all([
-        fetch(`/api/payroll?month=${targetMonth}`, { cache: 'no-store' }),
-        fetch(`/api/payroll/stats?month=${targetMonth}`, { cache: 'no-store' }),
-        fetch(`/api/payroll/stats?month=${prev}`, { cache: 'no-store' }),
-      ]);
+      const recordsP = fetch(`/api/payroll?month=${targetMonth}`, { cache: 'no-store' });
+      const statsP = fetch(`/api/payroll/stats?month=${targetMonth}`, { cache: 'no-store' });
+      const prevStatsP = opts.skipPrev
+        ? Promise.resolve(null)
+        : fetch(`/api/payroll/stats?month=${prev}`, { cache: 'no-store' });
+      const [recordsRes, statsRes, prevStatsRes] = await Promise.all([recordsP, statsP, prevStatsP]);
       const recordsJson = await recordsRes.json();
       const statsJson = await statsRes.json();
-      const prevStatsJson = await prevStatsRes.json();
-      setPayrolls(recordsJson?.payrolls ?? []);
+      const prevStatsJson = prevStatsRes ? await prevStatsRes.json() : null;
+      const nextPayrolls: PayrollRecord[] = recordsJson?.payrolls ?? [];
+      setPayrolls(nextPayrolls);
       setStats(statsJson?.stats ?? null);
-      setPrevStats(prevStatsJson?.stats ?? null);
-      const fetchedPayrolls: PayrollRecord[] = recordsJson?.payrolls ?? [];
+      if (!opts.skipPrev) setPrevStats(prevStatsJson?.stats ?? null);
+      // If the detail panel is open, swap in the matching freshly-computed
+      // record so toggling a profile updates the visible breakdown without
+      // closing the drawer.
+      setSelected((prev) => {
+        if (!prev) return prev;
+        const updated = nextPayrolls.find((p) => p.employeeId === prev.employeeId);
+        return updated ?? prev;
+      });
+      const fetchedPayrolls: PayrollRecord[] = nextPayrolls;
       let earliest: string | null = null;
       for (const p of fetchedPayrolls) {
         if (!p.generatedAt) continue;
@@ -301,7 +448,7 @@ export default function PayrollPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load payroll data');
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   };
 
@@ -309,6 +456,10 @@ export default function PayrollPage() {
     if (!mounted) return;
     loadData(month);
   }, [mounted, month]);
+
+  useEffect(() => {
+    if (mounted) loadProfiles();
+  }, [mounted]);
 
   const generate = async () => {
     setGenerating(true);
@@ -1448,33 +1599,184 @@ export default function PayrollPage() {
                     <p className="text-xs text-gray-500">for {monthLabel}</p>
                   </div>
 
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
-                      Earnings
-                    </p>
-                    <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
-                      <Row label="Base Salary (CTC)" value={`₹${formatINR(selected.baseSalary)}`} />
-                      <Row
-                        label="Hourly Rate"
-                        value={`₹${selected.hourlyRate.toFixed(2)}`}
-                        sub="based on 22 days × 8h"
-                      />
-                      <Row
-                        label="Payable Days"
-                        value={
-                          selected.breakdown
-                            ? `${fmtDays(selected.breakdown.payableDays)} of ${selected.breakdown.daysInMonth}`
-                            : `${selected.workingDays}`
-                        }
-                        sub={`${selected.workingHours.toFixed(1)} hours total`}
-                      />
-                      <Row
-                        label="Gross Salary"
-                        value={`₹${formatINR(selected.grossSalary)}`}
-                        emphasis
-                      />
+                  {/* Per-employee pay rule selector. Switching the dropdown
+                      hits /api/payroll/profiles/assign, invalidates the live
+                      cache, and re-fetches /api/payroll so the breakdown
+                      below updates without closing the drawer. */}
+                  <div className="rounded-md border border-black/10 bg-white p-3 sm:p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                        Pay Rule Profile
+                        {profileAssigning && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-normal normal-case tracking-normal text-gray-500">
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            Updating amounts…
+                          </span>
+                        )}
+                      </p>
+                      <Link
+                        href="/payroll/profiles"
+                        className="text-[11px] font-medium text-gray-500 hover:text-gray-900 hover:underline"
+                      >
+                        Manage profiles
+                      </Link>
                     </div>
+                    {profiles.length === 0 ? (
+                      <p className="text-xs text-gray-500">
+                        No profiles yet.{' '}
+                        <Link href="/payroll/profiles" className="font-medium text-gray-900 underline">
+                          Create one
+                        </Link>{' '}
+                        to use per-employee pay rules. Until then this employee uses the global setup config.
+                      </p>
+                    ) : (
+                      <>
+                        <select
+                          value={selected.payrollProfileId ?? ''}
+                          disabled={profileAssigning}
+                          onChange={(e) =>
+                            assignProfile(selected.employeeId, e.target.value || null)
+                          }
+                          className="h-9 w-full rounded-md border border-black/10 bg-white px-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                        >
+                          <option value="">— Use default profile —</option>
+                          {profiles.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                              {p.isDefault ? ' (default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Effective-from controls. The radio + month input
+                            apply to the very next assign action — selecting a
+                            profile in the dropdown above immediately fires the
+                            API with this value. */}
+                        <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px]">
+                          <span className="font-semibold uppercase tracking-wider text-gray-500">
+                            Apply from
+                          </span>
+                          <label className="inline-flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="panel-eff"
+                              checked={panelEffMode === 'current'}
+                              onChange={() => setPanelEffMode('current')}
+                              className="h-3 w-3"
+                            />
+                            Current month
+                          </label>
+                          <label className="inline-flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="panel-eff"
+                              checked={panelEffMode === 'next'}
+                              onChange={() => setPanelEffMode('next')}
+                              className="h-3 w-3"
+                            />
+                            Next month
+                          </label>
+                          <label className="inline-flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="panel-eff"
+                              checked={panelEffMode === 'specific'}
+                              onChange={() => setPanelEffMode('specific')}
+                              className="h-3 w-3"
+                            />
+                            Specific
+                          </label>
+                          {panelEffMode === 'specific' && (
+                            <input
+                              type="month"
+                              value={panelEffSpecific}
+                              onChange={(e) => setPanelEffSpecific(e.target.value)}
+                              className="h-6 rounded-md border border-black/10 bg-white px-1.5 text-[11px]"
+                            />
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-gray-500">
+                          {selected.payrollProfileName ? (
+                            <>
+                              Currently applied:{' '}
+                              <span className="font-medium text-gray-700">
+                                {selected.payrollProfileName}
+                              </span>
+                              {selected.payrollProfileSource === 'default-profile' && (
+                                <span> (org default)</span>
+                              )}
+                              {selected.payrollProfileSource === 'profile' && (
+                                <span> (assigned to employee)</span>
+                              )}
+                            </>
+                          ) : selected.payrollProfileSource === 'global-setup' ? (
+                            'Currently applied: global setup config (no profile assigned)'
+                          ) : (
+                            'Currently applied: built-in defaults'
+                          )}
+                        </p>
+                      </>
+                    )}
                   </div>
+
+                  {(() => {
+                    // Show every earned component the engine produced. Allowances
+                    // disabled in Pay Rules emit 0 and drop off the list, so the
+                    // visible rows match the active toggles exactly.
+                    const e = selected.earnings;
+                    const earnRows: { label: string; value: number }[] = e
+                      ? [
+                          { label: 'Basic Pay', value: e.basic },
+                          { label: 'HRA', value: e.hra },
+                          { label: 'DA (Dearness)', value: e.da },
+                          { label: 'Conveyance', value: e.conveyance },
+                          { label: 'Medical', value: e.medical },
+                          { label: 'LTA', value: e.lta },
+                          { label: 'Food / Meal', value: e.food },
+                          { label: 'Telephone / Internet', value: e.telephone },
+                          { label: 'Children’s Education', value: e.education },
+                          { label: 'Fuel / Car', value: e.fuel },
+                          { label: 'Books & Periodicals', value: e.books },
+                          { label: 'Uniform', value: e.uniform },
+                          { label: 'Special Allowance', value: e.specialAllowance },
+                          { label: 'Overtime', value: e.overtime },
+                        ]
+                      : [];
+                    const visible = earnRows.filter((r) => r.value > 0);
+                    return (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
+                          Earnings
+                        </p>
+                        <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
+                          <Row label="Base Salary (CTC)" value={`₹${formatINR(selected.baseSalary)}`} />
+                          <Row
+                            label="Hourly Rate"
+                            value={`₹${selected.hourlyRate.toFixed(2)}`}
+                            sub="based on 22 days × 8h"
+                          />
+                          <Row
+                            label="Payable Days"
+                            value={
+                              selected.breakdown
+                                ? `${fmtDays(selected.breakdown.payableDays)} of ${selected.breakdown.daysInMonth}`
+                                : `${selected.workingDays}`
+                            }
+                            sub={`${selected.workingHours.toFixed(1)} hours total`}
+                          />
+                          {visible.map((r) => (
+                            <Row key={r.label} label={r.label} value={`₹${formatINR(r.value)}`} />
+                          ))}
+                          <Row
+                            label="Gross Salary"
+                            value={`₹${formatINR(selected.grossSalary)}`}
+                            emphasis
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Attendance breakdown — only renders when the current
                       record was produced by the per-day classifier. Older
@@ -1542,42 +1844,62 @@ export default function PayrollPage() {
                     </div>
                   )}
 
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
-                      Deductions
-                    </p>
-                    <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
-                      <Row
-                        label="Provident Fund"
-                        value={`₹${formatINR(selected.deductions.pf)}`}
-                        sub="12% of gross"
-                      />
-                      <Row
-                        label="Income Tax"
-                        value={`₹${formatINR(selected.deductions.tax)}`}
-                        sub="5% of taxable"
-                      />
-                      <Row
-                        label="Insurance"
-                        value={`₹${formatINR(selected.deductions.insurance)}`}
-                        sub="fixed monthly"
-                      />
-                      <Row
-                        label="Other"
-                        value={`₹${formatINR(selected.deductions.other)}`}
-                      />
-                      <Row
-                        label="Total Deductions"
-                        value={`₹${formatINR(
-                          selected.deductions.pf +
-                            selected.deductions.tax +
-                            selected.deductions.insurance +
-                            selected.deductions.other,
-                        )}`}
-                        emphasis
-                      />
-                    </div>
-                  </div>
+                  {(() => {
+                    // Render only the deductions actually applied by the
+                    // engine. A disabled component (e.g. PF off in Pay Rules)
+                    // emits 0, so the row disappears entirely — making the
+                    // effect of every toggle visible at a glance. Falls back
+                    // to the legacy 4-slot view for older records that don't
+                    // carry `deductionsDetail`.
+                    const dd = selected.deductionsDetail;
+                    const detailRows: { label: string; sub: string; value: number }[] = dd
+                      ? [
+                          { label: 'Provident Fund', sub: 'PF on Basic', value: dd.pf },
+                          { label: 'Employee State Insurance', sub: 'ESI on gross', value: dd.esi },
+                          { label: 'Professional Tax', sub: 'state slab', value: dd.pt },
+                          { label: 'Income Tax (TDS)', sub: 'TDS on gross', value: dd.tds },
+                          { label: 'Labour Welfare Fund', sub: 'LWF', value: dd.lwf },
+                          { label: 'National Pension Scheme', sub: 'NPS on Basic', value: dd.nps },
+                        ]
+                      : [
+                          { label: 'Provident Fund', sub: 'PF', value: selected.deductions.pf },
+                          { label: 'Income Tax', sub: 'TDS', value: selected.deductions.tax },
+                          { label: 'Insurance', sub: 'ESI', value: selected.deductions.insurance },
+                          { label: 'Other', sub: 'PT + LWF + NPS', value: selected.deductions.other },
+                        ];
+                    const visible = detailRows.filter((r) => r.value > 0);
+                    const totalDed = detailRows.reduce((s, r) => s + r.value, 0);
+                    return (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
+                          Deductions
+                        </p>
+                        <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
+                          {visible.length === 0 ? (
+                            <Row
+                              label="No deductions"
+                              value="₹0"
+                              sub="all statutory components disabled in Pay Rules"
+                            />
+                          ) : (
+                            visible.map((r) => (
+                              <Row
+                                key={r.label}
+                                label={r.label}
+                                value={`₹${formatINR(r.value)}`}
+                                sub={r.sub}
+                              />
+                            ))
+                          )}
+                          <Row
+                            label="Total Deductions"
+                            value={`₹${formatINR(totalDed)}`}
+                            emphasis
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="flex flex-col gap-2 sm:flex-row sm:gap-3 pt-2">
                     <Button

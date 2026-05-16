@@ -1685,6 +1685,59 @@ model PayrollConfiguration {
   @@map("payroll_configurations")
 }
 
+// Named bundle of pay rules. An org typically defines 2–5 profiles
+// (e.g. "Standard", "Senior", "Probation") and assigns each employee to one.
+// The engine resolves an employee's formulas in this order:
+//   profile → org-wide setup (PayrollConfiguration) → DEFAULT_FORMULAS.
+model PayrollProfile {
+  id              String                     @id @default(cuid())
+  organizationId  String                     @map("organization_id")
+  name            String
+  description     String?
+  isDefault       Boolean                    @default(false) @map("is_default")
+  baseSalary      Decimal?                   @map("base_salary")
+  salaryStructure Json                       @default("{}") @map("salary_structure")
+  statutory       Json                       @default("{}")
+  bonus           Json                       @default("{}")
+  overtime        Json                       @default("{}")
+  policy          Json                       @default("{}")
+  assignments     PayrollProfileAssignment[]
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([isDefault])
+  @@map("payroll_profiles")
+}
+
+// Links an employee key (Employee.id when present, otherwise User.id —
+// matches the engine's canonical `employeeId`) to a PayrollProfile.
+// Absence of an assignment means "use the org's default profile, or fall
+// back to the global setup config".
+//
+// `effectiveFrom` is the "YYYY-MM" month at which the assignment starts
+// applying. The engine compares against the payroll target month and
+// ignores assignments whose effectiveFrom is in the future. Empty string
+// means "always effective" — preserved so rows written before this column
+// existed continue to apply.
+model PayrollProfileAssignment {
+  id             String         @id @default(cuid())
+  organizationId String         @map("organization_id")
+  employeeKey    String         @map("employee_key")
+  profileId      String         @map("profile_id")
+  effectiveFrom  String         @default("") @map("effective_from")
+  profile        PayrollProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@unique([organizationId, employeeKey])
+  @@index([profileId])
+  @@index([organizationId])
+  @@index([effectiveFrom])
+  @@map("payroll_profile_assignments")
+}
+
 model LeaveType {
   id          String            @id @default(cuid())
   name        String
@@ -2694,6 +2747,12 @@ model LeaveRequest {
   reason        String? @db.Text
   attachmentUrl String? @map("attachment_url")
 
+  // Emergency leaves bypass the leave type's `minNoticeDays` rule so an
+  // employee can apply for today when a real emergency strikes. Past dates
+  // are still blocked. Defaults to false; set client-side via the
+  // "Emergency leave" toggle on the apply form.
+  isEmergency  Boolean @default(false) @map("is_emergency")
+
   status       LeaveRequestStatus @default(PENDING)
   appliedAt    DateTime           @default(now()) @map("applied_at")
   decidedAt    DateTime?          @map("decided_at")
@@ -2702,6 +2761,24 @@ model LeaveRequest {
   cancelledAt  DateTime?          @map("cancelled_at")
   cancelReason String?            @map("cancel_reason") @db.Text
 
+  // ── Early-return / "shorten" request ───────────────────────────────────
+  // When an employee returns earlier than they planned, they file a shorten
+  // request on the already-APPROVED leave. The approver decides; on approval,
+  // `endDate` is rewound to `shortenRequestedEndDate` and the unused days are
+  // refunded to the user's LeaveBalance. The original endDate is preserved in
+  // `originalEndDate` so the trail is auditable.
+  // Null on every field = no shorten requested. Status is a plain string
+  // (PENDING/APPROVED/REJECTED) — kept off the LeaveRequestStatus enum so
+  // existing code paths that switch on status aren't disturbed.
+  originalEndDate         String?   @map("original_end_date")
+  shortenRequestedEndDate String?   @map("shorten_requested_end_date")
+  shortenRequestedReason  String?   @map("shorten_requested_reason") @db.Text
+  shortenStatus           String?   @map("shorten_status")
+  shortenRequestedAt      DateTime? @map("shorten_requested_at")
+  shortenDecidedAt        DateTime? @map("shorten_decided_at")
+  shortenDecidedById      String?   @map("shorten_decided_by_id")
+  shortenDecisionNote     String?   @map("shorten_decision_note") @db.Text
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -2709,6 +2786,7 @@ model LeaveRequest {
   @@index([userId, status])
   @@index([leaveTypeId])
   @@index([startDate, endDate])
+  @@index([shortenStatus])
   @@map("leave_requests")
 }
 

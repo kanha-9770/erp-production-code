@@ -23,8 +23,8 @@ import { loadFaceModels } from "./models";
 // person holding a phone with someone else's photo) at modest extra
 // inference cost (~50ms vs 320).
 const TINY_DETECTOR_OPTIONS = new faceapi.TinyFaceDetectorOptions({
-  inputSize: 416,
-  scoreThreshold: 0.4,
+  inputSize: 224,
+  scoreThreshold: 0.3,
 });
 
 /**
@@ -119,6 +119,12 @@ export async function computeDescriptorFromImage(
   includeDescriptor: boolean = true,
 ): Promise<FaceDetectionResult> {
   await loadFaceModels();
+  
+  // Yield to the browser's event loop before starting heavy inference.
+  // This allows React to paint the "Analyzing..." spinner to the screen
+  // instead of freezing the UI immediately.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
   if (!includeDescriptor) {
     // Fast path: just count faces. Skips the landmark + recognition
     // nets, so this is ~5–10× faster than the full pipeline. Used when
@@ -215,13 +221,18 @@ export async function computeLivenessFromBlobs(
   const urls = blobs.map((b) => URL.createObjectURL(b));
   try {
     const images = await Promise.all(urls.map(blobUrlToImage));
-    const detections = await Promise.all(
-      images.map((img) =>
-        faceapi
-          .detectSingleFace(img, TINY_DETECTOR_OPTIONS)
-          .withFaceLandmarks(),
-      ),
-    );
+    
+    // Process frames sequentially with yields in between. Promise.all()
+    // would dispatch 3 heavy inferences concurrently, which starves the
+    // event loop for a very long time and feels like a hard freeze.
+    const detections = [];
+    for (const img of images) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const detection = await faceapi
+        .detectSingleFace(img, TINY_DETECTOR_OPTIONS)
+        .withFaceLandmarks();
+      detections.push(detection);
+    }
 
     // Frames where we couldn't find a face are useless. Bail with null
     // so the caller can apply its policy.

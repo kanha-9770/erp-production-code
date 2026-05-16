@@ -1,37 +1,40 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+/**
+ * Self Initiative — premium workspace layout.
+ */
+
+import { useMemo, useState, useEffect } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Lightbulb, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
+  CheckCircle2, Type, FileText, Tag, UserCircle, Clock, Save
+} from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  WorkspaceShell, WorkspaceHeader,
+  DataTable, type ColumnDef,
+  FilterChips, ActiveFilterPills,
+  ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
+} from "@/components/real-estate/workspace";
+import { useToast } from "@/hooks/use-toast";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { useToast } from '@/hooks/use-toast';
-import { Lightbulb, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List } from 'lucide-react';
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from "@/components/ui/select";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle
+} from "@/components/ui/sheet";
 
 interface SelfInitiative {
   id: string;
@@ -42,34 +45,58 @@ interface SelfInitiative {
   status: 'planning' | 'in-progress' | 'completed' | 'on-hold';
   category: string;
   createdAt: string;
+  userId: string;
+  employeeId: string;
 }
 
+const STATUS_OPTIONS = [
+  { value: "planning", label: "Planning" },
+  { value: "in-progress", label: "In Progress" },
+  { value: "completed", label: "Completed" },
+  { value: "on-hold", label: "On Hold" },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "learning", label: "Skill Learning" },
+  { value: "mentoring", label: "Mentoring Others" },
+  { value: "process-improvement", label: "Process Improvement" },
+  { value: "team-building", label: "Team Building" },
+  { value: "innovation", label: "Product Innovation" },
+  { value: "other", label: "Other" },
+];
+
+interface Filters {
+  search: string;
+  status: string;
+  category: string;
+}
+
+const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
+
 export default function SelfInitiativePage() {
+  const { user } = useCurrentUser();
+  const { isAdmin } = usePermissions();
+  const { toast } = useToast();
+  
   const [initiatives, setInitiatives] = useState<SelfInitiative[]>([]);
   const [loading, setLoading] = useState(true);
-  const [layout, setLayout] = useState<'list' | 'form'>('list');
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [searchInput, setSearchInput] = useState("");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+
+  const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    startDate: '',
-    endDate: '',
-    status: 'planning',
-    category: 'learning',
-  });
-  const { toast } = useToast();
+
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+
+  const views = useSavedViews<Filters>("self-initiatives");
 
   useEffect(() => {
-    loadInitiatives();
-  }, []);
-
-  const loadInitiatives = async () => {
-    try {
-      setLoading(false);
-      const mockInitiatives: SelfInitiative[] = [
+    if (user?.id) {
+      const mock: SelfInitiative[] = [
         {
           id: '1',
           title: 'Mentorship Program for Juniors',
@@ -79,6 +106,8 @@ export default function SelfInitiativePage() {
           status: 'in-progress',
           category: 'mentoring',
           createdAt: '2026-03-20',
+          userId: user.id,
+          employeeId: employees[0]?.id || currentEmployee?.id || '',
         },
         {
           id: '2',
@@ -89,486 +118,298 @@ export default function SelfInitiativePage() {
           status: 'in-progress',
           category: 'process-improvement',
           createdAt: '2026-04-25',
-        },
-        {
-          id: '3',
-          title: 'Team Communication Enhancement',
-          description: 'Improve team communication and collaboration',
-          startDate: '2026-06-01',
-          endDate: '2026-09-30',
-          status: 'planning',
-          category: 'team-building',
-          createdAt: '2026-05-10',
+          userId: user.id,
+          employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
       ];
-      setInitiatives(mockInitiatives);
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load initiatives',
-        variant: 'destructive',
-      });
+      setInitiatives(isAdmin ? mock : mock.filter(i => i.employeeId === currentEmployee?.id));
+      setLoading(false);
     }
+  }, [user?.id, isAdmin, employees.length]);
+
+  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((f) => ({ ...f, [key]: value }));
   };
 
-  const handleSubmit = async () => {
-    if (!formData.title || !formData.startDate) {
-      toast({
-        title: 'Error',
-        description: 'Please fill in all required fields',
-        variant: 'destructive',
-      });
-      return;
+  const filterFields: FilterField[] = useMemo(() => [
+    { id: "title", label: "Title", type: "text" },
+    { id: "description", label: "Description", type: "text" },
+    { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "category", label: "Category", type: "select", options: CATEGORY_OPTIONS },
+    { id: "startDate", label: "Start Date", type: "date" },
+  ], []);
+
+  const items = useMemo(() => {
+    let result = initiatives;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(i => i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q));
     }
+    if (filters.status) result = result.filter(i => i.status === filters.status);
+    if (filters.category) result = result.filter(i => i.category === filters.category);
+    return applyAdvancedFilters(result, conditions, filterFields);
+  }, [initiatives, filters, conditions, filterFields]);
 
-    if (editingId) {
-      setInitiatives(
-        initiatives.map((i) =>
-          i.id === editingId ? { ...i, ...formData } : i
-        )
-      );
-      toast({
-        title: 'Success',
-        description: 'Initiative updated successfully',
-      });
-    } else {
-      const newInitiative: SelfInitiative = {
-        id: Date.now().toString(),
-        ...formData,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setInitiatives([newInitiative, ...initiatives]);
-      toast({
-        title: 'Success',
-        description: 'Initiative created successfully',
-      });
-    }
-
-    setDialogOpen(false);
-    setFormData({
-      title: '',
-      description: '',
-      startDate: '',
-      endDate: '',
-      status: 'planning',
-      category: 'learning',
-    });
-    setEditingId(null);
-  };
-
-  const handleEdit = (initiative: SelfInitiative) => {
-    setFormData({
-      title: initiative.title,
-      description: initiative.description,
-      startDate: initiative.startDate,
-      endDate: initiative.endDate,
-      status: initiative.status,
-      category: initiative.category,
-    });
-    setEditingId(initiative.id);
-    setDialogOpen(true);
-  };
+  const columns: ColumnDef<SelfInitiative>[] = useMemo(() => [
+    {
+      id: "title",
+      header: "Initiative",
+      width: 300,
+      pinned: true,
+      cell: (i) => (
+        <div className="min-w-0">
+          <div className="font-medium truncate uppercase">{i.title}</div>
+          <div className="text-[11px] text-muted-foreground truncate">{i.description}</div>
+        </div>
+      ),
+    },
+    {
+      id: "category",
+      header: "Category",
+      width: 150,
+      cell: (i) => <Badge variant="outline" className="capitalize text-[10px]">{i.category.replace('-', ' ')}</Badge>,
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (i) => {
+        const colors: Record<string, string> = {
+          planning: "bg-gray-100 text-gray-800",
+          "in-progress": "bg-blue-100 text-blue-800",
+          completed: "bg-green-100 text-green-800",
+          "on-hold": "bg-red-100 text-red-800",
+        };
+        return <Badge variant="outline" className={`${colors[i.status]} text-[10px]`}>{i.status.toUpperCase()}</Badge>;
+      },
+    },
+    {
+      id: "duration",
+      header: "Duration",
+      width: 200,
+      cell: (i) => <span className="text-xs text-muted-foreground">{new Date(i.startDate).toLocaleDateString()} — {new Date(i.endDate).toLocaleDateString()}</span>,
+    },
+  ], []);
 
   const handleDelete = (id: string) => {
-    setInitiatives(initiatives.filter((i) => i.id !== id));
-    toast({
-      title: 'Success',
-      description: 'Initiative deleted successfully',
-    });
+    if (!confirm("Delete this initiative?")) return;
+    setInitiatives(initiatives.filter(i => i.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    toast({ title: "Initiative deleted" });
   };
-
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, any> = {
-      'planning': 'secondary',
-      'in-progress': 'default',
-      'completed': 'default',
-      'on-hold': 'destructive',
-    };
-    const labels: Record<string, string> = {
-      'planning': 'Planning',
-      'in-progress': 'In Progress',
-      'completed': 'Completed',
-      'on-hold': 'On Hold',
-    };
-    return (
-      <Badge
-        variant={variants[status]}
-        className={
-          status === 'completed'
-            ? 'bg-green-100 text-green-800'
-            : status === 'in-progress'
-            ? 'bg-blue-100 text-blue-800'
-            : status === 'on-hold'
-            ? 'bg-red-100 text-red-800'
-            : ''
-        }
-      >
-        {labels[status]}
-      </Badge>
-    );
-  };
-
-  const getCategoryLabel = (category: string) => {
-    const labels: Record<string, string> = {
-      'learning': 'Learning',
-      'mentoring': 'Mentoring',
-      'process-improvement': 'Process Improvement',
-      'team-building': 'Team Building',
-      'innovation': 'Innovation',
-      'other': 'Other',
-    };
-    return labels[category] || category;
-  };
-
-  const filteredInitiatives = initiatives.filter((initiative) => {
-    const matchesSearch = initiative.title
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    const matchesStatus =
-      statusFilter === 'all' || initiative.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
-            <Lightbulb className="w-8 h-8 text-yellow-600" />
-            Self Initiative
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Document and manage your self-initiated improvement projects.
-          </p>
+    <>
+      <WorkspaceShell
+        scope="self-initiatives"
+        selectedId={selectedId}
+        onCloseSelection={() => setSelectedId(null)}
+        header={
+          <>
+            <WorkspaceHeader
+              icon={<Lightbulb className="h-5 w-5 text-amber-500" />}
+              title="Self Initiative"
+              subtitle={`${items.length} initiative${items.length === 1 ? "" : "s"}`}
+            >
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search initiatives..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && updateFilter("search", searchInput)}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
+              </div>
+              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <ManageColumnsButton tableId="self-initiatives" columns={columns} />
+              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setCreateOpen(true); }}>
+                <Plus className="h-4 w-4 mr-1.5" /> New Initiative
+              </Button>
+            </WorkspaceHeader>
+
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+              <ViewsBar
+                views={views.views}
+                activeId={views.activeId}
+                onSelect={(id) => {
+                   views.select(id);
+                   const v = views.views.find(x => x.id === id);
+                   if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
+                   else { setFilters(EMPTY_FILTERS); setSearchInput(""); }
+                }}
+                onSave={(name) => views.save(name, filters)}
+                onDelete={views.remove}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? EMPTY_FILTERS) !== JSON.stringify(filters)}
+              />
+            </div>
+
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <FilterChips label="Category" value={filters.category} onChange={(v) => updateFilter("category", v)} options={CATEGORY_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
+            </div>
+          </>
+        }
+        list={
+          <DataTable<SelfInitiative>
+            tableId="self-initiatives"
+            columns={columns}
+            rows={items}
+            rowId={(i) => i.id}
+            isLoading={loading}
+            selectedId={selectedId}
+            onRowClick={(i) => setSelectedId(i.id)}
+          />
+        }
+        preview={selectedId ? <InitiativePreview id={selectedId} initiatives={initiatives} onEdit={(id) => { setEditingId(id); setCreateOpen(true); }} onDelete={handleDelete} /> : null}
+        previewHeader={selectedId ? <PreviewHeader id={selectedId} initiatives={initiatives} /> : null}
+      />
+
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle>{editingId ? 'Edit Initiative' : 'New Initiative'}</SheetTitle>
+          </SheetHeader>
+          <InitiativeForm
+            initial={editingId ? initiatives.find(i => i.id === editingId) : undefined}
+            onCancel={() => { setCreateOpen(false); setEditingId(null); }}
+            onSubmit={(data) => {
+              if (editingId) {
+                setInitiatives(initiatives.map(i => i.id === editingId ? { ...i, ...data } : i));
+              } else {
+                const newI: SelfInitiative = {
+                  ...data,
+                  id: Date.now().toString(),
+                  createdAt: new Date().toISOString().split('T')[0],
+                  userId: user?.id || '',
+                  employeeId: currentEmployee?.id || '',
+                };
+                setInitiatives([newI, ...initiatives]);
+              }
+              setCreateOpen(false);
+              setEditingId(null);
+              toast({ title: editingId ? "Initiative updated" : "Initiative created" });
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+function PreviewHeader({ id, initiatives }: { id: string, initiatives: SelfInitiative[] }) {
+  const i = initiatives.find(x => x.id === id);
+  if (!i) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{i.status}</Badge>
+      <span className="font-semibold text-sm truncate uppercase tracking-tight">{i.title}</span>
+    </div>
+  );
+}
+
+function InitiativePreview({ id, initiatives, onEdit, onDelete }: { id: string, initiatives: SelfInitiative[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+  const i = initiatives.find(x => x.id === id);
+  if (!i) return null;
+
+  return (
+    <div className="p-6 space-y-8">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-black uppercase tracking-tighter leading-tight">{i.title}</h2>
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{i.category.replace('-', ' ')}</p>
         </div>
         <div className="flex gap-2">
-          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-            <Button
-              size="sm"
-              variant={layout === 'list' ? 'default' : 'ghost'}
-              onClick={() => setLayout('list')}
-              className="gap-2"
-            >
-              <List className="w-4 h-4" />
-              List
-            </Button>
-            <Button
-              size="sm"
-              variant={layout === 'form' ? 'default' : 'ghost'}
-              onClick={() => setLayout('form')}
-              className="gap-2"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Form
-            </Button>
-          </div>
-          <Button
-            onClick={() => {
-              setEditingId(null);
-              setFormData({
-                title: '',
-                description: '',
-                startDate: '',
-                endDate: '',
-                status: 'planning',
-                category: 'learning',
-              });
-              setDialogOpen(true);
-            }}
-            className="gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            New Initiative
-          </Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl" onClick={() => onEdit(i.id)}><Pencil className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => onDelete(i.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
 
-      {layout === 'list' ? (
-        <>
-          <div className="mb-6 flex gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-64">
-              <Label htmlFor="search" className="text-sm font-medium">
-                Search
-              </Label>
-              <Input
-                id="search"
-                placeholder="Search initiatives..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div className="w-48">
-              <Label htmlFor="status-filter" className="text-sm font-medium">
-                Status
-              </Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="planning">Planning</SelectItem>
-                  <SelectItem value="in-progress">In Progress</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="on-hold">On Hold</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+      <Card className="p-5 border-0 bg-slate-50 space-y-4 shadow-sm">
+        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Description</h3>
+        <p className="text-sm font-medium leading-relaxed text-slate-700">{i.description}</p>
+      </Card>
 
-          {loading ? (
-            <div className="text-center py-12">Loading initiatives...</div>
-          ) : filteredInitiatives.length === 0 ? (
-            <Card className="text-center py-12">
-              <CardContent>
-                <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">No initiatives found</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead className="w-20">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredInitiatives.map((initiative) => (
-                    <TableRow key={initiative.id}>
-                      <TableCell className="font-medium">
-                        {initiative.title}
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-600">
-                        {initiative.description}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {getCategoryLabel(initiative.category)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(initiative.status)}</TableCell>
-                      <TableCell className="text-sm">
-                        {new Date(initiative.startDate).toLocaleDateString()} -{' '}
-                        {new Date(initiative.endDate).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(initiative)}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(initiative.id)}
-                          >
-                            <Trash2 className="w-4 h-4 text-red-600" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          )}
-        </>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {loading ? (
-            <div className="text-center py-12">Loading initiatives...</div>
-          ) : initiatives.length === 0 ? (
-            <Card className="text-center py-12 md:col-span-2">
-              <CardContent>
-                <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">No initiatives yet</p>
-                <Button
-                  onClick={() => setDialogOpen(true)}
-                  variant="outline"
-                >
-                  Create your first initiative
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            initiatives.map((initiative) => (
-              <Card
-                key={initiative.id}
-                className="hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => handleEdit(initiative)}
-              >
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {initiative.title}
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {initiative.description}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(initiative.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 text-red-600" />
-                    </Button>
-                  </div>
+      <div className="grid grid-cols-2 gap-y-6 pt-4 border-t">
+        <Fact label="Start Date" value={new Date(i.startDate).toLocaleDateString()} icon={Calendar} />
+        <Fact label="Target End Date" value={new Date(i.endDate).toLocaleDateString()} icon={Calendar} />
+        <Fact label="Status" value={i.status.toUpperCase()} icon={CheckCircle2} />
+        <Fact label="Category" value={i.category.replace('-', ' ').toUpperCase()} icon={Tag} />
+      </div>
+    </div>
+  );
+}
 
-                  <div className="flex items-center gap-2 flex-wrap mb-3">
-                    {getStatusBadge(initiative.status)}
-                    <Badge variant="outline">
-                      {getCategoryLabel(initiative.category)}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-gray-600">
-                    {new Date(initiative.startDate).toLocaleDateString()} -{' '}
-                    {new Date(initiative.endDate).toLocaleDateString()}
-                  </p>
-                </CardContent>
-              </Card>
-            ))
-          )}
+function InitiativeForm({ initial, onCancel, onSubmit }: { initial?: SelfInitiative, onCancel: () => void, onSubmit: (data: any) => void }) {
+  const [formData, setFormData] = useState({
+    title: initial?.title || "",
+    description: initial?.description || "",
+    startDate: initial?.startDate || "",
+    endDate: initial?.endDate || "",
+    status: initial?.status || "planning",
+    category: initial?.category || "learning",
+  });
+
+  return (
+    <div className="p-6 space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Initiative Title</Label>
+          <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. Master React Query" />
         </div>
-      )}
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category</Label>
+          <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
+            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Description & Scope</Label>
+        <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="min-h-[120px] rounded-2xl border-slate-200" />
+      </div>
+      <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Date</Label>
+          <Input type="date" value={formData.startDate} onChange={e => setFormData({ ...formData, startDate: e.target.value })} className="h-12 border-slate-200" />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">End Date</Label>
+          <Input type="date" value={formData.endDate} onChange={e => setFormData({ ...formData, endDate: e.target.value })} className="h-12 border-slate-200" />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current Status</Label>
+        <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+          <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex justify-end gap-3 pt-6 border-t">
+        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Discard</Button>
+        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
+           {initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+           {initial ? 'Update Initiative' : 'Create Initiative'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? 'Edit Initiative' : 'New Initiative'}
-            </DialogTitle>
-            <DialogDescription>
-              Document a self-initiated improvement project.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="title">Initiative Title *</Label>
-              <Input
-                id="title"
-                placeholder="e.g., Mentorship Program for Juniors"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe your initiative"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                className="mt-1"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="startDate">Start Date *</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
-                  }
-                  className="mt-1"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="endDate">End Date</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
-                  }
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={formData.category}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, category: value })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="learning">Learning</SelectItem>
-                    <SelectItem value="mentoring">Mentoring</SelectItem>
-                    <SelectItem value="process-improvement">
-                      Process Improvement
-                    </SelectItem>
-                    <SelectItem value="team-building">Team Building</SelectItem>
-                    <SelectItem value="innovation">Innovation</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, status: value as any })
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="planning">Planning</SelectItem>
-                    <SelectItem value="in-progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="on-hold">On Hold</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit}>
-              {editingId ? 'Update' : 'Create'} Initiative
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+function Fact({ label, value, icon: Icon }: { label: string; value: string; icon?: any }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+      <div className="flex items-center gap-2 text-sm font-bold text-slate-900 uppercase tracking-tight">
+        {Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}
+        {value}
+      </div>
     </div>
   );
 }
