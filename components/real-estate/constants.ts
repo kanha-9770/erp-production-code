@@ -83,6 +83,193 @@ export const PROPERTY_STATUS_VARIANT: Record<PropertyStatus, BadgeVariant> = {
   EXPIRED: "destructive",
 };
 
+/**
+ * Per-category vocabulary for the project + unit identifier fields on
+ * Property. Keeps the form, list, and preview in sync so a Land plot reads
+ * "Plot 142" while a Residential apartment reads "Flat A-502" — without
+ * inventing one column per category in the DB.
+ *
+ * Resolution order: subType first (more specific), then type, then a
+ * sensible default. `floor`/`block` are hidden for categories where they
+ * make no sense (LAND, AGRICULTURAL).
+ */
+export interface PropertyUnitVocab {
+  /** Form heading for the project/layout field. */
+  projectLabel: string;
+  /** Form heading for the block/tower/wing field. `null` → hide. */
+  blockLabel: string | null;
+  /** Form heading for the floor field. `null` → hide. */
+  floorLabel: string | null;
+  /** Form heading for the unit-number field. */
+  unitLabel: string;
+  /** Short label used in lists, e.g. "Plot", "Flat", "Office". */
+  unitShort: string;
+}
+
+const VOCAB_DEFAULT: PropertyUnitVocab = {
+  projectLabel: "Project / Society",
+  blockLabel: "Block / Tower",
+  floorLabel: "Floor",
+  unitLabel: "Unit number",
+  unitShort: "Unit",
+};
+
+const VOCAB_BY_SUBTYPE: Partial<Record<PropertySubType, PropertyUnitVocab>> = {
+  PLOT: {
+    projectLabel: "Layout / Survey",
+    blockLabel: null,
+    floorLabel: null,
+    unitLabel: "Plot number",
+    unitShort: "Plot",
+  },
+  FARM: {
+    projectLabel: "Estate / Survey",
+    blockLabel: null,
+    floorLabel: null,
+    unitLabel: "Survey / Khasra number",
+    unitShort: "Survey",
+  },
+  APARTMENT: {
+    projectLabel: "Society / Project",
+    blockLabel: "Tower / Wing",
+    floorLabel: "Floor",
+    unitLabel: "Flat number",
+    unitShort: "Flat",
+  },
+  STUDIO: {
+    projectLabel: "Society / Project",
+    blockLabel: "Tower / Wing",
+    floorLabel: "Floor",
+    unitLabel: "Studio number",
+    unitShort: "Studio",
+  },
+  PENTHOUSE: {
+    projectLabel: "Society / Project",
+    blockLabel: "Tower / Wing",
+    floorLabel: "Floor",
+    unitLabel: "Penthouse number",
+    unitShort: "PH",
+  },
+  VILLA: {
+    projectLabel: "Society / Project",
+    blockLabel: "Cluster",
+    floorLabel: null,
+    unitLabel: "Villa number",
+    unitShort: "Villa",
+  },
+  HOUSE: {
+    projectLabel: "Colony / Locality",
+    blockLabel: "Block",
+    floorLabel: null,
+    unitLabel: "House number",
+    unitShort: "House",
+  },
+  TOWNHOUSE: {
+    projectLabel: "Society / Project",
+    blockLabel: "Cluster",
+    floorLabel: null,
+    unitLabel: "Townhouse number",
+    unitShort: "TH",
+  },
+  OFFICE: {
+    projectLabel: "Building / Park",
+    blockLabel: "Wing / Tower",
+    floorLabel: "Floor",
+    unitLabel: "Office number",
+    unitShort: "Office",
+  },
+  RETAIL: {
+    projectLabel: "Mall / Complex",
+    blockLabel: "Wing",
+    floorLabel: "Floor",
+    unitLabel: "Shop number",
+    unitShort: "Shop",
+  },
+  WAREHOUSE: {
+    projectLabel: "Estate / Park",
+    blockLabel: "Block",
+    floorLabel: null,
+    unitLabel: "Warehouse number",
+    unitShort: "WH",
+  },
+  HOTEL: {
+    projectLabel: "Property name",
+    blockLabel: "Wing",
+    floorLabel: "Floor",
+    unitLabel: "Room / suite",
+    unitShort: "Room",
+  },
+  OTHER: VOCAB_DEFAULT,
+};
+
+const VOCAB_BY_TYPE: Record<PropertyType, PropertyUnitVocab> = {
+  LAND: {
+    projectLabel: "Layout / Survey",
+    blockLabel: null,
+    floorLabel: null,
+    unitLabel: "Plot number",
+    unitShort: "Plot",
+  },
+  AGRICULTURAL: {
+    projectLabel: "Estate / Survey",
+    blockLabel: null,
+    floorLabel: null,
+    unitLabel: "Survey / Khasra number",
+    unitShort: "Survey",
+  },
+  RESIDENTIAL: {
+    projectLabel: "Society / Project",
+    blockLabel: "Tower / Block",
+    floorLabel: "Floor",
+    unitLabel: "Unit number",
+    unitShort: "Unit",
+  },
+  COMMERCIAL: {
+    projectLabel: "Building / Mall",
+    blockLabel: "Wing",
+    floorLabel: "Floor",
+    unitLabel: "Unit number",
+    unitShort: "Unit",
+  },
+  INDUSTRIAL: {
+    projectLabel: "Estate / Park",
+    blockLabel: "Block",
+    floorLabel: null,
+    unitLabel: "Plot / Unit number",
+    unitShort: "Unit",
+  },
+};
+
+export function propertyUnitVocab(
+  type: PropertyType,
+  subType: PropertySubType | null | undefined,
+): PropertyUnitVocab {
+  if (subType && VOCAB_BY_SUBTYPE[subType]) return VOCAB_BY_SUBTYPE[subType]!;
+  return VOCAB_BY_TYPE[type] ?? VOCAB_DEFAULT;
+}
+
+/**
+ * Compact, list-friendly rendering of the unit identifier, e.g.
+ *   "Tower A · 5F · Flat 502"   (apartment)
+ *   "Plot 142"                  (land)
+ *   "GF · Shop 12"              (retail)
+ * Returns `null` if no identifier parts were filled in.
+ */
+export function formatPropertyUnit(p: {
+  type: PropertyType;
+  subType: PropertySubType | null;
+  block: string | null;
+  floor: string | null;
+  unitNumber: string | null;
+}): string | null {
+  const v = propertyUnitVocab(p.type, p.subType);
+  const parts: string[] = [];
+  if (v.blockLabel && p.block) parts.push(p.block);
+  if (v.floorLabel && p.floor) parts.push(/^\d+$/.test(p.floor) ? `${p.floor}F` : p.floor);
+  if (p.unitNumber) parts.push(`${v.unitShort} ${p.unitNumber}`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 export const PROPERTY_DOC_TYPE_LABEL: Record<PropertyDocumentType, string> = {
   TITLE_DEED: "Title Deed",
   NOC: "NOC",
@@ -102,11 +289,58 @@ export const COMMISSION_TERM_LABEL: Record<CommissionTermType, string> = {
 };
 
 export const AREA_UNIT_OPTIONS = [
+  { value: "sqyd", label: "sq yd" },
   { value: "sqft", label: "sq ft" },
   { value: "sqm", label: "sq m" },
   { value: "acre", label: "acres" },
   { value: "hectare", label: "hectares" },
 ];
+
+export const DEFAULT_AREA_UNIT = "sqyd";
+
+// ─── Area unit conversion ────────────────────────────────────────────────────
+// Mirror of lib/real-estate/slab-engine.ts so the FE can render every
+// property's area in the brokerage's canonical unit (sq.yd) regardless of
+// what the listing was input in. Multipliers are exact / standard:
+//   1 sqft = 1/9 sqyd       (so 9 sqft → exactly 1 sqyd, no float drift)
+//   1 sqm  = 1.19599 sqyd
+//   1 acre = 4840 sqyd
+//   1 hectare = 11959.9 sqyd
+const SQYD_PER_UNIT: Record<string, number> = {
+  sqyd: 1,
+  sqft: 1 / 9,
+  sqm: 1.19599,
+  acre: 4840,
+  hectare: 11959.9,
+};
+
+/** Convert any supported area unit → sq.yd. Returns 0 for unknown units. */
+export function toSquareYards(area: number | null | undefined, unit: string | null | undefined): number {
+  if (area == null) return 0;
+  const key = (unit ?? "sqyd").toLowerCase();
+  const mult = SQYD_PER_UNIT[key];
+  if (mult == null) return 0;
+  return area * mult;
+}
+
+/**
+ * Format a property's area for listing display. Always renders sq.yd as the
+ * primary number; if the property was input in another unit, the original
+ * form is appended in parentheses so the user can still spot the source.
+ *   1450 sqft → "161 sq.yd (1,450 sqft)"
+ *   556 sqyd  → "556 sq.yd"
+ *   2 acre    → "9,680 sq.yd (2 acres)"
+ */
+export function formatAreaSqyd(area: number | null | undefined, unit: string | null | undefined): string {
+  if (area == null) return "—";
+  const u = (unit ?? "sqyd").toLowerCase();
+  const sqyd = toSquareYards(area, u);
+  const fmt = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  if (u === "sqyd") return `${fmt(sqyd)} sq.yd`;
+  // Use the same labels as AREA_UNIT_OPTIONS for the parenthetical hint.
+  const originalLabel = AREA_UNIT_OPTIONS.find((o) => o.value === u)?.label ?? u;
+  return `${fmt(sqyd)} sq.yd (${fmt(area)} ${originalLabel})`;
+}
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 

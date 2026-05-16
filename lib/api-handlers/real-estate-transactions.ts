@@ -294,10 +294,18 @@ export const TransactionHandlers = {
       if (!txn)
         return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      const result = await prisma.$transaction(async (tx) => {
-        return closeTransaction(tx, id, auth.id);
-      });
+      // Close does a lot inside one atomic boundary: calc splits, write
+      // CommissionSplit + WalletLedger rows for every upline level, append the
+      // area ledger, check + grant designation milestones, write the audit
+      // row. On a 10-deep upline that's ~30 round-trips — well past Prisma's
+      // 5-second default. Bump both maxWait and timeout to keep close atomic
+      // without false-failing on slow Postgres.
+      const result = await prisma.$transaction(
+        async (tx) => closeTransaction(tx, id, auth.id),
+        { maxWait: 10_000, timeout: 60_000 },
+      );
 
+      
       return NextResponse.json({
         success: true,
         data: {

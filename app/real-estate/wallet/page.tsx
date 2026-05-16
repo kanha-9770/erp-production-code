@@ -39,6 +39,7 @@ import {
   formatCurrency,
   formatDateTime,
 } from "@/components/real-estate/constants";
+import { SlabProgressCard } from "@/components/real-estate/slab-progress-card";
 
 export default function MyWalletPage() {
   const { data: walletResp, isLoading: walletLoading } = useGetMyWalletQuery();
@@ -108,6 +109,9 @@ export default function MyWalletPage() {
           </>
         )}
       </div>
+
+      {/* Slab progress — visible to every agent on the slab engine */}
+      <SlabProgressCard />
 
       {wallet?.isFrozen && (
         <Card className="border-destructive/40 bg-destructive/5">

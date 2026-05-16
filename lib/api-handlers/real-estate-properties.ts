@@ -81,6 +81,7 @@ export const PropertyHandlers = {
       const type = url.searchParams.get("type") ?? undefined;
       const subType = url.searchParams.get("subType") ?? undefined;
       const city = url.searchParams.get("city") ?? undefined;
+      const projectName = url.searchParams.get("projectName") ?? undefined;
       const search = url.searchParams.get("search") ?? undefined;
       const minPrice = url.searchParams.get("minPrice");
       const maxPrice = url.searchParams.get("maxPrice");
@@ -94,6 +95,9 @@ export const PropertyHandlers = {
         ...(type ? { type: type as any } : {}),
         ...(subType ? { subType: subType as any } : {}),
         ...(city ? { city: { contains: city, mode: "insensitive" } } : {}),
+        ...(projectName
+          ? { projectName: { contains: projectName, mode: "insensitive" } }
+          : {}),
         ...(listingAgentId ? { listingAgentId } : {}),
         ...(minPrice || maxPrice
           ? {
@@ -109,6 +113,9 @@ export const PropertyHandlers = {
                 { title: { contains: search, mode: "insensitive" } },
                 { code: { contains: search, mode: "insensitive" } },
                 { addressLine1: { contains: search, mode: "insensitive" } },
+                { projectName: { contains: search, mode: "insensitive" } },
+                { unitNumber: { contains: search, mode: "insensitive" } },
+                { block: { contains: search, mode: "insensitive" } },
               ],
             }
           : {}),
@@ -158,6 +165,10 @@ export const PropertyHandlers = {
           title: body.title,
           code: body.code || null,
           description: body.description || null,
+          projectName: body.projectName?.trim() || null,
+          block: body.block?.trim() || null,
+          floor: body.floor?.trim() || null,
+          unitNumber: body.unitNumber?.trim() || null,
           type: body.type,
           subType: body.subType || null,
           status: body.status || "DRAFT",
@@ -172,7 +183,7 @@ export const PropertyHandlers = {
           listingPrice: new Prisma.Decimal(body.listingPrice),
           currency: body.currency || "INR",
           area: body.area != null ? new Prisma.Decimal(body.area) : null,
-          areaUnit: body.areaUnit || null,
+          areaUnit: body.areaUnit || "sqyd",
           bedrooms: body.bedrooms ?? null,
           bathrooms: body.bathrooms ?? null,
           parkingSpots: body.parkingSpots ?? null,
@@ -264,6 +275,13 @@ export const PropertyHandlers = {
       setIfPresent("title", body.title);
       setIfPresent("code", body.code);
       setIfPresent("description", body.description);
+      // Normalise empty strings to null so the column reads cleanly.
+      if (body.projectName !== undefined)
+        data.projectName = body.projectName?.trim() || null;
+      if (body.block !== undefined) data.block = body.block?.trim() || null;
+      if (body.floor !== undefined) data.floor = body.floor?.trim() || null;
+      if (body.unitNumber !== undefined)
+        data.unitNumber = body.unitNumber?.trim() || null;
       setIfPresent("type", body.type);
       setIfPresent("subType", body.subType);
       setIfPresent("status", body.status);

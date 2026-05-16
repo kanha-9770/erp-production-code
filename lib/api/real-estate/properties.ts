@@ -13,6 +13,7 @@ export interface PropertyListParams {
   type?: string;
   subType?: string;
   city?: string;
+  projectName?: string;
   search?: string;
   minPrice?: string | number;
   maxPrice?: string | number;

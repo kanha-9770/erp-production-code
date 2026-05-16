@@ -55,6 +55,7 @@ import {
   formatDate,
   formatDateTime,
 } from "@/components/real-estate/constants";
+import { AgentSlabHistoryCard } from "@/components/real-estate/agent-slab-history-card";
 
 export default function AgentProfilePage() {
   const params = useParams<{ id: string }>();
@@ -492,6 +493,10 @@ export default function AgentProfilePage() {
           </Card>
         </div>
       </div>
+
+      {/* Full-width slab history — current position, every upgrade event,
+          every deal, and every override earned from the downline. */}
+      <AgentSlabHistoryCard agentId={id} />
     </div>
   );
 }

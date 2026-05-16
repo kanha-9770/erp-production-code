@@ -27,13 +27,19 @@ import {
   PROPERTY_STATUS_OPTIONS,
   AREA_UNIT_OPTIONS,
   COMMISSION_TERM_LABEL,
+  DEFAULT_AREA_UNIT,
+  propertyUnitVocab,
 } from "./constants";
-import type { Property } from "@/lib/api/real-estate/types";
+import type { Property, PropertySubType, PropertyType } from "@/lib/api/real-estate/types";
 
 export interface PropertyFormValues {
   title: string;
   code: string;
   description: string;
+  projectName: string;
+  block: string;
+  floor: string;
+  unitNumber: string;
   type: string;
   subType: string;
   status: string;
@@ -65,6 +71,10 @@ const EMPTY: PropertyFormValues = {
   title: "",
   code: "",
   description: "",
+  projectName: "",
+  block: "",
+  floor: "",
+  unitNumber: "",
   type: "RESIDENTIAL",
   subType: "",
   status: "DRAFT",
@@ -77,7 +87,7 @@ const EMPTY: PropertyFormValues = {
   listingPrice: "",
   currency: "INR",
   area: "",
-  areaUnit: "sqft",
+  areaUnit: DEFAULT_AREA_UNIT,
   bedrooms: "",
   bathrooms: "",
   parkingSpots: "",
@@ -97,6 +107,10 @@ export function fromProperty(p: Property): PropertyFormValues {
     title: p.title ?? "",
     code: p.code ?? "",
     description: p.description ?? "",
+    projectName: p.projectName ?? "",
+    block: p.block ?? "",
+    floor: p.floor ?? "",
+    unitNumber: p.unitNumber ?? "",
     type: p.type,
     subType: p.subType ?? "",
     status: p.status,
@@ -109,7 +123,7 @@ export function fromProperty(p: Property): PropertyFormValues {
     listingPrice: String(p.listingPrice ?? ""),
     currency: p.currency ?? "INR",
     area: p.area != null ? String(p.area) : "",
-    areaUnit: p.areaUnit ?? "sqft",
+    areaUnit: p.areaUnit ?? DEFAULT_AREA_UNIT,
     bedrooms: p.bedrooms != null ? String(p.bedrooms) : "",
     bathrooms: p.bathrooms != null ? String(p.bathrooms) : "",
     parkingSpots: p.parkingSpots != null ? String(p.parkingSpots) : "",
@@ -138,6 +152,10 @@ export function toApiPayload(values: PropertyFormValues): Record<string, any> {
     title: values.title.trim(),
     code: values.code.trim() || null,
     description: values.description.trim() || null,
+    projectName: values.projectName.trim() || null,
+    block: values.block.trim() || null,
+    floor: values.floor.trim() || null,
+    unitNumber: values.unitNumber.trim() || null,
     type: values.type,
     subType: values.subType || null,
     status: values.status,
@@ -226,6 +244,14 @@ export function PropertyForm({
       values.listingPrice !== "" &&
       Number(values.listingPrice) !== Number(initial.listingPrice));
 
+  // Drives the labels and visibility of the project/block/floor/unit
+  // fields below. Resolves on subType first, falling back to type — so an
+  // APARTMENT picks up "Tower / Wing", and a PLOT hides block/floor.
+  const unitVocab = propertyUnitVocab(
+    values.type as PropertyType,
+    (values.subType || null) as PropertySubType | null,
+  );
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -299,6 +325,73 @@ export function PropertyForm({
               value={values.description}
               onChange={(e) => set("description", e.target.value)}
               rows={3}
+            />
+          </Field>
+        </CardContent>
+      </Card>
+
+      {/* Project / unit identifier — labels driven by category */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Project &amp; unit
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              labels follow the selected {values.subType ? "sub-type" : "type"}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label={unitVocab.projectLabel}
+            hint="Layout, society, building or estate name"
+            className="sm:col-span-2"
+          >
+            <Input
+              value={values.projectName}
+              onChange={(e) => set("projectName", e.target.value)}
+              placeholder={
+                unitVocab.unitShort === "Plot"
+                  ? "e.g. Hinjewadi Phase III"
+                  : "e.g. Sunshine Heights"
+              }
+            />
+          </Field>
+          {unitVocab.blockLabel && (
+            <Field label={unitVocab.blockLabel}>
+              <Input
+                value={values.block}
+                onChange={(e) => set("block", e.target.value)}
+                placeholder="e.g. Tower A"
+              />
+            </Field>
+          )}
+          {unitVocab.floorLabel && (
+            <Field label={unitVocab.floorLabel} hint="0 for ground, B1/B2 for basements">
+              <Input
+                value={values.floor}
+                onChange={(e) => set("floor", e.target.value)}
+                placeholder="e.g. 5"
+              />
+            </Field>
+          )}
+          <Field
+            label={unitVocab.unitLabel}
+            className={
+              unitVocab.blockLabel == null && unitVocab.floorLabel == null
+                ? "sm:col-span-2"
+                : undefined
+            }
+          >
+            <Input
+              value={values.unitNumber}
+              onChange={(e) => set("unitNumber", e.target.value)}
+              placeholder={
+                unitVocab.unitShort === "Plot"
+                  ? "e.g. 142"
+                  : unitVocab.unitShort === "Flat"
+                    ? "e.g. 502"
+                    : "e.g. 12"
+              }
             />
           </Field>
         </CardContent>

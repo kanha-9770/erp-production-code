@@ -2911,6 +2911,19 @@ model Property {
   code        String? // optional human-readable code, e.g. "PROP-2026-0042"
   description String? @db.Text
 
+  // Project / unit identifier (FR-1.1+) — together these make a property
+  // findable by street address. The form labels them per category:
+  //   LAND/AGRI    → projectName = "Layout / Survey", unitNumber = "Plot No."
+  //   RESIDENTIAL  → projectName = "Society / Project", block = "Tower / Block",
+  //                  floor = "Floor", unitNumber = "Flat / Villa No."
+  //   COMMERCIAL   → projectName = "Building / Mall", block = "Wing",
+  //                  floor = "Floor", unitNumber = "Office / Shop No."
+  //   INDUSTRIAL   → projectName = "Estate", unitNumber = "Plot / Unit No."
+  projectName String? @map("project_name")
+  block       String?
+  floor       String?
+  unitNumber  String? @map("unit_number")
+
   // Classification
   type    PropertyType
   subType PropertySubType? @map("sub_type")
@@ -2972,6 +2985,7 @@ model Property {
   @@unique([organizationId, code])
   @@index([organizationId, status])
   @@index([organizationId, type, subType])
+  @@index([organizationId, projectName])
   @@index([city, country])
   @@index([listingAgentId])
   @@index([listingPrice])

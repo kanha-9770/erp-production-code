@@ -15,10 +15,12 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useGetCommissionRegisterQuery } from "@/lib/api/real-estate/reports";
+import { useGetAgentsQuery } from "@/lib/api/real-estate/agents";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -27,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   formatCurrency, COMMISSION_ROLE_LABEL, COMMISSION_STATUS_LABEL,
+  fullName, initials,
 } from "@/components/real-estate/constants";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +77,8 @@ function periodRange(period: Period, custom: { from: string; to: string }): { fr
 
 interface AgentRow {
   userId: string;
+  agentId: string | null;
+  user: { id: string; first_name: string | null; last_name: string | null; email: string; avatar?: string | null } | null;
   gross: number;
   reversed: number;
   net: number;
@@ -87,8 +92,33 @@ export default function MemberIncomeReportPage() {
   const [customTo, setCustomTo] = useState("");
   const [search, setSearch] = useState("");
 
-  const range = periodRange(period, { from: customFrom, to: customTo });
+  // periodRange() calls `new Date()` to derive the "to" bound — without
+  // memoization the result string differs by milliseconds on every render,
+  // so RTK Query treats every render as a fresh cache key and refetches
+  // forever (the "Loading…" never resolves). Pin it to a stable identity
+  // keyed by the user-controlled inputs only.
+  const range = useMemo(
+    () => periodRange(period, { from: customFrom, to: customTo }),
+    [period, customFrom, customTo],
+  );
   const { data, isLoading } = useGetCommissionRegisterQuery(range);
+
+  // Pull the org's agent roster so we can resolve `beneficiaryUserId` →
+  // real name + avatar + agentId (for the profile link). 1000 covers the
+  // documented FR-2.4 envelope; for orgs that grow past that, swap in a
+  // dedicated bulk-by-userIds endpoint later.
+  const { data: agentsData } = useGetAgentsQuery({ limit: 1000 });
+  const userIdToAgent = useMemo(() => {
+    const m = new Map<
+      string,
+      { agentId: string; user: AgentRow["user"] }
+    >();
+    for (const a of agentsData?.data ?? []) {
+      if (!a.user) continue;
+      m.set(a.user.id, { agentId: a.id, user: a.user as any });
+    }
+    return m;
+  }, [agentsData]);
 
   const rows = data?.rows ?? [];
 
@@ -96,8 +126,11 @@ export default function MemberIncomeReportPage() {
     const m = new Map<string, AgentRow>();
     for (const r of rows) {
       if (!r.beneficiaryUserId) continue;
+      const lookup = userIdToAgent.get(r.beneficiaryUserId);
       const cur = m.get(r.beneficiaryUserId) ?? {
         userId: r.beneficiaryUserId,
+        agentId: lookup?.agentId ?? null,
+        user: lookup?.user ?? null,
         gross: 0,
         reversed: 0,
         net: 0,
@@ -115,12 +148,19 @@ export default function MemberIncomeReportPage() {
     }
     for (const v of m.values()) v.net = v.gross - v.reversed;
     return Array.from(m.values()).sort((a, b) => b.net - a.net);
-  }, [rows]);
+  }, [rows, userIdToAgent]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return grouped;
-    return grouped.filter((g) => g.userId.toLowerCase().includes(q));
+    return grouped.filter((g) => {
+      if (g.userId.toLowerCase().includes(q)) return true;
+      if (g.user) {
+        const name = `${g.user.first_name ?? ""} ${g.user.last_name ?? ""} ${g.user.email}`.toLowerCase();
+        if (name.includes(q)) return true;
+      }
+      return false;
+    });
   }, [grouped, search]);
 
   const totals = useMemo(() => {
@@ -186,7 +226,7 @@ export default function MemberIncomeReportPage() {
       {/* Search */}
       <div className="flex items-center gap-2">
         <Input
-          placeholder="Filter by user ID…"
+          placeholder="Filter by name, email, or user ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-8 max-w-xs text-sm"
@@ -211,7 +251,7 @@ export default function MemberIncomeReportPage() {
               <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left w-10">#</th>
-                  <th className="px-3 py-2 text-left">Agent (user id)</th>
+                  <th className="px-3 py-2 text-left">Agent</th>
                   <th className="px-3 py-2 text-right">Splits</th>
                   <th className="px-3 py-2 text-right">Gross</th>
                   <th className="px-3 py-2 text-right">Reversed</th>
@@ -260,19 +300,52 @@ export default function MemberIncomeReportPage() {
 function MemberIncomeRow({ rank, row }: { rank: number; row: AgentRow }) {
   const [expanded, setExpanded] = useState(false);
   const roleEntries = Object.entries(row.byRole).sort((a, b) => b[1] - a[1]);
+  const displayName = row.user
+    ? fullName(row.user as any) || row.user.email
+    : `Unknown · ${row.userId.slice(0, 8)}…`;
 
   return (
     <>
       <tr className="border-t hover:bg-muted/30">
         <td className="px-3 py-2 tabular-nums text-muted-foreground">{rank}</td>
         <td className="px-3 py-2">
-          <button
-            onClick={() => setExpanded((e) => !e)}
-            className="flex items-center gap-1 text-left hover:underline"
-          >
-            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !expanded && "-rotate-90")} />
-            <code className="text-xs">{row.userId.slice(0, 16)}…</code>
-          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              aria-label={expanded ? "Collapse" : "Expand"}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown
+                className={cn("h-3.5 w-3.5 transition-transform", !expanded && "-rotate-90")}
+              />
+            </button>
+            <Avatar className="h-7 w-7 shrink-0">
+              <AvatarImage src={row.user?.avatar ?? undefined} alt={displayName} />
+              <AvatarFallback className="text-[10px]">
+                {row.user ? initials(row.user as any) : "?"}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              {row.agentId ? (
+                <Link
+                  href={`/real-estate/agents/${row.agentId}`}
+                  className="text-sm font-medium hover:underline truncate block"
+                >
+                  {displayName}
+                </Link>
+              ) : (
+                <span className="text-sm font-medium truncate block">
+                  {displayName}
+                </span>
+              )}
+              {row.user?.email && (
+                <div className="text-[11px] text-muted-foreground truncate">
+                  {row.user.email}
+                </div>
+              )}
+            </div>
+          </div>
         </td>
         <td className="px-3 py-2 text-right tabular-nums">{row.count}</td>
         <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.gross)}</td>

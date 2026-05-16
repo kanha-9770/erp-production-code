@@ -41,11 +41,47 @@ export interface AdminLedgerEntry extends LedgerEntry {
   } | null;
 }
 
+// Slab progress snapshot — what each user sees about their own ladder position.
+// Shape mirrors lib/real-estate/slab-engine.ts SlabProgress.
+export interface SlabLadderRow {
+  sortOrder: number;
+  minArea: number;
+  maxArea: number | null;
+  ratePerUnit: number;
+  isCurrent: boolean;
+  isCleared: boolean;
+}
+export interface SlabProgress {
+  enabled: boolean;
+  planName: string | null;
+  areaUnit: string;
+  cumulativeArea: number;
+  totalDirectIncome: number;
+  dealsCount: number;
+  // Team totals — personal + entire downline. The slab rate is still driven
+  // by personal `cumulativeArea` only.
+  teamCumulativeArea: number;
+  teamDirectIncome: number;
+  teamDealsCount: number;
+  downlineAgentCount: number;
+  currentSlab: { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number } | null;
+  nextSlab: { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number; areaToReach: number } | null;
+  ladder: SlabLadderRow[];
+  currentDesignation: { code: string; name: string; rewardDescription: string } | null;
+  nextDesignation: { code: string; name: string; minCumulativeArea: number; areaToReach: number; rewardDescription: string } | null;
+  designations: Array<{ code: string; name: string; minCumulativeArea: number; rewardType: string; rewardDescription: string; achieved: boolean }>;
+}
+
 export const financeApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // ─── Wallet ────────────────────────────────────────────────────────────
     getMyWallet: builder.query<SingleResponse<Wallet>, void>({
       query: () => "/real-estate/wallet",
+      providesTags: [{ type: "MyWallet", id: "ME" }],
+    }),
+
+    getMySlab: builder.query<SingleResponse<SlabProgress>, void>({
+      query: () => "/real-estate/my-slab",
       providesTags: [{ type: "MyWallet", id: "ME" }],
     }),
 
@@ -235,6 +271,7 @@ export const financeApi = baseApi.injectEndpoints({
 
 export const {
   useGetMyWalletQuery,
+  useGetMySlabQuery,
   useGetMyLedgerQuery,
   useGetAllWalletsQuery,
   useGetAdminLedgerQuery,

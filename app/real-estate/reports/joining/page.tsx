@@ -77,7 +77,12 @@ export default function JoiningReportPage() {
   const { data, isLoading } = useGetAgentsQuery({ limit: 1000 });
   const agents = data?.data ?? [];
 
-  const range = periodRange(period, { from: customFrom, to: customTo });
+  // Memoize range — periodRange() calls `new Date()` so without this every
+  // render produces a new object that busts the inRange useMemo below.
+  const range = useMemo(
+    () => periodRange(period, { from: customFrom, to: customTo }),
+    [period, customFrom, customTo],
+  );
 
   const inRange = useMemo(() => {
     if (!range) return agents.slice().sort((a, b) => +new Date(b.joinedAt) - +new Date(a.joinedAt));

@@ -6,6 +6,56 @@ import type {
   Rank,
   SingleResponse,
 } from "./types";
+import type { SlabProgress } from "./finance";
+
+// Slab history payload — mirrors lib/real-estate/slab-engine.ts
+// AgentSlabHistory. Kept here (not in types.ts) so it stays next to its hook.
+export interface SlabHistoryDealRow {
+  ledgerId: string;
+  transactionId: string;
+  transactionCode: string | null;
+  closedAt: string | null;
+  dealArea: number;
+  cumulativeArea: number;
+  rateApplied: number;
+  directIncome: number;
+  propertyTitle: string | null;
+  propertyCode: string | null;
+}
+export interface SlabUpgradeEvent {
+  at: string;
+  triggeredByLedgerId: string;
+  triggeredByTransactionId: string;
+  fromSlab: { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number };
+  toSlab:   { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number };
+}
+export interface SlabDesignationUnlock {
+  at: string;
+  triggeredByLedgerId: string | null;
+  code: string;
+  name: string;
+  rewardType: string;
+  rewardDescription: string;
+  minCumulativeArea: number;
+}
+export interface OverrideEarningRow {
+  splitId: string;
+  transactionId: string;
+  transactionCode: string | null;
+  closedAt: string | null;
+  level: number | null;
+  amount: number;
+  status: string;
+  fromAgentName: string | null;
+  propertyTitle: string | null;
+}
+export interface AgentSlabHistory {
+  progress: SlabProgress;
+  deals: SlabHistoryDealRow[];
+  slabUpgrades: SlabUpgradeEvent[];
+  designationUnlocks: SlabDesignationUnlock[];
+  overrides: { rows: OverrideEarningRow[]; totalAmount: number };
+}
 
 export interface AgentListParams {
   status?: string;
@@ -42,6 +92,11 @@ export const agentsApi = baseApi.injectEndpoints({
 
     getAgent: builder.query<SingleResponse<AgentProfile>, string>({
       query: (id) => `/real-estate/agents/${id}`,
+      providesTags: (_r, _e, id) => [{ type: "Agent", id }],
+    }),
+
+    getAgentSlabHistory: builder.query<SingleResponse<AgentSlabHistory>, string>({
+      query: (id) => `/real-estate/agents/${id}/slab-history`,
       providesTags: (_r, _e, id) => [{ type: "Agent", id }],
     }),
 
@@ -147,6 +202,7 @@ export const agentsApi = baseApi.injectEndpoints({
 export const {
   useGetAgentsQuery,
   useGetAgentQuery,
+  useGetAgentSlabHistoryQuery,
   useCreateAgentMutation,
   useUpdateAgentMutation,
   useDeleteAgentMutation,

@@ -54,6 +54,12 @@ export interface Property {
   title: string;
   code: string | null;
   description: string | null;
+  // Project / unit identifier (form labels these per category — see
+  // PROPERTY_UNIT_LABEL in components/real-estate/constants.ts).
+  projectName: string | null;
+  block: string | null;
+  floor: string | null;
+  unitNumber: string | null;
   type: PropertyType;
   subType: PropertySubType | null;
   status: PropertyStatus;
