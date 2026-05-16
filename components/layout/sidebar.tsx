@@ -361,6 +361,18 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     };
   }, [userData?.user?.id, isAdmin, pathname]);
 
+  // Real-estate-agent-only detection. A user whose ONLY unit assignment is
+  // the auto-provisioned "Real Estate Agent" role gets a stripped-down
+  // sidebar — they only see the Real Estate module and no attendance
+  // widget, since those workflows don't apply to a referral-onboarded agent.
+  // Admins always see everything (regardless of role labels).
+  const isRebmOnlyAgent = useMemo(() => {
+    if (isAdmin) return false;
+    const ua = (userData?.user as any)?.unitAssignments;
+    if (!Array.isArray(ua) || ua.length === 0) return false;
+    return ua.every((a: any) => a?.role?.name === "Real Estate Agent");
+  }, [isAdmin, userData]);
+
   const sidebarRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -696,10 +708,26 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         .filter(Boolean) as ModuleNode[];
     };
 
+    // Real-estate-only users see ONLY the Real Estate module. We identify
+    // it the same way the auto-expand effect does: a top-level module whose
+    // subtree contains at least one `/real-estate*` system-route leaf.
+    // Everything else (HR, Sales, CRM, attendance anchors, etc.) is hidden.
+    const filterForRebmAgent = (items: ModuleNode[]): ModuleNode[] => {
+      if (!isRebmOnlyAgent) return items;
+      const hasRebmLeaf = (n: ModuleNode): boolean => {
+        const route = (n as any).system_route;
+        if (n.module_type === "system-route" && typeof route === "string" && route.startsWith("/real-estate")) {
+          return true;
+        }
+        return (n.children ?? []).some(hasRebmLeaf);
+      };
+      return items.filter(hasRebmLeaf);
+    };
+
     const sorted = sortModules(roots as ModuleNode[]);
     const withAnchors = injectAnchorLeaves(sorted);
-    return filterByPermission(withAnchors);
-  }, [modules, isAdmin, checkPermission, canAccess, staticAnchors]);
+    return filterForRebmAgent(filterByPermission(withAnchors));
+  }, [modules, isAdmin, checkPermission, canAccess, staticAnchors, isRebmOnlyAgent]);
 
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;
@@ -752,13 +780,10 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   //    first render so they don't land on an empty-looking sidebar.
   //    This effect is intentionally additive — it never collapses a
   //    group the user is already viewing.
-  const isRebmOnlyAgent = useMemo(() => {
-    if (isAdmin) return false;
-    const ua = (userData?.user as any)?.unitAssignments;
-    if (!Array.isArray(ua) || ua.length === 0) return false;
-    return ua.every((a: any) => a?.role?.name === "Real Estate Agent");
-  }, [isAdmin, userData]);
-
+  //
+  //    (`isRebmOnlyAgent` is defined earlier — it's also used to gate the
+  //    module-tree filter and the attendance widget, so it has to be in
+  //    scope before `moduleTree` builds.)
   const autoExpandedForRebmRef = useRef(false);
   useEffect(() => {
     if (moduleTree.length === 0) return;
@@ -1169,8 +1194,10 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
           {/* Attendance widget — pinned just above the user area so the
               live working timer is always in the user's peripheral vision.
-              Hides itself when the user is unauthenticated. */}
-          {!!userData?.user && (
+              Hides itself when the user is unauthenticated, and is also
+              hidden for real-estate-only agents (referral-onboarded MLM
+              users), since check-in/out doesn't apply to that workflow. */}
+          {!!userData?.user && !isRebmOnlyAgent && (
             <div className="border-t border-black/10 dark:border-white/10 px-2 py-2">
               <AttendanceWidget />
             </div>

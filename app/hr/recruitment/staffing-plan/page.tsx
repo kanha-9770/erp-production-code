@@ -42,6 +42,7 @@ import {
   Pencil,
   Trash2,
   Layers,
+  Filter,
   Users as UsersIcon,
   Calculator,
   Calendar,
@@ -57,6 +58,12 @@ import {
   useSavedViews,
   InlineEditCell,
 } from "@/components/real-estate/workspace";
+import {
+  StaticFilterSidebar,
+  applyStaticFilters,
+  type FieldFilter,
+  type StaticFilterField,
+} from "@/components/static-filter";
 import { useToast } from "@/hooks/use-toast";
 
 const PAGE_SIZE = 50;
@@ -125,6 +132,68 @@ function formatINR(n: number): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
 }
 
+// Filterable fields exposed by the per-record StaticFilterSidebar. Each
+// `accessor` returns a primitive that the filter evaluator can compare
+// against the user's operator + value pair.
+const FILTER_FIELDS: StaticFilterField<StaffingPlan>[] = [
+  {
+    id: "profileName",
+    label: "Profile Name",
+    type: "text",
+    accessor: (p) => p.profileName,
+  },
+  {
+    id: "designation",
+    label: "Designation",
+    type: "text",
+    accessor: (p) => p.designation,
+  },
+  {
+    id: "department",
+    label: "Department",
+    type: "text",
+    accessor: (p) => p.department,
+  },
+  {
+    id: "status",
+    label: "Status",
+    type: "select",
+    accessor: (p) => p.status,
+    options: STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+  },
+  {
+    id: "employmentType",
+    label: "Employment Type",
+    type: "select",
+    accessor: (p) => p.employmentType,
+    options: Object.entries(EMPLOYMENT_TYPE_LABEL).map(([value, label]) => ({
+      value,
+      label,
+    })),
+  },
+  {
+    id: "vacancies",
+    label: "Vacancies",
+    type: "number",
+    accessor: (p) => p.vacancies,
+  },
+  {
+    id: "totalEstimatedCost",
+    label: "Total Cost",
+    type: "number",
+    accessor: (p) =>
+      p.totalEstimatedCost === null || p.totalEstimatedCost === undefined
+        ? null
+        : Number(p.totalEstimatedCost),
+  },
+  {
+    id: "createdAt",
+    label: "Created Date",
+    type: "date",
+    accessor: (p) => p.createdAt,
+  },
+];
+
 function formatDate(s: string | null | undefined): string {
   if (!s) return "—";
   const d = new Date(s);
@@ -144,6 +213,8 @@ export default function StaffingPlanListPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [fieldFilters, setFieldFilters] = useState<FieldFilter[]>([]);
   const [createPlan, { isLoading: creating }] = useCreateStaffingPlanMutation();
 
   // Seed the department dropdown with departments already used by existing
@@ -194,7 +265,7 @@ export default function StaffingPlanListPage() {
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    return allPlans.filter((p) => {
+    const base = allPlans.filter((p) => {
       if (filters.status && p.status !== filters.status) return false;
       if (filters.employmentType && p.employmentType !== filters.employmentType)
         return false;
@@ -209,7 +280,8 @@ export default function StaffingPlanListPage() {
         p.id?.toLowerCase().includes(q)
       );
     });
-  }, [allPlans, filters]);
+    return applyStaticFilters(base, FILTER_FIELDS, fieldFilters);
+  }, [allPlans, filters, fieldFilters]);
 
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -436,6 +508,19 @@ export default function StaffingPlanListPage() {
             </div>
             <Button
               size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => setFilterOpen(true)}
+            >
+              <Filter className="h-3.5 w-3.5 mr-1" /> Filter
+              {fieldFilters.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                  {fieldFilters.length}
+                </span>
+              )}
+            </Button>
+            <Button
+              size="sm"
               className="h-8"
               onClick={() => setCreateOpen(true)}
             >
@@ -637,6 +722,15 @@ export default function StaffingPlanListPage() {
         </div>
       </SheetContent>
     </Sheet>
+
+    <StaticFilterSidebar<StaffingPlan>
+      open={filterOpen}
+      onOpenChange={setFilterOpen}
+      fields={FILTER_FIELDS}
+      filters={fieldFilters}
+      onFiltersChange={setFieldFilters}
+      records={allPlans}
+    />
     </>
   );
 }

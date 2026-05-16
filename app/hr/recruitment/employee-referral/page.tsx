@@ -39,6 +39,7 @@ import {
   ChevronRight,
   Pencil,
   Trash2,
+  Filter,
   Mail,
   Phone,
   FileText,
@@ -58,6 +59,12 @@ import {
   useSavedViews,
   InlineEditCell,
 } from "@/components/real-estate/workspace";
+import {
+  StaticFilterSidebar,
+  applyStaticFilters,
+  type FieldFilter,
+  type StaticFilterField,
+} from "@/components/static-filter";
 import { useToast } from "@/hooks/use-toast";
 import { EmployeeReferralForm } from "@/components/employee-referral/employee-referral-form";
 import { STATUS_OPTIONS as FORM_STATUS_OPTIONS } from "@/components/employee-referral/employee-referral-form";
@@ -123,6 +130,71 @@ function initialsOf(name: string): string {
     .join("");
 }
 
+const FILTER_FIELDS: StaticFilterField<EmployeeReferral>[] = [
+  {
+    id: "applicantName",
+    label: "Applicant Name",
+    type: "text",
+    accessor: (r) => r.applicantName,
+  },
+  {
+    id: "applicantEmail",
+    label: "Applicant Email",
+    type: "text",
+    accessor: (r) => r.applicantEmail,
+  },
+  {
+    id: "applicantMobile",
+    label: "Applicant Mobile",
+    type: "text",
+    accessor: (r) => r.applicantMobile,
+  },
+  {
+    id: "designation",
+    label: "Designation",
+    type: "text",
+    accessor: (r) => r.designation,
+  },
+  {
+    id: "status",
+    label: "Status",
+    type: "select",
+    accessor: (r) => r.status,
+    options: (Object.entries(STATUS_LABEL) as [EmployeeReferralStatus, string][])
+      .map(([value, label]) => ({ value, label })),
+  },
+  {
+    id: "referrerFirstName",
+    label: "Referrer",
+    type: "text",
+    accessor: (r) => r.referrerFirstName,
+  },
+  {
+    id: "referrerDepartment",
+    label: "Referrer Department",
+    type: "text",
+    accessor: (r) => r.referrerDepartment,
+  },
+  {
+    id: "referralDate",
+    label: "Referral Date",
+    type: "date",
+    accessor: (r) => r.referralDate,
+  },
+  {
+    id: "referralCode",
+    label: "Referral Code",
+    type: "text",
+    accessor: (r) => r.referralCode,
+  },
+  {
+    id: "createdAt",
+    label: "Created Date",
+    type: "date",
+    accessor: (r) => r.createdAt,
+  },
+];
+
 export default function EmployeeReferralListPage() {
   const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -131,6 +203,8 @@ export default function EmployeeReferralListPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [fieldFilters, setFieldFilters] = useState<FieldFilter[]>([]);
   const [createReferral, { isLoading: creating }] =
     useCreateEmployeeReferralMutation();
 
@@ -166,7 +240,7 @@ export default function EmployeeReferralListPage() {
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    return allReferrals.filter((r) => {
+    const base = allReferrals.filter((r) => {
       if (filters.status && r.status !== filters.status) return false;
       if (
         filters.referringEmployeeId &&
@@ -185,7 +259,8 @@ export default function EmployeeReferralListPage() {
         r.id?.toLowerCase().includes(q)
       );
     });
-  }, [allReferrals, filters]);
+    return applyStaticFilters(base, FILTER_FIELDS, fieldFilters);
+  }, [allReferrals, filters, fieldFilters]);
 
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -453,6 +528,19 @@ export default function EmployeeReferralListPage() {
               </div>
               <Button
                 size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={() => setFilterOpen(true)}
+              >
+                <Filter className="h-3.5 w-3.5 mr-1" /> Filter
+                {fieldFilters.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                    {fieldFilters.length}
+                  </span>
+                )}
+              </Button>
+              <Button
+                size="sm"
                 className="h-8"
                 onClick={() => setCreateOpen(true)}
               >
@@ -647,6 +735,15 @@ export default function EmployeeReferralListPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <StaticFilterSidebar<EmployeeReferral>
+        open={filterOpen}
+        onOpenChange={setFilterOpen}
+        fields={FILTER_FIELDS}
+        filters={fieldFilters}
+        onFiltersChange={setFieldFilters}
+        records={allReferrals}
+      />
     </>
   );
 }

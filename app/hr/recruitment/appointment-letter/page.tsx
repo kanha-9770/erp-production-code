@@ -39,6 +39,7 @@ import {
   ChevronRight,
   Pencil,
   Trash2,
+  Filter,
   Mail,
   Calendar,
   Briefcase,
@@ -58,6 +59,12 @@ import {
   useSavedViews,
   InlineEditCell,
 } from "@/components/real-estate/workspace";
+import {
+  StaticFilterSidebar,
+  applyStaticFilters,
+  type FieldFilter,
+  type StaticFilterField,
+} from "@/components/static-filter";
 import { useToast } from "@/hooks/use-toast";
 import { AppointmentLetterForm } from "@/components/appointment-letter/appointment-letter-form";
 import { STATUS_OPTIONS as FORM_STATUS_OPTIONS } from "@/components/appointment-letter/appointment-letter-form";
@@ -119,6 +126,71 @@ function initialsOf(name: string): string {
     .map((n) => n[0]?.toUpperCase() ?? "")
     .join("");
 }
+
+const FILTER_FIELDS: StaticFilterField<AppointmentLetter>[] = [
+  {
+    id: "applicantName",
+    label: "Applicant Name",
+    type: "text",
+    accessor: (l) => l.applicantName,
+  },
+  {
+    id: "applicantEmail",
+    label: "Applicant Email",
+    type: "text",
+    accessor: (l) => l.applicantEmail,
+  },
+  {
+    id: "company",
+    label: "Company",
+    type: "text",
+    accessor: (l) => l.company,
+  },
+  {
+    id: "letterCode",
+    label: "Letter Code",
+    type: "text",
+    accessor: (l) => l.letterCode,
+  },
+  {
+    id: "status",
+    label: "Status",
+    type: "select",
+    accessor: (l) => l.status,
+    options: (Object.entries(STATUS_LABEL) as [AppointmentLetterStatus, string][])
+      .map(([value, label]) => ({ value, label })),
+  },
+  {
+    id: "signed",
+    label: "Signed",
+    type: "boolean",
+    accessor: (l) => !!l.signed,
+  },
+  {
+    id: "appointmentDate",
+    label: "Appointment Date",
+    type: "date",
+    accessor: (l) => l.appointmentDate,
+  },
+  {
+    id: "signedDate",
+    label: "Signed Date",
+    type: "date",
+    accessor: (l) => l.signedDate,
+  },
+  {
+    id: "templateName",
+    label: "Template",
+    type: "text",
+    accessor: (l) => l.templateName,
+  },
+  {
+    id: "createdAt",
+    label: "Created Date",
+    type: "date",
+    accessor: (l) => l.createdAt,
+  },
+];
 
 // Browser-safe HTML escape — every interpolated field goes through this before
 // hitting the printable document, so newlines stay (whitespace-pre-line) but
@@ -378,6 +450,8 @@ export default function AppointmentLetterListPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [fieldFilters, setFieldFilters] = useState<FieldFilter[]>([]);
   const [createLetter, { isLoading: creating }] =
     useCreateAppointmentLetterMutation();
 
@@ -417,7 +491,7 @@ export default function AppointmentLetterListPage() {
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    return allLetters.filter((l) => {
+    const base = allLetters.filter((l) => {
       if (filters.status && l.status !== filters.status) return false;
       if (filters.signed === "yes" && !l.signed) return false;
       if (filters.signed === "no" && l.signed) return false;
@@ -431,7 +505,8 @@ export default function AppointmentLetterListPage() {
         l.id?.toLowerCase().includes(q)
       );
     });
-  }, [allLetters, filters]);
+    return applyStaticFilters(base, FILTER_FIELDS, fieldFilters);
+  }, [allLetters, filters, fieldFilters]);
 
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -682,6 +757,19 @@ export default function AppointmentLetterListPage() {
               </div>
               <Button
                 size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={() => setFilterOpen(true)}
+              >
+                <Filter className="h-3.5 w-3.5 mr-1" /> Filter
+                {fieldFilters.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                    {fieldFilters.length}
+                  </span>
+                )}
+              </Button>
+              <Button
+                size="sm"
                 className="h-8"
                 onClick={() => setCreateOpen(true)}
               >
@@ -869,6 +957,15 @@ export default function AppointmentLetterListPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <StaticFilterSidebar<AppointmentLetter>
+        open={filterOpen}
+        onOpenChange={setFilterOpen}
+        fields={FILTER_FIELDS}
+        filters={fieldFilters}
+        onFiltersChange={setFieldFilters}
+        records={allLetters}
+      />
     </>
   );
 }
