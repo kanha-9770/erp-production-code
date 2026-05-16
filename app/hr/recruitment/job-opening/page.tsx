@@ -43,6 +43,7 @@ import {
   Pencil,
   Trash2,
   Layers,
+  Filter,
   Users as UsersIcon,
   Calendar,
   Globe,
@@ -58,6 +59,12 @@ import {
   useSavedViews,
   InlineEditCell,
 } from "@/components/real-estate/workspace";
+import {
+  StaticFilterSidebar,
+  applyStaticFilters,
+  type FieldFilter,
+  type StaticFilterField,
+} from "@/components/static-filter";
 import { useToast } from "@/hooks/use-toast";
 import { JobOpeningForm } from "@/components/job-opening/job-opening-form";
 
@@ -130,6 +137,68 @@ function formatDate(s: string | null | undefined): string {
   });
 }
 
+const FILTER_FIELDS: StaticFilterField<JobOpening>[] = [
+  {
+    id: "profileName",
+    label: "Profile Name",
+    type: "text",
+    accessor: (o) => o.profileName,
+  },
+  {
+    id: "designation",
+    label: "Designation",
+    type: "text",
+    accessor: (o) => o.designation,
+  },
+  {
+    id: "department",
+    label: "Department",
+    type: "text",
+    accessor: (o) => o.department,
+  },
+  {
+    id: "status",
+    label: "Status",
+    type: "select",
+    accessor: (o) => o.status,
+    options: STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label })),
+  },
+  {
+    id: "employmentType",
+    label: "Employment Type",
+    type: "select",
+    accessor: (o) => o.employmentType,
+    options: Object.entries(EMPLOYMENT_TYPE_LABEL).map(([value, label]) => ({
+      value,
+      label,
+    })),
+  },
+  {
+    id: "vacancies",
+    label: "Vacancies",
+    type: "number",
+    accessor: (o) => o.vacancies,
+  },
+  {
+    id: "publishOnWebsite",
+    label: "Published on Website",
+    type: "boolean",
+    accessor: (o) => !!o.publishOnWebsite,
+  },
+  {
+    id: "salaryApprox",
+    label: "Salary",
+    type: "text",
+    accessor: (o) => o.salaryApprox,
+  },
+  {
+    id: "createdAt",
+    label: "Created Date",
+    type: "date",
+    accessor: (o) => o.createdAt,
+  },
+];
+
 export default function JobOpeningListPage() {
   const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -138,6 +207,8 @@ export default function JobOpeningListPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [fieldFilters, setFieldFilters] = useState<FieldFilter[]>([]);
   const [createOpening, { isLoading: creating }] = useCreateJobOpeningMutation();
 
   const views = useSavedViews<Filters>("job-openings");
@@ -180,7 +251,7 @@ export default function JobOpeningListPage() {
 
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    return allOpenings.filter((o) => {
+    const base = allOpenings.filter((o) => {
       if (filters.status && o.status !== filters.status) return false;
       if (filters.employmentType && o.employmentType !== filters.employmentType)
         return false;
@@ -197,7 +268,8 @@ export default function JobOpeningListPage() {
         o.id?.toLowerCase().includes(q)
       );
     });
-  }, [allOpenings, filters]);
+    return applyStaticFilters(base, FILTER_FIELDS, fieldFilters);
+  }, [allOpenings, filters, fieldFilters]);
 
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -451,6 +523,19 @@ export default function JobOpeningListPage() {
               </div>
               <Button
                 size="sm"
+                variant="outline"
+                className="h-8"
+                onClick={() => setFilterOpen(true)}
+              >
+                <Filter className="h-3.5 w-3.5 mr-1" /> Filter
+                {fieldFilters.length > 0 && (
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                    {fieldFilters.length}
+                  </span>
+                )}
+              </Button>
+              <Button
+                size="sm"
                 className="h-8"
                 onClick={() => setCreateOpen(true)}
               >
@@ -661,6 +746,15 @@ export default function JobOpeningListPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <StaticFilterSidebar<JobOpening>
+        open={filterOpen}
+        onOpenChange={setFilterOpen}
+        fields={FILTER_FIELDS}
+        filters={fieldFilters}
+        onFiltersChange={setFieldFilters}
+        records={allOpenings}
+      />
     </>
   );
 }

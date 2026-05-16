@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Shared Staffing Plan form, used by /staffing-plan/new and (future) edit.
+ * Shared Staffing Plan form, used by /hr/recruitment/staffing-plan create + edit sheets.
  * Pure client component — the page wires the create-or-update mutation and
  * handles navigation.
  *

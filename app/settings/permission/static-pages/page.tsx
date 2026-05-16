@@ -251,15 +251,15 @@ export default function StaticPagesAnchorPage() {
   const effectiveSearch = search.trim().toLowerCase()
   const visibleGroups = effectiveSearch
     ? groups
-        .map((g) => ({
-          ...g,
-          pages: g.pages.filter(
-            (p) =>
-              p.label.toLowerCase().includes(effectiveSearch) ||
-              p.path.toLowerCase().includes(effectiveSearch),
-          ),
-        }))
-        .filter((g) => g.pages.length > 0)
+      .map((g) => ({
+        ...g,
+        pages: g.pages.filter(
+          (p) =>
+            p.label.toLowerCase().includes(effectiveSearch) ||
+            p.path.toLowerCase().includes(effectiveSearch),
+        ),
+      }))
+      .filter((g) => g.pages.length > 0)
     : groups
 
   return (
