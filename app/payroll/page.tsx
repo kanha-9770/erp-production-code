@@ -90,6 +90,8 @@ interface PayrollEarnings {
   uniform: number;
   specialAllowance: number;
   overtime: number;
+  // Per-employee bonus from Employee Master.
+  employeeBonus?: number;
 }
 
 interface PayrollDeductionsDetail {
@@ -1740,6 +1742,7 @@ export default function PayrollPage() {
                           { label: 'Books & Periodicals', value: e.books },
                           { label: 'Uniform', value: e.uniform },
                           { label: 'Special Allowance', value: e.specialAllowance },
+                          { label: 'Bonus (Employee Master)', value: e.employeeBonus ?? 0 },
                           { label: 'Overtime', value: e.overtime },
                         ]
                       : [];

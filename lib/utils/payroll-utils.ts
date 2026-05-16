@@ -252,6 +252,10 @@ export interface PayrollComputeInputs {
   payableDays: number; // already net of LOP / out-of-service
   daysInMonth: number; // for the monthDays divisor
   overtimeHours?: { weekday: number; weekend: number; holiday: number };
+  // Per-employee monthly bonus from Employee Master. Pro-rated by payable
+  // days and added to gross as a separate "Bonus" earning line. Optional —
+  // defaults to 0 so existing callers / synthetic inputs keep working.
+  employeeBonus?: number;
 }
 
 export interface PayrollComputeResult {
@@ -275,6 +279,7 @@ export interface PayrollComputeResult {
     uniform: number;
     specialAllowance: number;
     overtime: number;
+    employeeBonus: number;
   };
   grossSalary: number;
   deductionsDetail: {
@@ -352,9 +357,17 @@ export function computePayrollFromInputs(
   const monthlyUniform = isOn('uniformEnabled', false)
     ? Number(ssAny.uniformAllowance ?? 0)
     : 0;
+  // Per-employee bonus from Employee Master is treated as a fixed monthly
+  // component — sits inside CTC so it reduces auto special allowance by the
+  // same amount. If the resulting fixed sum exceeds baseSalary (e.g. an
+  // admin set bonus higher than the structure can absorb), special falls to
+  // 0 and gross naturally lands above CTC by the excess — matching the
+  // common HR practice where "Total = base structure + bonus".
+  const monthlyEmployeeBonus = Math.max(0, Number(inputs.employeeBonus ?? 0));
   const monthlyFixedSum =
     monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta +
-    monthlyFood + monthlyPhone + monthlyEdu + monthlyFuel + monthlyBooks + monthlyUniform;
+    monthlyFood + monthlyPhone + monthlyEdu + monthlyFuel + monthlyBooks + monthlyUniform +
+    monthlyEmployeeBonus;
   // Manual special allowance cannot be negative — a sign-error in config
   // shouldn't silently reduce gross below the sum of fixed components.
   const monthlySpecial =
@@ -376,6 +389,7 @@ export function computePayrollFromInputs(
   const earnedFuel = monthlyFuel * proRationFactor;
   const earnedBooks = monthlyBooks * proRationFactor;
   const earnedUniform = monthlyUniform * proRationFactor;
+  const earnedEmployeeBonus = monthlyEmployeeBonus * proRationFactor;
   const earnedSpecial = monthlySpecial * proRationFactor;
 
   // Overtime pay capped at maxOvertimeHoursPerMonth across buckets in
@@ -397,7 +411,7 @@ export function computePayrollFromInputs(
   const grossSalary =
     earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta +
     earnedFood + earnedPhone + earnedEdu + earnedFuel + earnedBooks + earnedUniform +
-    earnedSpecial + overtimePay;
+    earnedEmployeeBonus + earnedSpecial + overtimePay;
 
   // Deductions.
   let pf = 0;
@@ -569,6 +583,7 @@ export function computePayrollFromInputs(
       uniform: Math.round(earnedUniform),
       specialAllowance: Math.round(earnedSpecial),
       overtime: Math.round(overtimePay),
+      employeeBonus: Math.round(earnedEmployeeBonus),
     },
     grossSalary: Math.round(grossSalary),
     deductionsDetail: { pf, esi, pt, tds, lwf, nps },
@@ -854,6 +869,10 @@ function calculateForEmployee(
       payableDays: breakdown.payableDays,
       daysInMonth,
       overtimeHours: { weekday: weekdayOtHours, weekend: weekendOtHours, holiday: holidayOtHours },
+      // Per-employee bonus from Employee Master flows through unchanged —
+      // the engine pro-rates it by payable days and emits it as a separate
+      // earnings line.
+      employeeBonus: employee.bonusAmount ?? 0,
     },
     policy,
     formulas,

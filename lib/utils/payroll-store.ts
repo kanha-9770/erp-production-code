@@ -25,6 +25,14 @@ export interface SampleEmployee {
   designation: string;
   department: string;
   totalSalary: number;
+  // Per-employee monthly bonus carried over from Employee Master (the
+  // "Bonus amount" field on the Compensation section). Distinct from the
+  // profile-level bonuses (statutory / performance / festival / joining /
+  // retention) — those are configured per pay-rule profile and apply to
+  // everyone on that profile, whereas this is a fixed extra paid only to
+  // this specific employee. Pro-rated by payable days like every other
+  // earning, surfaced on the payslip as a "Bonus" line.
+  bonusAmount: number;
   matchKeys: string[];
   dateOfJoining: string | null;
   dateOfLeaving: string | null;
@@ -286,6 +294,10 @@ export interface PayrollEarnings {
   uniform: number;
   specialAllowance: number;
   overtime: number;
+  // Per-employee bonus from Employee Master (Employee.bonusAmount). Lives
+  // separately from profile-level bonusAccrual because this one is paid in
+  // the take-home gross every month, not smoothed as an employer accrual.
+  employeeBonus: number;
 }
 
 // Bonus accruals emitted alongside the payslip. These are MONTHLY ACCRUAL
@@ -1437,6 +1449,10 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       pickWithMapping(data, fields.dateOfLeaving, formInfo.labels, DOL_FALLBACKS),
     );
 
+    // Form-path doesn't map bonusAmount yet — only the native-user loop
+    // below sees Employee.bonusAmount directly. Default to 0 so the engine
+    // is happy; an admin who wants per-employee bonus on form-loaded
+    // employees should switch to the native Employee table path.
     employees.push({
       employeeId: String(employeeId),
       employeeName: String(employeeName),
@@ -1444,6 +1460,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
       designation: String(designation || ''),
       department: String(department || ''),
       totalSalary,
+      bonusAmount: 0,
       matchKeys,
       dateOfJoining,
       dateOfLeaving,
@@ -1488,6 +1505,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
             designation: true,
             totalSalary: true,
             givenSalary: true,
+            bonusAmount: true,
             dateOfJoining: true,
             dateOfLeaving: true,
           },
@@ -1529,6 +1547,14 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
             ? Number((u.employee.givenSalary as any).toString?.() ?? u.employee.givenSalary)
             : 0;
       const totalSalary = empSalary > 0 ? empSalary : fallbackSalary;
+      // Per-employee bonus from the Compensation section of Employee Master.
+      // null / undefined / negative collapse to 0 so we never accidentally
+      // pay a negative bonus.
+      const empBonusRaw = u.employee?.bonusAmount;
+      const empBonus =
+        empBonusRaw != null
+          ? Math.max(0, Number((empBonusRaw as any).toString?.() ?? empBonusRaw))
+          : 0;
 
       const matchKeys: string[] = [userIdKey];
       if (emailKey) matchKeys.push(emailKey);
@@ -1541,6 +1567,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         designation: u.employee?.designation ?? '',
         department: u.employee?.department ?? u.department ?? '',
         totalSalary,
+        bonusAmount: empBonus,
         matchKeys,
         dateOfJoining: u.employee?.dateOfJoining
           ? new Date(u.employee.dateOfJoining).toISOString().slice(0, 10)
