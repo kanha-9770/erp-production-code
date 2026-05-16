@@ -466,3 +466,22 @@ export function getStaticFormEntries(moduleName: string | null | undefined): Inj
     isPublished: true,
   }));
 }
+
+/**
+ * Module-list helper for module pickers (e.g. the "Create New Rule" dialog).
+ * Returns one synthetic module entry per static page so admins can build
+ * workflow rules / notifications against pages that aren't backed by a
+ * dynamic form. Synthetic ids use the `static-mod:` prefix so callers that
+ * care can distinguish them from real `module_id` values.
+ */
+export interface InjectedModule {
+  id: string;
+  name: string;
+}
+
+export function getStaticModules(): InjectedModule[] {
+  return STATIC_FORMS.map((f) => ({
+    id: `static-mod:${f.formId.replace(/^static:/, "")}`,
+    name: f.moduleName,
+  }));
+}

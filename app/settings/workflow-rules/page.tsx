@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import PageBackLink from "@/components/shared/page-back-link"
 import { useGetPermittedModulesQuery } from "@/lib/api/modules"
+import { getStaticModules } from "@/lib/static-page-fields"
 import { useGetWorkflowRulesQuery, useDeleteWorkflowRuleMutation, useUpdateWorkflowRuleMutation } from "@/lib/api/workflow-rules"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -88,10 +89,21 @@ export default function WorkflowRulesPage() {
   const { data: modulesData, isLoading: modulesLoading } = useGetPermittedModulesQuery()
   const systemModules = useMemo(() => {
     const mods = modulesData?.modules || []
-    return mods.map((m: any) => ({
+    const dynamic = mods.map((m: any) => ({
       id: m.module_id || m.id,
       name: m.module_name || m.name,
     }))
+    // Merge in static-page modules (Employee Master, Staffing Plan, Leave,
+    // etc.) so admins can build rules against them too. Dedupe by name —
+    // if the tenant already has a real module with the same name, the
+    // dynamic one wins.
+    const knownNames = new Set(dynamic.map((m) => m.name.trim().toLowerCase()))
+    const staticOnly = getStaticModules().filter(
+      (m) => !knownNames.has(m.name.trim().toLowerCase()),
+    )
+    return [...dynamic, ...staticOnly].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
   }, [modulesData])
 
   const { data: rulesData } = useGetWorkflowRulesQuery()
