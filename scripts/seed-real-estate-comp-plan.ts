@@ -247,8 +247,46 @@ async function main() {
     `[seed] Loaded ${SLABS.length} slabs · ${OVERRIDE_LEVELS.length} override levels · ` +
     `${DESIGNATIONS.length} designations · ${GUARANTEES.length} guarantees`,
   );
+
+  // ── Activate the plan + switch the org's engine to SLAB ────────────────
+  // The slab engine reads RebmSettings.{planEngine, activePlanId} on every
+  // transaction close; without these two writes the engine silently falls
+  // back to the legacy % rule. Doing it here keeps the seed self-contained
+  // so end-to-end tests don't have to remember a manual activate step.
+  await prisma.$transaction(async (tx) => {
+    await tx.compPlan.update({
+      where: { id: plan!.id },
+      data: {
+        status: "ACTIVE",
+        activatedAt: new Date(),
+        activatedBy: ROOT_USER_ID,
+      },
+    });
+
+    await tx.rebmSettings.upsert({
+      where: { organizationId: ROOT_ORG_ID },
+      create: {
+        organizationId: ROOT_ORG_ID,
+        planEngine: "SLAB",
+        activePlanId: plan!.id,
+        areaUnit: AREA_UNIT,
+        isReraRequired: false,
+        holdPeriodDays: 7,
+        companyResidualPercent: new Prisma.Decimal(0),
+        updatedById: ROOT_USER_ID,
+      },
+      update: {
+        planEngine: "SLAB",
+        activePlanId: plan!.id,
+        areaUnit: AREA_UNIT,
+        updatedById: ROOT_USER_ID,
+      },
+    });
+  });
+
   console.log("[seed] Plan id :", plan.id);
-  console.log("[seed] Status  : DRAFT (review + activate from /real-estate/admin/plan-designer)");
+  console.log("[seed] Status  : ACTIVE — RebmSettings.planEngine = SLAB");
+  console.log("[seed] Area unit: SQYD (commission auto-calculated in square yards)");
 }
 
 main()

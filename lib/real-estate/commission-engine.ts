@@ -201,6 +201,32 @@ export async function calculateCommission(
     include: { property: true },
   });
 
+  // Engine selector — when slab plan is active, return a shape-compatible
+  // CalculationResult derived from the slab engine so the preview endpoint
+  // can render it without branching on engine type.
+  const settings = await (tx as any).rebmSettings.findUnique({
+    where: { organizationId: transaction.organizationId },
+    select: { planEngine: true, activePlanId: true },
+  });
+  if (settings?.planEngine === "SLAB" && settings.activePlanId) {
+    const { calculateSlabCommission } = await import("./slab-engine");
+    const slabCalc = await calculateSlabCommission(tx, transactionId);
+    return {
+      ruleId: slabCalc.planId,
+      ruleVersion: slabCalc.planVersion,
+      baseCommission: slabCalc.directIncome.plus(slabCalc.overrideTotal),
+      splits: slabCalc.splits
+        .filter((s) => s.userId != null)
+        .map((s) => ({
+          role: (s.role === "DIRECT" ? "LISTING_AGENT" : s.role) as CalculatedSplit["role"],
+          level: s.level,
+          beneficiaryUserId: s.userId,
+          percent: new Prisma.Decimal(0),
+          amount: s.amount,
+        })),
+    };
+  }
+
   const property = transaction.property;
   const rule = await resolveActiveRule(
     tx,
@@ -359,6 +385,38 @@ export async function closeTransaction(
     throw new Error("Transaction already closed");
   if (transaction.status === "CANCELLED")
     throw new Error("Cannot close a cancelled transaction");
+
+  // Engine selector — when this org has switched to the slab plan engine
+  // (RebmSettings.planEngine === "SLAB"), hand off to the dedicated slab
+  // close. Falls through to the legacy % engine otherwise so orgs that
+  // haven't activated a CompPlan keep working unchanged.
+  const settings = await (tx as any).rebmSettings.findUnique({
+    where: { organizationId: transaction.organizationId },
+    select: { planEngine: true, activePlanId: true },
+  });
+  if (settings?.planEngine === "SLAB" && settings.activePlanId) {
+    const { closeTransactionSlab } = await import("./slab-engine");
+    const slabResult = await closeTransactionSlab(tx, transactionId, invokerUserId);
+    // Adapt SlabCalculationResult → CalculationResult so the route handler's
+    // response builder (which reads baseCommission / ruleId / ruleVersion /
+    // splits) doesn't have to branch on engine.
+    const splits: CalculatedSplit[] = slabResult.splits.map((s) => ({
+      role:
+        s.role === "DIRECT" ? "LISTING_AGENT"
+        : s.role === "OVERRIDE" ? "OVERRIDE"
+        : "BROKERAGE",
+      level: s.level,
+      beneficiaryUserId: s.userId,
+      percent: new Prisma.Decimal(0),
+      amount: s.amount,
+    }));
+    return {
+      ruleId: slabResult.planId,
+      ruleVersion: slabResult.planVersion,
+      baseCommission: slabResult.directIncome.plus(slabResult.overrideTotal),
+      splits,
+    };
+  }
 
   // Required documents check (FR-4.8).
   const docs = await tx.transactionDocument.count({

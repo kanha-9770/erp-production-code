@@ -120,6 +120,9 @@ export interface AttendanceStatus {
   shift: {
     start: string; // HH:mm
     end: string;
+    /** True when the times shown here come from the user's Employee.inTime
+     *  / outTime override rather than the org default. UI can flag this. */
+    isCustom: boolean;
   };
 }
 
@@ -149,6 +152,59 @@ function dateAtHHmm(base: Date, hhmm: string): Date {
 
 function diffMinutes(a: Date, b: Date): number {
   return Math.round((a.getTime() - b.getTime()) / 60000);
+}
+
+// ---- Per-employee shift override ------------------------------------------
+
+export interface EffectiveShift {
+  start: string; // HH:mm
+  end: string;
+  /** True when the user has their own `Employee.inTime`/`outTime` set and we
+   *  used those instead of the org default. UI can show a "(custom)" tag. */
+  isCustom: boolean;
+}
+
+/**
+ * Look up the shift window that should apply to this user for late/grace/OT
+ * classification. Prefers the user's per-employee override (`Employee.inTime`
+ * / `Employee.outTime`) when both are valid HH:mm strings; otherwise falls
+ * back to the org-wide `AttendanceConfig.defaultShiftStart` / `End`.
+ *
+ * Returning a tiny struct (not just two strings) so callers don't have to do
+ * the override-detection themselves and so the API can surface `isCustom` to
+ * the widget without a second lookup.
+ */
+export async function getEffectiveShift(
+  userId: string,
+  cfg: AttendanceConfig,
+): Promise<EffectiveShift> {
+  const fallback: EffectiveShift = {
+    start: cfg.defaultShiftStart,
+    end: cfg.defaultShiftEnd,
+    isCustom: false,
+  };
+  if (!userId) return fallback;
+
+  let emp: { inTime: string | null; outTime: string | null } | null;
+  try {
+    emp = await prisma.employee.findUnique({
+      where: { userId },
+      select: { inTime: true, outTime: true },
+    });
+  } catch {
+    // Employee table may not have the columns yet in old migrations — fall
+    // back silently so attendance still works.
+    return fallback;
+  }
+  if (!emp) return fallback;
+
+  const start = (emp.inTime ?? '').trim();
+  const end = (emp.outTime ?? '').trim();
+  // Both sides must be valid HH:mm; a half-set override would silently mix
+  // a custom start with the org default end, which is almost always wrong.
+  if (parseHHmm(start) === null || parseHHmm(end) === null) return fallback;
+
+  return { start, end, isCustom: true };
 }
 
 // ---- Geofence -------------------------------------------------------------
@@ -277,6 +333,7 @@ async function applyAutoCheckoutIfNeeded(
   rowId: string,
   checkInAt: Date,
   cfg: AttendanceConfig,
+  shift: EffectiveShift,
   now: Date,
 ): Promise<{ checkOutAt: Date; overtimeMinutes: number; earlyOutMinutes: number } | null> {
   const auto = parseHHmm(cfg.autoCheckoutAt ?? null);
@@ -289,7 +346,7 @@ async function applyAutoCheckoutIfNeeded(
   if (now.getTime() - checkInAt.getTime() < 60 * 60 * 1000) return null;
 
   const checkOutAt = autoToday;
-  const expectedOut = dateAtHHmm(now, cfg.defaultShiftEnd);
+  const expectedOut = dateAtHHmm(now, shift.end);
   const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, checkOutAt));
   const workedMinutes = Math.max(
     0,
@@ -320,6 +377,11 @@ export async function getStatus(
   organizationId: string | null,
 ): Promise<AttendanceStatus> {
   const cfg = await getAttendanceConfig(organizationId);
+  // Resolve the user's effective shift once up front. Late/grace/OT and the
+  // shift block in the response all use the same window so an employee with
+  // per-row inTime/outTime gets classified against their own hours instead of
+  // the org default.
+  const shift = await getEffectiveShift(userId, cfg);
   const now = new Date();
   const date = todayKey(now);
   const month = date.slice(0, 7);
@@ -384,6 +446,7 @@ export async function getStatus(
       row.id,
       checkInAtInitial,
       cfg,
+      shift,
       now,
     );
     if (result) {
@@ -393,8 +456,8 @@ export async function getStatus(
     }
   }
 
-  const expectedInAt = dateAtHHmm(now, cfg.defaultShiftStart);
-  const expectedOutAt = dateAtHHmm(now, cfg.defaultShiftEnd);
+  const expectedInAt = dateAtHHmm(now, shift.start);
+  const expectedOutAt = dateAtHHmm(now, shift.end);
   const isWeeklyOff = cfg.weeklyOffDays.includes(now.getDay());
 
   const checkedIn = !!row?.checkedIn;
@@ -500,7 +563,7 @@ export async function getStatus(
       lng: cfg.geofenceLng,
       radiusM: cfg.geofenceRadiusM,
     },
-    shift: { start: cfg.defaultShiftStart, end: cfg.defaultShiftEnd },
+    shift: { start: shift.start, end: shift.end, isCustom: shift.isCustom },
   };
 }
 
@@ -674,6 +737,10 @@ export async function recordPunch(
   input: PunchInput,
 ): Promise<{ status: AttendanceStatus; deduplicated: boolean }> {
   const cfg = await getAttendanceConfig(input.organizationId);
+  // Per-employee shift override: pulled once so the IN's lateMinutes and the
+  // OUT's earlyOutMinutes / overtimeMinutes are all computed against the
+  // same window the widget/getStatus shows the user.
+  const shift = await getEffectiveShift(input.userId, cfg);
   const now = new Date();
   const date = todayKey(now);
   const source = input.source ?? 'WEB';
@@ -854,7 +921,7 @@ export async function recordPunch(
       };
     }
 
-    const expectedIn = dateAtHHmm(now, cfg.defaultShiftStart);
+    const expectedIn = dateAtHHmm(now, shift.start);
     const graceEnd = new Date(expectedIn.getTime() + cfg.graceMinutes * 60_000);
     const lateMinutes = Math.max(0, diffMinutes(now, graceEnd));
 
@@ -957,7 +1024,7 @@ export async function recordPunch(
     const checkInAt = (existing as any).checkInAt
       ? new Date((existing as any).checkInAt)
       : null;
-    const expectedOut = dateAtHHmm(now, cfg.defaultShiftEnd);
+    const expectedOut = dateAtHHmm(now, shift.end);
     const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, now));
 
     let overtimeMinutes = 0;

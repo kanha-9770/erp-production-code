@@ -189,13 +189,6 @@ export const STATIC_PAGES: StaticPage[] = [
 
   // ── Employee Engagement ───────────────────────────────────────────────
   {
-    path: '/employee-engagement',
-    label: 'Employee Engagement',
-    group: 'Employee Engagement',
-    description: 'Module home — engagement dashboard and quick links',
-    icon: 'users',
-  },
-  {
     path: '/employee-engagement/self-target',
     label: 'Self Target',
     group: 'Employee Engagement',

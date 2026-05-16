@@ -32,6 +32,8 @@ import {
   PROPERTY_STATUS_LABEL, PROPERTY_STATUS_OPTIONS, PROPERTY_STATUS_VARIANT,
   PROPERTY_TYPE_LABEL, PROPERTY_TYPE_OPTIONS,
   PROPERTY_SUBTYPE_LABEL, formatCurrency, formatDate,
+  formatAreaSqyd, toSquareYards,
+  formatPropertyUnit, propertyUnitVocab,
 } from "@/components/real-estate/constants";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -53,12 +55,13 @@ interface Filters {
   status: string;
   type: string;
   city: string;
+  projectName: string;
   minPrice: string;
   maxPrice: string;
 }
 
 const EMPTY_FILTERS: Filters = {
-  search: "", status: "", type: "", city: "", minPrice: "", maxPrice: "",
+  search: "", status: "", type: "", city: "", projectName: "", minPrice: "", maxPrice: "",
 };
 
 export default function PropertiesListPage() {
@@ -99,6 +102,7 @@ export default function PropertiesListPage() {
     type: filters.type || undefined,
     status: filters.status || undefined,
     city: filters.city || undefined,
+    projectName: filters.projectName || undefined,
     minPrice: filters.minPrice || undefined,
     maxPrice: filters.maxPrice || undefined,
     limit: PAGE_SIZE,
@@ -127,6 +131,7 @@ export default function PropertiesListPage() {
     if (filters.status) pills.push({ key: "status", label: <>Status: <strong>{PROPERTY_STATUS_LABEL[filters.status as keyof typeof PROPERTY_STATUS_LABEL]}</strong></> });
     if (filters.type) pills.push({ key: "type", label: <>Type: <strong>{PROPERTY_TYPE_LABEL[filters.type as keyof typeof PROPERTY_TYPE_LABEL]}</strong></> });
     if (filters.city) pills.push({ key: "city", label: <>City: <strong>{filters.city}</strong></> });
+    if (filters.projectName) pills.push({ key: "projectName", label: <>Project: <strong>{filters.projectName}</strong></> });
     if (filters.minPrice) pills.push({ key: "minPrice", label: <>Min ₹{Number(filters.minPrice).toLocaleString()}</> });
     if (filters.maxPrice) pills.push({ key: "maxPrice", label: <>Max ₹{Number(filters.maxPrice).toLocaleString()}</> });
     return pills;
@@ -142,6 +147,10 @@ export default function PropertiesListPage() {
     () => [
       { id: "title", label: "Title", type: "text" },
       { id: "code", label: "Code", type: "text" },
+      { id: "projectName", label: "Project", type: "text" },
+      { id: "unitNumber", label: "Unit number", type: "text" },
+      { id: "block", label: "Block / Tower", type: "text" },
+      { id: "floor", label: "Floor", type: "text" },
       {
         id: "status",
         label: "Status",
@@ -199,19 +208,68 @@ export default function PropertiesListPage() {
     {
       id: "title",
       header: "Property",
-      width: 280,
+      width: 300,
       pinned: true,
       sortKey: "title",
-      copyValue: (p) => p.code ? `${p.title} (${p.code})` : p.title,
-      cell: (p) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate">{p.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">
-            {p.code ?? "—"} · {PROPERTY_TYPE_LABEL[p.type]}
-            {p.subType ? ` · ${PROPERTY_SUBTYPE_LABEL[p.subType]}` : ""}
+      copyValue: (p) => {
+        const unit = formatPropertyUnit(p);
+        const subline = [p.projectName, unit].filter(Boolean).join(" · ");
+        return subline ? `${p.title} — ${subline}` : p.title;
+      },
+      cell: (p) => {
+        // Project · Unit replaces the old `code · type` subline. The unit
+        // bit is formatted per-category (Plot 142 / Tower A · 5F · Flat 502)
+        // so the row matches how a broker would speak about the listing.
+        const unit = formatPropertyUnit(p);
+        const hasIdentity = p.projectName || unit;
+        return (
+          <div className="min-w-0">
+            <div className="font-medium truncate">{p.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">
+              {hasIdentity ? (
+                <>
+                  {p.projectName && <span className="font-medium text-foreground/70">{p.projectName}</span>}
+                  {p.projectName && unit && " · "}
+                  {unit}
+                </>
+              ) : (
+                <>
+                  {PROPERTY_TYPE_LABEL[p.type]}
+                  {p.subType ? ` · ${PROPERTY_SUBTYPE_LABEL[p.subType]}` : ""}
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        );
+      },
+    },
+    {
+      id: "projectName",
+      header: "Project",
+      width: 180,
+      sortKey: "projectName",
+      copyValue: (p) => p.projectName ?? "",
+      cell: (p) => (
+        <span className="truncate text-sm">{p.projectName ?? <span className="text-muted-foreground">—</span>}</span>
       ),
+    },
+    {
+      id: "unitId",
+      header: "Unit",
+      width: 160,
+      copyValue: (p) => formatPropertyUnit(p) ?? "",
+      cell: (p) => {
+        const unit = formatPropertyUnit(p);
+        if (!unit) return <span className="text-muted-foreground text-xs">—</span>;
+        return (
+          <span
+            className="text-xs tabular-nums"
+            title={`${propertyUnitVocab(p.type, p.subType).unitLabel}`}
+          >
+            {unit}
+          </span>
+        );
+      },
     },
     {
       id: "status",
@@ -270,7 +328,7 @@ export default function PropertiesListPage() {
       copyValue: (p) => [
         p.bedrooms != null ? `${p.bedrooms}BR` : null,
         p.bathrooms != null ? `${p.bathrooms}BA` : null,
-        p.area != null ? `${p.area}${p.areaUnit ?? ""}` : null,
+        p.area != null ? formatAreaSqyd(Number(p.area), p.areaUnit) : null,
       ].filter(Boolean).join(" / "),
       cell: (p) => (
         <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
@@ -281,9 +339,18 @@ export default function PropertiesListPage() {
             <span className="inline-flex items-center gap-0.5"><Bath className="h-3 w-3" />{p.bathrooms}</span>
           )}
           {p.area != null && (
-            <span className="inline-flex items-center gap-0.5">
+            <span
+              className="inline-flex items-center gap-0.5"
+              // Hover-title shows the original unit when we've converted to sq.yd
+              // so admins can spot conversions at a glance.
+              title={
+                (p.areaUnit ?? "sqyd").toLowerCase() !== "sqyd"
+                  ? `Original: ${p.area} ${p.areaUnit}`
+                  : undefined
+              }
+            >
               <Maximize className="h-3 w-3" />
-              {p.area}{p.areaUnit ? ` ${p.areaUnit}` : ""}
+              {toSquareYards(Number(p.area), p.areaUnit).toLocaleString("en-IN", { maximumFractionDigits: 0 })} sq.yd
             </span>
           )}
         </div>
@@ -405,6 +472,12 @@ export default function PropertiesListPage() {
               options={PROPERTY_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             />
             <div className="flex items-center gap-1">
+              <Input
+                placeholder="Project"
+                value={filters.projectName}
+                onChange={(e) => updateFilter("projectName", e.target.value)}
+                className="h-7 w-32 text-xs"
+              />
               <Input
                 placeholder="City"
                 value={filters.city}
@@ -533,6 +606,11 @@ function PropertyPreview({ id }: { id: string }) {
 
       <div>
         <h2 className="text-xl font-bold">{p.title}</h2>
+        {(p.projectName || formatPropertyUnit(p)) && (
+          <div className="text-sm font-medium text-foreground/80 mt-1 truncate">
+            {[p.projectName, formatPropertyUnit(p)].filter(Boolean).join(" · ")}
+          </div>
+        )}
         <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
           <MapPin className="h-3.5 w-3.5" />
           {[p.addressLine1, p.city, p.state].filter(Boolean).join(", ")}
@@ -543,7 +621,12 @@ function PropertyPreview({ id }: { id: string }) {
         <div className="flex flex-wrap gap-3 mt-2 text-sm text-muted-foreground tabular-nums">
           {p.bedrooms != null && <span className="flex items-center gap-1"><Bed className="h-4 w-4" />{p.bedrooms}</span>}
           {p.bathrooms != null && <span className="flex items-center gap-1"><Bath className="h-4 w-4" />{p.bathrooms}</span>}
-          {p.area != null && <span className="flex items-center gap-1"><Maximize className="h-4 w-4" />{p.area}{p.areaUnit ? ` ${p.areaUnit}` : ""}</span>}
+          {p.area != null && (
+            <span className="flex items-center gap-1">
+              <Maximize className="h-4 w-4" />
+              {formatAreaSqyd(Number(p.area), p.areaUnit)}
+            </span>
+          )}
           {p.parkingSpots != null && <span>{p.parkingSpots} parking</span>}
         </div>
       </div>
@@ -552,6 +635,14 @@ function PropertyPreview({ id }: { id: string }) {
       <div className="grid grid-cols-2 gap-3 text-sm">
         <Fact label="Type" value={`${PROPERTY_TYPE_LABEL[p.type]}${p.subType ? ` · ${PROPERTY_SUBTYPE_LABEL[p.subType]}` : ""}`} />
         <Fact label="Code" value={p.code ?? "—"} />
+        <Fact label={propertyUnitVocab(p.type, p.subType).projectLabel} value={p.projectName ?? "—"} />
+        <Fact label={propertyUnitVocab(p.type, p.subType).unitLabel} value={p.unitNumber ?? "—"} />
+        {propertyUnitVocab(p.type, p.subType).blockLabel && (
+          <Fact label={propertyUnitVocab(p.type, p.subType).blockLabel as string} value={p.block ?? "—"} />
+        )}
+        {propertyUnitVocab(p.type, p.subType).floorLabel && (
+          <Fact label={propertyUnitVocab(p.type, p.subType).floorLabel as string} value={p.floor ?? "—"} />
+        )}
         <Fact label="Listed" icon={Calendar} value={formatDate(p.listedAt)} />
         <Fact label="Expected close" icon={Calendar} value={formatDate(p.expectedClosingAt)} />
         <Fact label="Commission" icon={Coins}

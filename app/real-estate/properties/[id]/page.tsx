@@ -61,6 +61,9 @@ import {
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatAreaSqyd,
+  formatPropertyUnit,
+  propertyUnitVocab,
 } from "@/components/real-estate/constants";
 
 export default function PropertyDetailPage() {
@@ -132,6 +135,13 @@ export default function PropertyDetailPage() {
                 {PROPERTY_STATUS_LABEL[property.status]}
               </Badge>
             </div>
+            {(property.projectName || formatPropertyUnit(property)) && (
+              <p className="text-sm font-medium text-foreground/80 mt-1 truncate">
+                {[property.projectName, formatPropertyUnit(property)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
             <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
               <MapPin className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">
@@ -192,9 +202,25 @@ export default function PropertyDetailPage() {
               {PROPERTY_TYPE_LABEL[property.type]}
               {property.subType ? ` · ${PROPERTY_SUBTYPE_LABEL[property.subType]}` : ""}
             </Fact>
+            {property.projectName && (
+              <Fact
+                icon={<Building2 className="h-4 w-4" />}
+                label={propertyUnitVocab(property.type, property.subType).projectLabel}
+              >
+                {property.projectName}
+              </Fact>
+            )}
+            {(property.unitNumber || property.block || property.floor) && (
+              <Fact
+                icon={<MapPin className="h-4 w-4" />}
+                label={propertyUnitVocab(property.type, property.subType).unitLabel}
+              >
+                {formatPropertyUnit(property) ?? "—"}
+              </Fact>
+            )}
             {property.area != null && (
               <Fact icon={<Maximize className="h-4 w-4" />} label="Area">
-                {property.area.toLocaleString()} {property.areaUnit ?? ""}
+                {formatAreaSqyd(Number(property.area), property.areaUnit)}
               </Fact>
             )}
             <div className="flex items-center gap-3 text-muted-foreground">

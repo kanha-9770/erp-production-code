@@ -3,8 +3,9 @@ import {
   getEmployeesFromDB,
   getHolidaysFromDB,
   getLeavesFromDB,
-  getPayrollFormulas,
+  getOrgProfilesContext,
   getPayrollPolicy,
+  resolveEmployeeFormulas,
   PayrollFormulas,
   PayrollRecord,
   PayrollPolicy,
@@ -518,12 +519,18 @@ export function computePayrollFromInputs(
       );
     }
     if (bonus.retentionBonusEnabled) {
+      // Monthly pays the full amount every month (no smoothing). All other
+      // frequencies smooth across their period so the CTC view reflects
+      // steady-state cost; the actual payout still hits a single payslip
+      // in those months but the breakdown shows the per-month accrual.
       const months =
-        bonus.retentionBonusFrequency === 'half-yearly'
-          ? 6
-          : bonus.retentionBonusFrequency === 'annual'
-            ? 12
-            : 24; // one-time: smoothed over 2 years for CTC math
+        bonus.retentionBonusFrequency === 'monthly'
+          ? 1
+          : bonus.retentionBonusFrequency === 'half-yearly'
+            ? 6
+            : bonus.retentionBonusFrequency === 'annual'
+              ? 12
+              : 24; // one-time
       bonusAccrual.retention = Math.round(
         ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
       );
@@ -726,6 +733,8 @@ function calculateForEmployee(
   policy: PayrollPolicy,
   formulas: PayrollFormulas,
   month: string,
+  profileMeta?: { profileId: string | null; profileName: string | null; source: string },
+  baseSalaryOverride?: number | null,
 ): PayrollCalculation {
   const [yStr, mStr] = month.split('-');
   const year = Number(yStr);
@@ -831,7 +840,14 @@ function calculateForEmployee(
     breakdown.holidayDays +
     breakdown.weeklyOffDays;
 
-  const baseSalary = employee.totalSalary;
+  // Profile-level base salary override wins over the employee record's own
+  // salary — that's the point of per-employee profile selection (e.g. moving
+  // someone into a "Senior" profile that fixes CTC at a higher band).
+  // Employee.totalSalary is the fallback.
+  const baseSalary =
+    typeof baseSalaryOverride === 'number' && baseSalaryOverride > 0
+      ? baseSalaryOverride
+      : employee.totalSalary;
   const result = computePayrollFromInputs(
     {
       baseSalary,
@@ -879,6 +895,9 @@ function calculateForEmployee(
     department: employee.department,
     generatedAt: new Date().toISOString(),
     breakdown,
+    payrollProfileId: profileMeta?.profileId ?? null,
+    payrollProfileName: profileMeta?.profileName ?? null,
+    payrollProfileSource: profileMeta?.source ?? null,
   };
 }
 
@@ -889,13 +908,18 @@ export async function calculatePayroll(
   const targetMonth = month || new Date().toISOString().slice(0, 7);
   // Run all the IO concurrently — each fetcher is independent. The leave-rule
   // lookup is global so it doesn't need an org filter.
-  const [employees, attendance, leaves, holidays, policy, formulas, rules] = await Promise.all([
+  // `profileCtx` carries the per-employee profile map and the global fallback;
+  // it replaces the old single getPayrollFormulas call so each employee can
+  // resolve their own pay rules without re-querying inside the hot loop.
+  const [employees, attendance, leaves, holidays, policy, profileCtx, rules] = await Promise.all([
     getEmployeesFromDB(organizationId),
     getAttendanceFromDB(organizationId, targetMonth),
     getLeavesFromDB(organizationId, targetMonth),
     getHolidaysFromDB(organizationId, targetMonth),
     getPayrollPolicy(organizationId),
-    getPayrollFormulas(organizationId),
+    // targetMonth here makes effectiveFrom scheduling work: an assignment
+    // dated next month won't apply to this month's run.
+    getOrgProfilesContext(organizationId, targetMonth),
     loadLeaveRules(),
   ]);
 
@@ -937,7 +961,23 @@ export async function calculatePayroll(
       }
     }
 
-    return calculateForEmployee(emp, empAtt, empLeaves, holidays, rules, policy, formulas, targetMonth);
+    const resolution = resolveEmployeeFormulas(profileCtx, emp.employeeId);
+    return calculateForEmployee(
+      emp,
+      empAtt,
+      empLeaves,
+      holidays,
+      rules,
+      policy,
+      resolution.formulas,
+      targetMonth,
+      {
+        profileId: resolution.profileId,
+        profileName: resolution.profileName,
+        source: resolution.source,
+      },
+      resolution.baseSalaryOverride,
+    );
   });
 }
 

@@ -92,7 +92,7 @@ interface AttendanceStatusPayload {
     lng: number | null;
     radiusM: number | null;
   };
-  shift: { start: string; end: string };
+  shift: { start: string; end: string; isCustom: boolean };
 }
 
 const REFRESH_MS = 60_000;
@@ -908,6 +908,14 @@ export function AttendanceWidget({
               </div>
               <div className="text-[11px] text-gray-600">
                 Shift {status.shift.start} – {status.shift.end}
+                {status.shift.isCustom && (
+                  <span
+                    className="ml-1 text-[10px] text-emerald-700"
+                    title="Your shift differs from the company default."
+                  >
+                    (custom)
+                  </span>
+                )}
                 {" · "}grace {status.graceMinutes}m
               </div>
             </div>

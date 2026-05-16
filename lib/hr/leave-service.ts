@@ -32,6 +32,8 @@ export class LeaveError extends Error {
   }
 }
 
+export type ShortenStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface LeaveRequestRow {
   id: string;
   organizationId: string;
@@ -43,6 +45,7 @@ export interface LeaveRequestRow {
   totalDays: number;
   reason: string | null;
   attachmentUrl: string | null;
+  isEmergency: boolean;
   status: LeaveRequestStatus;
   appliedAt: string;
   decidedAt: string | null;
@@ -50,6 +53,15 @@ export interface LeaveRequestRow {
   decisionNote: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  // Early-return fields. Null on all of them = no shorten requested yet.
+  originalEndDate: string | null;
+  shortenRequestedEndDate: string | null;
+  shortenRequestedReason: string | null;
+  shortenStatus: ShortenStatus | null;
+  shortenRequestedAt: string | null;
+  shortenDecidedAt: string | null;
+  shortenDecidedById: string | null;
+  shortenDecisionNote: string | null;
 }
 
 export interface LeaveTypeLite {
@@ -274,6 +286,9 @@ export interface ApplyLeaveInput {
   duration: LeaveDuration;
   reason?: string | null;
   attachmentUrl?: string | null;
+  /** When true, the leave type's `minNoticeDays` rule is bypassed so the
+   *  employee can apply for today. startDate is still forbidden in the past. */
+  isEmergency?: boolean;
 }
 
 export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRow> {
@@ -287,15 +302,25 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
   const lt = await getLeaveType(input.leaveTypeId);
   if (!lt) throw new LeaveError('UNKNOWN_LEAVE_TYPE', 'Leave type not found or inactive.', 404);
 
-  // Notice period: startDate must be at least N days from today.
-  if (lt.rule.minNoticeDays && lt.rule.minNoticeDays > 0) {
-    const today = todayStr();
+  // Past-date guard — applies to every leave, including emergency. An
+  // emergency means "I need to start today", not "I forgot to file last week".
+  const today = todayStr();
+  if (dateOnlyMs(input.startDate) < dateOnlyMs(today)) {
+    throw new LeaveError(
+      'PAST_DATE',
+      'Start date cannot be in the past.',
+    );
+  }
+
+  // Notice period: startDate must be at least N days from today. Emergency
+  // leaves bypass this rule but still cannot be applied for past dates.
+  if (!input.isEmergency && lt.rule.minNoticeDays && lt.rule.minNoticeDays > 0) {
     const noticeMs = dateOnlyMs(input.startDate) - dateOnlyMs(today);
     const noticeDays = Math.floor(noticeMs / (1000 * 60 * 60 * 24));
     if (noticeDays < lt.rule.minNoticeDays) {
       throw new LeaveError(
         'INSUFFICIENT_NOTICE',
-        `${lt.type.name} requires at least ${lt.rule.minNoticeDays} day(s) notice. You gave ${noticeDays}.`,
+        `${lt.type.name} requires at least ${lt.rule.minNoticeDays} day(s) notice. You gave ${noticeDays}. Mark the request as Emergency if this is urgent.`,
       );
     }
   }
@@ -360,6 +385,7 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
         totalDays,
         reason: input.reason ?? null,
         attachmentUrl: input.attachmentUrl ?? null,
+        isEmergency: !!input.isEmergency,
         status: 'PENDING',
       },
     });
@@ -526,6 +552,197 @@ export async function cancelLeave(input: CancelLeaveInput): Promise<LeaveRequest
         status: 'CANCELLED',
         cancelledAt: new Date(),
         cancelReason: input.reason ?? null,
+      },
+    });
+  });
+
+  return serializeRequest(updated);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Early-return ("shorten") flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RequestEarlyReturnInput {
+  requestId: string;
+  /** Owner — the same userId on the LeaveRequest. */
+  userId: string;
+  /** New (earlier) end date the employee is requesting. YYYY-MM-DD, must lie
+   *  within [startDate, currentEndDate) of the leave. */
+  newEndDate: string;
+  reason?: string | null;
+}
+
+/**
+ * Employee-side action: ask to end an APPROVED leave earlier than originally
+ * planned. The new end date must be strictly before the current end date and
+ * not before the start date. Per leave, only one shorten request can be open
+ * at a time (`shortenStatus = PENDING`). Does NOT mutate the balance — that
+ * happens only on approval.
+ */
+export async function requestEarlyReturn(input: RequestEarlyReturnInput): Promise<LeaveRequestRow> {
+  if (!isValidDateStr(input.newEndDate)) {
+    throw new LeaveError('BAD_DATE', "newEndDate must be YYYY-MM-DD.");
+  }
+
+  const updated = await prisma.$transaction(async (tx: any) => {
+    const req = await tx.leaveRequest.findUnique({ where: { id: input.requestId } });
+    if (!req) throw new LeaveError('NOT_FOUND', 'Leave request not found.', 404);
+    if (req.userId !== input.userId) {
+      throw new LeaveError('FORBIDDEN', 'You can only shorten your own leave.', 403);
+    }
+    if (req.status !== 'APPROVED') {
+      throw new LeaveError(
+        'NOT_APPROVED',
+        'Only APPROVED leaves can be shortened. Pending leaves should be cancelled instead.',
+        409,
+      );
+    }
+    if (req.shortenStatus === 'PENDING') {
+      throw new LeaveError(
+        'SHORTEN_PENDING',
+        'An early-return request is already pending on this leave.',
+        409,
+      );
+    }
+
+    const startMs = dateOnlyMs(req.startDate);
+    const endMs = dateOnlyMs(req.endDate);
+    const newMs = dateOnlyMs(input.newEndDate);
+
+    if (newMs < startMs) {
+      throw new LeaveError(
+        'BAD_END_DATE',
+        `New end date (${input.newEndDate}) cannot be before the leave's start (${req.startDate}).`,
+      );
+    }
+    if (newMs >= endMs) {
+      throw new LeaveError(
+        'NOT_SHORTER',
+        `New end date (${input.newEndDate}) must be before the current end (${req.endDate}). Use cancel to drop the leave entirely.`,
+      );
+    }
+
+    return tx.leaveRequest.update({
+      where: { id: req.id },
+      data: {
+        shortenRequestedEndDate: input.newEndDate,
+        shortenRequestedReason: input.reason ?? null,
+        shortenStatus: 'PENDING',
+        shortenRequestedAt: new Date(),
+        // Clear any stale decision metadata from a previous reject so the
+        // approver UI doesn't show outdated context.
+        shortenDecidedAt: null,
+        shortenDecidedById: null,
+        shortenDecisionNote: null,
+      },
+    });
+  });
+
+  return serializeRequest(updated);
+}
+
+export interface DecideEarlyReturnInput {
+  requestId: string;
+  decision: 'APPROVED' | 'REJECTED';
+  decidedById: string;
+  note?: string | null;
+}
+
+/**
+ * Approver-side action: accept or reject a pending early-return request.
+ *
+ * On APPROVED: rewinds `endDate` to the requested date, recomputes `totalDays`
+ * for the new range, and refunds the balance by the day delta. The pre-shorten
+ * end date is preserved in `originalEndDate` (only on the first approval, so
+ * a second shorten doesn't overwrite the original audit trail).
+ *
+ * On REJECTED: just marks the shorten request as rejected; the leave stays
+ * intact at its original dates.
+ */
+export async function decideEarlyReturn(input: DecideEarlyReturnInput): Promise<LeaveRequestRow> {
+  const updated = await prisma.$transaction(async (tx: any) => {
+    const req = await tx.leaveRequest.findUnique({ where: { id: input.requestId } });
+    if (!req) throw new LeaveError('NOT_FOUND', 'Leave request not found.', 404);
+    if (req.shortenStatus !== 'PENDING' || !req.shortenRequestedEndDate) {
+      throw new LeaveError(
+        'NO_PENDING_SHORTEN',
+        'There is no pending early-return request to decide on.',
+        409,
+      );
+    }
+    if (req.status !== 'APPROVED') {
+      throw new LeaveError(
+        'NOT_APPROVED',
+        'Leave is no longer APPROVED — cannot shorten.',
+        409,
+      );
+    }
+
+    if (input.decision === 'REJECTED') {
+      return tx.leaveRequest.update({
+        where: { id: req.id },
+        data: {
+          shortenStatus: 'REJECTED',
+          shortenDecidedAt: new Date(),
+          shortenDecidedById: input.decidedById,
+          shortenDecisionNote: input.note ?? null,
+        },
+      });
+    }
+
+    // APPROVED — recompute totalDays for the new shorter range, refund the
+    // delta, and rewind endDate. Preserve originalEndDate the first time we
+    // shorten so the audit trail isn't lost on repeat shortens.
+    const newTotalDays = await computeTotalDays({
+      organizationId: req.organizationId,
+      startDate: req.startDate,
+      endDate: req.shortenRequestedEndDate,
+      duration: req.duration,
+    });
+    if (newTotalDays <= 0) {
+      throw new LeaveError(
+        'ZERO_DAYS',
+        'Shortened range contains only weekly-offs / holidays — cancel the leave instead.',
+      );
+    }
+
+    const oldTotalDays = toNumber(req.totalDays);
+    const refundDays = oldTotalDays - newTotalDays;
+
+    if (refundDays > 0) {
+      const year = yearOf(req.startDate);
+      const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
+      // used -= refundDays — frees up the days again on the balance.
+      await tx.leaveBalance.update({
+        where: { id: balance.id },
+        data: { used: { decrement: refundDays } },
+      });
+      await tx.leaveAllocation.create({
+        data: {
+          organizationId: req.organizationId,
+          userId: req.userId,
+          leaveTypeId: req.leaveTypeId,
+          year,
+          delta: refundDays,
+          reason: 'SHORTENED',
+          referenceId: req.id,
+          note: input.note ?? null,
+          createdById: input.decidedById,
+        },
+      });
+    }
+
+    return tx.leaveRequest.update({
+      where: { id: req.id },
+      data: {
+        endDate: req.shortenRequestedEndDate,
+        totalDays: newTotalDays,
+        originalEndDate: req.originalEndDate ?? req.endDate,
+        shortenStatus: 'APPROVED',
+        shortenDecidedAt: new Date(),
+        shortenDecidedById: input.decidedById,
+        shortenDecisionNote: input.note ?? null,
       },
     });
   });
@@ -730,6 +947,8 @@ export async function canApproveLeave(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function serializeRequest(r: any): LeaveRequestRow {
+  const iso = (v: any) =>
+    v ? (v instanceof Date ? v.toISOString() : String(v)) : null;
   return {
     id: r.id,
     organizationId: r.organizationId,
@@ -741,12 +960,21 @@ function serializeRequest(r: any): LeaveRequestRow {
     totalDays: toNumber(r.totalDays),
     reason: r.reason ?? null,
     attachmentUrl: r.attachmentUrl ?? null,
+    isEmergency: !!r.isEmergency,
     status: r.status,
     appliedAt: r.appliedAt instanceof Date ? r.appliedAt.toISOString() : String(r.appliedAt),
-    decidedAt: r.decidedAt ? (r.decidedAt instanceof Date ? r.decidedAt.toISOString() : String(r.decidedAt)) : null,
+    decidedAt: iso(r.decidedAt),
     decidedById: r.decidedById ?? null,
     decisionNote: r.decisionNote ?? null,
-    cancelledAt: r.cancelledAt ? (r.cancelledAt instanceof Date ? r.cancelledAt.toISOString() : String(r.cancelledAt)) : null,
+    cancelledAt: iso(r.cancelledAt),
     cancelReason: r.cancelReason ?? null,
+    originalEndDate: r.originalEndDate ?? null,
+    shortenRequestedEndDate: r.shortenRequestedEndDate ?? null,
+    shortenRequestedReason: r.shortenRequestedReason ?? null,
+    shortenStatus: (r.shortenStatus ?? null) as ShortenStatus | null,
+    shortenRequestedAt: iso(r.shortenRequestedAt),
+    shortenDecidedAt: iso(r.shortenDecidedAt),
+    shortenDecidedById: r.shortenDecidedById ?? null,
+    shortenDecisionNote: r.shortenDecisionNote ?? null,
   };
 }

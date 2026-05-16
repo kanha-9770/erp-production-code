@@ -36,6 +36,32 @@ function mulRaw(a: Prisma.Decimal, b: Prisma.Decimal): Prisma.Decimal {
   return a.times(b);
 }
 
+// ─── Unit conversion → sq.yd ────────────────────────────────────────────────
+// All slab math is in square yards. Multipliers below are the exact / standard
+// conversions; sqft uses 1/9 as a rational fraction so 9 sqft → exactly 1 sqyd
+// with no floating drift.
+const SQYD_PER_UNIT: Record<string, Prisma.Decimal> = {
+  sqyd:    new Prisma.Decimal(1),
+  sqft:    new Prisma.Decimal(1).dividedBy(9),
+  sqm:     new Prisma.Decimal("1.19599"),
+  acre:    new Prisma.Decimal(4840),
+  hectare: new Prisma.Decimal("11959.9"),
+};
+
+export function toSquareYards(
+  area: Prisma.Decimal,
+  unit: string | null | undefined,
+): Prisma.Decimal {
+  const key = (unit ?? "sqyd").toLowerCase();
+  const mult = SQYD_PER_UNIT[key];
+  if (!mult) {
+    throw new Error(
+      `Unknown areaUnit "${unit}". Use one of: ${Object.keys(SQYD_PER_UNIT).join(", ")}.`,
+    );
+  }
+  return area.times(mult).toDecimalPlaces(2, ROUND);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,6 +182,31 @@ async function getAgentCumulativeArea(
   return last ? dec(last.cumulativeArea) : ZERO;
 }
 
+/**
+ * Effective cumulative area for slab determination = personal + entire downline.
+ *
+ * This is the "group volume" the agent has produced. Team area is read from
+ * the recursive descendant CTE used by getTeamAreaTotals. A junior with no
+ * downline gets `personal` only, so their slab still tracks their own work;
+ * a leader gets their downline's production rolled in so their slab upgrades
+ * as the team produces.
+ *
+ * Used everywhere a slab rate is looked up: seller direct income, upline
+ * override differentials, designation milestones, and the dashboard ladder.
+ */
+async function getEffectiveCumulativeArea(
+  tx: Tx,
+  organizationId: string,
+  agentId: string,
+  planId: string,
+): Promise<Prisma.Decimal> {
+  const [personal, team] = await Promise.all([
+    getAgentCumulativeArea(tx, organizationId, agentId, planId, { slabs: [] }),
+    getTeamAreaTotals(tx, organizationId, agentId),
+  ]);
+  return personal.plus(new Prisma.Decimal(team.area));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Upline walk (same pattern as legacy engine, extended with rate lookup)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +224,7 @@ async function walkUplineWithRates(
   startUserId: string,
   plan: ResolvedPlan,
   maxDepth: number,
+  dealArea: Prisma.Decimal,
 ): Promise<UplineNode[]> {
   const startAgent = await (tx as any).agentProfile.findUnique({
     where: { userId: startUserId },
@@ -199,9 +251,14 @@ async function walkUplineWithRates(
       (node.status === "SUSPENDED" || node.status === "TERMINATED");
 
     if (!skipped) {
-      const cumArea = await getAgentCumulativeArea(tx, organizationId, node.id, plan.id, plan);
-      const rate = lookupSlabRate(plan, cumArea);
-      out.push({ agentId: node.id, userId: node.userId, cumulativeArea: cumArea, slabRate: rate });
+      // Effective = upline.personal + upline.team_before + this deal's area
+      // (the just-closing deal isn't in the ledger yet, but it's downline
+      // production for this upline so it counts toward their effective slab).
+      const effective = (
+        await getEffectiveCumulativeArea(tx, organizationId, node.id, plan.id)
+      ).plus(dealArea);
+      const rate = lookupSlabRate(plan, effective);
+      out.push({ agentId: node.id, userId: node.userId, cumulativeArea: effective, slabRate: rate });
     }
     cursor = node.parentId;
   }
@@ -223,11 +280,14 @@ export async function calculateSlabCommission(
 
   const plan = await resolveActivePlan(tx, txn.organizationId);
 
-  // Derive deal area from property. Property must have areaSqyd set.
-  const dealArea = dec(txn.property.areaSqyd ?? txn.property.areaSqft ?? 0);
+  // Derive deal area in sq.yd from the property's stored area + unit.
+  // sqyd is the canonical unit for the slab engine — every other unit is
+  // converted on the way in so admins can keep listing in whatever local
+  // unit makes sense for the deal (acre for farms, sqft for apartments).
+  const dealArea = toSquareYards(dec(txn.property.area ?? 0), txn.property.areaUnit);
   if (dealArea.lte(ZERO)) {
     throw new Error(
-      `Property ${txn.property.id} has no area (areaSqyd/areaSqft). Set it before closing.`,
+      `Property ${txn.property.id} has no area set. Add area + areaUnit before closing.`,
     );
   }
 
@@ -258,11 +318,31 @@ export async function calculateSlabCommission(
     }
   }
 
-  // Plan 1+2 — direct income for the seller
+  // Plan 1+2 — direct income for the seller.
+  //
+  // Slab rate is determined by EFFECTIVE cumulative area after this deal:
+  // personal sales + entire downline production. For a junior with no
+  // downline this is simply their personal cumulative; for a leader it
+  // rolls up the whole subtree (group-volume MLM model). The whole deal
+  // is credited at the slab the seller sits on once this deal lands.
+  //
+  // Trade-off vs. pre-deal lookup: this is more agent-favorable (no "I just
+  // missed the threshold by 1 sq.yd" sting) but a single deal can push a
+  // beginner straight onto a high slab. The override math below diffs against
+  // this same post-deal rate, so the upline differential stays consistent.
   const sellerCumAreaBefore = await getAgentCumulativeArea(
     tx, txn.organizationId, sellerAgent.id, plan.id, plan,
   );
-  const sellerRate = lookupSlabRate(plan, sellerCumAreaBefore);
+  const sellerTeamBefore = await getTeamAreaTotals(
+    tx, txn.organizationId, sellerAgent.id,
+  );
+  // Effective = (personal_before + dealArea) + sellerDownlineArea.
+  // The seller's own deal isn't in the ledger yet so we add dealArea manually;
+  // the team CTE excludes the seller themselves so no double-count.
+  const sellerEffectiveAfter = sellerCumAreaBefore
+    .plus(dealArea)
+    .plus(new Prisma.Decimal(sellerTeamBefore.area));
+  const sellerRate = lookupSlabRate(plan, sellerEffectiveAfter);
   const directIncome = mul(dealArea, sellerRate);
 
   const splits: SlabSplit[] = [];
@@ -273,12 +353,12 @@ export async function calculateSlabCommission(
     userId: sellerUserId,
     amount: directIncome,
     rateApplied: sellerRate,
-    note: `Direct income @ ₹${sellerRate.toFixed(2)}/unit × ${dealArea.toFixed(2)} units`,
+    note: `Direct income @ ₹${sellerRate.toFixed(2)}/unit × ${dealArea.toFixed(2)} units (slab after deal)`,
   });
 
   // Plan 3 — differential overrides up the upline chain (max 10 levels)
   const upline = await walkUplineWithRates(
-    tx, txn.organizationId, sellerUserId, plan, 10,
+    tx, txn.organizationId, sellerUserId, plan, 10, dealArea,
   );
 
   let overrideTotal = ZERO;
@@ -480,28 +560,58 @@ export async function closeTransactionSlab(
         },
       });
 
-      // Plan 4 — check designation milestones
+      // Plan 4 — designation milestones use effective area (personal + team).
+      // The seller's own new ledger row is now committed above, so getEffective
+      // sees the up-to-date personal cumulative; team CTE walks downline.
+      const effectiveAfter = await getEffectiveCumulativeArea(
+        tx, txn.organizationId, split.agentId, plan.id,
+      );
       await checkAndGrantDesignationMilestones(
         tx,
         txn.organizationId,
         split.agentId,
         plan.id,
-        newCumArea,
+        effectiveAfter,
+        invokerUserId,
+      );
+    }
+
+    // Plan 4 — uplines' effective area also just moved (downline sale rolled
+    // up into their team total). Re-check their milestones so a leader gets
+    // rank rewards when their group volume crosses a threshold.
+    if (split.role === "OVERRIDE" && split.agentId) {
+      const uplineEffective = await getEffectiveCumulativeArea(
+        tx, txn.organizationId, split.agentId, plan.id,
+      );
+      await checkAndGrantDesignationMilestones(
+        tx,
+        txn.organizationId,
+        split.agentId,
+        plan.id,
+        uplineEffective,
         invokerUserId,
       );
     }
   }
 
   // Audit entry
+  //
+  // CommissionAudit.ruleId has a FK to CommissionRule (the legacy %-engine
+  // table). Slab audits reference a CompPlan instead — there's no FK for
+  // that — so leave ruleId NULL and stash the plan reference in `inputs`
+  // (planId, planVersion, engine="SLAB"). All audit consumers we own read
+  // from `inputs` for slab rows, so nothing is lost.
   await (tx as any).commissionAudit.create({
     data: {
       organizationId: txn.organizationId,
       transactionId,
-      ruleId: plan.id, // reuse ruleId field to store planId for the slab engine
+      ruleId: null,
       ruleVersion: plan.version,
       kind: "CALCULATE",
       inputs: {
         engine: "SLAB",
+        planId: plan.id,
+        planVersion: plan.version,
         dealArea: calc.dealArea.toString(),
         sellerCumulativeAreaBefore: calc.sellerCumulativeAreaBefore.toString(),
         sellerRate: calc.sellerRate.toString(),
@@ -595,15 +705,17 @@ export async function reverseTransactionSlab(
     data: { status: "AVAILABLE" },
   });
 
-  // Audit
+  // Audit — same reasoning as the close path: ruleId NULL for slab audits,
+  // plan reference stays in `inputs`. txn.commissionRuleId is also kept null
+  // for slab closes, so we don't accidentally point at a non-existent rule.
   await (tx as any).commissionAudit.create({
     data: {
       organizationId: txn.organizationId,
       transactionId,
-      ruleId: txn.commissionRuleId ?? "SLAB",
+      ruleId: txn.commissionRuleId ?? null,
       ruleVersion: txn.commissionRuleVersion ?? 0,
       kind: "REVERSAL",
-      inputs: { reason, invokerUserId },
+      inputs: { engine: "SLAB", reason, invokerUserId },
       outputs: { reversedSplits: txn.commissionSplits.length },
       createdById: invokerUserId,
     },
@@ -698,7 +810,9 @@ export async function getAgentDesignation(
   });
   if (!plan) return null;
 
-  const cumArea = await getAgentCumulativeArea(tx, organizationId, agentId, planId, plan);
+  // Designation milestones use effective (personal + team) area, matching
+  // the slab engine — a leader earns their rank from group volume.
+  const cumArea = await getEffectiveCumulativeArea(tx, organizationId, agentId, planId);
 
   for (const des of plan.designations) {
     if (cumArea.gte(dec(des.minCumulativeArea))) {
@@ -880,5 +994,583 @@ export function simulatePlan(
     overrideTotal: overrideTotal.toNumber(),
     brokerageAmount: brokerageAmount.toNumber(),
     total: directIncome.plus(overrideTotal).plus(brokerageAmount).toNumber(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slab progress (read-only) — what an agent sees on their own dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SlabProgress {
+  enabled: boolean;            // false when the org isn't on SLAB engine yet
+  planName: string | null;
+  areaUnit: string;            // "SQYD" by default
+
+  // PERSONAL — area the agent has sold themselves. Displayed alongside the
+  // team total so the breakdown stays transparent.
+  cumulativeArea: number;       // total area sold by THIS agent (personal)
+  totalDirectIncome: number;    // sum of all direct income they earned
+  dealsCount: number;           // number of personal closed deals
+
+  // TEAM — personal + entire downline. THIS is the value that drives the
+  // slab rate (group-volume MLM model). currentSlab/nextSlab/ladder below
+  // are computed off this number, matching what the commission engine uses.
+  teamCumulativeArea: number;     // personal + sum(downline.cumulativeArea)
+  teamDirectIncome: number;       // personal income + downline's direct income
+  teamDealsCount: number;         // personal + downline deal count
+  downlineAgentCount: number;     // size of subtree (excluding self)
+
+  currentSlab: {
+    sortOrder: number;
+    minArea: number;
+    maxArea: number | null;
+    ratePerUnit: number;
+  } | null;
+  nextSlab: {
+    sortOrder: number;
+    minArea: number;
+    maxArea: number | null;
+    ratePerUnit: number;
+    areaToReach: number;        // sqyd still needed to upgrade
+  } | null;
+
+  // Every slab on the plan — the UI uses this to draw the full ladder with
+  // a "you are here" marker.
+  ladder: Array<{
+    sortOrder: number;
+    minArea: number;
+    maxArea: number | null;
+    ratePerUnit: number;
+    isCurrent: boolean;
+    isCleared: boolean;         // cumulativeArea >= minArea
+  }>;
+
+  // Designation milestones — earned + next unlocked threshold
+  currentDesignation: {
+    code: string;
+    name: string;
+    rewardDescription: string;
+  } | null;
+  nextDesignation: {
+    code: string;
+    name: string;
+    minCumulativeArea: number;
+    areaToReach: number;
+    rewardDescription: string;
+  } | null;
+  designations: Array<{
+    code: string;
+    name: string;
+    minCumulativeArea: number;
+    rewardType: string;
+    rewardDescription: string;
+    achieved: boolean;
+  }>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Team volume — sum of cumulative area across the agent's entire downline.
+//
+// Used by getEffectiveCumulativeArea: effective = personal + team. The slab
+// engine reads effective area to look up rates, so leaders' slabs upgrade as
+// the downline produces (group-volume MLM model). A junior with no downline
+// gets team=0, so their slab still tracks personal sales only.
+//
+// Note on override differentials: when two uplines sit at the same top slab
+// because both have large group volumes, their (uplineRate − sellerRate)
+// differential compresses to zero — that's expected compression, the highest
+// upline with a rate advantage earns the override.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TeamAreaTotals {
+  area: number;          // sq.yd — sum of dealArea across all descendants
+  dealsCount: number;    // # of closed deals in the downline
+  directIncome: number;  // sum of directIncome paid to descendants
+  agentCount: number;    // size of the downline subtree (excluding self)
+}
+
+/**
+ * Returns aggregated area-ledger totals for every descendant of `agentId`
+ * (excluding the agent themselves). Uses a Postgres recursive CTE — runs as
+ * a single round-trip regardless of tree depth.
+ *
+ * Includes both ACTIVE and inactive descendants — the user wants to see
+ * everything their tree has historically produced. Filtering by status is
+ * the caller's job if they need a different view.
+ */
+export async function getTeamAreaTotals(
+  tx: Tx,
+  organizationId: string,
+  agentId: string,
+): Promise<TeamAreaTotals> {
+  const rows: Array<{
+    total_area: string; deals_count: string; total_income: string; agent_count: string;
+  }> = await (tx as any).$queryRaw(Prisma.sql`
+    WITH RECURSIVE downline AS (
+      SELECT id
+        FROM re_agent_profiles
+       WHERE parent_id = ${agentId}
+         AND organization_id = ${organizationId}
+      UNION
+      SELECT child.id
+        FROM re_agent_profiles child
+        JOIN downline d ON child.parent_id = d.id
+       WHERE child.organization_id = ${organizationId}
+    )
+    SELECT
+      COALESCE(SUM(l.deal_area),     0)::text AS total_area,
+      COALESCE(SUM(l.direct_income), 0)::text AS total_income,
+      COALESCE(COUNT(l.id),          0)::text AS deals_count,
+      (SELECT COUNT(*) FROM downline)::text   AS agent_count
+    FROM re_agent_area_ledger l
+   WHERE l.agent_id IN (SELECT id FROM downline)
+     AND l.organization_id = ${organizationId}
+     AND l.is_reversed = false;
+  `);
+
+  // queryRaw returns numeric values as strings for Decimal columns — parse
+  // through Decimal so we don't introduce floating-point drift.
+  const r = rows[0] ?? { total_area: "0", deals_count: "0", total_income: "0", agent_count: "0" };
+  return {
+    area: dec(r.total_area).toNumber(),
+    dealsCount: Number(r.deals_count) || 0,
+    directIncome: dec(r.total_income).toNumber(),
+    agentCount: Number(r.agent_count) || 0,
+  };
+}
+
+/**
+ * Returns a snapshot of one agent's progress through the active slab plan.
+ * Pure read — safe to call from any GET handler without a transaction.
+ *
+ * `userId` is preferred over agentId because every agent-facing page already
+ * has the User in hand from the auth helper.
+ */
+export async function getSlabProgress(
+  tx: Tx,
+  organizationId: string,
+  userId: string,
+): Promise<SlabProgress> {
+  const settings = await (tx as any).rebmSettings.findUnique({
+    where: { organizationId },
+    select: { planEngine: true, activePlanId: true, areaUnit: true },
+  });
+
+  // Empty-but-valid response when slab engine isn't on — keeps the UI from
+  // having to special-case the "no plan yet" state.
+  const emptyResponse: SlabProgress = {
+    enabled: false,
+    planName: null,
+    areaUnit: settings?.areaUnit ?? "SQYD",
+    cumulativeArea: 0,
+    totalDirectIncome: 0,
+    dealsCount: 0,
+    teamCumulativeArea: 0,
+    teamDirectIncome: 0,
+    teamDealsCount: 0,
+    downlineAgentCount: 0,
+    currentSlab: null,
+    nextSlab: null,
+    ladder: [],
+    currentDesignation: null,
+    nextDesignation: null,
+    designations: [],
+  };
+
+  if (settings?.planEngine !== "SLAB" || !settings.activePlanId) {
+    return emptyResponse;
+  }
+
+  const plan = await (tx as any).compPlan.findUnique({
+    where: { id: settings.activePlanId },
+    include: {
+      slabs: { orderBy: { sortOrder: "asc" } },
+      designations: { orderBy: { sortOrder: "asc" } },
+    },
+  });
+  if (!plan || plan.status !== "ACTIVE") return emptyResponse;
+
+  const agent = await (tx as any).agentProfile.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  // A user without an AgentProfile (e.g. plain admin) gets the "no progress"
+  // shape — UI hides the card.
+  if (!agent) return { ...emptyResponse, enabled: true, planName: plan.name };
+
+  // Pull the latest area-ledger row for personal cumulative; aggregate the
+  // personal direct-income + deal count; in parallel, recursive-walk the
+  // downline for team volume. Three queries, one round-trip-batch.
+  const [last, agg, team] = await Promise.all([
+    (tx as any).agentAreaLedger.findFirst({
+      where: { organizationId, agentId: agent.id, planId: plan.id, isReversed: false },
+      orderBy: { createdAt: "desc" },
+      select: { cumulativeArea: true },
+    }),
+    (tx as any).agentAreaLedger.aggregate({
+      where: { organizationId, agentId: agent.id, planId: plan.id, isReversed: false },
+      _sum: { directIncome: true },
+      _count: { _all: true },
+    }),
+    getTeamAreaTotals(tx, organizationId, agent.id),
+  ]);
+
+  const cumulative = last ? dec(last.cumulativeArea) : ZERO;
+  const totalDirectIncome = agg._sum.directIncome ? dec(agg._sum.directIncome) : ZERO;
+  const dealsCount = agg._count._all ?? 0;
+
+  // Team totals roll up personal + downline. The user wanted this so a leader
+  // who hasn't personally closed anything still sees their team's production.
+  const teamCumulativeArea = cumulative.toNumber() + team.area;
+  const teamDirectIncome = totalDirectIncome.toNumber() + team.directIncome;
+  const teamDealsCount = dealsCount + team.dealsCount;
+
+  // Effective area drives the slab. Personal + entire downline production —
+  // this is the same value the commission engine uses to look up the seller's
+  // and uplines' rates, so the dashboard ladder matches what the engine pays.
+  const effective = dec(teamCumulativeArea);
+
+  const slabs = plan.slabs as Array<{ sortOrder: number; minArea: any; maxArea: any | null; ratePerUnit: any }>;
+
+  const ladder = slabs.map((s) => {
+    const min = dec(s.minArea);
+    const max = s.maxArea != null ? dec(s.maxArea) : null;
+    const isCurrent =
+      effective.gte(min) && (max === null || effective.lt(max));
+    return {
+      sortOrder: s.sortOrder,
+      minArea: min.toNumber(),
+      maxArea: max ? max.toNumber() : null,
+      ratePerUnit: dec(s.ratePerUnit).toNumber(),
+      isCurrent,
+      isCleared: effective.gte(min),
+    };
+  });
+
+  const currentSlab = ladder.find((s) => s.isCurrent) ?? null;
+  // The next slab is the first one not yet cleared. If the agent is on the
+  // very last (open-ended) slab, there is no "next" — keep it null.
+  const nextSlabRaw = ladder.find((s) => !s.isCleared) ?? null;
+  const nextSlab = nextSlabRaw
+    ? {
+        sortOrder: nextSlabRaw.sortOrder,
+        minArea: nextSlabRaw.minArea,
+        maxArea: nextSlabRaw.maxArea,
+        ratePerUnit: nextSlabRaw.ratePerUnit,
+        areaToReach: Math.max(0, nextSlabRaw.minArea - effective.toNumber()),
+      }
+    : null;
+
+  const designations = (plan.designations as Array<any>).map((d) => {
+    const min = dec(d.minCumulativeArea);
+    return {
+      code: d.designationCode,
+      name: d.designationName,
+      minCumulativeArea: min.toNumber(),
+      rewardType: d.rewardType,
+      rewardDescription: d.rewardDescription,
+      achieved: effective.gte(min),
+    };
+  });
+  const achievedDesignations = designations.filter((d) => d.achieved);
+  const currentDesignation = achievedDesignations.length
+    ? {
+        code: achievedDesignations[achievedDesignations.length - 1].code,
+        name: achievedDesignations[achievedDesignations.length - 1].name,
+        rewardDescription: achievedDesignations[achievedDesignations.length - 1].rewardDescription,
+      }
+    : null;
+  const nextDesignationRaw = designations.find((d) => !d.achieved) ?? null;
+  const nextDesignation = nextDesignationRaw
+    ? {
+        code: nextDesignationRaw.code,
+        name: nextDesignationRaw.name,
+        minCumulativeArea: nextDesignationRaw.minCumulativeArea,
+        areaToReach: Math.max(0, nextDesignationRaw.minCumulativeArea - effective.toNumber()),
+        rewardDescription: nextDesignationRaw.rewardDescription,
+      }
+    : null;
+
+  return {
+    enabled: true,
+    planName: plan.name,
+    areaUnit: plan.areaUnit ?? "SQYD",
+    cumulativeArea: cumulative.toNumber(),
+    totalDirectIncome: totalDirectIncome.toNumber(),
+    dealsCount,
+    teamCumulativeArea,
+    teamDirectIncome,
+    teamDealsCount,
+    downlineAgentCount: team.agentCount,
+    currentSlab,
+    nextSlab,
+    ladder,
+    currentDesignation,
+    nextDesignation,
+    designations,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slab history — for the agent profile page so admins (and the agent
+// themselves) can see every deal, the slab they were on for it, and every
+// upgrade event in order.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SlabHistoryDealRow {
+  ledgerId: string;
+  transactionId: string;
+  transactionCode: string | null;
+  closedAt: string | null;
+  dealArea: number;         // sq.yd
+  cumulativeArea: number;   // after this deal
+  rateApplied: number;      // ₹/sq.yd at deal time
+  directIncome: number;     // ₹ direct earned on this deal
+  propertyTitle: string | null;
+  propertyCode: string | null;
+}
+
+export interface SlabUpgradeEvent {
+  at: string;
+  triggeredByLedgerId: string;
+  triggeredByTransactionId: string;
+  fromSlab: { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number };
+  toSlab:   { sortOrder: number; minArea: number; maxArea: number | null; ratePerUnit: number };
+}
+
+export interface SlabHistoryDesignationEvent {
+  at: string;
+  triggeredByLedgerId: string | null;
+  code: string;
+  name: string;
+  rewardType: string;
+  rewardDescription: string;
+  minCumulativeArea: number;
+}
+
+export interface OverrideEarningRow {
+  splitId: string;
+  transactionId: string;
+  transactionCode: string | null;
+  closedAt: string | null;
+  level: number | null;
+  amount: number;
+  status: string;
+  fromAgentName: string | null;     // who closed the sale that fed this override
+  propertyTitle: string | null;
+}
+
+export interface AgentSlabHistory {
+  progress: SlabProgress;                        // same snapshot used in MyWallet card
+  deals: SlabHistoryDealRow[];                   // every closed deal (chronological)
+  slabUpgrades: SlabUpgradeEvent[];              // derived events
+  designationUnlocks: SlabHistoryDesignationEvent[];
+  overrides: {
+    rows: OverrideEarningRow[];
+    totalAmount: number;
+  };
+}
+
+/**
+ * Returns a complete slab history for one agent (by userId). Includes:
+ *   - current progress snapshot
+ *   - every deal in the area ledger
+ *   - synthesized slab-upgrade events (when consecutive ledger rows cross
+ *     a slab boundary)
+ *   - designation unlock events (from RewardGrant)
+ *   - override earnings this agent received from downline deals
+ *
+ * Pure read; safe outside a $transaction.
+ */
+export async function getAgentSlabHistory(
+  tx: Tx,
+  organizationId: string,
+  userId: string,
+): Promise<AgentSlabHistory> {
+  const progress = await getSlabProgress(tx, organizationId, userId);
+
+  const agent = await (tx as any).agentProfile.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+
+  if (!progress.enabled || !agent) {
+    return {
+      progress,
+      deals: [],
+      slabUpgrades: [],
+      designationUnlocks: [],
+      overrides: { rows: [], totalAmount: 0 },
+    };
+  }
+
+  // Resolve the active plan once so we can map ledger rows → slab boundaries.
+  const settings = await (tx as any).rebmSettings.findUnique({
+    where: { organizationId },
+    select: { activePlanId: true },
+  });
+  const plan = settings?.activePlanId
+    ? await (tx as any).compPlan.findUnique({
+        where: { id: settings.activePlanId },
+        include: { slabs: { orderBy: { sortOrder: "asc" } } },
+      })
+    : null;
+
+  const resolvedSlabs: ResolvedPlan["slabs"] =
+    plan?.slabs.map((s: any) => ({
+      sortOrder: s.sortOrder,
+      minArea: dec(s.minArea),
+      maxArea: s.maxArea != null ? dec(s.maxArea) : null,
+      ratePerUnit: dec(s.ratePerUnit),
+    })) ?? [];
+
+  const slabAt = (cumulative: Prisma.Decimal) => {
+    for (const s of resolvedSlabs) {
+      if (cumulative.gte(s.minArea) && (s.maxArea === null || cumulative.lt(s.maxArea))) return s;
+    }
+    return resolvedSlabs[resolvedSlabs.length - 1] ?? null;
+  };
+
+  // ── Pull every area-ledger row joined to its transaction + property ──
+  const ledger = await (tx as any).agentAreaLedger.findMany({
+    where: { organizationId, agentId: agent.id, isReversed: false },
+    orderBy: { createdAt: "asc" },
+    include: {
+      transaction: {
+        select: {
+          id: true, code: true, closedAt: true,
+          property: { select: { title: true, code: true } },
+        },
+      },
+    },
+  });
+
+  const deals: SlabHistoryDealRow[] = ledger.map((row: any) => ({
+    ledgerId: row.id,
+    transactionId: row.transactionId,
+    transactionCode: row.transaction?.code ?? null,
+    closedAt: row.transaction?.closedAt?.toISOString() ?? row.createdAt.toISOString(),
+    dealArea: dec(row.dealArea).toNumber(),
+    cumulativeArea: dec(row.cumulativeArea).toNumber(),
+    rateApplied: dec(row.rateApplied).toNumber(),
+    directIncome: dec(row.directIncome).toNumber(),
+    propertyTitle: row.transaction?.property?.title ?? null,
+    propertyCode: row.transaction?.property?.code ?? null,
+  }));
+
+  // ── Derive upgrade events by walking ledger and watching slab changes ─
+  const slabUpgrades: SlabUpgradeEvent[] = [];
+  let lastCum = ZERO;
+  let lastSlab = slabAt(lastCum);
+  for (const row of ledger) {
+    const before = lastCum;
+    const after = dec(row.cumulativeArea);
+    const beforeSlab = slabAt(before);
+    const afterSlab = slabAt(after);
+    if (
+      beforeSlab && afterSlab && beforeSlab.sortOrder !== afterSlab.sortOrder
+    ) {
+      slabUpgrades.push({
+        at: row.createdAt.toISOString(),
+        triggeredByLedgerId: row.id,
+        triggeredByTransactionId: row.transactionId,
+        fromSlab: {
+          sortOrder: beforeSlab.sortOrder,
+          minArea: beforeSlab.minArea.toNumber(),
+          maxArea: beforeSlab.maxArea ? beforeSlab.maxArea.toNumber() : null,
+          ratePerUnit: beforeSlab.ratePerUnit.toNumber(),
+        },
+        toSlab: {
+          sortOrder: afterSlab.sortOrder,
+          minArea: afterSlab.minArea.toNumber(),
+          maxArea: afterSlab.maxArea ? afterSlab.maxArea.toNumber() : null,
+          ratePerUnit: afterSlab.ratePerUnit.toNumber(),
+        },
+      });
+    }
+    lastCum = after;
+    lastSlab = afterSlab;
+  }
+
+  // ── Designation unlocks (one per RewardGrant) ──
+  const grants = settings?.activePlanId
+    ? await (tx as any).rewardGrant.findMany({
+        where: { organizationId, agentId: agent.id, planId: settings.activePlanId },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const designationUnlocks: SlabHistoryDesignationEvent[] = grants.map((g: any) => ({
+    at: g.createdAt.toISOString(),
+    triggeredByLedgerId: null,
+    code: g.designationCode,
+    name: g.designationName,
+    rewardType: g.rewardType,
+    rewardDescription: g.rewardDescription ?? "",
+    minCumulativeArea: dec(g.triggeredByArea).toNumber(),
+  }));
+
+  // ── Override earnings — splits where this agent was the beneficiary at
+  // OVERRIDE role. Sum total and list rows for transparency.
+  const overrideSplits = await (tx as any).commissionSplit.findMany({
+    where: {
+      organizationId,
+      beneficiaryUserId: userId,
+      role: "OVERRIDE",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      transaction: {
+        select: {
+          id: true, code: true, closedAt: true,
+          listingAgentId: true, sellingAgentId: true,
+          property: { select: { title: true } },
+        },
+      },
+    },
+  });
+
+  // Resolve names for the downline agent who closed each deal (best effort —
+  // empty when the user has been deleted).
+  const downlineUserIds = Array.from(
+    new Set(
+      overrideSplits
+        .map((s: any) => s.transaction?.sellingAgentId ?? s.transaction?.listingAgentId)
+        .filter(Boolean),
+    ),
+  );
+  const downlineUsers = downlineUserIds.length
+    ? await (tx as any).user.findMany({
+        where: { id: { in: downlineUserIds } },
+        select: { id: true, first_name: true, last_name: true, email: true },
+      })
+    : [];
+  const userById = new Map<string, any>(downlineUsers.map((u: any) => [u.id, u]));
+
+  const overrideRows: OverrideEarningRow[] = overrideSplits.map((s: any) => {
+    const fromUserId = s.transaction?.sellingAgentId ?? s.transaction?.listingAgentId;
+    const u = fromUserId ? userById.get(fromUserId) : null;
+    return {
+      splitId: s.id,
+      transactionId: s.transactionId,
+      transactionCode: s.transaction?.code ?? null,
+      closedAt: s.transaction?.closedAt?.toISOString() ?? null,
+      level: s.level,
+      amount: dec(s.amount).toNumber(),
+      status: s.status,
+      fromAgentName: u
+        ? `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || u.email
+        : null,
+      propertyTitle: s.transaction?.property?.title ?? null,
+    };
+  });
+  const overrideTotal = overrideRows.reduce((a, r) => a + r.amount, 0);
+
+  return {
+    progress,
+    deals,
+    slabUpgrades,
+    designationUnlocks,
+    overrides: { rows: overrideRows, totalAmount: overrideTotal },
   };
 }

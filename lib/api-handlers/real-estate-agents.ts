@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
+import { getAgentSlabHistory } from "@/lib/real-estate/slab-engine";
 
 async function requireAuth(request: NextRequest) {
   const user = await getAuthenticatedUser(request);
@@ -426,6 +427,37 @@ export const AgentHandlers = {
 
       return NextResponse.json({ success: true, data: agent });
     }, "get");
+  },
+
+  // GET /api/real-estate/agents/[id]/slab-history
+  // Returns the agent's slab progress + every deal, slab upgrade event,
+  // designation unlock, and override earning. Visibility follows the same
+  // gate as `get`: privileged (admin/manager) can see anyone; an agent can
+  // only see themselves or their downline (404 otherwise — don't leak
+  // existence).
+  async slabHistory(request: NextRequest, id: string): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      const scope = await resolveAgentViewerScope(auth);
+
+      if (!scope.isPrivileged && !scope.allowedAgentIds.has(id)) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+
+      const agent = await prisma.agentProfile.findFirst({
+        where: { id, organizationId: auth.organizationId },
+        select: { userId: true },
+      });
+      if (!agent)
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+      const history = await getAgentSlabHistory(
+        prisma,
+        auth.organizationId,
+        agent.userId,
+      );
+      return NextResponse.json({ success: true, data: history });
+    }, "slabHistory");
   },
 
   // PUT /api/real-estate/agents/[id]

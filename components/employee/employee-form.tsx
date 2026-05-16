@@ -28,10 +28,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  Camera,
 } from "lucide-react";
 import type { EmployeeDetail } from "@/lib/api/employees";
 import { useToast } from "@/hooks/use-toast";
 import { computeDescriptorFromBlobWithTimeout } from "@/lib/face/descriptor";
+import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
 
 /**
  * Resolve the org's Employee form id, seeding one if it doesn't exist yet.
@@ -290,6 +292,7 @@ export function EmployeeForm({
   >("idle");
   const [photoFaceCount, setPhotoFaceCount] = useState<number>(0);
   const [photoConsent, setPhotoConsent] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Revoke any object URL when the preview changes or the form unmounts
@@ -353,6 +356,32 @@ export function EmployeeForm({
     if (photoInputRef.current) photoInputRef.current.value = "";
     onPhotoPicked(null);
     setPhotoConsent(false);
+  };
+
+  const handleCameraCapture = (
+    blob: Blob,
+    descriptor: Float32Array | null,
+    faceCount: number,
+  ) => {
+    const file = new File([blob], `capture_${Date.now()}.jpg`, { type: "image/jpeg" });
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoDescriptor(descriptor);
+    setPhotoFaceCount(faceCount);
+    
+    if (faceCount === 0) {
+      setPhotoStatus("no_face");
+    } else if (faceCount > 1) {
+      setPhotoStatus("multiple_faces");
+      setPhotoDescriptor(null);
+    } else if (descriptor) {
+      setPhotoStatus("ok");
+    } else {
+      setPhotoStatus("no_face");
+    }
+    setCameraOpen(false);
   };
 
   useEffect(() => {
@@ -525,6 +554,15 @@ export function EmployeeForm({
                 >
                   <Upload className="mr-1.5 h-3.5 w-3.5" />
                   {photoFile ? "Replace photo" : "Choose photo"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCameraOpen(true)}
+                >
+                  <Camera className="mr-1.5 h-3.5 w-3.5" />
+                  Take photo
                 </Button>
                 {photoFile && (
                   <Button
@@ -893,6 +931,16 @@ export function EmployeeForm({
           </Button>
         </div>
       </div>
+
+      <FaceCaptureDialog
+        open={cameraOpen}
+        onOpenChange={setCameraOpen}
+        mode="OPTIONAL"
+        actionLabel="profile photo"
+        onCapture={handleCameraCapture}
+        extractDescriptor={true}
+        requireFaceDetected={false}
+      />
     </form>
   );
 }

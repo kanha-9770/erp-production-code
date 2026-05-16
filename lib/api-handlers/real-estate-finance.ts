@@ -16,6 +16,7 @@ import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 import { WalletService } from "@/lib/real-estate/wallet-service";
 import { releaseDueCommissions } from "@/lib/real-estate/commission-engine";
+import { getSlabProgress } from "@/lib/real-estate/slab-engine";
 import {
   encryptAccountNumber,
   decryptAccountNumber,
@@ -101,6 +102,15 @@ export const WalletHandlers = {
         }));
       return NextResponse.json({ success: true, data: serializeWallet(result) });
     }, "getMine");
+  },
+
+  // GET /api/real-estate/my-slab — current user's slab progress / rank
+  async getMySlab(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      const progress = await getSlabProgress(prisma, auth.organizationId, auth.id);
+      return NextResponse.json({ success: true, data: progress });
+    }, "getMySlab");
   },
 
   // GET /api/real-estate/wallet/ledger — current user's ledger entries

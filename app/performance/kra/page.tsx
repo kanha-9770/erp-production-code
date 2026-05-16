@@ -1,58 +1,44 @@
 "use client";
 
+/**
+ * Key Result Areas (KRA) — Premium Workspace Layout.
+ * Tracks measurable objectives, goal weighting, and quarterly progress.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import {
-  Target,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-  TrendingUp,
-  AlertTriangle,
-  CheckCircle2,
+  Target, Plus, Search, Pencil, Trash2, TrendingUp, AlertTriangle,
+  CheckCircle2, Calendar, User, Briefcase, Percent, Zap, Info,
+  ArrowRight, BarChart3, Flag, Layers
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  WorkspaceShell, WorkspaceHeader,
+  DataTable, type ColumnDef,
+  FilterChips, ActiveFilterPills,
+  ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
+} from "@/components/real-estate/workspace";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import PageBackLink from "@/components/shared/page-back-link";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle
+} from "@/components/ui/sheet";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+
+// --- Types & Constants ---
 
 type KraStatus = "DRAFT" | "ACTIVE" | "ACHIEVED" | "AT_RISK" | "MISSED";
 type Period = "Q1" | "Q2" | "Q3" | "Q4" | "ANNUAL";
@@ -61,7 +47,7 @@ interface Kra {
   id: string;
   employee: string;
   objective: string;
-  weight: number; // percentage 0-100
+  weight: number; // percentage
   target: string;
   actual: string;
   progress: number; // 0-100
@@ -71,31 +57,21 @@ interface Kra {
   notes: string;
 }
 
+const STATUS_OPTIONS = [
+  { value: "DRAFT", label: "Draft" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "ACHIEVED", label: "Achieved" },
+  { value: "AT_RISK", label: "At Risk" },
+  { value: "MISSED", label: "Missed" },
+];
+
+const PERIOD_OPTIONS = [
+  { value: "Q1", label: "Q1" }, { value: "Q2", label: "Q2" },
+  { value: "Q3", label: "Q3" }, { value: "Q4", label: "Q4" },
+  { value: "ANNUAL", label: "Annual" },
+];
+
 const STORAGE_KEY = "performance-kra:v1";
-
-const STATUS_LABEL: Record<KraStatus, string> = {
-  DRAFT: "Draft",
-  ACTIVE: "Active",
-  ACHIEVED: "Achieved",
-  AT_RISK: "At Risk",
-  MISSED: "Missed",
-};
-
-const STATUS_VARIANT: Record<KraStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  DRAFT: "secondary",
-  ACTIVE: "default",
-  ACHIEVED: "default",
-  AT_RISK: "outline",
-  MISSED: "destructive",
-};
-
-const PERIOD_LABEL: Record<Period, string> = {
-  Q1: "Q1",
-  Q2: "Q2",
-  Q3: "Q3",
-  Q4: "Q4",
-  ANNUAL: "Annual",
-};
 
 const SEED: Kra[] = [
   {
@@ -107,7 +83,7 @@ const SEED: Kra[] = [
     actual: "4.6 hours",
     progress: 78,
     period: "Q1",
-    year: new Date().getFullYear(),
+    year: 2024,
     status: "ACTIVE",
     notes: "Tracked via Zendesk export",
   },
@@ -120,7 +96,7 @@ const SEED: Kra[] = [
     actual: "8 deals",
     progress: 100,
     period: "Q1",
-    year: new Date().getFullYear(),
+    year: 2024,
     status: "ACHIEVED",
     notes: "Closed last deal on 28 Mar",
   },
@@ -133,506 +109,417 @@ const SEED: Kra[] = [
     actual: "Beta only",
     progress: 55,
     period: "Q1",
-    year: new Date().getFullYear(),
+    year: 2024,
     status: "AT_RISK",
     notes: "Tax compliance review pending",
   },
 ];
 
-function loadKras(): Kra[] {
-  if (typeof window === "undefined") return SEED;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return SEED;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Kra[]) : SEED;
-  } catch {
-    return SEED;
-  }
-}
-
-function saveKras(items: Kra[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-}
-
-function nextKraId(items: Kra[]): string {
-  const nums = items
-    .map((k) => Number(k.id.replace(/[^0-9]/g, "")))
-    .filter((n) => Number.isFinite(n));
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `KRA-${String(next).padStart(4, "0")}`;
-}
-
 const EMPTY: Kra = {
-  id: "",
-  employee: "",
-  objective: "",
-  weight: 0,
-  target: "",
-  actual: "",
-  progress: 0,
-  period: "Q1",
-  year: new Date().getFullYear(),
-  status: "DRAFT",
-  notes: "",
+  id: "", employee: "", objective: "", weight: 0, target: "", actual: "",
+  progress: 0, period: "Q1", year: new Date().getFullYear(), status: "DRAFT", notes: ""
 };
+
+// --- Main Component ---
 
 export default function KraPage() {
   const { toast } = useToast();
   const [items, setItems] = useState<Kra[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"" | KraStatus>("");
-  const [periodFilter, setPeriodFilter] = useState<"" | Period>("");
-  const [editing, setEditing] = useState<Kra | null>(null);
-  const [deleting, setDeleting] = useState<Kra | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  const [filters, setFilters] = useState({ search: "", period: "", status: "" });
+  const [searchInput, setSearchInput] = useState("");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const views = useSavedViews<typeof filters>("performance-kra");
 
   useEffect(() => {
-    setItems(loadKras());
-    setLoaded(true);
+    if (typeof window !== "undefined") {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setItems(JSON.parse(raw));
+      else setItems(SEED);
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (loaded) saveKras(items);
-  }, [items, loaded]);
+    if (!loading) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }, [items, loading]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((k) => {
-      if (statusFilter && k.status !== statusFilter) return false;
-      if (periodFilter && k.period !== periodFilter) return false;
-      if (!q) return true;
-      return (
-        k.employee.toLowerCase().includes(q) ||
-        k.id.toLowerCase().includes(q) ||
+  const filterFields: FilterField[] = useMemo(() => [
+    { id: "employee", label: "Employee", type: "text" },
+    { id: "objective", label: "Objective", type: "text" },
+    { id: "period", label: "Period", type: "select", options: PERIOD_OPTIONS },
+    { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "weight", label: "Weight", type: "number" },
+    { id: "progress", label: "Progress", type: "number" },
+  ], []);
+
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(k => 
+        k.employee.toLowerCase().includes(q) || 
+        k.id.toLowerCase().includes(q) || 
         k.objective.toLowerCase().includes(q)
       );
-    });
-  }, [items, search, statusFilter, periodFilter]);
-
-  const stats = useMemo(() => {
-    const total = items.length;
-    const active = items.filter((k) => k.status === "ACTIVE").length;
-    const achieved = items.filter((k) => k.status === "ACHIEVED").length;
-    const atRisk = items.filter((k) => k.status === "AT_RISK" || k.status === "MISSED").length;
-    return { total, active, achieved, atRisk };
-  }, [items]);
-
-  const onSave = (draft: Kra) => {
-    if (!draft.employee.trim()) {
-      toast({ title: "Employee is required", variant: "destructive" });
-      return;
     }
-    if (!draft.objective.trim()) {
-      toast({ title: "Objective is required", variant: "destructive" });
-      return;
+    if (filters.period) result = result.filter(k => k.period === filters.period);
+    if (filters.status) result = result.filter(k => k.status === filters.status);
+    return applyAdvancedFilters(result, conditions, filterFields);
+  }, [items, filters, conditions, filterFields]);
+
+  const columns: ColumnDef<Kra>[] = useMemo(() => [
+    {
+      id: "id",
+      header: "KRA ID",
+      width: 120,
+      pinned: true,
+      cell: (k) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{k.id}</span>,
+    },
+    {
+      id: "employee",
+      header: "Employee / Goal",
+      width: 320,
+      cell: (k) => (
+        <div className="min-w-0">
+           <div className="font-bold truncate uppercase text-[12px]">{k.employee}</div>
+           <div className="text-[10px] text-muted-foreground truncate uppercase flex items-center gap-1 font-medium">
+              <Target className="h-3 w-3" /> {k.objective}
+           </div>
+        </div>
+      ),
+    },
+    {
+      id: "weight",
+      header: "Weight",
+      width: 100,
+      cell: (k) => <div className="font-bold text-xs uppercase tracking-tight">{k.weight}%</div>,
+    },
+    {
+      id: "progress",
+      header: "Real-time Progress",
+      width: 180,
+      cell: (k) => (
+        <div className="space-y-1.5">
+           <div className="flex items-center justify-between text-[10px] font-black uppercase">
+              <span>{k.progress}% Complete</span>
+           </div>
+           <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all rounded-full ${k.status === 'AT_RISK' ? 'bg-amber-500' : k.status === 'MISSED' ? 'bg-red-500' : 'bg-emerald-500'}`} 
+                style={{ width: `${k.progress}%` }} 
+              />
+           </div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (k) => {
+        const colors: Record<string, string> = {
+          DRAFT: "bg-slate-100 text-slate-800",
+          ACTIVE: "bg-blue-100 text-blue-800",
+          ACHIEVED: "bg-emerald-100 text-emerald-800",
+          AT_RISK: "bg-amber-100 text-amber-800",
+          MISSED: "bg-red-100 text-red-800",
+        };
+        return <Badge variant="outline" className={`${colors[k.status]} text-[10px] font-bold uppercase`}>{k.status.replace('_', ' ')}</Badge>;
+      },
+    },
+  ], []);
+
+  const handleSave = (draft: Kra) => {
+    if (editingId) {
+      setItems(items.map(i => i.id === editingId ? draft : i));
+      toast({ title: "KRA Updated" });
+    } else {
+      const newId = `KRA-${String(items.length + 1).padStart(4, '0')}`;
+      setItems([{ ...draft, id: newId }, ...items]);
+      toast({ title: "KRA Added" });
     }
-    const existing = items.find((k) => k.id === draft.id);
-    const finalKra: Kra =
-      existing != null ? draft : { ...draft, id: draft.id || nextKraId(items) };
-    setItems((prev) =>
-      existing != null
-        ? prev.map((k) => (k.id === finalKra.id ? finalKra : k))
-        : [finalKra, ...prev],
-    );
-    setEditing(null);
-    toast({
-      title: existing ? "KRA updated" : "KRA added",
-      description: `${finalKra.id} · ${finalKra.employee}`,
-    });
+    setFormOpen(false);
+    setEditingId(null);
   };
 
-  const onDelete = (kra: Kra) => {
-    setItems((prev) => prev.filter((k) => k.id !== kra.id));
-    setDeleting(null);
-    toast({ title: "KRA deleted", description: `${kra.id} · ${kra.employee}` });
+  const handleDelete = () => {
+    if (!deletingId) return;
+    setItems(items.filter(i => i.id !== deletingId));
+    if (selectedId === deletingId) setSelectedId(null);
+    setDeletingId(null);
+    toast({ title: "KRA Deleted", variant: "destructive" });
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1.5">
-          <PageBackLink href="/admin/modules" label="Modules" />
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
-            <Target className="h-5 w-5 text-gray-500" /> Key Result Areas
-          </h1>
-          <p className="mt-1 text-sm text-gray-600 max-w-2xl">
-            Define measurable objectives per employee, weight them by priority,
-            and track quarterly progress. KRAs feed into the performance
-            appraisal at period close.
-          </p>
-        </div>
-        <Button onClick={() => setEditing({ ...EMPTY })}>
-          <Plus className="h-4 w-4 mr-1.5" /> Add KRA
-        </Button>
-      </div>
+    <>
+      <WorkspaceShell
+        scope="performance-kra"
+        selectedId={selectedId}
+        onCloseSelection={() => setSelectedId(null)}
+        header={
+          <>
+            <WorkspaceHeader
+              icon={<Target className="h-5 w-5 text-blue-600" />}
+              title="Key Result Areas (KRA)"
+              subtitle={`${filteredItems.length} objectives defined`}
+            >
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search objective, employee..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && setFilters(f => ({ ...f, search: searchInput }))}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
+              </div>
+              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <ManageColumnsButton tableId="performance-kra" columns={columns} />
+              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
+                <Plus className="h-4 w-4 mr-1.5" /> New KRA
+              </Button>
+            </WorkspaceHeader>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <KpiCard label="Total KRAs" value={stats.total.toString()} />
-        <KpiCard label="Active" value={stats.active.toString()} tone="primary" />
-        <KpiCard label="Achieved" value={stats.achieved.toString()} tone="success" />
-        <KpiCard label="At risk / missed" value={stats.atRisk.toString()} tone="warning" />
-      </div>
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+              <ViewsBar
+                views={views.views}
+                activeId={views.activeId}
+                onSelect={(id) => {
+                   views.select(id);
+                   const v = views.views.find(x => x.id === id);
+                   if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
+                   else { setFilters({ search: "", period: "", status: "" }); setSearchInput(""); }
+                }}
+                onSave={(name) => views.save(name, filters)}
+                onDelete={views.remove}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", period: "", status: "" }) !== JSON.stringify(filters)}
+              />
+            </div>
 
-      <Card className="mb-4">
-        <CardContent className="p-3 flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search employee, ID, objective…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-          <Select
-            value={statusFilter || "ALL"}
-            onValueChange={(v) =>
-              setStatusFilter(v === "ALL" ? "" : (v as KraStatus))
-            }
-          >
-            <SelectTrigger className="h-8 w-[150px] text-sm">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All statuses</SelectItem>
-              {(Object.keys(STATUS_LABEL) as KraStatus[]).map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_LABEL[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={periodFilter || "ALL"}
-            onValueChange={(v) =>
-              setPeriodFilter(v === "ALL" ? "" : (v as Period))
-            }
-          >
-            <SelectTrigger className="h-8 w-[130px] text-sm">
-              <SelectValue placeholder="All periods" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All periods</SelectItem>
-              {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
-                <SelectItem key={p} value={p}>
-                  {PERIOD_LABEL[p]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[110px]">KRA ID</TableHead>
-              <TableHead>Employee</TableHead>
-              <TableHead>Objective</TableHead>
-              <TableHead className="w-[80px] text-right">Weight</TableHead>
-              <TableHead className="w-[160px]">Progress</TableHead>
-              <TableHead className="w-[110px]">Period</TableHead>
-              <TableHead className="w-[120px]">Status</TableHead>
-              <TableHead className="w-[80px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground text-sm">
-                  {items.length === 0
-                    ? "No KRAs yet. Click \"Add KRA\" to define the first objective."
-                    : "No KRAs match these filters."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              filtered.map((k) => {
-                const StatusIcon =
-                  k.status === "ACHIEVED"
-                    ? CheckCircle2
-                    : k.status === "AT_RISK" || k.status === "MISSED"
-                      ? AlertTriangle
-                      : TrendingUp;
-                return (
-                  <TableRow key={k.id}>
-                    <TableCell className="font-mono text-xs">{k.id}</TableCell>
-                    <TableCell className="font-medium">{k.employee}</TableCell>
-                    <TableCell>
-                      <div className="text-sm">{k.objective}</div>
-                      {k.target && (
-                        <div className="text-[11px] text-muted-foreground">
-                          Target: {k.target}
-                          {k.actual ? ` · Actual: ${k.actual}` : ""}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {k.weight}%
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Progress value={k.progress} className="h-1.5" />
-                        <span className="text-[11px] text-muted-foreground tabular-nums w-8 text-right">
-                          {k.progress}%
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {PERIOD_LABEL[k.period]} {k.year}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <StatusIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                        <Badge variant={STATUS_VARIANT[k.status]} className="text-[10px]">
-                          {STATUS_LABEL[k.status]}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setEditing(k)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => setDeleting(k)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <KraDialog
-        open={editing != null}
-        draft={editing}
-        onCancel={() => setEditing(null)}
-        onSave={onSave}
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips label="Period" value={filters.period} onChange={(v) => setFilters(f => ({ ...f, period: v }))} options={PERIOD_OPTIONS} />
+              <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", period: "", status: "" }); setSearchInput(""); }} />
+            </div>
+          </>
+        }
+        list={
+          <DataTable<Kra>
+            tableId="performance-kra"
+            columns={columns}
+            rows={filteredItems}
+            rowId={(k) => k.id}
+            isLoading={loading}
+            selectedId={selectedId}
+            onRowClick={(k) => setSelectedId(k.id)}
+          />
+        }
+        preview={selectedId ? (
+          <KraPreview 
+            id={selectedId} 
+            items={items} 
+            onEdit={(id) => { setEditingId(id); setFormOpen(true); }} 
+            onDelete={(id) => setDeletingId(id)} 
+          />
+        ) : null}
+        previewHeader={selectedId ? <PreviewHeader id={selectedId} items={items} /> : null}
       />
 
-      <AlertDialog open={deleting != null} onOpenChange={(o) => !o && setDeleting(null)}>
+      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle className="uppercase tracking-tight font-black">{editingId ? 'Edit KRA' : 'Define New KRA'}</SheetTitle>
+          </SheetHeader>
+          <KraForm
+            initial={editingId ? items.find(i => i.id === editingId) : undefined}
+            onCancel={() => setFormOpen(false)}
+            onSubmit={handleSave}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete KRA?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleting && (
-                <>
-                  This will permanently remove <strong>{deleting.id}</strong> ·{" "}
-                  {deleting.employee} from the register. This cannot be undone.
-                </>
-              )}
-            </AlertDialogDescription>
+            <AlertDialogTitle>Remove KRA objective?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently delete the goal definition and its progress tracking. This action is irreversible.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleting && onDelete(deleting)}>
-              Delete
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete KRA</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+function PreviewHeader({ id, items }: { id: string, items: Kra[] }) {
+  const k = items.find(x => x.id === id);
+  if (!k) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{k.id}</Badge>
+      <span className="font-bold text-sm truncate uppercase tracking-tight">{k.employee}</span>
     </div>
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "primary" | "success" | "warning";
-}) {
-  const toneClass: Record<typeof tone, string> = {
-    neutral: "text-gray-900",
-    primary: "text-blue-700",
-    success: "text-emerald-700",
-    warning: "text-amber-700",
-  } as const;
+function KraPreview({ id, items, onEdit, onDelete }: { id: string, items: Kra[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+  const k = items.find(x => x.id === id);
+  if (!k) return null;
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
-          {label}
+    <div className="p-6 space-y-8">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+           <h2 className="text-3xl font-black uppercase tracking-tighter leading-tight">{k.employee}</h2>
+           <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px] font-black uppercase tracking-[0.1em]">{k.period} {k.year} GOAL</Badge>
+              <div className="h-1 w-1 rounded-full bg-slate-300" />
+              <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-tight">
+                 <Percent className="h-3.5 w-3.5" /> Weight: {k.weight}% of Total Performance
+              </div>
+           </div>
         </div>
-        <div className={`text-2xl font-bold tabular-nums mt-1 ${toneClass[tone]}`}>
-          {value}
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl" onClick={() => onEdit(k.id)}><Pencil className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(k.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      <Card className="p-6 border-0 bg-slate-900 text-white space-y-4 shadow-2xl relative overflow-hidden">
+         <div className="flex justify-between items-center relative z-10">
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Live Progress Tracking</span>
+            <span className="text-3xl font-black text-emerald-400">{k.progress}%</span>
+         </div>
+         <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden relative z-10">
+            <div className="h-full bg-emerald-500 rounded-full transition-all duration-1000" style={{ width: `${k.progress}%` }} />
+         </div>
+         <div className="flex justify-between items-end relative z-10">
+            <div className="space-y-1">
+               <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Objective Details</span>
+               <p className="text-sm font-medium leading-relaxed">{k.objective}</p>
+            </div>
+            <BarChart3 className="h-12 w-12 text-white/10 absolute -bottom-4 -right-2" />
+         </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+         <Card className="p-5 border-0 bg-slate-50 flex flex-col justify-between">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Target Outcome</span>
+            <div className="flex items-center gap-3">
+               <div className="p-2 rounded-xl bg-white shadow-sm text-blue-600"><Flag className="h-4 w-4" /></div>
+               <span className="text-lg font-black uppercase tracking-tight">{k.target || "NOT DEFINED"}</span>
+            </div>
+         </Card>
+         <Card className="p-5 border-0 bg-slate-50 flex flex-col justify-between">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Actual Achievement</span>
+            <div className="flex items-center gap-3">
+               <div className="p-2 rounded-xl bg-white shadow-sm text-emerald-600"><Zap className="h-4 w-4" /></div>
+               <span className="text-lg font-black uppercase tracking-tight">{k.actual || "PENDING"}</span>
+            </div>
+         </Card>
+      </div>
+
+      <div className="space-y-6">
+         <div className="space-y-3">
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
+               <Layers className="h-3.5 w-3.5" /> Additional Notes & Context
+            </h3>
+            <p className="text-sm font-medium leading-relaxed text-slate-700 bg-slate-50/50 p-5 rounded-2xl border border-slate-100 italic">
+               "{k.notes || "No strategic notes provided for this objective yet. Click edit to add context."}"
+            </p>
+         </div>
+      </div>
+    </div>
   );
 }
 
-function KraDialog({
-  open,
-  draft,
-  onCancel,
-  onSave,
-}: {
-  open: boolean;
-  draft: Kra | null;
-  onCancel: () => void;
-  onSave: (k: Kra) => void;
-}) {
-  const [form, setForm] = useState<Kra>(EMPTY);
-  useEffect(() => {
-    if (draft) setForm(draft);
-  }, [draft]);
-
-  const isEdit = !!draft?.id;
+function KraForm({ initial, onCancel, onSubmit }: { initial?: Kra, onCancel: () => void, onSubmit: (data: Kra) => void }) {
+  const [formData, setFormData] = useState<Kra>(initial || { ...EMPTY });
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit KRA" : "Add KRA"}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? `Update details for ${form.id}.`
-              : "Define a measurable objective for an employee. ID is generated automatically."}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="p-6 space-y-8">
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Employee Name</Label>
+        <Input value={formData.employee} onChange={e => setFormData({ ...formData, employee: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. John Doe" />
+      </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <Label className="text-xs">Employee</Label>
-            <Input
-              value={form.employee}
-              onChange={(e) => setForm({ ...form, employee: e.target.value })}
-              placeholder="Employee name"
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Objective</Label>
-            <Textarea
-              value={form.objective}
-              onChange={(e) => setForm({ ...form, objective: e.target.value })}
-              placeholder="e.g. Reduce average ticket resolution time by 25%"
-              rows={2}
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Target</Label>
-            <Input
-              value={form.target}
-              onChange={(e) => setForm({ ...form, target: e.target.value })}
-              placeholder="e.g. ≤ 4 hours"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Actual</Label>
-            <Input
-              value={form.actual}
-              onChange={(e) => setForm({ ...form, actual: e.target.value })}
-              placeholder="Current value"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Weight (%)</Label>
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              value={form.weight || ""}
-              onChange={(e) =>
-                setForm({ ...form, weight: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })
-              }
-              placeholder="0-100"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Progress (%)</Label>
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              value={form.progress || ""}
-              onChange={(e) =>
-                setForm({ ...form, progress: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })
-              }
-              placeholder="0-100"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Period</Label>
-            <Select
-              value={form.period}
-              onValueChange={(v) => setForm({ ...form, period: v as Period })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {PERIOD_LABEL[p]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Year</Label>
-            <Input
-              type="number"
-              value={form.year}
-              onChange={(e) => setForm({ ...form, year: Number(e.target.value) || new Date().getFullYear() })}
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Status</Label>
-            <Select
-              value={form.status}
-              onValueChange={(v) => setForm({ ...form, status: v as KraStatus })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(STATUS_LABEL) as KraStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Notes</Label>
-            <Input
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              placeholder="Optional"
-            />
-          </div>
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Strategic Objective</Label>
+        <Textarea value={formData.objective} onChange={e => setFormData({ ...formData, objective: e.target.value })} className="min-h-[80px] rounded-2xl border-slate-200" placeholder="e.g. Increase enterprise conversion rate..." />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Target Metric</Label>
+          <Input value={formData.target} onChange={e => setFormData({ ...formData, target: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. 15% increase" />
         </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Actual Result</Label>
+          <Input value={formData.actual} onChange={e => setFormData({ ...formData, actual: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. 12% achieved" />
+        </div>
+      </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={() => onSave(form)}>
-            {isEdit ? "Save changes" : "Add KRA"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Objective Weight (%)</Label>
+          <Input type="number" value={formData.weight} onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Period</Label>
+          <Select value={formData.period} onValueChange={v => setFormData({ ...formData, period: v as Period })}>
+            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+            <SelectContent>{PERIOD_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Target Year</Label>
+          <Input type="number" value={formData.year} onChange={e => setFormData({ ...formData, year: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
+        </div>
+      </div>
+
+      <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4 shadow-2xl">
+         <div className="flex items-center justify-between">
+            <Label className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Live Progress Completion</Label>
+            <span className="text-2xl font-black text-blue-400">{formData.progress}%</span>
+         </div>
+         <Input 
+           type="range" min="0" max="100" 
+           value={formData.progress} 
+           onChange={e => setFormData({ ...formData, progress: Number(e.target.value) })}
+           className="h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-400 w-full"
+         />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Strategic Notes</Label>
+        <Textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="min-h-[80px] rounded-2xl border-slate-200" placeholder="Context, blockers, or evidence..." />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Lifecycle Status</Label>
+        <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as KraStatus })}>
+          <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+          <SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-6 border-t">
+        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Cancel</Button>
+        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
+           {initial ? 'Update Objective' : 'Commit Goal'}
+        </Button>
+      </div>
+    </div>
   );
 }
