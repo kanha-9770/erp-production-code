@@ -169,7 +169,7 @@ export interface PayrollBonus {
   // Retention bonus — periodic.
   retentionBonusEnabled?: boolean;
   retentionBonusAmount?: number;
-  retentionBonusFrequency?: 'annual' | 'half-yearly' | 'one-time';
+  retentionBonusFrequency?: 'monthly' | 'annual' | 'half-yearly' | 'one-time';
 }
 
 export interface PayrollOvertime {

@@ -144,7 +144,7 @@ export interface PayrollSetup {
     joiningBonusClawbackMonths?: number;
     retentionBonusEnabled?: boolean;
     retentionBonusAmount?: number;
-    retentionBonusFrequency?: 'annual' | 'half-yearly' | 'one-time';
+    retentionBonusFrequency?: 'monthly' | 'annual' | 'half-yearly' | 'one-time';
   };
   policy: {
     weeklyOffDays: number[];

@@ -137,7 +137,7 @@ export interface BonusConfig {
   // mass-market roles, common in senior/specialist tracks).
   retentionBonusEnabled: boolean;
   retentionBonusAmount: number;
-  retentionBonusFrequency: 'annual' | 'half-yearly' | 'one-time';
+  retentionBonusFrequency: 'monthly' | 'annual' | 'half-yearly' | 'one-time';
 }
 
 // Per-state PT presets. PT is governed by individual State Profession Tax
@@ -430,12 +430,19 @@ export function SalaryPreview({
       );
     }
     if (bonus.retentionBonusEnabled) {
+      // Monthly retention pays the full amount every month — no smoothing.
+      // Annual / half-yearly are smoothed across their period for the CTC
+      // view (the actual payout still hits a single month in reality, but
+      // the steady-state monthly accrual is what the admin wants to see).
+      // One-time is amortised over 2 years.
       const months =
-        bonus.retentionBonusFrequency === 'half-yearly'
-          ? 6
-          : bonus.retentionBonusFrequency === 'annual'
-            ? 12
-            : 24; // one-time: smooth over 2 years for CTC math
+        bonus.retentionBonusFrequency === 'monthly'
+          ? 1
+          : bonus.retentionBonusFrequency === 'half-yearly'
+            ? 6
+            : bonus.retentionBonusFrequency === 'annual'
+              ? 12
+              : 24; // one-time
       retentionBonusM = Math.round(bonus.retentionBonusAmount / months);
     }
   }
@@ -1391,6 +1398,7 @@ export function BonusSection({
                   >
                     <SelectTrigger className="h-9 w-full sm:w-48"><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="monthly">Monthly</SelectItem>
                       <SelectItem value="annual">Annual</SelectItem>
                       <SelectItem value="half-yearly">Half-yearly</SelectItem>
                       <SelectItem value="one-time">One-time</SelectItem>

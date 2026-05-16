@@ -183,8 +183,12 @@ export default function PayrollProfilesPage() {
     setMounted(true);
   }, []);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (opts: { silent?: boolean } = {}) => {
+    // Silent mode skips the full-screen "Loading pay rule profiles..." gate
+    // so background refreshes after save/assign don't unmount the form the
+    // user is interacting with. Initial mount stays non-silent so the gate
+    // still shows on a cold load.
+    if (!opts.silent) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/payroll/profiles', { cache: 'no-store' });
@@ -198,8 +202,11 @@ export default function PayrollProfilesPage() {
         setEditing(def);
       } else if (selectedId) {
         const found = ps.find((p) => p.id === selectedId);
-        if (found) setEditing(found);
-        else {
+        // On a SILENT refresh we deliberately don't blow away the user's
+        // in-flight edits in `editing` — they may have unsaved tweaks open.
+        // Only the profile list + counts get the fresh values.
+        if (found && !opts.silent) setEditing(found);
+        else if (!found) {
           setSelectedId(ps[0]?.id ?? null);
           setEditing(ps[0] ?? null);
         }
@@ -207,7 +214,7 @@ export default function PayrollProfilesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load profiles');
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   };
 
@@ -245,11 +252,24 @@ export default function PayrollProfilesPage() {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to create profile');
-      await load();
-      setSelectedId(json.profile.id);
+      // Optimistic insert — the create response already carries the new
+      // profile, so we splice it into local state and switch to it. The
+      // dialog can close right now; the background reload runs un-awaited
+      // afterwards just to reconcile assignedCount and any server-side
+      // defaults the client doesn't know about.
+      const fresh = mergeProfile(json.profile);
+      setProfiles((prev) => {
+        // Avoid a flash of duplicate row if a parallel load already added it.
+        if (prev.some((p) => p.id === fresh.id)) return prev;
+        return [...prev, { ...fresh, assignedCount: 0 }];
+      });
+      setSelectedId(fresh.id);
+      setEditing(fresh);
       setSuccess(`Profile "${json.profile.name}" created`);
       setCreateOpen(false);
       setCreateName('');
+      // Fire-and-forget background reload.
+      void load({ silent: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create profile');
     } finally {
@@ -281,7 +301,7 @@ export default function PayrollProfilesPage() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Save failed');
       setSuccess(`Profile "${editing.name}" saved. Next payroll run will use the updated rules.`);
-      await load();
+      void load({ silent: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -303,7 +323,7 @@ export default function PayrollProfilesPage() {
           setSuccess(`Profile "${p.name}" deleted`);
           setSelectedId(null);
           setEditing(null);
-          await load();
+          void load({ silent: true });
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Delete failed');
         } finally {
@@ -404,7 +424,7 @@ export default function PayrollProfilesPage() {
             `Applied "${profile.name}" to ${json.assigned ?? json.total ?? 'all'} employee${(json.assigned ?? 1) === 1 ? '' : 's'} from ${formatMonth(effectiveFrom)}.`,
           );
           closePicker();
-          await load();
+          void load({ silent: true });
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Bulk assign failed');
         } finally {
@@ -437,7 +457,7 @@ export default function PayrollProfilesPage() {
         `Applied "${pickerProfile.name}" to ${json.assigned ?? keys.length} employee${(json.assigned ?? keys.length) === 1 ? '' : 's'} from ${formatMonth(effectiveFrom)}.`,
       );
       closePicker();
-      await load();
+      void load({ silent: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Bulk assign failed');
     } finally {
@@ -471,7 +491,7 @@ export default function PayrollProfilesPage() {
             `Cleared ${json.count ?? keys.length} assignment${(json.count ?? keys.length) === 1 ? '' : 's'}.`,
           );
           closePicker();
-          await load();
+          void load({ silent: true });
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Clear failed');
         } finally {

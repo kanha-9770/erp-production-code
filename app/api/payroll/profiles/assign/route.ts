@@ -94,34 +94,43 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Assign path: upserts one row per key. Done sequentially because Prisma
-  // doesn't expose a multi-row upsert and a transaction array would tank
-  // when the list grows to hundreds of employees (we'd hit the connection
-  // limit). Per-row failure is logged but doesn't abort the batch — the
-  // admin gets back a partial-success count.
+  // Assign path: upsert one row per key. Done in parallel chunks — fully
+  // sequential was painfully slow on apply-to-all for orgs >50 employees
+  // (50× round-trip = 5s+). A pool of 10 concurrent upserts keeps us well
+  // under the Prisma connection cap while cutting total time ~10×. Per-row
+  // failure is logged and counted but doesn't abort the batch.
+  const CONCURRENCY = 10;
   let success = 0;
   let failed = 0;
-  for (const key of employeeKeys) {
-    try {
-      await (prisma as any).payrollProfileAssignment.upsert({
-        where: {
-          organizationId_employeeKey: {
+  for (let i = 0; i < employeeKeys.length; i += CONCURRENCY) {
+    const chunk = employeeKeys.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      chunk.map((key) =>
+        (prisma as any).payrollProfileAssignment.upsert({
+          where: {
+            organizationId_employeeKey: {
+              organizationId: authUser.organizationId,
+              employeeKey: key,
+            },
+          },
+          update: { profileId, effectiveFrom },
+          create: {
             organizationId: authUser.organizationId,
             employeeKey: key,
+            profileId,
+            effectiveFrom,
           },
-        },
-        update: { profileId, effectiveFrom },
-        create: {
-          organizationId: authUser.organizationId,
-          employeeKey: key,
-          profileId,
-          effectiveFrom,
-        },
-      });
-      success++;
-    } catch (err) {
-      failed++;
-      console.warn(`[payroll-profile-assign] failed for ${key}:`, err);
+        }),
+      ),
+    );
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status === 'fulfilled') {
+        success++;
+      } else {
+        failed++;
+        console.warn(`[payroll-profile-assign] failed for ${chunk[j]}:`, r.reason);
+      }
     }
   }
 

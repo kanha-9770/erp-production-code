@@ -11,7 +11,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
+import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 import bcrypt from "bcryptjs";
+
+// Compensation fields on Employee that affect the payroll engine. When any
+// of these change in an update, the live payroll cache must be invalidated so
+// the next read of /api/payroll recomputes against the new values instead of
+// serving a stale 5s-cached row. Keep this list in sync with the salary
+// pickers in getEmployeesFromDB.
+const PAYROLL_RELEVANT_EMPLOYEE_FIELDS = new Set([
+  "totalSalary",
+  "givenSalary",
+  "bonusAmount",
+  "nightAllowance",
+  "overTime",
+  "oneHourExtra",
+  "dateOfJoining",
+  "dateOfLeaving",
+  "status",
+  "department",
+  "designation",
+]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
@@ -503,6 +523,9 @@ export const UserManagementHandlers = {
       }
 
       const employee = await prisma.employee.create({ data });
+      // New employee → drop the live payroll cache so they appear in the
+      // dashboard on the next fetch instead of waiting for the 5s TTL.
+      if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
       return NextResponse.json({ success: true, employee }, { status: 201 });
     }, "createEmployee");
   },
@@ -529,6 +552,18 @@ export const UserManagementHandlers = {
 
       const data = sanitizeEmployeePayload(body, { partial: true });
       const employee = await prisma.employee.update({ where: { id }, data });
+
+      // If the update touched any field the payroll engine reads, drop the
+      // live cache for this org so the next /api/payroll fetch recomputes
+      // against the new salary / dates / department instead of serving a
+      // stale TTL row. Without this, edits to CTC in Employee Master could
+      // sit invisible for up to 5 seconds and confuse the admin.
+      const changedKeys = Object.keys(data ?? {});
+      const touchesPayroll = changedKeys.some((k) => PAYROLL_RELEVANT_EMPLOYEE_FIELDS.has(k));
+      if (touchesPayroll && authUser.organizationId) {
+        invalidatePayrollCache(authUser.organizationId);
+      }
+
       return NextResponse.json({ success: true, employee });
     }, "updateEmployee");
   },
@@ -551,6 +586,9 @@ export const UserManagementHandlers = {
         return NextResponse.json({ error: "Employee not found" }, { status: 404 });
       }
       await prisma.employee.delete({ where: { id } });
+      // Drop the live payroll cache so the deleted row disappears from the
+      // dashboard on the next fetch.
+      if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
       return NextResponse.json({ success: true });
     }, "deleteEmployee");
   },

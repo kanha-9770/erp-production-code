@@ -358,6 +358,25 @@ export default function PayrollPage() {
 
   const assignProfile = async (employeeKey: string, profileId: string | null) => {
     setProfileAssigning(true);
+    // Optimistic: flip the "currently applied" label on the selected record
+    // immediately so the dropdown reflects the user's choice within a frame.
+    // Amounts catch up when the background refresh returns. Without this the
+    // user sees no feedback for the ~1-2s the server takes to recompute.
+    const optimisticName =
+      profileId === null
+        ? null
+        : profiles.find((p) => p.id === profileId)?.name ?? null;
+    setSelected((prev) =>
+      prev && prev.employeeId === employeeKey
+        ? {
+            ...prev,
+            payrollProfileId: profileId,
+            payrollProfileName: optimisticName,
+            payrollProfileSource: profileId ? 'profile' : null,
+          }
+        : prev,
+    );
+
     try {
       const effectiveFrom = computeEffectiveFrom();
       const res = await fetch('/api/payroll/profiles/assign', {
@@ -367,9 +386,13 @@ export default function PayrollPage() {
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to assign profile');
-      // Recompute payroll + refresh the catalog so counts and amounts both
-      // pick up the new assignment.
-      await Promise.all([loadData(month), loadProfiles()]);
+      // Background refresh — silent (no page-wide dimmer), skips previous-
+      // month stats (those don't change when effectiveFrom is current/future).
+      // loadProfiles runs in parallel to refresh the assignedCount badges.
+      await Promise.all([
+        loadData(month, { silent: true, skipPrev: true }),
+        loadProfiles(),
+      ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign profile');
     } finally {
@@ -381,23 +404,32 @@ export default function PayrollPage() {
     setMounted(true);
   }, []);
 
-  const loadData = async (targetMonth: string) => {
-    setLoading(true);
+  const loadData = async (
+    targetMonth: string,
+    opts: { silent?: boolean; skipPrev?: boolean } = {},
+  ) => {
+    // `silent` skips the page-wide loading dimmer — used for background
+    // refreshes after a profile/assignment change so the UI stays usable
+    // while amounts recompute. `skipPrev` avoids the previous-month stats
+    // fetch (a separate engine recompute) when we know prev-month numbers
+    // haven't changed (e.g. effectiveFrom = current or future month).
+    if (!opts.silent) setLoading(true);
     setError(null);
     try {
       const prev = previousMonth(targetMonth);
-      const [recordsRes, statsRes, prevStatsRes] = await Promise.all([
-        fetch(`/api/payroll?month=${targetMonth}`, { cache: 'no-store' }),
-        fetch(`/api/payroll/stats?month=${targetMonth}`, { cache: 'no-store' }),
-        fetch(`/api/payroll/stats?month=${prev}`, { cache: 'no-store' }),
-      ]);
+      const recordsP = fetch(`/api/payroll?month=${targetMonth}`, { cache: 'no-store' });
+      const statsP = fetch(`/api/payroll/stats?month=${targetMonth}`, { cache: 'no-store' });
+      const prevStatsP = opts.skipPrev
+        ? Promise.resolve(null)
+        : fetch(`/api/payroll/stats?month=${prev}`, { cache: 'no-store' });
+      const [recordsRes, statsRes, prevStatsRes] = await Promise.all([recordsP, statsP, prevStatsP]);
       const recordsJson = await recordsRes.json();
       const statsJson = await statsRes.json();
-      const prevStatsJson = await prevStatsRes.json();
+      const prevStatsJson = prevStatsRes ? await prevStatsRes.json() : null;
       const nextPayrolls: PayrollRecord[] = recordsJson?.payrolls ?? [];
       setPayrolls(nextPayrolls);
       setStats(statsJson?.stats ?? null);
-      setPrevStats(prevStatsJson?.stats ?? null);
+      if (!opts.skipPrev) setPrevStats(prevStatsJson?.stats ?? null);
       // If the detail panel is open, swap in the matching freshly-computed
       // record so toggling a profile updates the visible breakdown without
       // closing the drawer.
@@ -416,7 +448,7 @@ export default function PayrollPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load payroll data');
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   };
 
@@ -1573,8 +1605,14 @@ export default function PayrollPage() {
                       below updates without closing the drawer. */}
                   <div className="rounded-md border border-black/10 bg-white p-3 sm:p-4 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
+                      <p className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500">
                         Pay Rule Profile
+                        {profileAssigning && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-normal normal-case tracking-normal text-gray-500">
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            Updating amounts…
+                          </span>
+                        )}
                       </p>
                       <Link
                         href="/payroll/profiles"

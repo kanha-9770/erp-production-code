@@ -519,12 +519,18 @@ export function computePayrollFromInputs(
       );
     }
     if (bonus.retentionBonusEnabled) {
+      // Monthly pays the full amount every month (no smoothing). All other
+      // frequencies smooth across their period so the CTC view reflects
+      // steady-state cost; the actual payout still hits a single payslip
+      // in those months but the breakdown shows the per-month accrual.
       const months =
-        bonus.retentionBonusFrequency === 'half-yearly'
-          ? 6
-          : bonus.retentionBonusFrequency === 'annual'
-            ? 12
-            : 24; // one-time: smoothed over 2 years for CTC math
+        bonus.retentionBonusFrequency === 'monthly'
+          ? 1
+          : bonus.retentionBonusFrequency === 'half-yearly'
+            ? 6
+            : bonus.retentionBonusFrequency === 'annual'
+              ? 12
+              : 24; // one-time
       bonusAccrual.retention = Math.round(
         ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
       );
