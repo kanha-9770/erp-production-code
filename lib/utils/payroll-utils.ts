@@ -332,7 +332,17 @@ export function computePayrollFromInputs(
   const ssAny = ss as any;
   const isOn = (flag: string, fallback: boolean) =>
     ssAny[flag] === undefined ? fallback : Boolean(ssAny[flag]);
-  const monthlyBasic = (baseSalary * ss.basicPercent) / 100;
+  // Carve the per-employee bonus out of CTC FIRST, then apply the structure
+  // to whatever's left. This matches the HR convention "Total = Basic +
+  // Bonus": bonus is a fixed slice of CTC, and basic/HRA/allowances live in
+  // the remainder. Without this, basicPercent=100 makes basic alone fill
+  // the entire CTC and the bonus stacks on top — producing gross > CTC,
+  // which surprises admins ("I set CTC to 10k but the payslip shows 12k").
+  // Clamp at 0 so a bonus larger than CTC doesn't push the structure base
+  // negative — gross then equals just the bonus, which is the honest result.
+  const employeeBonusRaw = Math.max(0, Number(inputs.employeeBonus ?? 0));
+  const ctcForStructure = Math.max(0, baseSalary - employeeBonusRaw);
+  const monthlyBasic = (ctcForStructure * ss.basicPercent) / 100;
   const monthlyHra = (monthlyBasic * ss.hraPercent) / 100;
   const monthlyDa = isOn('daEnabled', (ss.daPercent ?? 0) > 0)
     ? (monthlyBasic * ss.daPercent) / 100
@@ -357,13 +367,10 @@ export function computePayrollFromInputs(
   const monthlyUniform = isOn('uniformEnabled', false)
     ? Number(ssAny.uniformAllowance ?? 0)
     : 0;
-  // Per-employee bonus from Employee Master is treated as a fixed monthly
-  // component — sits inside CTC so it reduces auto special allowance by the
-  // same amount. If the resulting fixed sum exceeds baseSalary (e.g. an
-  // admin set bonus higher than the structure can absorb), special falls to
-  // 0 and gross naturally lands above CTC by the excess — matching the
-  // common HR practice where "Total = base structure + bonus".
-  const monthlyEmployeeBonus = Math.max(0, Number(inputs.employeeBonus ?? 0));
+  // employeeBonusRaw was carved out of CTC above; treat it as a fixed
+  // earning line by including it in monthlyFixedSum so the auto special-
+  // allowance balancer accounts for it correctly.
+  const monthlyEmployeeBonus = employeeBonusRaw;
   const monthlyFixedSum =
     monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta +
     monthlyFood + monthlyPhone + monthlyEdu + monthlyFuel + monthlyBooks + monthlyUniform +
