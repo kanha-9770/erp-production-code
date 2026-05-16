@@ -1382,6 +1382,12 @@ model Employee {
   emergencyContactName       String?         @map("emergency_contact_name")
   emergencyPhone             String?         @map("emergency_phone")
   emergencyRelation          String?         @map("emergency_relation")
+  // Additional emergency contacts beyond the primary three fields above.
+  // Stored as an array of `{ name, phone, relation }` JSON objects so HR
+  // can list multiple next-of-kin without adding more columns. The first
+  // row is mirrored to the legacy `emergencyContactName/Phone/Relation`
+  // columns for backward compatibility with older reports.
+  emergencyContacts          Json?           @map("emergency_contacts")
   // ── 3. Employment details ───────────────────────────────────────────
   employmentType             String?         @map("employment_type")
   branch                     String?
@@ -1417,6 +1423,9 @@ model Employee {
   bankName                   String?         @map("bank_name")
   bankAccountNo              String?         @map("bank_account_no")
   ifscCode                   String?         @map("ifsc_code")
+  // SWIFT / BIC code for international wire transfers (8 or 11 chars).
+  // Optional — domestic-only employees won't fill this.
+  swiftCode                  String?         @map("swift_code")
   // ── 7. Exit / Resignation ──────────────────────────────────────────
   resignationLetterDate      DateTime?       @map("resignation_letter_date")
   reasonOfLeaving            String?         @map("reason_of_leaving")

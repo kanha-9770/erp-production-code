@@ -64,6 +64,8 @@ export interface EmployeeDetail extends EmployeeListItem {
   emergencyContactName: string | null;
   emergencyPhone: string | null;
   emergencyRelation: string | null;
+  // Multi-contact list (above three are the legacy primary mirror).
+  emergencyContacts: Array<{ name: string; phone: string; relation: string }> | null;
 
   // Section 3 — Employment details
   employmentType: string | null;
@@ -91,6 +93,7 @@ export interface EmployeeDetail extends EmployeeListItem {
   bankName: string | null;
   bankAccountNo: string | null;
   ifscCode: string | null;
+  swiftCode: string | null;
 
   // Section 7 — Exit / Resignation
   resignationLetterDate: string | null;

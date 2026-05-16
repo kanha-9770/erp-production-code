@@ -696,6 +696,24 @@ function sanitizeEmployeePayload(
   strField("emergencyContactName");
   strField("emergencyPhone");
   strField("emergencyRelation");
+  // emergencyContacts: stored as JSON array of {name, phone, relation}. The
+  // form sends an array; we accept null/undefined → wipe, and otherwise
+  // coerce to a plain array of normalized objects so junk values can't
+  // poison the column.
+  if ("emergencyContacts" in body) {
+    const raw = body.emergencyContacts;
+    if (Array.isArray(raw)) {
+      data.emergencyContacts = raw
+        .map((c: any) => ({
+          name: typeof c?.name === "string" ? c.name.trim() : "",
+          phone: typeof c?.phone === "string" ? c.phone.trim() : "",
+          relation: typeof c?.relation === "string" ? c.relation.trim() : "",
+        }))
+        .filter((c) => c.name || c.phone);
+    } else if (raw === null || raw === undefined) {
+      data.emergencyContacts = null;
+    }
+  }
 
   // Section 3 — Employment details
   strField("employmentType");
@@ -719,6 +737,7 @@ function sanitizeEmployeePayload(
   strField("bankName");
   strField("bankAccountNo");
   strField("ifscCode");
+  strField("swiftCode");
 
   // Section 7 — Exit / Resignation
   strField("reasonOfLeaving");

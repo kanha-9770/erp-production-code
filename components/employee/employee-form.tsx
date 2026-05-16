@@ -6,7 +6,7 @@
  * handles navigation.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,8 +29,11 @@ import {
   AlertTriangle,
   X,
   Camera,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import type { EmployeeDetail } from "@/lib/api/employees";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { useToast } from "@/hooks/use-toast";
 import { computeDescriptorFromBlobWithTimeout } from "@/lib/face/descriptor";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
@@ -97,6 +100,10 @@ export interface EmployeeFormValues {
   emergencyContactName: string;
   emergencyPhone: string;
   emergencyRelation: string;
+  // Full multi-contact list. The first row mirrors the three primary
+  // fields above on save (kept in sync for backward compatibility with
+  // any legacy reader that still reads the singular columns).
+  emergencyContacts: Array<{ name: string; phone: string; relation: string }>;
   // Legacy single-field addresses, preserved on edit so older data isn't
   // dropped. New saves can leave these blank.
   permanentAddress: string;
@@ -133,14 +140,12 @@ export interface EmployeeFormValues {
   bonusAmount: string;
   bonusAfterYears: string;
   incrementMonth: string;
-  givenSalary: string;
-  nightAllowance: string;
-  oneHourExtra: string;
 
   // ── 6. Bank details ────────────────────────────────────────────────
   bankName: string;
   bankAccountNo: string;
   ifscCode: string;
+  swiftCode: string;
 
   // ── 7. Exit / Resignation ──────────────────────────────────────────
   resignationLetterDate: string;
@@ -148,7 +153,6 @@ export interface EmployeeFormValues {
   reasonOfLeaving: string;
   noticeServed: boolean;
 
-  companySimIssue: boolean;
 }
 
 const EMPTY: EmployeeFormValues = {
@@ -190,6 +194,7 @@ const EMPTY: EmployeeFormValues = {
   emergencyContactName: "",
   emergencyPhone: "",
   emergencyRelation: "",
+  emergencyContacts: [{ name: "", phone: "", relation: "" }],
   permanentAddress: "",
   currentAddress: "",
 
@@ -224,22 +229,18 @@ const EMPTY: EmployeeFormValues = {
   bonusAmount: "",
   bonusAfterYears: "",
   incrementMonth: "",
-  givenSalary: "",
-  nightAllowance: "",
-  oneHourExtra: "",
 
   // Section 6
   bankName: "",
   bankAccountNo: "",
   ifscCode: "",
+  swiftCode: "",
 
   // Section 7
   resignationLetterDate: "",
   dateOfLeaving: "",
   reasonOfLeaving: "",
   noticeServed: false,
-
-  companySimIssue: false,
 };
 
 export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
@@ -285,6 +286,26 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     emergencyContactName: e.emergencyContactName ?? "",
     emergencyPhone: e.emergencyPhone ?? "",
     emergencyRelation: e.emergencyRelation ?? "",
+    // Prefer the JSON list when present; otherwise synthesize a single
+    // entry from the legacy primary fields so older employees still show
+    // their existing contact on edit. Always keep at least one row so the
+    // form has something to render.
+    emergencyContacts:
+      Array.isArray(e.emergencyContacts) && e.emergencyContacts.length > 0
+        ? e.emergencyContacts.map((c) => ({
+            name: c.name ?? "",
+            phone: c.phone ?? "",
+            relation: c.relation ?? "",
+          }))
+        : e.emergencyContactName || e.emergencyPhone
+          ? [
+              {
+                name: e.emergencyContactName ?? "",
+                phone: e.emergencyPhone ?? "",
+                relation: e.emergencyRelation ?? "",
+              },
+            ]
+          : [{ name: "", phone: "", relation: "" }],
     permanentAddress: e.permanentAddress ?? "",
     currentAddress: e.currentAddress ?? "",
 
@@ -322,22 +343,18 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     bonusAmount: numStr(e.bonusAmount),
     bonusAfterYears: e.bonusAfterYears != null ? String(e.bonusAfterYears) : "",
     incrementMonth: e.incrementMonth != null ? String(e.incrementMonth) : "",
-    givenSalary: numStr(e.givenSalary),
-    nightAllowance: numStr(e.nightAllowance),
-    oneHourExtra: numStr(e.oneHourExtra),
 
     // Section 6
     bankName: e.bankName ?? "",
     bankAccountNo: e.bankAccountNo ?? "",
     ifscCode: e.ifscCode ?? "",
+    swiftCode: e.swiftCode ?? "",
 
     // Section 7
     resignationLetterDate: dateStr(e.resignationLetterDate),
     dateOfLeaving: dateStr(e.dateOfLeaving),
     reasonOfLeaving: e.reasonOfLeaving ?? "",
     noticeServed: !!e.noticeServed,
-
-    companySimIssue: !!e.companySimIssue,
   };
 }
 
@@ -409,9 +426,26 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
     permanentPostalCode: trimOrNull(permanentSrc.postalCode),
     permanentCountry: trimOrNull(permanentSrc.country),
     permanentAccommodationType: trimOrNull(values.permanentAccommodationType),
-    emergencyContactName: trimOrNull(values.emergencyContactName),
-    emergencyPhone: trimOrNull(values.emergencyPhone),
-    emergencyRelation: trimOrNull(values.emergencyRelation),
+    // Strip blank trailing rows, then keep only entries with at least a
+    // name or phone. The first surviving entry is mirrored back into the
+    // legacy singular columns so older readers (reports, payslips) still
+    // see a primary contact.
+    emergencyContacts: (() => {
+      const cleaned = values.emergencyContacts
+        .map((c) => ({
+          name: c.name.trim(),
+          phone: c.phone.trim(),
+          relation: c.relation.trim(),
+        }))
+        .filter((c) => c.name || c.phone);
+      return cleaned.length > 0 ? cleaned : null;
+    })(),
+    emergencyContactName:
+      trimOrNull(values.emergencyContacts[0]?.name ?? values.emergencyContactName),
+    emergencyPhone:
+      trimOrNull(values.emergencyContacts[0]?.phone ?? values.emergencyPhone),
+    emergencyRelation:
+      trimOrNull(values.emergencyContacts[0]?.relation ?? values.emergencyRelation),
     permanentAddress: trimOrNull(values.permanentAddress),
     currentAddress: trimOrNull(values.currentAddress),
 
@@ -442,28 +476,33 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
     // HR-facing label, totalSalary is what the payroll engine reads.
     baseSalary: values.baseSalary,
     totalSalary: values.totalSalary || values.baseSalary,
-    perHourSalary: values.perHourSalary,
+    // perHourSalary is computed from CTC ÷ (22 × hours/day) at save time so
+    // it stays in lock-step with the visible read-only field. Bypasses the
+    // form's `perHourSalary` slot which is no longer user-editable.
+    perHourSalary: (() => {
+      const ctc = Number(values.baseSalary);
+      const hpd = Number(values.totalWorkingHours);
+      const validHpd = Number.isFinite(hpd) && hpd > 0 ? hpd : 8;
+      if (!Number.isFinite(ctc) || ctc <= 0) return null;
+      return (ctc / (22 * validHpd)).toFixed(2);
+    })(),
     isOvertimeApplicable: values.isOvertimeApplicable,
     overTime: values.overTime,
     bonusAmount: values.bonusAmount,
     bonusAfterYears: values.bonusAfterYears,
     incrementMonth: values.incrementMonth,
-    givenSalary: values.givenSalary,
-    nightAllowance: values.nightAllowance,
-    oneHourExtra: values.oneHourExtra,
 
     // Section 6
     bankName: trimOrNull(values.bankName),
     bankAccountNo: trimOrNull(values.bankAccountNo),
     ifscCode: trimOrNull(values.ifscCode),
+    swiftCode: trimOrNull(values.swiftCode),
 
     // Section 7
     resignationLetterDate: values.resignationLetterDate || null,
     dateOfLeaving: values.dateOfLeaving || null,
     reasonOfLeaving: trimOrNull(values.reasonOfLeaving),
     noticeServed: values.noticeServed,
-
-    companySimIssue: values.companySimIssue,
   };
 }
 
@@ -502,6 +541,37 @@ export function EmployeeForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [openingBuilder, setOpeningBuilder] = useState(false);
+
+  // Per-hour salary derived from monthly CTC ÷ (22 working days × hours/day).
+  // 22 matches the engine's `calculateDailyPayroll` standard divisor. Hours/
+  // day comes from the "Total Working Hours" field; falls back to 8 if blank
+  // or non-positive. Re-computes on every render so editing CTC or hours
+  // updates the visible rate immediately.
+  const derivedPerHourSalary = useMemo(() => {
+    const ctc = Number(values.baseSalary);
+    const hoursPerDay = Number(values.totalWorkingHours);
+    const validHours = Number.isFinite(hoursPerDay) && hoursPerDay > 0 ? hoursPerDay : 8;
+    if (!Number.isFinite(ctc) || ctc <= 0) return "";
+    const rate = ctc / (22 * validHours);
+    return rate.toFixed(2);
+  }, [values.baseSalary, values.totalWorkingHours]);
+
+  // Distinct department list, derived from every existing employee in the
+  // org. New names typed in the free-text fallback get added to this list
+  // automatically next time the form is opened — there's no separate
+  // Department table to maintain.
+  const { data: empList } = useGetEmployeeListQuery();
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    empList?.employees?.forEach((e) => {
+      const d = (e.department ?? "").trim();
+      if (d) set.add(d);
+    });
+    // Include whatever was already typed on this row so an edit-page open
+    // doesn't show a missing value as blank.
+    if (values.department?.trim()) set.add(values.department.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [empList?.employees, values.department]);
 
   // Face enrollment: the user (HR) can attach a photo here so the new
   // employee is auto-enrolled into face recognition. Descriptor is
@@ -663,10 +733,11 @@ export function EmployeeForm({
     if (!splitPhone(values.personalContact).number) {
       return setError("Cell number is required");
     }
-    if (!values.emergencyContactName.trim()) {
+    const primaryContact = values.emergencyContacts[0];
+    if (!primaryContact?.name?.trim()) {
       return setError("Emergency contact name is required");
     }
-    if (!splitPhone(values.emergencyPhone).number) {
+    if (!splitPhone(primaryContact?.phone ?? "").number) {
       return setError("Emergency phone is required");
     }
     if (!values.companyName.trim()) {
@@ -973,10 +1044,17 @@ export function EmployeeForm({
                 />
               </Field>
               <Field label="Country">
-                <Input
+                <CountrySelect
                   value={values.currentCountry}
-                  onChange={(e) => set("currentCountry", e.target.value)}
-                  placeholder="Select country"
+                  onChange={(v) => set("currentCountry", v)}
+                />
+              </Field>
+              <Field label="Continent" hint="Auto-filled from country">
+                <Input
+                  value={continentFor(values.currentCountry)}
+                  readOnly
+                  disabled
+                  placeholder="—"
                 />
               </Field>
               <Field label="Current Accommodation Type" className="sm:col-span-2">
@@ -1045,9 +1123,17 @@ export function EmployeeForm({
                   />
                 </Field>
                 <Field label="Country">
-                  <Input
+                  <CountrySelect
                     value={values.permanentCountry}
-                    onChange={(e) => set("permanentCountry", e.target.value)}
+                    onChange={(v) => set("permanentCountry", v)}
+                  />
+                </Field>
+                <Field label="Continent" hint="Auto-filled from country">
+                  <Input
+                    value={continentFor(values.permanentCountry)}
+                    readOnly
+                    disabled
+                    placeholder="—"
                   />
                 </Field>
               </div>
@@ -1069,28 +1155,98 @@ export function EmployeeForm({
             </Field>
           </fieldset>
 
-          {/* Emergency Contact */}
-          <Field label="Emergency Contact Name *">
-            <Input
-              value={values.emergencyContactName}
-              onChange={(e) => set("emergencyContactName", e.target.value)}
-              placeholder="Full name"
-            />
-          </Field>
-          <Field label="Emergency Phone *">
-            <PhoneInput
-              value={values.emergencyPhone}
-              onChange={(v) => set("emergencyPhone", v)}
-              placeholder="Phone"
-            />
-          </Field>
-          <Field label="Relation">
-            <Input
-              value={values.emergencyRelation}
-              onChange={(e) => set("emergencyRelation", e.target.value)}
-              placeholder="e.g. Father"
-            />
-          </Field>
+          {/* Emergency Contacts — repeatable list. First row is required;
+              the "+" button appends another contact, "×" removes a non-
+              primary row. */}
+          <fieldset className="sm:col-span-2 rounded-md border p-3 space-y-3">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">
+              Emergency Contacts
+            </legend>
+            {values.emergencyContacts.map((contact, idx) => {
+              const isPrimary = idx === 0;
+              return (
+                <div
+                  key={idx}
+                  className="grid gap-3 sm:grid-cols-12 items-end border-b last:border-b-0 pb-3 last:pb-0"
+                >
+                  <div className="sm:col-span-4 space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      Contact Name {isPrimary && "*"}
+                    </Label>
+                    <Input
+                      value={contact.name}
+                      onChange={(e) => {
+                        const next = [...values.emergencyContacts];
+                        next[idx] = { ...next[idx], name: e.target.value };
+                        set("emergencyContacts", next);
+                      }}
+                      placeholder="Full name"
+                    />
+                  </div>
+                  <div className="sm:col-span-5 space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      Phone {isPrimary && "*"}
+                    </Label>
+                    <PhoneInput
+                      value={contact.phone}
+                      onChange={(v) => {
+                        const next = [...values.emergencyContacts];
+                        next[idx] = { ...next[idx], phone: v };
+                        set("emergencyContacts", next);
+                      }}
+                      placeholder="Phone"
+                    />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      Relation
+                    </Label>
+                    <Input
+                      value={contact.relation}
+                      onChange={(e) => {
+                        const next = [...values.emergencyContacts];
+                        next[idx] = { ...next[idx], relation: e.target.value };
+                        set("emergencyContacts", next);
+                      }}
+                      placeholder="e.g. Father"
+                    />
+                  </div>
+                  <div className="sm:col-span-1 flex justify-end">
+                    {!isPrimary && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          const next = values.emergencyContacts.filter(
+                            (_, i) => i !== idx,
+                          );
+                          set("emergencyContacts", next);
+                        }}
+                        title="Remove contact"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                set("emergencyContacts", [
+                  ...values.emergencyContacts,
+                  { name: "", phone: "", relation: "" },
+                ]);
+              }}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add another contact
+            </Button>
+          </fieldset>
         </CardContent>
       </Card>
 
@@ -1118,11 +1274,18 @@ export function EmployeeForm({
           <Field label="Employee ID" hint="Will be generated on submit">
             <Input value="" disabled placeholder="# Will be generated on submit" />
           </Field>
-          <Field label="Department">
-            <Input
+          <Field
+            label="Department"
+            hint={
+              departmentOptions.length > 0
+                ? "Pick from existing departments or type a new one"
+                : "Type a new department name"
+            }
+          >
+            <DepartmentCombobox
               value={values.department}
-              onChange={(e) => set("department", e.target.value)}
-              placeholder="e.g. Engineering"
+              options={departmentOptions}
+              onChange={(v) => set("department", v)}
             />
           </Field>
           <Field label="Company *">
@@ -1187,11 +1350,29 @@ export function EmployeeForm({
             />
           </Field>
           <Field label="Employee Engagement Team Name">
-            <Input
-              value={values.employeeEngagementTeamName}
-              onChange={(e) => set("employeeEngagementTeamName", e.target.value)}
-              placeholder="Team name"
-            />
+            <Select
+              value={values.employeeEngagementTeamName || undefined}
+              onValueChange={(v) => set("employeeEngagementTeamName", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a team" />
+              </SelectTrigger>
+              <SelectContent>
+                {/* Surface a legacy free-text value so old employees keep
+                    their team on edit even if it's not in this list. */}
+                {values.employeeEngagementTeamName &&
+                  !ENGAGEMENT_TEAMS.includes(values.employeeEngagementTeamName) && (
+                    <SelectItem value={values.employeeEngagementTeamName}>
+                      {values.employeeEngagementTeamName} (legacy)
+                    </SelectItem>
+                  )}
+                {ENGAGEMENT_TEAMS.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="Status *">
             <Select
@@ -1299,13 +1480,29 @@ export function EmployeeForm({
               placeholder="e.g. 50000"
             />
           </Field>
-          <Field label="Per Hour Salary" hint="Reference only — overtime uses the Pay Rule's hourly rate.">
+          <Field
+            label="Bonus Amount (above CTC)"
+            hint="Paid every month on top of CTC — appears as a separate Bonus line on the payslip and is included in gross."
+          >
             <Input
               type="number"
               inputMode="decimal"
-              value={values.perHourSalary}
-              onChange={(e) => set("perHourSalary", e.target.value)}
-              placeholder="Hourly rate"
+              value={values.bonusAmount}
+              onChange={(e) => set("bonusAmount", e.target.value)}
+              placeholder="e.g. 2000"
+            />
+          </Field>
+          <Field
+            label="Per Hour Salary"
+            hint="Auto-calculated: CTC ÷ (22 days × hours/day). Reference only — overtime uses the Pay Rule's hourly rate."
+          >
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={derivedPerHourSalary}
+              readOnly
+              disabled
+              placeholder="—"
             />
           </Field>
           <Field label="Is Overtime Applicable">
@@ -1327,18 +1524,6 @@ export function EmployeeForm({
               onChange={(e) => set("overTime", e.target.value)}
               placeholder="Rate per overtime hour"
               disabled={!values.isOvertimeApplicable}
-            />
-          </Field>
-          <Field
-            label="Bonus Amount (above CTC)"
-            hint="Paid every month on top of CTC — appears as a separate Bonus line on the payslip and is included in gross."
-          >
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.bonusAmount}
-              onChange={(e) => set("bonusAmount", e.target.value)}
-              placeholder="e.g. 2000"
             />
           </Field>
           <Field label="Bonus After How Many Years">
@@ -1364,31 +1549,6 @@ export function EmployeeForm({
               </SelectContent>
             </Select>
           </Field>
-          {/* Legacy fields kept here in a collapsed area so older data round-trips */}
-          <Field label="Take-home (given salary)">
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.givenSalary}
-              onChange={(e) => set("givenSalary", e.target.value)}
-            />
-          </Field>
-          <Field label="Night Allowance">
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.nightAllowance}
-              onChange={(e) => set("nightAllowance", e.target.value)}
-            />
-          </Field>
-          <Field label="One-hour Extra">
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.oneHourExtra}
-              onChange={(e) => set("oneHourExtra", e.target.value)}
-            />
-          </Field>
         </CardContent>
       </Card>
 
@@ -1402,16 +1562,25 @@ export function EmployeeForm({
               onChange={(e) => set("bankAccountNo", e.target.value)}
             />
           </Field>
-          <Field label="IFSC Code">
+          <Field label="IFSC Code" hint="For domestic transfers (India)">
             <Input
               value={values.ifscCode}
               onChange={(e) => set("ifscCode", e.target.value.toUpperCase())}
+              placeholder="e.g. HDFC0001234"
             />
           </Field>
-          <Field label="Bank Name" className="sm:col-span-2">
+          <Field label="Bank Name">
             <Input
               value={values.bankName}
               onChange={(e) => set("bankName", e.target.value)}
+            />
+          </Field>
+          <Field label="SWIFT / BIC Code" hint="For international wire transfers (8 or 11 chars)">
+            <Input
+              value={values.swiftCode}
+              onChange={(e) => set("swiftCode", e.target.value.toUpperCase())}
+              placeholder="e.g. HDFCINBBXXX"
+              maxLength={11}
             />
           </Field>
         </CardContent>
@@ -1450,17 +1619,6 @@ export function EmployeeForm({
               />
               <span className="text-sm text-muted-foreground">
                 {values.noticeServed ? "Notice Served" : "Not yet"}
-              </span>
-            </div>
-          </Field>
-          <Field label="Company SIM issued" className="sm:col-span-2">
-            <div className="flex items-center gap-3 pt-1">
-              <Switch
-                checked={values.companySimIssue}
-                onCheckedChange={(c) => set("companySimIssue", c)}
-              />
-              <span className="text-sm text-muted-foreground">
-                {values.companySimIssue ? "Yes — SIM issued" : "No"}
               </span>
             </div>
           </Field>
@@ -1540,27 +1698,229 @@ function Field({
   );
 }
 
+// Employee-engagement team roster. Names normalized to Title Case and the
+// "deseart" typo corrected to "Desert". Update this list when a new team
+// is formed — the form auto-surfaces any legacy value not in this list
+// as a "(legacy)" option so older employees keep their existing team.
+const ENGAGEMENT_TEAMS: string[] = [
+  "Finance Dreamers",
+  "Lakshya",
+  "Micro Makers",
+  "Nessco Avengers",
+  "Nessco Knight Riders",
+  "Panthers",
+  "Team Mahakal",
+  "The Desert Kings",
+];
+
+// Country → continent lookup used by both the dropdown options and the
+// auto-filled Continent display next to each country field. Sorted
+// alphabetically so the dropdown lists countries in a predictable order.
+// Coverage targets the regions HR commonly hires from; extend the list
+// when you start sourcing from a country that isn't here.
+const COUNTRIES: { name: string; continent: string }[] = [
+  { name: "Afghanistan", continent: "Asia" },
+  { name: "Algeria", continent: "Africa" },
+  { name: "Argentina", continent: "South America" },
+  { name: "Australia", continent: "Oceania" },
+  { name: "Austria", continent: "Europe" },
+  { name: "Bangladesh", continent: "Asia" },
+  { name: "Belgium", continent: "Europe" },
+  { name: "Bhutan", continent: "Asia" },
+  { name: "Brazil", continent: "South America" },
+  { name: "Cambodia", continent: "Asia" },
+  { name: "Canada", continent: "North America" },
+  { name: "Chile", continent: "South America" },
+  { name: "China", continent: "Asia" },
+  { name: "Colombia", continent: "South America" },
+  { name: "Czech Republic", continent: "Europe" },
+  { name: "Denmark", continent: "Europe" },
+  { name: "Egypt", continent: "Africa" },
+  { name: "Finland", continent: "Europe" },
+  { name: "France", continent: "Europe" },
+  { name: "Germany", continent: "Europe" },
+  { name: "Greece", continent: "Europe" },
+  { name: "Hong Kong", continent: "Asia" },
+  { name: "Hungary", continent: "Europe" },
+  { name: "Iceland", continent: "Europe" },
+  { name: "India", continent: "Asia" },
+  { name: "Indonesia", continent: "Asia" },
+  { name: "Iran", continent: "Asia" },
+  { name: "Iraq", continent: "Asia" },
+  { name: "Ireland", continent: "Europe" },
+  { name: "Israel", continent: "Asia" },
+  { name: "Italy", continent: "Europe" },
+  { name: "Japan", continent: "Asia" },
+  { name: "Jordan", continent: "Asia" },
+  { name: "Kenya", continent: "Africa" },
+  { name: "Kuwait", continent: "Asia" },
+  { name: "Malaysia", continent: "Asia" },
+  { name: "Maldives", continent: "Asia" },
+  { name: "Mexico", continent: "North America" },
+  { name: "Morocco", continent: "Africa" },
+  { name: "Myanmar", continent: "Asia" },
+  { name: "Nepal", continent: "Asia" },
+  { name: "Netherlands", continent: "Europe" },
+  { name: "New Zealand", continent: "Oceania" },
+  { name: "Nigeria", continent: "Africa" },
+  { name: "Norway", continent: "Europe" },
+  { name: "Oman", continent: "Asia" },
+  { name: "Pakistan", continent: "Asia" },
+  { name: "Peru", continent: "South America" },
+  { name: "Philippines", continent: "Asia" },
+  { name: "Poland", continent: "Europe" },
+  { name: "Portugal", continent: "Europe" },
+  { name: "Qatar", continent: "Asia" },
+  { name: "Romania", continent: "Europe" },
+  { name: "Russia", continent: "Europe" },
+  { name: "Saudi Arabia", continent: "Asia" },
+  { name: "Singapore", continent: "Asia" },
+  { name: "South Africa", continent: "Africa" },
+  { name: "South Korea", continent: "Asia" },
+  { name: "Spain", continent: "Europe" },
+  { name: "Sri Lanka", continent: "Asia" },
+  { name: "Sweden", continent: "Europe" },
+  { name: "Switzerland", continent: "Europe" },
+  { name: "Taiwan", continent: "Asia" },
+  { name: "Thailand", continent: "Asia" },
+  { name: "Turkey", continent: "Asia" },
+  { name: "Ukraine", continent: "Europe" },
+  { name: "United Arab Emirates", continent: "Asia" },
+  { name: "United Kingdom", continent: "Europe" },
+  { name: "United States", continent: "North America" },
+  { name: "Uzbekistan", continent: "Asia" },
+  { name: "Vietnam", continent: "Asia" },
+];
+
+function continentFor(country: string): string {
+  if (!country) return "";
+  return COUNTRIES.find((c) => c.name === country)?.continent ?? "";
+}
+
+// Country dropdown. Uses the same Radix Select primitive as the other
+// dropdowns for visual consistency. Free-text entries from older rows
+// (e.g. "Bharat" for India) are surfaced as a custom option at the top
+// so editing an existing employee never silently drops their value.
+function CountrySelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const known = COUNTRIES.some((c) => c.name === value);
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger>
+        <SelectValue placeholder="Select country" />
+      </SelectTrigger>
+      <SelectContent className="max-h-72">
+        {value && !known && (
+          <SelectItem value={value}>{value} (legacy)</SelectItem>
+        )}
+        {COUNTRIES.map((c) => (
+          <SelectItem key={c.name} value={c.name}>
+            {c.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// Department picker: dropdown of names already in use across the org +
+// inline "type custom" mode for when HR is creating a brand-new department.
+// Switching to custom is one click; once a typed name is saved it'll show
+// up in the dropdown for the next form open.
+function DepartmentCombobox({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  const valueInOptions = !!value && options.includes(value);
+  const [mode, setMode] = useState<"select" | "custom">(
+    options.length === 0 || (value && !valueInOptions) ? "custom" : "select",
+  );
+  if (mode === "select" && options.length > 0) {
+    return (
+      <div className="flex gap-2">
+        <Select
+          value={value || undefined}
+          onValueChange={(v) => {
+            if (v === "__new__") {
+              setMode("custom");
+              onChange("");
+              return;
+            }
+            onChange(v);
+          }}
+        >
+          <SelectTrigger className="flex-1">
+            <SelectValue placeholder="Select a department" />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d}
+              </SelectItem>
+            ))}
+            <SelectItem value="__new__">+ Add new department…</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-2">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="e.g. Engineering"
+        className="flex-1"
+        autoFocus={mode === "custom"}
+      />
+      {options.length > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setMode("select")}
+        >
+          Pick existing
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // Common country dial codes for phone fields. India (+91) is the default
 // since this is the main user base; widen the list if you start hiring
 // across more regions. Storage format is the joined string
 // "<code> <number>" so a single text column round-trips it.
-const COUNTRY_DIAL_CODES: { code: string; label: string }[] = [
-  { code: "+91", label: "🇮🇳 +91 India" },
-  { code: "+1", label: "🇺🇸 +1 USA / Canada" },
-  { code: "+44", label: "🇬🇧 +44 UK" },
-  { code: "+971", label: "🇦🇪 +971 UAE" },
-  { code: "+61", label: "🇦🇺 +61 Australia" },
-  { code: "+65", label: "🇸🇬 +65 Singapore" },
-  { code: "+49", label: "🇩🇪 +49 Germany" },
-  { code: "+33", label: "🇫🇷 +33 France" },
-  { code: "+81", label: "🇯🇵 +81 Japan" },
-  { code: "+86", label: "🇨🇳 +86 China" },
-  { code: "+852", label: "🇭🇰 +852 Hong Kong" },
-  { code: "+92", label: "🇵🇰 +92 Pakistan" },
-  { code: "+880", label: "🇧🇩 +880 Bangladesh" },
-  { code: "+94", label: "🇱🇰 +94 Sri Lanka" },
-  { code: "+977", label: "🇳🇵 +977 Nepal" },
+const COUNTRY_DIAL_CODES: { code: string; flag: string; country: string }[] = [
+  { code: "+91", flag: "🇮🇳", country: "India" },
+  { code: "+1", flag: "🇺🇸", country: "USA / Canada" },
+  { code: "+44", flag: "🇬🇧", country: "UK" },
+  { code: "+971", flag: "🇦🇪", country: "UAE" },
+  { code: "+61", flag: "🇦🇺", country: "Australia" },
+  { code: "+65", flag: "🇸🇬", country: "Singapore" },
+  { code: "+49", flag: "🇩🇪", country: "Germany" },
+  { code: "+33", flag: "🇫🇷", country: "France" },
+  { code: "+81", flag: "🇯🇵", country: "Japan" },
+  { code: "+86", flag: "🇨🇳", country: "China" },
+  { code: "+852", flag: "🇭🇰", country: "Hong Kong" },
+  { code: "+92", flag: "🇵🇰", country: "Pakistan" },
+  { code: "+880", flag: "🇧🇩", country: "Bangladesh" },
+  { code: "+94", flag: "🇱🇰", country: "Sri Lanka" },
+  { code: "+977", flag: "🇳🇵", country: "Nepal" },
 ];
+
+const flagForDialCode = (code: string): string =>
+  COUNTRY_DIAL_CODES.find((c) => c.code === code)?.flag ?? "🌐";
 
 // Splits a stored phone string into (dial code, local number). Recognises
 // any code from COUNTRY_DIAL_CODES that appears at the start. Falls back
@@ -1597,15 +1957,24 @@ function PhoneInput({
     onChange(cleaned ? `${nextCode} ${cleaned}` : "");
   };
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-1.5">
       <Select value={code} onValueChange={(c) => emit(c, number)}>
-        <SelectTrigger className="w-[150px] flex-none">
-          <SelectValue>{code}</SelectValue>
+        <SelectTrigger className="w-[88px] flex-none px-2 gap-1">
+          <SelectValue>
+            <span className="flex items-center gap-1 text-sm">
+              <span className="leading-none">{flagForDialCode(code)}</span>
+              <span>{code}</span>
+            </span>
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {COUNTRY_DIAL_CODES.map((c) => (
             <SelectItem key={c.code} value={c.code}>
-              {c.label}
+              <span className="flex items-center gap-2">
+                <span>{c.flag}</span>
+                <span className="font-medium tabular-nums">{c.code}</span>
+                <span className="text-muted-foreground">{c.country}</span>
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
