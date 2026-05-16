@@ -94,6 +94,19 @@ interface PayrollEarnings {
   employeeBonus?: number;
 }
 
+// Profile-level bonus accruals — smoothed monthly amounts for each bonus
+// type the pay-rule profile has enabled. The engine already pro-rates these
+// by payable days; we just need to render them on the payslip so admins can
+// see what the activated bonuses are paying out each month.
+interface PayrollBonusAccrual {
+  statutory: number;
+  performance: number;
+  festival: number;
+  joining: number;
+  retention: number;
+  total: number;
+}
+
 interface PayrollDeductionsDetail {
   pf: number;
   esi: number;
@@ -120,6 +133,8 @@ interface PayrollRecord {
   // disabled components simply vanish.
   earnings?: PayrollEarnings;
   deductionsDetail?: PayrollDeductionsDetail;
+  bonusAccrual?: PayrollBonusAccrual;
+  gratuityAccrual?: number;
   netSalary: number;
   status: 'pending' | 'processed';
   month?: string;
@@ -1727,7 +1742,8 @@ export default function PayrollPage() {
                     // disabled in Pay Rules emit 0 and drop off the list, so the
                     // visible rows match the active toggles exactly.
                     const e = selected.earnings;
-                    const earnRows: { label: string; value: number }[] = e
+                    const ba = selected.bonusAccrual;
+                    const earnRows: { label: string; value: number; sub?: string }[] = e
                       ? [
                           { label: 'Basic Pay', value: e.basic },
                           { label: 'HRA', value: e.hra },
@@ -1744,6 +1760,17 @@ export default function PayrollPage() {
                           { label: 'Special Allowance', value: e.specialAllowance },
                           { label: 'Bonus (Employee Master)', value: e.employeeBonus ?? 0 },
                           { label: 'Overtime', value: e.overtime },
+                          // Profile-level bonuses from the assigned Pay Rule
+                          // Profile. These are smoothed monthly amounts: for
+                          // "Monthly" frequency you'll see the full bonus
+                          // every month; for annual/half-yearly/one-time the
+                          // value is divided across the period. Each row
+                          // auto-hides when the bonus is disabled (value=0).
+                          { label: 'Statutory Bonus', value: ba?.statutory ?? 0, sub: 'Payment of Bonus Act' },
+                          { label: 'Performance Bonus', value: ba?.performance ?? 0, sub: 'monthly accrual' },
+                          { label: 'Festival Bonus', value: ba?.festival ?? 0, sub: 'annualised' },
+                          { label: 'Joining Bonus', value: ba?.joining ?? 0, sub: 'amortised over clawback' },
+                          { label: 'Retention Bonus', value: ba?.retention ?? 0, sub: 'as per profile frequency' },
                         ]
                       : [];
                     const visible = earnRows.filter((r) => r.value > 0);
@@ -1769,7 +1796,12 @@ export default function PayrollPage() {
                             sub={`${selected.workingHours.toFixed(1)} hours total`}
                           />
                           {visible.map((r) => (
-                            <Row key={r.label} label={r.label} value={`₹${formatINR(r.value)}`} />
+                            <Row
+                              key={r.label}
+                              label={r.label}
+                              value={`₹${formatINR(r.value)}`}
+                              sub={r.sub}
+                            />
                           ))}
                           <Row
                             label="Gross Salary"

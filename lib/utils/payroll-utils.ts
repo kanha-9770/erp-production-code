@@ -415,10 +415,76 @@ export function computePayrollFromInputs(
     cappedOtHours = wkd + wke + hol;
   }
 
+  // ── Profile-level bonus accruals ────────────────────────────────────────
+  // Smoothed monthly amounts for every bonus type the profile has enabled.
+  // Computed BEFORE gross so they get added into grossSalary and flow into
+  // the payslip + deductions consistently. Statutory eligibility is checked
+  // on the FULL-MONTH (Basic+DA) so an employee doesn't lose statutory
+  // bonus just because they had LOP days.
+  const bonus = formulas.bonus;
+  const bonusAccrual = {
+    statutory: 0,
+    performance: 0,
+    festival: 0,
+    joining: 0,
+    retention: 0,
+    total: 0,
+  };
+  if (bonus) {
+    if (
+      bonus.statutoryBonusEnabled &&
+      monthlyBasic + monthlyDa <= (bonus.statutoryBonusSalaryCeiling ?? 21000)
+    ) {
+      const base = Math.min(
+        monthlyBasic + monthlyDa,
+        bonus.statutoryBonusCalcCeiling ?? 7000,
+      );
+      bonusAccrual.statutory = Math.round(
+        base * ((bonus.statutoryBonusPercent ?? 8.33) / 100) * proRationFactor,
+      );
+    }
+    if (bonus.performanceBonusEnabled) {
+      const annual = baseSalary * 12 * ((bonus.performanceBonusPercent ?? 0) / 100);
+      bonusAccrual.performance = Math.round((annual / 12) * proRationFactor);
+    }
+    if (bonus.festivalBonusEnabled) {
+      bonusAccrual.festival = Math.round(
+        ((bonus.festivalBonusAmount ?? 0) / 12) * proRationFactor,
+      );
+    }
+    if (bonus.joiningBonusEnabled && (bonus.joiningBonusClawbackMonths ?? 0) > 0) {
+      bonusAccrual.joining = Math.round(
+        ((bonus.joiningBonusAmount ?? 0) / (bonus.joiningBonusClawbackMonths ?? 12)) *
+          proRationFactor,
+      );
+    }
+    if (bonus.retentionBonusEnabled) {
+      // Monthly pays the full amount every month (no smoothing). All other
+      // frequencies smooth across their period.
+      const months =
+        bonus.retentionBonusFrequency === 'monthly'
+          ? 1
+          : bonus.retentionBonusFrequency === 'half-yearly'
+            ? 6
+            : bonus.retentionBonusFrequency === 'annual'
+              ? 12
+              : 24; // one-time
+      bonusAccrual.retention = Math.round(
+        ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
+      );
+    }
+    bonusAccrual.total =
+      bonusAccrual.statutory +
+      bonusAccrual.performance +
+      bonusAccrual.festival +
+      bonusAccrual.joining +
+      bonusAccrual.retention;
+  }
+
   const grossSalary =
     earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta +
     earnedFood + earnedPhone + earnedEdu + earnedFuel + earnedBooks + earnedUniform +
-    earnedEmployeeBonus + earnedSpecial + overtimePay;
+    earnedEmployeeBonus + earnedSpecial + overtimePay + bonusAccrual.total;
 
   // Deductions.
   let pf = 0;
@@ -488,81 +554,6 @@ export function computePayrollFromInputs(
   const gratuityAccrual = gratuityEnabled
     ? Math.round(((earnedBasic + earnedDa) * gratuityPct) / 100)
     : 0;
-
-  // ── Bonus accruals ──────────────────────────────────────────────────────
-  // Smoothed monthly cost view. Statutory eligibility is checked on the
-  // FULL-MONTH (Basic+DA) so an employee doesn't lose statutory bonus just
-  // because they had LOP days. Frequency-based bonuses are amortised across
-  // their period so admins see steady-state cost.
-  const bonus = formulas.bonus;
-  const bonusAccrual = {
-    statutory: 0,
-    performance: 0,
-    festival: 0,
-    joining: 0,
-    retention: 0,
-    total: 0,
-  };
-  if (bonus) {
-    if (
-      bonus.statutoryBonusEnabled &&
-      monthlyBasic + monthlyDa <= (bonus.statutoryBonusSalaryCeiling ?? 21000)
-    ) {
-      const base = Math.min(
-        monthlyBasic + monthlyDa,
-        bonus.statutoryBonusCalcCeiling ?? 7000,
-      );
-      // Pro-rate so LOP months accrue less. (You could argue statutory bonus
-      // shouldn't pro-rate on LOP — the Bonus Act is silent on this — but
-      // matching the rest of payroll's pro-ration is the consistent default.)
-      bonusAccrual.statutory = Math.round(
-        base * ((bonus.statutoryBonusPercent ?? 8.33) / 100) * proRationFactor,
-      );
-    }
-    if (bonus.performanceBonusEnabled) {
-      const annual = baseSalary * 12 * ((bonus.performanceBonusPercent ?? 0) / 100);
-      bonusAccrual.performance = Math.round((annual / 12) * proRationFactor);
-    }
-    if (bonus.festivalBonusEnabled) {
-      // Annualised so the CTC view shows steady-state cost. The actual
-      // disbursement happens in the festival month (handled outside this
-      // calculator).
-      bonusAccrual.festival = Math.round(
-        ((bonus.festivalBonusAmount ?? 0) / 12) * proRationFactor,
-      );
-    }
-    if (bonus.joiningBonusEnabled && (bonus.joiningBonusClawbackMonths ?? 0) > 0) {
-      // Amortise the joining bonus over the clawback period — that's the
-      // honest monthly cost until the clawback expires.
-      bonusAccrual.joining = Math.round(
-        ((bonus.joiningBonusAmount ?? 0) / (bonus.joiningBonusClawbackMonths ?? 12)) *
-          proRationFactor,
-      );
-    }
-    if (bonus.retentionBonusEnabled) {
-      // Monthly pays the full amount every month (no smoothing). All other
-      // frequencies smooth across their period so the CTC view reflects
-      // steady-state cost; the actual payout still hits a single payslip
-      // in those months but the breakdown shows the per-month accrual.
-      const months =
-        bonus.retentionBonusFrequency === 'monthly'
-          ? 1
-          : bonus.retentionBonusFrequency === 'half-yearly'
-            ? 6
-            : bonus.retentionBonusFrequency === 'annual'
-              ? 12
-              : 24; // one-time
-      bonusAccrual.retention = Math.round(
-        ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
-      );
-    }
-    bonusAccrual.total =
-      bonusAccrual.statutory +
-      bonusAccrual.performance +
-      bonusAccrual.festival +
-      bonusAccrual.joining +
-      bonusAccrual.retention;
-  }
 
   // True monthly employer cost. The component groupings mirror what HR /
   // finance use in CTC letters.
