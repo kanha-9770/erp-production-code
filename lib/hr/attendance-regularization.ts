@@ -19,7 +19,7 @@ import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/api-helpers';
 import { triggerWorkflowsForRecord } from '@/lib/workflow/trigger';
 import { getAttendanceConfig } from './attendance-config';
-import { formatHHmm, todayKey } from './attendance-service';
+import { formatHHmm, todayKey, getEffectiveShift } from './attendance-service';
 
 export type RegularizationStatus =
   | 'PENDING'
@@ -315,8 +315,13 @@ export async function approveRegularization(input: ReviewInput): Promise<void> {
     : null;
 
   const cfg = await getAttendanceConfig(input.organizationId);
-  const expectedInMins = parseTimeToMinutes(cfg.defaultShiftStart) + cfg.graceMinutes;
-  const expectedOutMins = parseTimeToMinutes(cfg.defaultShiftEnd);
+  // Per-employee shift override: use the row's user's own inTime/outTime if
+  // set, otherwise the org default. Mirrors getStatus()/recordPunch() so an
+  // admin-approved regularization is classified against the same window the
+  // live widget would have used.
+  const shift = await getEffectiveShift(row.userId, cfg);
+  const expectedInMins = parseTimeToMinutes(shift.start) + cfg.graceMinutes;
+  const expectedOutMins = parseTimeToMinutes(shift.end);
 
   let lateMinutes = 0;
   let earlyOutMinutes = 0;

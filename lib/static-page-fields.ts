@@ -242,6 +242,39 @@ const LEAD_FIELDS: StaticField[] = [
   { coreKey: "createdAt", label: "Created At", type: "date" },
 ];
 
+const LEAVE_REQUEST_FIELDS: StaticField[] = [
+  // Applicant — denormalised onto the request so workflow templates can address
+  // the employee directly without joining LeaveRequest.user themselves.
+  { coreKey: "applicantName", label: "Applicant Name", type: "text" },
+  { coreKey: "applicantEmail", label: "Applicant Email", type: "email" },
+  { coreKey: "applicantDepartment", label: "Applicant Department", type: "text" },
+  { coreKey: "applicantDesignation", label: "Applicant Designation", type: "text" },
+  // Leave dates / duration
+  { coreKey: "leaveTypeName", label: "Leave Type", type: "text" },
+  { coreKey: "leaveTypeCode", label: "Leave Type Code", type: "text" },
+  { coreKey: "startDate", label: "Start Date", type: "date" },
+  { coreKey: "endDate", label: "End Date", type: "date" },
+  { coreKey: "totalDays", label: "Total Days", type: "number" },
+  { coreKey: "duration", label: "Duration (Full/Half)", type: "select" },
+  // Request meta
+  { coreKey: "reason", label: "Reason", type: "textarea" },
+  { coreKey: "attachmentUrl", label: "Attachment URL", type: "text" },
+  { coreKey: "isEmergency", label: "Is Emergency", type: "checkbox" },
+  // Approval lifecycle
+  { coreKey: "status", label: "Status", type: "select" },
+  { coreKey: "appliedAt", label: "Applied At", type: "date" },
+  { coreKey: "decidedAt", label: "Decided At", type: "date" },
+  { coreKey: "decisionNote", label: "Decision Note", type: "textarea" },
+  { coreKey: "cancelledAt", label: "Cancelled At", type: "date" },
+  { coreKey: "cancelReason", label: "Cancel Reason", type: "textarea" },
+  // Early-return ("shorten") flow
+  { coreKey: "shortenStatus", label: "Early-Return Status", type: "select" },
+  { coreKey: "shortenRequestedEndDate", label: "Early-Return New End Date", type: "date" },
+  { coreKey: "shortenRequestedReason", label: "Early-Return Reason", type: "textarea" },
+  { coreKey: "shortenDecisionNote", label: "Early-Return Decision Note", type: "textarea" },
+  { coreKey: "originalEndDate", label: "Original End Date", type: "date" },
+];
+
 const PAYROLL_RECORD_FIELDS: StaticField[] = [
   { coreKey: "employeeId", label: "Employee ID", type: "text" },
   { coreKey: "employeeName", label: "Employee Name", type: "text" },
@@ -334,6 +367,28 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:payroll",
     formName: "Payroll Record (static)",
     fields: PAYROLL_RECORD_FIELDS,
+  },
+  {
+    moduleName: "Leave",
+    // Aliases cover both the apply page ("My Leaves") and the approver page
+    // ("Leave Approvals"), plus a common misspelling ("Managment") we saw in
+    // a real tenant module name, so a workflow rule built from any entry
+    // point surfaces the same field set.
+    aliases: [
+      "Leaves",
+      "My Leaves",
+      "Leave Management",
+      "Leave Managment",
+      "Leaves Management",
+      "Leaves Managment",
+      "Leave Approval",
+      "Leave Approvals",
+      "Leave Request",
+      "Leave Requests",
+    ],
+    formId: "static:leave-request",
+    formName: "Leave Request (static)",
+    fields: LEAVE_REQUEST_FIELDS,
   },
 ];
 
