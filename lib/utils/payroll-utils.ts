@@ -256,6 +256,10 @@ export interface PayrollComputeInputs {
   // days and added to gross as a separate "Bonus" earning line. Optional —
   // defaults to 0 so existing callers / synthetic inputs keep working.
   employeeBonus?: number;
+  // Per-employee OT override from Employee Master. Explicit `false` blocks
+  // overtime for this employee even when the assigned Pay Rule has OT on.
+  // null/undefined/true defers to the Pay Rule.
+  isOvertimeApplicable?: boolean | null;
 }
 
 export interface PayrollComputeResult {
@@ -332,17 +336,16 @@ export function computePayrollFromInputs(
   const ssAny = ss as any;
   const isOn = (flag: string, fallback: boolean) =>
     ssAny[flag] === undefined ? fallback : Boolean(ssAny[flag]);
-  // Carve the per-employee bonus out of CTC FIRST, then apply the structure
-  // to whatever's left. This matches the HR convention "Total = Basic +
-  // Bonus": bonus is a fixed slice of CTC, and basic/HRA/allowances live in
-  // the remainder. Without this, basicPercent=100 makes basic alone fill
-  // the entire CTC and the bonus stacks on top — producing gross > CTC,
-  // which surprises admins ("I set CTC to 10k but the payslip shows 12k").
-  // Clamp at 0 so a bonus larger than CTC doesn't push the structure base
-  // negative — gross then equals just the bonus, which is the honest result.
+  // Bonus placement contract (per HR/UX decision):
+  //   - Employee Master `bonusAmount` is ABOVE CTC. It does NOT shrink the
+  //     structure base; it stacks on top of gross as a separate line.
+  //   - Pay-rule bonuses (statutory/performance/festival/joining/retention)
+  //     live INSIDE CTC. They are computed from monthlyBasic+DA and from
+  //     baseSalary, then absorbed via the auto special-allowance balance
+  //     so that monthlyGross collapses back to baseSalary.
+  // Apply the structure to the full baseSalary — no carve-out.
   const employeeBonusRaw = Math.max(0, Number(inputs.employeeBonus ?? 0));
-  const ctcForStructure = Math.max(0, baseSalary - employeeBonusRaw);
-  const monthlyBasic = (ctcForStructure * ss.basicPercent) / 100;
+  const monthlyBasic = (baseSalary * ss.basicPercent) / 100;
   const monthlyHra = (monthlyBasic * ss.hraPercent) / 100;
   const monthlyDa = isOn('daEnabled', (ss.daPercent ?? 0) > 0)
     ? (monthlyBasic * ss.daPercent) / 100
@@ -367,20 +370,79 @@ export function computePayrollFromInputs(
   const monthlyUniform = isOn('uniformEnabled', false)
     ? Number(ssAny.uniformAllowance ?? 0)
     : 0;
-  // employeeBonusRaw was carved out of CTC above; treat it as a fixed
-  // earning line by including it in monthlyFixedSum so the auto special-
-  // allowance balancer accounts for it correctly.
+  // Employee Master bonus is paid above CTC — kept out of monthlyFixedSum so
+  // the auto special-allowance balance treats it as a separate top-up.
   const monthlyEmployeeBonus = employeeBonusRaw;
+
+  // ── Pay-rule bonus accruals (monthly, un-pro-rated) ──────────────────
+  // Computed here so they can participate in the auto special-allowance
+  // balance and land INSIDE CTC. Statutory eligibility uses the full-month
+  // (Basic+DA) so an employee doesn't lose statutory bonus just because they
+  // had LOP days.
+  const bonus = formulas.bonus;
+  const bonusMonthly = {
+    statutory: 0,
+    performance: 0,
+    festival: 0,
+    joining: 0,
+    retention: 0,
+  };
+  if (bonus) {
+    if (
+      bonus.statutoryBonusEnabled &&
+      monthlyBasic + monthlyDa <= (bonus.statutoryBonusSalaryCeiling ?? 21000)
+    ) {
+      const base = Math.min(
+        monthlyBasic + monthlyDa,
+        bonus.statutoryBonusCalcCeiling ?? 7000,
+      );
+      bonusMonthly.statutory = base * ((bonus.statutoryBonusPercent ?? 8.33) / 100);
+    }
+    if (bonus.performanceBonusEnabled) {
+      bonusMonthly.performance = baseSalary * ((bonus.performanceBonusPercent ?? 0) / 100);
+    }
+    if (bonus.festivalBonusEnabled) {
+      bonusMonthly.festival = (bonus.festivalBonusAmount ?? 0) / 12;
+    }
+    if (bonus.joiningBonusEnabled && (bonus.joiningBonusClawbackMonths ?? 0) > 0) {
+      bonusMonthly.joining =
+        (bonus.joiningBonusAmount ?? 0) / (bonus.joiningBonusClawbackMonths ?? 12);
+    }
+    if (bonus.retentionBonusEnabled) {
+      // Monthly pays the full amount every month (no smoothing). All other
+      // frequencies smooth across their period.
+      const months =
+        bonus.retentionBonusFrequency === 'monthly'
+          ? 1
+          : bonus.retentionBonusFrequency === 'half-yearly'
+            ? 6
+            : bonus.retentionBonusFrequency === 'annual'
+              ? 12
+              : 24; // one-time
+      bonusMonthly.retention = (bonus.retentionBonusAmount ?? 0) / months;
+    }
+  }
+  const bonusMonthlyTotal =
+    bonusMonthly.statutory +
+    bonusMonthly.performance +
+    bonusMonthly.festival +
+    bonusMonthly.joining +
+    bonusMonthly.retention;
+
+  // Pay-rule bonuses live INSIDE CTC, so include them in the fixed sum that
+  // special-allowance auto-balances against. Employee Master bonus stays out.
   const monthlyFixedSum =
     monthlyBasic + monthlyHra + monthlyDa + monthlyConv + monthlyMed + monthlyLta +
     monthlyFood + monthlyPhone + monthlyEdu + monthlyFuel + monthlyBooks + monthlyUniform +
-    monthlyEmployeeBonus;
+    bonusMonthlyTotal;
   // Manual special allowance cannot be negative — a sign-error in config
   // shouldn't silently reduce gross below the sum of fixed components.
   const monthlySpecial =
     ss.specialAllowanceMode === 'auto'
       ? Math.max(0, baseSalary - monthlyFixedSum)
       : Math.max(0, ss.specialAllowanceAmount);
+  // monthlyGross here is the CTC envelope (parts that live inside baseSalary).
+  // Employee Master bonus is added later as an above-CTC top-up.
   const monthlyGross = monthlyFixedSum + monthlySpecial;
 
   // Pro-rated earned components.
@@ -400,10 +462,13 @@ export function computePayrollFromInputs(
   const earnedSpecial = monthlySpecial * proRationFactor;
 
   // Overtime pay capped at maxOvertimeHoursPerMonth across buckets in
-  // priority weekday → weekend → holiday.
+  // priority weekday → weekend → holiday. The per-employee
+  // isOvertimeApplicable toggle (from Employee Master → Salary &
+  // Compensation) hard-overrides the Pay Rule when set to false.
+  const employeeOtAllowed = inputs.isOvertimeApplicable !== false;
   let overtimePay = 0;
   let cappedOtHours = 0;
-  if (ot.enabled && inputs.overtimeHours) {
+  if (employeeOtAllowed && ot.enabled && inputs.overtimeHours) {
     let remaining = Math.max(0, ot.maxOvertimeHoursPerMonth);
     const wkd = Math.min(Math.max(0, inputs.overtimeHours.weekday), remaining); remaining -= wkd;
     const wke = Math.min(Math.max(0, inputs.overtimeHours.weekend), remaining); remaining -= wke;
@@ -415,76 +480,33 @@ export function computePayrollFromInputs(
     cappedOtHours = wkd + wke + hol;
   }
 
-  // ── Profile-level bonus accruals ────────────────────────────────────────
-  // Smoothed monthly amounts for every bonus type the profile has enabled.
-  // Computed BEFORE gross so they get added into grossSalary and flow into
-  // the payslip + deductions consistently. Statutory eligibility is checked
-  // on the FULL-MONTH (Basic+DA) so an employee doesn't lose statutory
-  // bonus just because they had LOP days.
-  const bonus = formulas.bonus;
+  // Pro-rated pay-rule bonus accruals — earned versions of `bonusMonthly`
+  // computed above. These are INSIDE CTC because they participate in the
+  // auto special-allowance balance, so adding them to grossSalary doesn't
+  // push gross past baseSalary (the special row absorbs the slack).
   const bonusAccrual = {
-    statutory: 0,
-    performance: 0,
-    festival: 0,
-    joining: 0,
-    retention: 0,
+    statutory: Math.round(bonusMonthly.statutory * proRationFactor),
+    performance: Math.round(bonusMonthly.performance * proRationFactor),
+    festival: Math.round(bonusMonthly.festival * proRationFactor),
+    joining: Math.round(bonusMonthly.joining * proRationFactor),
+    retention: Math.round(bonusMonthly.retention * proRationFactor),
     total: 0,
   };
-  if (bonus) {
-    if (
-      bonus.statutoryBonusEnabled &&
-      monthlyBasic + monthlyDa <= (bonus.statutoryBonusSalaryCeiling ?? 21000)
-    ) {
-      const base = Math.min(
-        monthlyBasic + monthlyDa,
-        bonus.statutoryBonusCalcCeiling ?? 7000,
-      );
-      bonusAccrual.statutory = Math.round(
-        base * ((bonus.statutoryBonusPercent ?? 8.33) / 100) * proRationFactor,
-      );
-    }
-    if (bonus.performanceBonusEnabled) {
-      const annual = baseSalary * 12 * ((bonus.performanceBonusPercent ?? 0) / 100);
-      bonusAccrual.performance = Math.round((annual / 12) * proRationFactor);
-    }
-    if (bonus.festivalBonusEnabled) {
-      bonusAccrual.festival = Math.round(
-        ((bonus.festivalBonusAmount ?? 0) / 12) * proRationFactor,
-      );
-    }
-    if (bonus.joiningBonusEnabled && (bonus.joiningBonusClawbackMonths ?? 0) > 0) {
-      bonusAccrual.joining = Math.round(
-        ((bonus.joiningBonusAmount ?? 0) / (bonus.joiningBonusClawbackMonths ?? 12)) *
-          proRationFactor,
-      );
-    }
-    if (bonus.retentionBonusEnabled) {
-      // Monthly pays the full amount every month (no smoothing). All other
-      // frequencies smooth across their period.
-      const months =
-        bonus.retentionBonusFrequency === 'monthly'
-          ? 1
-          : bonus.retentionBonusFrequency === 'half-yearly'
-            ? 6
-            : bonus.retentionBonusFrequency === 'annual'
-              ? 12
-              : 24; // one-time
-      bonusAccrual.retention = Math.round(
-        ((bonus.retentionBonusAmount ?? 0) / months) * proRationFactor,
-      );
-    }
-    bonusAccrual.total =
-      bonusAccrual.statutory +
-      bonusAccrual.performance +
-      bonusAccrual.festival +
-      bonusAccrual.joining +
-      bonusAccrual.retention;
-  }
+  bonusAccrual.total =
+    bonusAccrual.statutory +
+    bonusAccrual.performance +
+    bonusAccrual.festival +
+    bonusAccrual.joining +
+    bonusAccrual.retention;
 
+  // grossSalary = (CTC envelope, pro-rated) + Employee Master bonus (above
+  // CTC, pro-rated) + overtime. The CTC envelope already includes the pay-
+  // rule bonusAccrual.total because those were absorbed into monthlyFixedSum
+  // via the special-allowance auto-balance.
   const grossSalary =
     earnedBasic + earnedHra + earnedDa + earnedConv + earnedMed + earnedLta +
     earnedFood + earnedPhone + earnedEdu + earnedFuel + earnedBooks + earnedUniform +
-    earnedEmployeeBonus + earnedSpecial + overtimePay + bonusAccrual.total;
+    earnedSpecial + bonusAccrual.total + earnedEmployeeBonus + overtimePay;
 
   // Deductions.
   let pf = 0;
@@ -556,9 +578,10 @@ export function computePayrollFromInputs(
     : 0;
 
   // True monthly employer cost. The component groupings mirror what HR /
-  // finance use in CTC letters.
+  // finance use in CTC letters. bonusAccrual is NOT added again because it's
+  // already inside grossSalary (pay-rule bonuses live inside CTC now).
   const totalCtcCost = Math.round(
-    grossSalary + employerPf + employerEsi + gratuityAccrual + bonusAccrual.total,
+    grossSalary + employerPf + employerEsi + gratuityAccrual,
   );
 
   return {
@@ -871,6 +894,7 @@ function calculateForEmployee(
       // the engine pro-rates it by payable days and emits it as a separate
       // earnings line.
       employeeBonus: employee.bonusAmount ?? 0,
+      isOvertimeApplicable: employee.isOvertimeApplicable ?? null,
     },
     policy,
     formulas,

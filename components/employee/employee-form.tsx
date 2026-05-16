@@ -55,91 +55,189 @@ async function ensureEmployeeBuilderHref(): Promise<{ href: string; created: boo
 }
 
 export interface EmployeeFormValues {
+  // ── 1. Personal information ──────────────────────────────────────────
+  salutation: string;
+  firstName: string;
+  lastName: string;
+  // employeeName stays in values because some downstream code still reads
+  // it — we compose it from firstName + lastName on submit.
   employeeName: string;
   gender: "MALE" | "FEMALE" | "OTHER";
-  status: "ACTIVE" | "INACTIVE" | "ON_LEAVE" | "TERMINATED";
-  department: string;
-  designation: string;
-  companyName: string;
-  employeeEngagementTeamName: string;
-
-  emailAddress1: string;
-  emailAddress2: string;
-  personalContact: string;
-  alternateNo1: string;
-  alternateNo2: string;
-
   dob: string;
-  dateOfJoining: string;
-  dateOfLeaving: string;
+  placeOfBirth: string;
+  bloodGroup: string;
+  maritalStatus: string;
+  nationality: string;
+  // Legacy fields the form no longer surfaces but keeps in state so an
+  // older saved employee round-trips without dropping data.
   nativePlace: string;
   country: string;
+
+  // ── 2. Contact information ───────────────────────────────────────────
+  emailAddress1: string; // Personal email
+  emailAddress2: string; // Company email
+  personalContact: string; // Cell number
+  alternateNo1: string;
+  alternateNo2: string;
+  currentAddressLine1: string;
+  currentAddressLine2: string;
+  currentCity: string;
+  currentState: string;
+  currentPostalCode: string;
+  currentCountry: string;
+  currentAccommodationType: string;
+  permanentSameAsCurrent: boolean;
+  permanentAddressLine1: string;
+  permanentAddressLine2: string;
+  permanentCity: string;
+  permanentState: string;
+  permanentPostalCode: string;
+  permanentCountry: string;
+  permanentAccommodationType: string;
+  emergencyContactName: string;
+  emergencyPhone: string;
+  emergencyRelation: string;
+  // Legacy single-field addresses, preserved on edit so older data isn't
+  // dropped. New saves can leave these blank.
   permanentAddress: string;
   currentAddress: string;
 
+  // ── 3. Employment details ───────────────────────────────────────────
+  employmentType: string;
+  department: string;
+  designation: string;
+  companyName: string;
+  branch: string;
+  status: "ACTIVE" | "INACTIVE" | "ON_LEAVE" | "TERMINATED";
+  dateOfJoining: string;
   shiftType: string;
   inTime: string;
   outTime: string;
-
-  totalSalary: string;
-  givenSalary: string;
-  bonusAmount: string;
-  nightAllowance: string;
-  overTime: string;
-  oneHourExtra: string;
-  incrementMonth: string;
+  totalWorkingHours: string;
+  employeeEngagementTeamName: string;
   yearsOfAgreement: string;
-  bonusAfterYears: string;
 
+  // ── 4. Document uploads ─────────────────────────────────────────────
+  passportUpload: string;
+  aadharCardUpload: string;
+  aadharCardNo: string;
+  panCardUpload: string;
+
+  // ── 5. Salary & compensation ───────────────────────────────────────
+  salaryMode: string;
+  baseSalary: string;
+  totalSalary: string;
+  perHourSalary: string;
+  isOvertimeApplicable: boolean;
+  overTime: string;
+  bonusAmount: string;
+  bonusAfterYears: string;
+  incrementMonth: string;
+  givenSalary: string;
+  nightAllowance: string;
+  oneHourExtra: string;
+
+  // ── 6. Bank details ────────────────────────────────────────────────
   bankName: string;
   bankAccountNo: string;
   ifscCode: string;
-  aadharCardNo: string;
+
+  // ── 7. Exit / Resignation ──────────────────────────────────────────
+  resignationLetterDate: string;
+  dateOfLeaving: string;
+  reasonOfLeaving: string;
+  noticeServed: boolean;
 
   companySimIssue: boolean;
 }
 
 const EMPTY: EmployeeFormValues = {
+  // Section 1
+  salutation: "",
+  firstName: "",
+  lastName: "",
   employeeName: "",
   gender: "OTHER",
-  status: "ACTIVE",
-  department: "",
-  designation: "",
-  companyName: "",
-  employeeEngagementTeamName: "",
+  dob: "",
+  placeOfBirth: "",
+  bloodGroup: "",
+  maritalStatus: "",
+  nationality: "Indian",
+  nativePlace: "",
+  country: "India",
 
+  // Section 2
   emailAddress1: "",
   emailAddress2: "",
   personalContact: "",
   alternateNo1: "",
   alternateNo2: "",
-
-  dob: "",
-  dateOfJoining: "",
-  dateOfLeaving: "",
-  nativePlace: "",
-  country: "India",
+  currentAddressLine1: "",
+  currentAddressLine2: "",
+  currentCity: "",
+  currentState: "",
+  currentPostalCode: "",
+  currentCountry: "India",
+  currentAccommodationType: "",
+  permanentSameAsCurrent: false,
+  permanentAddressLine1: "",
+  permanentAddressLine2: "",
+  permanentCity: "",
+  permanentState: "",
+  permanentPostalCode: "",
+  permanentCountry: "India",
+  permanentAccommodationType: "",
+  emergencyContactName: "",
+  emergencyPhone: "",
+  emergencyRelation: "",
   permanentAddress: "",
   currentAddress: "",
 
+  // Section 3
+  employmentType: "",
+  department: "",
+  designation: "",
+  companyName: "",
+  branch: "",
+  status: "ACTIVE",
+  dateOfJoining: "",
   shiftType: "",
   inTime: "",
   outTime: "",
-
-  totalSalary: "",
-  givenSalary: "",
-  bonusAmount: "",
-  nightAllowance: "",
-  overTime: "",
-  oneHourExtra: "",
-  incrementMonth: "",
+  totalWorkingHours: "8",
+  employeeEngagementTeamName: "",
   yearsOfAgreement: "",
-  bonusAfterYears: "",
 
+  // Section 4
+  passportUpload: "",
+  aadharCardUpload: "",
+  aadharCardNo: "",
+  panCardUpload: "",
+
+  // Section 5
+  salaryMode: "Bank Transfer",
+  baseSalary: "",
+  totalSalary: "",
+  perHourSalary: "",
+  isOvertimeApplicable: false,
+  overTime: "",
+  bonusAmount: "",
+  bonusAfterYears: "",
+  incrementMonth: "",
+  givenSalary: "",
+  nightAllowance: "",
+  oneHourExtra: "",
+
+  // Section 6
   bankName: "",
   bankAccountNo: "",
   ifscCode: "",
-  aadharCardNo: "",
+
+  // Section 7
+  resignationLetterDate: "",
+  dateOfLeaving: "",
+  reasonOfLeaving: "",
+  noticeServed: false,
 
   companySimIssue: false,
 };
@@ -149,46 +247,95 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     v === null || v === undefined ? "" : String(v);
   const dateStr = (v: string | null | undefined) => (v ? v.slice(0, 10) : "");
   return {
+    // Section 1
+    salutation: e.salutation ?? "",
+    firstName: e.firstName ?? "",
+    lastName: e.lastName ?? "",
     employeeName: e.employeeName ?? "",
     gender: (e.gender ?? "OTHER") as EmployeeFormValues["gender"],
-    status: (e.status ?? "ACTIVE") as EmployeeFormValues["status"],
-    department: e.department ?? "",
-    designation: e.designation ?? "",
-    companyName: e.companyName ?? "",
-    employeeEngagementTeamName: e.employeeEngagementTeamName ?? "",
+    dob: dateStr(e.dob),
+    placeOfBirth: e.placeOfBirth ?? "",
+    bloodGroup: e.bloodGroup ?? "",
+    maritalStatus: e.maritalStatus ?? "",
+    nationality: e.nationality ?? "Indian",
+    nativePlace: e.nativePlace ?? "",
+    country: e.country ?? "",
 
+    // Section 2
     emailAddress1: e.emailAddress1 ?? "",
     emailAddress2: e.emailAddress2 ?? "",
     personalContact: e.personalContact ?? "",
     alternateNo1: e.alternateNo1 ?? "",
     alternateNo2: e.alternateNo2 ?? "",
-
-    dob: dateStr(e.dob),
-    dateOfJoining: dateStr(e.dateOfJoining),
-    dateOfLeaving: dateStr(e.dateOfLeaving),
-    nativePlace: e.nativePlace ?? "",
-    country: e.country ?? "",
+    currentAddressLine1: e.currentAddressLine1 ?? "",
+    currentAddressLine2: e.currentAddressLine2 ?? "",
+    currentCity: e.currentCity ?? "",
+    currentState: e.currentState ?? "",
+    currentPostalCode: e.currentPostalCode ?? "",
+    currentCountry: e.currentCountry ?? "India",
+    currentAccommodationType: e.currentAccommodationType ?? "",
+    permanentSameAsCurrent: !!e.permanentSameAsCurrent,
+    permanentAddressLine1: e.permanentAddressLine1 ?? "",
+    permanentAddressLine2: e.permanentAddressLine2 ?? "",
+    permanentCity: e.permanentCity ?? "",
+    permanentState: e.permanentState ?? "",
+    permanentPostalCode: e.permanentPostalCode ?? "",
+    permanentCountry: e.permanentCountry ?? "India",
+    permanentAccommodationType: e.permanentAccommodationType ?? "",
+    emergencyContactName: e.emergencyContactName ?? "",
+    emergencyPhone: e.emergencyPhone ?? "",
+    emergencyRelation: e.emergencyRelation ?? "",
     permanentAddress: e.permanentAddress ?? "",
     currentAddress: e.currentAddress ?? "",
 
+    // Section 3
+    employmentType: e.employmentType ?? "",
+    department: e.department ?? "",
+    designation: e.designation ?? "",
+    companyName: e.companyName ?? "",
+    branch: e.branch ?? "",
+    status: (e.status ?? "ACTIVE") as EmployeeFormValues["status"],
+    dateOfJoining: dateStr(e.dateOfJoining),
     shiftType: e.shiftType ?? "",
     inTime: e.inTime ?? "",
     outTime: e.outTime ?? "",
-
-    totalSalary: numStr(e.totalSalary),
-    givenSalary: numStr(e.givenSalary),
-    bonusAmount: numStr(e.bonusAmount),
-    nightAllowance: numStr(e.nightAllowance),
-    overTime: numStr(e.overTime),
-    oneHourExtra: numStr(e.oneHourExtra),
-    incrementMonth: e.incrementMonth != null ? String(e.incrementMonth) : "",
+    totalWorkingHours: numStr(e.totalWorkingHours),
+    employeeEngagementTeamName: e.employeeEngagementTeamName ?? "",
     yearsOfAgreement: e.yearsOfAgreement != null ? String(e.yearsOfAgreement) : "",
-    bonusAfterYears: e.bonusAfterYears != null ? String(e.bonusAfterYears) : "",
 
+    // Section 4
+    passportUpload: e.passportUpload ?? "",
+    aadharCardUpload: e.aadharCardUpload ?? "",
+    aadharCardNo: e.aadharCardNo ?? "",
+    panCardUpload: e.panCardUpload ?? "",
+
+    // Section 5
+    salaryMode: e.salaryMode ?? "Bank Transfer",
+    // Show the single CTC value in the form. Prefer baseSalary when present,
+    // fall back to totalSalary for legacy rows that only had one column set.
+    // The form now mirrors edits into both columns on save.
+    baseSalary: numStr(e.baseSalary ?? e.totalSalary),
+    totalSalary: numStr(e.totalSalary ?? e.baseSalary),
+    perHourSalary: numStr(e.perHourSalary),
+    isOvertimeApplicable: !!e.isOvertimeApplicable,
+    overTime: numStr(e.overTime),
+    bonusAmount: numStr(e.bonusAmount),
+    bonusAfterYears: e.bonusAfterYears != null ? String(e.bonusAfterYears) : "",
+    incrementMonth: e.incrementMonth != null ? String(e.incrementMonth) : "",
+    givenSalary: numStr(e.givenSalary),
+    nightAllowance: numStr(e.nightAllowance),
+    oneHourExtra: numStr(e.oneHourExtra),
+
+    // Section 6
     bankName: e.bankName ?? "",
     bankAccountNo: e.bankAccountNo ?? "",
     ifscCode: e.ifscCode ?? "",
-    aadharCardNo: e.aadharCardNo ?? "",
+
+    // Section 7
+    resignationLetterDate: dateStr(e.resignationLetterDate),
+    dateOfLeaving: dateStr(e.dateOfLeaving),
+    reasonOfLeaving: e.reasonOfLeaving ?? "",
+    noticeServed: !!e.noticeServed,
 
     companySimIssue: !!e.companySimIssue,
   };
@@ -196,47 +343,125 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
 
 export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
   const trimOrNull = (s: string) => (s.trim() === "" ? null : s.trim());
-  return {
-    employeeName: values.employeeName.trim(),
-    gender: values.gender,
-    status: values.status,
-    department: trimOrNull(values.department),
-    designation: trimOrNull(values.designation),
-    companyName: trimOrNull(values.companyName),
-    employeeEngagementTeamName: trimOrNull(values.employeeEngagementTeamName),
+  // Compose the canonical employeeName from firstName + lastName + salutation
+  // so downstream readers (engine, payslip, sidebar) keep working unchanged.
+  // If the user typed something in the old combined field, prefer that.
+  const composedName = [values.firstName.trim(), values.lastName.trim()]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const finalName = values.employeeName.trim() || composedName;
 
+  // If "Same as Current Address" is on, mirror the current-address fields
+  // into the permanent block at save time so the DB has consistent data
+  // regardless of which fields the form rendered.
+  const permanentSrc = values.permanentSameAsCurrent
+    ? {
+        line1: values.currentAddressLine1,
+        line2: values.currentAddressLine2,
+        city: values.currentCity,
+        state: values.currentState,
+        postalCode: values.currentPostalCode,
+        country: values.currentCountry,
+      }
+    : {
+        line1: values.permanentAddressLine1,
+        line2: values.permanentAddressLine2,
+        city: values.permanentCity,
+        state: values.permanentState,
+        postalCode: values.permanentPostalCode,
+        country: values.permanentCountry,
+      };
+
+  return {
+    // Section 1
+    salutation: trimOrNull(values.salutation),
+    firstName: trimOrNull(values.firstName),
+    lastName: trimOrNull(values.lastName),
+    employeeName: finalName,
+    gender: values.gender,
+    dob: values.dob || null,
+    placeOfBirth: trimOrNull(values.placeOfBirth),
+    bloodGroup: trimOrNull(values.bloodGroup),
+    maritalStatus: trimOrNull(values.maritalStatus),
+    nationality: trimOrNull(values.nationality),
+    nativePlace: trimOrNull(values.nativePlace),
+    country: trimOrNull(values.country),
+
+    // Section 2
     emailAddress1: trimOrNull(values.emailAddress1),
     emailAddress2: trimOrNull(values.emailAddress2),
     personalContact: trimOrNull(values.personalContact),
     alternateNo1: trimOrNull(values.alternateNo1),
     alternateNo2: trimOrNull(values.alternateNo2),
-
-    dob: values.dob || null,
-    dateOfJoining: values.dateOfJoining || null,
-    dateOfLeaving: values.dateOfLeaving || null,
-    nativePlace: trimOrNull(values.nativePlace),
-    country: trimOrNull(values.country),
+    currentAddressLine1: trimOrNull(values.currentAddressLine1),
+    currentAddressLine2: trimOrNull(values.currentAddressLine2),
+    currentCity: trimOrNull(values.currentCity),
+    currentState: trimOrNull(values.currentState),
+    currentPostalCode: trimOrNull(values.currentPostalCode),
+    currentCountry: trimOrNull(values.currentCountry),
+    currentAccommodationType: trimOrNull(values.currentAccommodationType),
+    permanentSameAsCurrent: values.permanentSameAsCurrent,
+    permanentAddressLine1: trimOrNull(permanentSrc.line1),
+    permanentAddressLine2: trimOrNull(permanentSrc.line2),
+    permanentCity: trimOrNull(permanentSrc.city),
+    permanentState: trimOrNull(permanentSrc.state),
+    permanentPostalCode: trimOrNull(permanentSrc.postalCode),
+    permanentCountry: trimOrNull(permanentSrc.country),
+    permanentAccommodationType: trimOrNull(values.permanentAccommodationType),
+    emergencyContactName: trimOrNull(values.emergencyContactName),
+    emergencyPhone: trimOrNull(values.emergencyPhone),
+    emergencyRelation: trimOrNull(values.emergencyRelation),
     permanentAddress: trimOrNull(values.permanentAddress),
     currentAddress: trimOrNull(values.currentAddress),
 
+    // Section 3
+    employmentType: trimOrNull(values.employmentType),
+    department: trimOrNull(values.department),
+    designation: trimOrNull(values.designation),
+    companyName: trimOrNull(values.companyName),
+    branch: trimOrNull(values.branch),
+    status: values.status,
+    dateOfJoining: values.dateOfJoining || null,
     shiftType: trimOrNull(values.shiftType),
     inTime: trimOrNull(values.inTime),
     outTime: trimOrNull(values.outTime),
-
-    totalSalary: values.totalSalary,
-    givenSalary: values.givenSalary,
-    bonusAmount: values.bonusAmount,
-    nightAllowance: values.nightAllowance,
-    overTime: values.overTime,
-    oneHourExtra: values.oneHourExtra,
-    incrementMonth: values.incrementMonth,
+    totalWorkingHours: values.totalWorkingHours,
+    employeeEngagementTeamName: trimOrNull(values.employeeEngagementTeamName),
     yearsOfAgreement: values.yearsOfAgreement,
-    bonusAfterYears: values.bonusAfterYears,
 
+    // Section 4
+    passportUpload: trimOrNull(values.passportUpload),
+    aadharCardUpload: trimOrNull(values.aadharCardUpload),
+    aadharCardNo: trimOrNull(values.aadharCardNo),
+    panCardUpload: trimOrNull(values.panCardUpload),
+
+    // Section 5
+    salaryMode: trimOrNull(values.salaryMode),
+    // The single "Salary Amount" input drives both columns: baseSalary is the
+    // HR-facing label, totalSalary is what the payroll engine reads.
+    baseSalary: values.baseSalary,
+    totalSalary: values.totalSalary || values.baseSalary,
+    perHourSalary: values.perHourSalary,
+    isOvertimeApplicable: values.isOvertimeApplicable,
+    overTime: values.overTime,
+    bonusAmount: values.bonusAmount,
+    bonusAfterYears: values.bonusAfterYears,
+    incrementMonth: values.incrementMonth,
+    givenSalary: values.givenSalary,
+    nightAllowance: values.nightAllowance,
+    oneHourExtra: values.oneHourExtra,
+
+    // Section 6
     bankName: trimOrNull(values.bankName),
     bankAccountNo: trimOrNull(values.bankAccountNo),
     ifscCode: trimOrNull(values.ifscCode),
-    aadharCardNo: trimOrNull(values.aadharCardNo),
+
+    // Section 7
+    resignationLetterDate: values.resignationLetterDate || null,
+    dateOfLeaving: values.dateOfLeaving || null,
+    reasonOfLeaving: trimOrNull(values.reasonOfLeaving),
+    noticeServed: values.noticeServed,
 
     companySimIssue: values.companySimIssue,
   };
@@ -419,17 +644,40 @@ export function EmployeeForm({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!values.employeeName.trim()) return setError("Employee name is required");
+    // First Name is the required identity field on the new layout. Last
+    // Name is also flagged as required on the form, but we accept First
+    // Name alone to support single-name entries (common in some regions).
+    if (!values.firstName.trim() && !values.employeeName.trim()) {
+      return setError("First name is required");
+    }
     if (
       values.emailAddress1 &&
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress1)
     )
-      return setError("Primary email is not a valid address");
+      return setError("Personal email is not a valid address");
     if (
-      values.totalSalary !== "" &&
-      Number(values.totalSalary) < 0
+      values.emailAddress2 &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress2)
     )
+      return setError("Company email is not a valid address");
+    if (!splitPhone(values.personalContact).number) {
+      return setError("Cell number is required");
+    }
+    if (!values.emergencyContactName.trim()) {
+      return setError("Emergency contact name is required");
+    }
+    if (!splitPhone(values.emergencyPhone).number) {
+      return setError("Emergency phone is required");
+    }
+    if (!values.companyName.trim()) {
+      return setError("Company is required");
+    }
+    if (!values.dateOfJoining) {
+      return setError("Date of joining is required");
+    }
+    if (values.totalSalary !== "" && Number(values.totalSalary) < 0) {
       return setError("Total salary must be a non-negative number");
+    }
 
     // Only forward the face photo if (a) a usable descriptor was extracted
     // and (b) the consent box is ticked. Without consent we still keep the
@@ -443,25 +691,52 @@ export function EmployeeForm({
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      {/* Identity */}
+      {/* ─── Section 1: Personal Information ─────────────────────────── */}
+      <SectionHeader index={1} title="Personal Information" subtitle="Identity, DOB, nationality" />
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Identity</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full name *" className="sm:col-span-2">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Salutation">
+            <Select
+              value={values.salutation || undefined}
+              onValueChange={(v) => set("salutation", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Mr.">Mr.</SelectItem>
+                <SelectItem value="Mrs.">Mrs.</SelectItem>
+                <SelectItem value="Ms.">Ms.</SelectItem>
+                <SelectItem value="Dr.">Dr.</SelectItem>
+                <SelectItem value="Prof.">Prof.</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="First Name *">
             <Input
-              value={values.employeeName}
-              onChange={(e) => set("employeeName", e.target.value)}
-              placeholder="e.g. Ananya Sharma"
+              value={values.firstName}
+              onChange={(e) => set("firstName", e.target.value)}
+              placeholder="First name"
+            />
+          </Field>
+          <Field label="Last Name *">
+            <Input
+              value={values.lastName}
+              onChange={(e) => set("lastName", e.target.value)}
+              placeholder="Last name"
+            />
+          </Field>
+          <Field label="Date of Birth *">
+            <Input
+              type="date"
+              value={values.dob}
+              onChange={(e) => set("dob", e.target.value)}
             />
           </Field>
           <Field label="Gender">
             <Select
               value={values.gender}
-              onValueChange={(v) =>
-                set("gender", v as EmployeeFormValues["gender"])
-              }
+              onValueChange={(v) => set("gender", v as EmployeeFormValues["gender"])}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -473,12 +748,455 @@ export function EmployeeForm({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Status">
+          <Field label="Place of Birth">
+            <Input
+              value={values.placeOfBirth}
+              onChange={(e) => set("placeOfBirth", e.target.value)}
+              placeholder="City, country"
+            />
+          </Field>
+          <Field label="Blood Group">
+            <Select
+              value={values.bloodGroup || undefined}
+              onValueChange={(v) => set("bloodGroup", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select..." />
+              </SelectTrigger>
+              <SelectContent>
+                {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((bg) => (
+                  <SelectItem key={bg} value={bg}>{bg}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Marital Status">
+            <Select
+              value={values.maritalStatus || undefined}
+              onValueChange={(v) => set("maritalStatus", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="SINGLE">Single</SelectItem>
+                <SelectItem value="MARRIED">Married</SelectItem>
+                <SelectItem value="DIVORCED">Divorced</SelectItem>
+                <SelectItem value="WIDOWED">Widowed</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Nationality">
+            <Input
+              value={values.nationality}
+              onChange={(e) => set("nationality", e.target.value)}
+              placeholder="Indian"
+            />
+          </Field>
+
+          {/* Employee Image — full-width inside Section 1 */}
+          <div className="sm:col-span-2">
+            <Label className="text-xs font-medium text-muted-foreground">
+              Employee Image
+            </Label>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Profile photo. Optional — used as the avatar everywhere. If a face is detected and the consent box is ticked, also enrolled for face-recognition attendance.
+            </p>
+            <div className="flex items-start gap-4">
+              <div className="flex h-28 w-28 flex-none items-center justify-center overflow-hidden rounded-md border bg-gray-50">
+                {photoPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoPreview}
+                    alt="Selected employee photo"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Upload className="h-6 w-6 text-gray-400" />
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => onPhotoPicked(e.target.files?.[0] ?? null)}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    {photoFile ? "Replace photo" : "Choose images..."}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCameraOpen(true)}
+                  >
+                    <Camera className="mr-1.5 h-3.5 w-3.5" />
+                    Take photo
+                  </Button>
+                  {photoFile && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearPhoto}
+                    >
+                      <X className="mr-1.5 h-3.5 w-3.5" />
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                {photoStatus === "analyzing" && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Analyzing face…
+                  </div>
+                )}
+                {photoStatus === "ok" && (
+                  <div className="flex items-center gap-1.5 text-xs text-green-700">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Face detected — eligible for enrollment
+                  </div>
+                )}
+                {photoStatus === "no_face" && (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-700">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    No face detected. Photo saved as avatar only.
+                  </div>
+                )}
+                {photoStatus === "multiple_faces" && (
+                  <div className="flex items-center gap-1.5 text-xs text-red-700">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    {photoFaceCount} faces detected. Choose a solo photo.
+                  </div>
+                )}
+                {photoStatus === "error" && (
+                  <div className="flex items-center gap-1.5 text-xs text-red-700">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Couldn't analyze photo. Try a different image.
+                  </div>
+                )}
+              </div>
+            </div>
+            {photoStatus === "ok" && (
+              <label className="mt-3 flex items-start gap-2 rounded-md border bg-amber-50/40 p-3 text-xs">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={photoConsent}
+                  onChange={(e) => setPhotoConsent(e.target.checked)}
+                />
+                <span>
+                  I confirm this employee consents to face-recognition for attendance verification. A 128-number face fingerprint will be stored (the original photo is kept as the avatar). Consent timestamp is recorded for audit.
+                </span>
+              </label>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Section 2: Contact Information ──────────────────────────── */}
+      <SectionHeader index={2} title="Contact Information" subtitle="Email, phone, addresses, emergency" />
+      <Card>
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Personal Email *">
+            <Input
+              type="email"
+              value={values.emailAddress1}
+              onChange={(e) => set("emailAddress1", e.target.value)}
+              placeholder="personal@example.com"
+            />
+          </Field>
+          <Field label="Company Email">
+            <Input
+              type="email"
+              value={values.emailAddress2}
+              onChange={(e) => set("emailAddress2", e.target.value)}
+              placeholder="work@company.com"
+            />
+          </Field>
+          <Field label="Cell Number *" className="sm:col-span-2">
+            <PhoneInput
+              value={values.personalContact}
+              onChange={(v) => set("personalContact", v)}
+              placeholder="Primary phone"
+            />
+          </Field>
+
+          {/* Current Address */}
+          <fieldset className="sm:col-span-2 rounded-md border p-3 space-y-3">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">
+              Current Address
+            </legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Address Line 1">
+                <Input
+                  value={values.currentAddressLine1}
+                  onChange={(e) => set("currentAddressLine1", e.target.value)}
+                  placeholder="Street address, house no."
+                />
+              </Field>
+              <Field label="Address Line 2">
+                <Input
+                  value={values.currentAddressLine2}
+                  onChange={(e) => set("currentAddressLine2", e.target.value)}
+                  placeholder="Apartment, suite, floor"
+                />
+              </Field>
+              <Field label="City / District">
+                <Input
+                  value={values.currentCity}
+                  onChange={(e) => set("currentCity", e.target.value)}
+                  placeholder="Enter City"
+                />
+              </Field>
+              <Field label="State / Province">
+                <Input
+                  value={values.currentState}
+                  onChange={(e) => set("currentState", e.target.value)}
+                  placeholder="Enter State"
+                />
+              </Field>
+              <Field label="Postal / Zip Code">
+                <Input
+                  value={values.currentPostalCode}
+                  onChange={(e) => set("currentPostalCode", e.target.value)}
+                  placeholder="Enter Postal Code"
+                />
+              </Field>
+              <Field label="Country">
+                <Input
+                  value={values.currentCountry}
+                  onChange={(e) => set("currentCountry", e.target.value)}
+                  placeholder="Select country"
+                />
+              </Field>
+              <Field label="Current Accommodation Type" className="sm:col-span-2">
+                <Select
+                  value={values.currentAccommodationType || undefined}
+                  onValueChange={(v) => set("currentAccommodationType", v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="OWNED">Owned</SelectItem>
+                    <SelectItem value="RENTED">Rented</SelectItem>
+                    <SelectItem value="COMPANY_PROVIDED">Company-provided</SelectItem>
+                    <SelectItem value="FAMILY">Family</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </fieldset>
+
+          {/* Permanent Address */}
+          <fieldset className="sm:col-span-2 rounded-md border p-3 space-y-3">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">
+              Permanent Address
+            </legend>
+            <label className="flex items-center gap-2 text-sm">
+              <Switch
+                checked={values.permanentSameAsCurrent}
+                onCheckedChange={(c) => set("permanentSameAsCurrent", c)}
+              />
+              Same as Current Address
+            </label>
+            {!values.permanentSameAsCurrent && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Address Line 1">
+                  <Input
+                    value={values.permanentAddressLine1}
+                    onChange={(e) => set("permanentAddressLine1", e.target.value)}
+                    placeholder="Street address, house no."
+                  />
+                </Field>
+                <Field label="Address Line 2">
+                  <Input
+                    value={values.permanentAddressLine2}
+                    onChange={(e) => set("permanentAddressLine2", e.target.value)}
+                    placeholder="Apartment, suite, floor"
+                  />
+                </Field>
+                <Field label="City / District">
+                  <Input
+                    value={values.permanentCity}
+                    onChange={(e) => set("permanentCity", e.target.value)}
+                  />
+                </Field>
+                <Field label="State / Province">
+                  <Input
+                    value={values.permanentState}
+                    onChange={(e) => set("permanentState", e.target.value)}
+                  />
+                </Field>
+                <Field label="Postal / Zip Code">
+                  <Input
+                    value={values.permanentPostalCode}
+                    onChange={(e) => set("permanentPostalCode", e.target.value)}
+                  />
+                </Field>
+                <Field label="Country">
+                  <Input
+                    value={values.permanentCountry}
+                    onChange={(e) => set("permanentCountry", e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
+            <Field label="Permanent Accommodation Type">
+              <Select
+                value={values.permanentAccommodationType || undefined}
+                onValueChange={(v) => set("permanentAccommodationType", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="OWNED">Owned</SelectItem>
+                  <SelectItem value="RENTED">Rented</SelectItem>
+                  <SelectItem value="FAMILY">Family</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </fieldset>
+
+          {/* Emergency Contact */}
+          <Field label="Emergency Contact Name *">
+            <Input
+              value={values.emergencyContactName}
+              onChange={(e) => set("emergencyContactName", e.target.value)}
+              placeholder="Full name"
+            />
+          </Field>
+          <Field label="Emergency Phone *">
+            <PhoneInput
+              value={values.emergencyPhone}
+              onChange={(v) => set("emergencyPhone", v)}
+              placeholder="Phone"
+            />
+          </Field>
+          <Field label="Relation">
+            <Input
+              value={values.emergencyRelation}
+              onChange={(e) => set("emergencyRelation", e.target.value)}
+              placeholder="e.g. Father"
+            />
+          </Field>
+        </CardContent>
+      </Card>
+
+      {/* ─── Section 3: Employment Details ───────────────────────────── */}
+      <SectionHeader index={3} title="Employment Details" subtitle="Company, department, shift, joining" />
+      <Card>
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Employment Type">
+            <Select
+              value={values.employmentType || undefined}
+              onValueChange={(v) => set("employmentType", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="FULL_TIME">Full-time</SelectItem>
+                <SelectItem value="PART_TIME">Part-time</SelectItem>
+                <SelectItem value="CONTRACT">Contract</SelectItem>
+                <SelectItem value="INTERN">Intern</SelectItem>
+                <SelectItem value="PROBATION">Probation</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Employee ID" hint="Will be generated on submit">
+            <Input value="" disabled placeholder="# Will be generated on submit" />
+          </Field>
+          <Field label="Department">
+            <Input
+              value={values.department}
+              onChange={(e) => set("department", e.target.value)}
+              placeholder="e.g. Engineering"
+            />
+          </Field>
+          <Field label="Company *">
+            <Input
+              value={values.companyName}
+              onChange={(e) => set("companyName", e.target.value)}
+              placeholder="Company name"
+            />
+          </Field>
+          <Field label="Branch">
+            <Input
+              value={values.branch}
+              onChange={(e) => set("branch", e.target.value)}
+              placeholder="Branch / location"
+            />
+          </Field>
+          <Field label="Date of Joining *">
+            <Input
+              type="date"
+              value={values.dateOfJoining}
+              onChange={(e) => set("dateOfJoining", e.target.value)}
+            />
+          </Field>
+          <Field label="Shift Type">
+            <Select
+              value={values.shiftType || undefined}
+              onValueChange={(v) => set("shiftType", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="GENERAL">General</SelectItem>
+                <SelectItem value="MORNING">Morning</SelectItem>
+                <SelectItem value="EVENING">Evening</SelectItem>
+                <SelectItem value="NIGHT">Night</SelectItem>
+                <SelectItem value="ROTATIONAL">Rotational</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="In Time" hint="Scheduled in time">
+            <Input
+              type="time"
+              value={values.inTime}
+              onChange={(e) => set("inTime", e.target.value)}
+            />
+          </Field>
+          <Field label="Out Time" hint="Scheduled out time">
+            <Input
+              type="time"
+              value={values.outTime}
+              onChange={(e) => set("outTime", e.target.value)}
+            />
+          </Field>
+          <Field label="Total Working Hours">
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={values.totalWorkingHours}
+              onChange={(e) => set("totalWorkingHours", e.target.value)}
+              placeholder="8"
+            />
+          </Field>
+          <Field label="Employee Engagement Team Name">
+            <Input
+              value={values.employeeEngagementTeamName}
+              onChange={(e) => set("employeeEngagementTeamName", e.target.value)}
+              placeholder="Team name"
+            />
+          </Field>
+          <Field label="Status *">
             <Select
               value={values.status}
-              onValueChange={(v) =>
-                set("status", v as EmployeeFormValues["status"])
-              }
+              onValueChange={(v) => set("status", v as EmployeeFormValues["status"])}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -491,297 +1209,162 @@ export function EmployeeForm({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Date of birth">
+          <Field label="Years of Agreement While Joining" className="sm:col-span-2">
             <Input
-              type="date"
-              value={values.dob}
-              onChange={(e) => set("dob", e.target.value)}
-            />
-          </Field>
-          <Field label="Native place">
-            <Input
-              value={values.nativePlace}
-              onChange={(e) => set("nativePlace", e.target.value)}
-            />
-          </Field>
-          <Field label="Country">
-            <Input
-              value={values.country}
-              onChange={(e) => set("country", e.target.value)}
+              type="number"
+              value={values.yearsOfAgreement}
+              onChange={(e) => set("yearsOfAgreement", e.target.value)}
+              placeholder="Years"
             />
           </Field>
         </CardContent>
       </Card>
 
-      {/* Profile photo + face enrollment */}
+      {/* ─── Section 4: Document Uploads ─────────────────────────────── */}
+      <SectionHeader index={4} title="Document Uploads" subtitle="Passport, Aadhar, PAN" />
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Profile photo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Optional. Used as the employee's avatar everywhere. If a face is
-            detected and the consent box is ticked, the photo is also used to
-            enroll this employee into face-recognition attendance verification.
-          </p>
-          <div className="flex items-start gap-4">
-            <div className="flex h-28 w-28 flex-none items-center justify-center overflow-hidden rounded-md border bg-gray-50">
-              {photoPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={photoPreview}
-                  alt="Selected employee photo"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <Upload className="h-6 w-6 text-gray-400" />
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                onChange={(e) => onPhotoPicked(e.target.files?.[0] ?? null)}
-              />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => photoInputRef.current?.click()}
-                >
-                  <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  {photoFile ? "Replace photo" : "Choose photo"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCameraOpen(true)}
-                >
-                  <Camera className="mr-1.5 h-3.5 w-3.5" />
-                  Take photo
-                </Button>
-                {photoFile && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearPhoto}
-                  >
-                    <X className="mr-1.5 h-3.5 w-3.5" />
-                    Remove
-                  </Button>
-                )}
-              </div>
-              {photoStatus === "analyzing" && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Analyzing face…
-                </div>
-              )}
-              {photoStatus === "ok" && (
-                <div className="flex items-center gap-1.5 text-xs text-green-700">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Face detected — eligible for enrollment
-                </div>
-              )}
-              {photoStatus === "no_face" && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  No face detected. Photo will be saved as avatar only; the
-                  employee can self-enroll later from the attendance widget.
-                </div>
-              )}
-              {photoStatus === "multiple_faces" && (
-                <div className="flex items-center gap-1.5 text-xs text-red-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {photoFaceCount} faces detected. Choose a solo photo —
-                  group photos can't be used for verification.
-                </div>
-              )}
-              {photoStatus === "error" && (
-                <div className="flex items-center gap-1.5 text-xs text-red-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Couldn't analyze photo. Try a different image.
-                </div>
-              )}
-            </div>
-          </div>
-
-          {photoStatus === "ok" && (
-            <label className="flex items-start gap-2 rounded-md border bg-amber-50/40 p-3 text-xs">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={photoConsent}
-                onChange={(e) => setPhotoConsent(e.target.checked)}
-              />
-              <span>
-                I confirm this employee consents to face-recognition for
-                attendance verification. A 128-number face fingerprint will be
-                stored (the original photo is kept as the avatar). Consent
-                timestamp is recorded for audit.
-              </span>
-            </label>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Role */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Role & organization</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Department">
-            <Input
-              value={values.department}
-              onChange={(e) => set("department", e.target.value)}
-              placeholder="e.g. Engineering"
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Passport Upload">
+            <DocumentUpload
+              value={values.passportUpload}
+              onChange={(url) => set("passportUpload", url)}
+              uploadType="passport"
+              accept="application/pdf,image/*"
             />
           </Field>
-          <Field label="Designation">
-            <Input
-              value={values.designation}
-              onChange={(e) => set("designation", e.target.value)}
-              placeholder="e.g. Senior Software Engineer"
+          <Field label="Aadhar Card Upload">
+            <DocumentUpload
+              value={values.aadharCardUpload}
+              onChange={(url) => set("aadharCardUpload", url)}
+              uploadType="aadhar"
+              accept="application/pdf,image/*"
             />
           </Field>
-          <Field label="Company">
-            <Input
-              value={values.companyName}
-              onChange={(e) => set("companyName", e.target.value)}
+          <Field label="PAN Card Upload">
+            <DocumentUpload
+              value={values.panCardUpload}
+              onChange={(url) => set("panCardUpload", url)}
+              uploadType="pan"
+              accept="application/pdf,image/*"
             />
           </Field>
-          <Field label="Engagement team">
+          <Field label="Aadhaar Number">
             <Input
-              value={values.employeeEngagementTeamName}
-              onChange={(e) =>
-                set("employeeEngagementTeamName", e.target.value)
-              }
-            />
-          </Field>
-          <Field label="Date of joining">
-            <Input
-              type="date"
-              value={values.dateOfJoining}
-              onChange={(e) => set("dateOfJoining", e.target.value)}
-            />
-          </Field>
-          <Field label="Date of leaving">
-            <Input
-              type="date"
-              value={values.dateOfLeaving}
-              onChange={(e) => set("dateOfLeaving", e.target.value)}
+              value={values.aadharCardNo}
+              onChange={(e) => set("aadharCardNo", e.target.value)}
+              placeholder="XXXX XXXX XXXX"
             />
           </Field>
         </CardContent>
       </Card>
 
-      {/* Contact */}
+      {/* ─── Section 5: Salary & Compensation ────────────────────────── */}
+      <SectionHeader
+        index={5}
+        title="Salary & Compensation"
+        subtitle="Monthly CTC drives Pay Rules. Bonus Amount is paid above CTC."
+      />
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Contact</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Primary email">
-            <Input
-              type="email"
-              value={values.emailAddress1}
-              onChange={(e) => set("emailAddress1", e.target.value)}
-              placeholder="user@company.com"
-            />
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Salary Mode">
+            <Select
+              value={values.salaryMode || undefined}
+              onValueChange={(v) => set("salaryMode", v)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                <SelectItem value="Cash">Cash</SelectItem>
+                <SelectItem value="Cheque">Cheque</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
-          <Field label="Secondary email">
-            <Input
-              type="email"
-              value={values.emailAddress2}
-              onChange={(e) => set("emailAddress2", e.target.value)}
-            />
-          </Field>
-          <Field label="Personal contact">
-            <Input
-              value={values.personalContact}
-              onChange={(e) => set("personalContact", e.target.value)}
-              placeholder="+91 98xxxxxxxx"
-            />
-          </Field>
-          <Field label="Alternate no. 1">
-            <Input
-              value={values.alternateNo1}
-              onChange={(e) => set("alternateNo1", e.target.value)}
-            />
-          </Field>
-          <Field label="Alternate no. 2">
-            <Input
-              value={values.alternateNo2}
-              onChange={(e) => set("alternateNo2", e.target.value)}
-            />
-          </Field>
-          <Field label="Permanent address" className="sm:col-span-2">
-            <Textarea
-              value={values.permanentAddress}
-              onChange={(e) => set("permanentAddress", e.target.value)}
-              rows={2}
-            />
-          </Field>
-          <Field label="Current address" className="sm:col-span-2">
-            <Textarea
-              value={values.currentAddress}
-              onChange={(e) => set("currentAddress", e.target.value)}
-              rows={2}
-            />
-          </Field>
-        </CardContent>
-      </Card>
-
-      {/* Shift */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Shift</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
-          <Field label="Shift type">
-            <Input
-              value={values.shiftType}
-              onChange={(e) => set("shiftType", e.target.value)}
-              placeholder="e.g. General, Night"
-            />
-          </Field>
-          <Field label="In time">
-            <Input
-              value={values.inTime}
-              onChange={(e) => set("inTime", e.target.value)}
-              placeholder="09:30"
-            />
-          </Field>
-          <Field label="Out time">
-            <Input
-              value={values.outTime}
-              onChange={(e) => set("outTime", e.target.value)}
-              placeholder="18:30"
-            />
-          </Field>
-        </CardContent>
-      </Card>
-
-      {/* Compensation */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Compensation</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Total salary (CTC)">
+          <Field
+            label="Salary Amount (Monthly CTC)"
+            hint="Drives the payslip via the assigned Pay Rule Profile. Pay-rule bonuses (statutory / performance / festival / joining / retention) are absorbed into this CTC."
+          >
             <Input
               type="number"
               inputMode="decimal"
-              value={values.totalSalary}
-              onChange={(e) => set("totalSalary", e.target.value)}
+              value={values.baseSalary}
+              onChange={(e) => {
+                set("baseSalary", e.target.value);
+                // Mirror into totalSalary too — the payroll engine reads
+                // Employee.totalSalary as the structure base. Keeping one
+                // input prevents the two columns drifting apart.
+                set("totalSalary", e.target.value);
+              }}
+              placeholder="e.g. 50000"
             />
           </Field>
+          <Field label="Per Hour Salary" hint="Reference only — overtime uses the Pay Rule's hourly rate.">
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={values.perHourSalary}
+              onChange={(e) => set("perHourSalary", e.target.value)}
+              placeholder="Hourly rate"
+            />
+          </Field>
+          <Field label="Is Overtime Applicable">
+            <div className="flex items-center gap-3 pt-1">
+              <Switch
+                checked={values.isOvertimeApplicable}
+                onCheckedChange={(c) => set("isOvertimeApplicable", c)}
+              />
+              <span className="text-sm text-muted-foreground">
+                {values.isOvertimeApplicable ? "Yes — overtime applicable" : "No"}
+              </span>
+            </div>
+          </Field>
+          <Field label="Overtime Rate">
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={values.overTime}
+              onChange={(e) => set("overTime", e.target.value)}
+              placeholder="Rate per overtime hour"
+              disabled={!values.isOvertimeApplicable}
+            />
+          </Field>
+          <Field
+            label="Bonus Amount (above CTC)"
+            hint="Paid every month on top of CTC — appears as a separate Bonus line on the payslip and is included in gross."
+          >
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={values.bonusAmount}
+              onChange={(e) => set("bonusAmount", e.target.value)}
+              placeholder="e.g. 2000"
+            />
+          </Field>
+          <Field label="Bonus After How Many Years">
+            <Input
+              type="number"
+              value={values.bonusAfterYears}
+              onChange={(e) => set("bonusAfterYears", e.target.value)}
+              placeholder="Years"
+            />
+          </Field>
+          <Field label="Increment Month" hint="Month annual increment is due" className="sm:col-span-2">
+            <Select
+              value={values.incrementMonth || undefined}
+              onValueChange={(v) => set("incrementMonth", v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent>
+                {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m, i) => (
+                  <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {/* Legacy fields kept here in a collapsed area so older data round-trips */}
           <Field label="Take-home (given salary)">
             <Input
               type="number"
@@ -790,15 +1373,7 @@ export function EmployeeForm({
               onChange={(e) => set("givenSalary", e.target.value)}
             />
           </Field>
-          <Field label="Bonus amount">
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.bonusAmount}
-              onChange={(e) => set("bonusAmount", e.target.value)}
-            />
-          </Field>
-          <Field label="Night allowance">
+          <Field label="Night Allowance">
             <Input
               type="number"
               inputMode="decimal"
@@ -806,15 +1381,7 @@ export function EmployeeForm({
               onChange={(e) => set("nightAllowance", e.target.value)}
             />
           </Field>
-          <Field label="Overtime rate">
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={values.overTime}
-              onChange={(e) => set("overTime", e.target.value)}
-            />
-          </Field>
-          <Field label="One-hour extra">
+          <Field label="One-hour Extra">
             <Input
               type="number"
               inputMode="decimal"
@@ -822,61 +1389,69 @@ export function EmployeeForm({
               onChange={(e) => set("oneHourExtra", e.target.value)}
             />
           </Field>
-          <Field label="Increment month (1–12)">
-            <Input
-              type="number"
-              min={1}
-              max={12}
-              value={values.incrementMonth}
-              onChange={(e) => set("incrementMonth", e.target.value)}
-            />
-          </Field>
-          <Field label="Years of agreement">
-            <Input
-              type="number"
-              value={values.yearsOfAgreement}
-              onChange={(e) => set("yearsOfAgreement", e.target.value)}
-            />
-          </Field>
-          <Field label="Bonus after years">
-            <Input
-              type="number"
-              value={values.bonusAfterYears}
-              onChange={(e) => set("bonusAfterYears", e.target.value)}
-            />
-          </Field>
         </CardContent>
       </Card>
 
-      {/* Bank & ID */}
+      {/* ─── Section 6: Bank Details ─────────────────────────────────── */}
+      <SectionHeader index={6} title="Bank Details" subtitle="Salary bank account" />
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Bank & identification</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Bank name">
-            <Input
-              value={values.bankName}
-              onChange={(e) => set("bankName", e.target.value)}
-            />
-          </Field>
-          <Field label="Account number">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Bank Account No">
             <Input
               value={values.bankAccountNo}
               onChange={(e) => set("bankAccountNo", e.target.value)}
             />
           </Field>
-          <Field label="IFSC code">
+          <Field label="IFSC Code">
             <Input
               value={values.ifscCode}
               onChange={(e) => set("ifscCode", e.target.value.toUpperCase())}
             />
           </Field>
-          <Field label="Aadhaar number">
+          <Field label="Bank Name" className="sm:col-span-2">
             <Input
-              value={values.aadharCardNo}
-              onChange={(e) => set("aadharCardNo", e.target.value)}
+              value={values.bankName}
+              onChange={(e) => set("bankName", e.target.value)}
             />
+          </Field>
+        </CardContent>
+      </Card>
+
+      {/* ─── Section 7: Exit / Resignation ───────────────────────────── */}
+      <SectionHeader index={7} title="Exit / Resignation" subtitle="Resignation and relieving details" />
+      <Card>
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+          <Field label="Resignation Letter Date">
+            <Input
+              type="date"
+              value={values.resignationLetterDate}
+              onChange={(e) => set("resignationLetterDate", e.target.value)}
+            />
+          </Field>
+          <Field label="Relieving Date">
+            <Input
+              type="date"
+              value={values.dateOfLeaving}
+              onChange={(e) => set("dateOfLeaving", e.target.value)}
+            />
+          </Field>
+          <Field label="Reason of Leaving" className="sm:col-span-1">
+            <Textarea
+              value={values.reasonOfLeaving}
+              onChange={(e) => set("reasonOfLeaving", e.target.value)}
+              rows={2}
+            />
+          </Field>
+          <Field label="Notice period served">
+            <div className="flex items-center gap-3 pt-1">
+              <Switch
+                checked={values.noticeServed}
+                onCheckedChange={(c) => set("noticeServed", c)}
+              />
+              <span className="text-sm text-muted-foreground">
+                {values.noticeServed ? "Notice Served" : "Not yet"}
+              </span>
+            </div>
           </Field>
           <Field label="Company SIM issued" className="sm:col-span-2">
             <div className="flex items-center gap-3 pt-1">
@@ -961,6 +1536,232 @@ function Field({
       <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
       {children}
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+// Common country dial codes for phone fields. India (+91) is the default
+// since this is the main user base; widen the list if you start hiring
+// across more regions. Storage format is the joined string
+// "<code> <number>" so a single text column round-trips it.
+const COUNTRY_DIAL_CODES: { code: string; label: string }[] = [
+  { code: "+91", label: "🇮🇳 +91 India" },
+  { code: "+1", label: "🇺🇸 +1 USA / Canada" },
+  { code: "+44", label: "🇬🇧 +44 UK" },
+  { code: "+971", label: "🇦🇪 +971 UAE" },
+  { code: "+61", label: "🇦🇺 +61 Australia" },
+  { code: "+65", label: "🇸🇬 +65 Singapore" },
+  { code: "+49", label: "🇩🇪 +49 Germany" },
+  { code: "+33", label: "🇫🇷 +33 France" },
+  { code: "+81", label: "🇯🇵 +81 Japan" },
+  { code: "+86", label: "🇨🇳 +86 China" },
+  { code: "+852", label: "🇭🇰 +852 Hong Kong" },
+  { code: "+92", label: "🇵🇰 +92 Pakistan" },
+  { code: "+880", label: "🇧🇩 +880 Bangladesh" },
+  { code: "+94", label: "🇱🇰 +94 Sri Lanka" },
+  { code: "+977", label: "🇳🇵 +977 Nepal" },
+];
+
+// Splits a stored phone string into (dial code, local number). Recognises
+// any code from COUNTRY_DIAL_CODES that appears at the start. Falls back
+// to "+91" for plain 10-digit Indian numbers stored by the old form.
+function splitPhone(raw: string): { code: string; number: string } {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return { code: "+91", number: "" };
+  // Match the longest dial code first so "+971" wins over "+9".
+  const sorted = [...COUNTRY_DIAL_CODES].sort((a, b) => b.code.length - a.code.length);
+  for (const c of sorted) {
+    if (trimmed.startsWith(c.code)) {
+      return { code: c.code, number: trimmed.slice(c.code.length).trim() };
+    }
+  }
+  return { code: "+91", number: trimmed };
+}
+
+// Phone field with a country-code dropdown + number input. The combined
+// value is stored as "<code> <number>" in the existing string column so
+// no schema change is needed. Re-derives the split on every render from
+// the canonical `value` prop — the parent state is the source of truth.
+function PhoneInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const { code, number } = splitPhone(value);
+  const emit = (nextCode: string, nextNumber: string) => {
+    const cleaned = nextNumber.replace(/[^\d]/g, "");
+    onChange(cleaned ? `${nextCode} ${cleaned}` : "");
+  };
+  return (
+    <div className="flex gap-2">
+      <Select value={code} onValueChange={(c) => emit(c, number)}>
+        <SelectTrigger className="w-[150px] flex-none">
+          <SelectValue>{code}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {COUNTRY_DIAL_CODES.map((c) => (
+            <SelectItem key={c.code} value={c.code}>
+              {c.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        inputMode="tel"
+        value={number}
+        onChange={(e) => emit(code, e.target.value)}
+        placeholder={placeholder}
+        className="flex-1"
+      />
+    </div>
+  );
+}
+
+// File picker bound to `/api/upload`. Stores the returned public URL in
+// the form value so the employee record persists a link, not a blob. PDFs
+// and images both flow through the same endpoint (it's filename-based,
+// not type-based). The component handles uploading, error, and the
+// already-uploaded state with a clickable preview + Remove.
+function DocumentUpload({
+  value,
+  onChange,
+  uploadType,
+  accept,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  uploadType: string;
+  accept: string;
+}) {
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const onPick = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("type", uploadType);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success || !json?.imageUrl) {
+        throw new Error(json?.error ?? `Upload failed (${res.status})`);
+      }
+      onChange(json.imageUrl);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: err?.message ?? "Unknown error",
+      });
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  // Derive a short display name from the URL — the timestamp prefix the
+  // server adds is hidden so HR sees "passport.pdf" not "passport_1700_…".
+  const displayName = (() => {
+    if (!value) return "";
+    const last = value.split("/").pop() ?? value;
+    return last.replace(/^[a-z]+_\d+_/i, "");
+  })();
+
+  return (
+    <div className="space-y-1.5">
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+      />
+      {value ? (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <a
+            href={value}
+            target="_blank"
+            rel="noreferrer"
+            className="flex-1 truncate text-primary underline-offset-2 hover:underline"
+            title={displayName}
+          >
+            {displayName || "View file"}
+          </a>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+          >
+            Replace
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange("")}
+            disabled={uploading}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-start font-normal text-muted-foreground"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+              Uploading…
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-3.5 w-3.5" />
+              Choose file (PDF or image)
+            </>
+          )}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// Section banner that prefixes each of the 7 ordered sections. Mirrors the
+// visual style from the form-builder screenshots — a circular index badge
+// in primary tint, the section title, and a subtitle describing what lives
+// inside.
+function SectionHeader({
+  index,
+  title,
+  subtitle,
+}: {
+  index: number;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 px-1 pt-2">
+      <span className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+        {index}
+      </span>
+      <div>
+        <p className="text-base font-semibold leading-tight">{title}</p>
+        {subtitle && (
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        )}
+      </div>
     </div>
   );
 }
