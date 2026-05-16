@@ -1,66 +1,45 @@
 "use client";
 
+/**
+ * Asset Management — Premium Workspace Layout.
+ * Tracks physical assets (laptops, monitors, etc.) and corporate SIMs.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import {
-  Package,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-  Laptop,
-  Smartphone,
-  Monitor,
-  Headphones,
-  HardDrive,
+  Package, Plus, Search, Pencil, Trash2, Laptop, Smartphone, Monitor,
+  Headphones, HardDrive, Calendar, User, IndianRupee, Tag, Info,
+  MoreVertical, Filter, Smartphone as SimIcon, ShieldCheck
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  WorkspaceShell, WorkspaceHeader,
+  DataTable, type ColumnDef,
+  FilterChips, ActiveFilterPills,
+  ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
+} from "@/components/real-estate/workspace";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import PageBackLink from "@/components/shared/page-back-link";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle
+} from "@/components/ui/sheet";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 
-type AssetType =
-  | "LAPTOP"
-  | "PHONE"
-  | "MONITOR"
-  | "ACCESSORY"
-  | "SIM"
-  | "OTHER";
+// --- Types & Constants ---
+
+type AssetType = "LAPTOP" | "PHONE" | "MONITOR" | "ACCESSORY" | "SIM" | "OTHER";
 type AssetStatus = "AVAILABLE" | "ASSIGNED" | "UNDER_REPAIR" | "RETIRED";
 type PlanType = "CORPORATE" | "INDIVIDUAL";
 
@@ -74,110 +53,39 @@ interface Asset {
   purchaseDate: string;
   value: number;
   notes: string;
-  // SIM-only fields. Used when type === "SIM" so a single asset register can
-  // hold both physical assets and corporate SIMs without splitting tables.
-  // Non-SIM rows leave these blank/zero.
-  countryCode?: string; // ISD prefix, e.g. "+91" — paired with simNumber
-  simNumber?: string; // local number without the prefix
+  countryCode?: string;
+  simNumber?: string;
   imei?: string;
   carrier?: string;
   plan?: PlanType;
   monthlyCost?: number;
 }
 
-// Common Indian-market carriers. Free-text fallback isn't necessary — admins
-// can edit the constant when a new MNO enters the market.
-const CARRIER_OPTIONS = ["Airtel", "Jio", "Vi", "BSNL", "MTNL"] as const;
-
-// Plan type captures who owns the contract — corporate billing vs. employee-
-// reimbursed personal plans. The actual tariff (Postpaid 999, etc.) goes in
-// the Notes field if needed.
-const PLAN_TYPE_LABEL: Record<PlanType, string> = {
-  CORPORATE: "Corporate",
-  INDIVIDUAL: "Individual",
-};
-
-// ISD codes for the markets this product currently ships in. Add more as
-// needed; the dropdown stays single-select so accidental concatenation
-// ("+91 +91 …") can't happen.
-const COUNTRY_CODE_OPTIONS = [
-  { code: "+91", label: "🇮🇳 +91 India" },
-  { code: "+1", label: "🇺🇸 +1 US/Canada" },
-  { code: "+44", label: "🇬🇧 +44 UK" },
-  { code: "+971", label: "🇦🇪 +971 UAE" },
-  { code: "+65", label: "🇸🇬 +65 Singapore" },
-  { code: "+61", label: "🇦🇺 +61 Australia" },
-  { code: "+966", label: "🇸🇦 +966 Saudi Arabia" },
-] as const;
-const DEFAULT_COUNTRY_CODE = "+91";
-
-// v3 schema: countryCode is split out, plan is a PlanType enum. Migration
-// from v2 parses the leading ISD prefix out of simNumber and best-effort
-// maps free-text plan to the new enum.
-const STORAGE_KEY = "asset-management:v3";
-const LEGACY_V2_KEY = "asset-management:v2";
-const LEGACY_V1_KEY = "asset-management:v1";
-
-function migrateAsset(raw: any): Asset {
-  // Pull out ISD prefix if the legacy simNumber was stored with one.
-  let countryCode: string | undefined;
-  let simNumber: string | undefined = raw?.simNumber;
-  if (typeof simNumber === "string") {
-    const match = COUNTRY_CODE_OPTIONS.find((o) =>
-      simNumber!.trim().startsWith(o.code),
-    );
-    if (match) {
-      countryCode = match.code;
-      simNumber = simNumber.slice(match.code.length).trim();
-    }
-  }
-  // Best-effort plan migration. Anything containing "corp" → CORPORATE,
-  // otherwise INDIVIDUAL. Unset plans stay unset.
-  let plan: PlanType | undefined;
-  if (typeof raw?.plan === "string" && raw.plan.length > 0) {
-    plan = /corp/i.test(raw.plan) ? "CORPORATE" : "INDIVIDUAL";
-  } else if (raw?.plan === "CORPORATE" || raw?.plan === "INDIVIDUAL") {
-    plan = raw.plan;
-  }
-  return {
-    ...raw,
-    countryCode: countryCode ?? raw?.countryCode,
-    simNumber,
-    plan,
-  } as Asset;
-}
-
 const ASSET_TYPE_LABEL: Record<AssetType, string> = {
-  LAPTOP: "Laptop",
-  PHONE: "Phone",
-  MONITOR: "Monitor",
-  ACCESSORY: "Accessory",
-  SIM: "SIM card",
-  OTHER: "Other",
+  LAPTOP: "Laptop", PHONE: "Phone", MONITOR: "Monitor", ACCESSORY: "Accessory", SIM: "SIM card", OTHER: "Other"
 };
 
-const ASSET_TYPE_ICON: Record<AssetType, React.ComponentType<{ className?: string }>> = {
-  LAPTOP: Laptop,
-  PHONE: Smartphone,
-  MONITOR: Monitor,
-  ACCESSORY: Headphones,
-  SIM: Smartphone,
-  OTHER: HardDrive,
+const ASSET_TYPE_ICON: Record<AssetType, any> = {
+  LAPTOP: Laptop, PHONE: Smartphone, MONITOR: Monitor, ACCESSORY: Headphones, SIM: SimIcon, OTHER: HardDrive
 };
 
-const STATUS_LABEL: Record<AssetStatus, string> = {
-  AVAILABLE: "Available",
-  ASSIGNED: "Assigned",
-  UNDER_REPAIR: "Under Repair",
-  RETIRED: "Retired",
-};
+const STATUS_OPTIONS = [
+  { value: "AVAILABLE", label: "Available" },
+  { value: "ASSIGNED", label: "Assigned" },
+  { value: "UNDER_REPAIR", label: "Under Repair" },
+  { value: "RETIRED", label: "Retired" },
+];
 
-const STATUS_VARIANT: Record<AssetStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  AVAILABLE: "default",
-  ASSIGNED: "secondary",
-  UNDER_REPAIR: "outline",
-  RETIRED: "destructive",
-};
+const TYPE_OPTIONS = (Object.keys(ASSET_TYPE_LABEL) as AssetType[]).map(t => ({ value: t, label: ASSET_TYPE_LABEL[t] }));
+
+const CARRIER_OPTIONS = ["Airtel", "Jio", "Vi", "BSNL", "MTNL"] as const;
+const COUNTRY_CODE_OPTIONS = [
+  { code: "+91", label: "India (+91)" },
+  { code: "+1", label: "US (+1)" },
+  { code: "+44", label: "UK (+44)" },
+];
+
+const STORAGE_KEY = "asset-management:v3";
 
 const SEED: Asset[] = [
   {
@@ -203,17 +111,6 @@ const SEED: Asset[] = [
     notes: "",
   },
   {
-    id: "AST-0003",
-    name: "iPhone 14 (company)",
-    type: "PHONE",
-    serialNo: "IP14-D8H7K2",
-    status: "UNDER_REPAIR",
-    assignedTo: "Arjun Mehta",
-    purchaseDate: "2023-11-21",
-    value: 71000,
-    notes: "Screen replacement in progress",
-  },
-  {
     id: "AST-0004",
     name: "Sales team primary line",
     type: "SIM",
@@ -225,691 +122,469 @@ const SEED: Asset[] = [
     notes: "Unlimited data + roaming",
     countryCode: "+91",
     simNumber: "98765 43210",
-    imei: "356938035643809",
     carrier: "Airtel",
     plan: "CORPORATE",
     monthlyCost: 999,
   },
 ];
 
-function loadAssets(): Asset[] {
-  if (typeof window === "undefined") return SEED;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as Asset[]) : SEED;
-    }
-    // One-time migration cascade: try v2 first (had SIM fields), fall back
-    // to v1 (had no SIM fields). Either way the rows pass through
-    // migrateAsset to split country code + remap free-text plan.
-    for (const legacyKey of [LEGACY_V2_KEY, LEGACY_V1_KEY]) {
-      const legacy = window.localStorage.getItem(legacyKey);
-      if (!legacy) continue;
-      const parsed = JSON.parse(legacy);
-      if (Array.isArray(parsed)) {
-        const migrated = parsed.map(migrateAsset);
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-        return migrated;
-      }
-    }
-    return SEED;
-  } catch {
-    return SEED;
-  }
+// --- Helper Functions ---
+
+function formatINR(n: number) {
+  return new Intl.NumberFormat("en-IN").format(n);
 }
 
-function saveAssets(items: Asset[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-}
-
-function nextAssetId(items: Asset[]): string {
-  const nums = items
-    .map((a) => Number(a.id.replace(/[^0-9]/g, "")))
-    .filter((n) => Number.isFinite(n));
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `AST-${String(next).padStart(4, "0")}`;
-}
-
-function formatINR(n: number): string {
-  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
-}
-
-// What to show as the row's primary label. For SIMs, the user-provided Name
-// is optional (since Carrier + Plan type + Number already identify the SIM),
-// so we fall back to "SIM · Airtel · ●●●● 3210" so the table never displays
-// an empty row.
-function displayName(a: Asset): string {
+function displayName(a: Asset) {
   if (a.name?.trim()) return a.name.trim();
   if (a.type === "SIM") {
     const last4 = (a.simNumber ?? "").replace(/\D/g, "").slice(-4);
-    const tail = last4 ? `●●●● ${last4}` : "(no number)";
-    return a.carrier ? `SIM · ${a.carrier} · ${tail}` : `SIM · ${tail}`;
+    return a.carrier ? `SIM · ${a.carrier} · ●●●● ${last4}` : `SIM · ●●●● ${last4}`;
   }
   return ASSET_TYPE_LABEL[a.type];
 }
 
 const EMPTY: Asset = {
-  id: "",
-  name: "",
-  type: "LAPTOP",
-  serialNo: "",
-  status: "AVAILABLE",
-  assignedTo: "",
-  purchaseDate: new Date().toISOString().slice(0, 10),
-  value: 0,
-  notes: "",
+  id: "", name: "", type: "LAPTOP", serialNo: "", status: "AVAILABLE", assignedTo: "",
+  purchaseDate: new Date().toISOString().slice(0, 10), value: 0, notes: ""
 };
+
+// --- Main Component ---
 
 export default function AssetManagementPage() {
   const { toast } = useToast();
   const [items, setItems] = useState<Asset[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"" | AssetStatus>("");
-  const [typeFilter, setTypeFilter] = useState<"" | AssetType>("");
-  const [editing, setEditing] = useState<Asset | null>(null);
-  const [deleting, setDeleting] = useState<Asset | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  const [filters, setFilters] = useState({ search: "", type: "", status: "" });
+  const [searchInput, setSearchInput] = useState("");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const views = useSavedViews<typeof filters>("asset-management");
 
   useEffect(() => {
-    setItems(loadAssets());
-    setLoaded(true);
+    if (typeof window !== "undefined") {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setItems(JSON.parse(raw));
+      else setItems(SEED);
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (loaded) saveAssets(items);
-  }, [items, loaded]);
+    if (!loading) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }, [items, loading]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((a) => {
-      if (statusFilter && a.status !== statusFilter) return false;
-      if (typeFilter && a.type !== typeFilter) return false;
-      if (!q) return true;
-      return (
-        a.name.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
-        a.serialNo.toLowerCase().includes(q) ||
-        a.assignedTo.toLowerCase().includes(q)
+  const filterFields: FilterField[] = useMemo(() => [
+    { id: "id", label: "Asset ID", type: "text" },
+    { id: "name", label: "Name", type: "text" },
+    { id: "type", label: "Type", type: "select", options: TYPE_OPTIONS },
+    { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "assignedTo", label: "Assigned To", type: "text" },
+    { id: "value", label: "Value", type: "number" },
+  ], []);
+
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(a => 
+        a.name.toLowerCase().includes(q) || 
+        a.id.toLowerCase().includes(q) || 
+        a.assignedTo.toLowerCase().includes(q) ||
+        a.serialNo.toLowerCase().includes(q)
       );
-    });
-  }, [items, search, statusFilter, typeFilter]);
-
-  const stats = useMemo(() => {
-    const totalValue = items.reduce((s, a) => s + a.value, 0);
-    const activeSimMonthly = items
-      .filter((a) => a.type === "SIM" && a.status !== "RETIRED")
-      .reduce((sum, a) => sum + (a.monthlyCost ?? 0), 0);
-    const simCount = items.filter((a) => a.type === "SIM").length;
-    return {
-      total: items.length,
-      assigned: items.filter((a) => a.status === "ASSIGNED").length,
-      available: items.filter((a) => a.status === "AVAILABLE").length,
-      underRepair: items.filter((a) => a.status === "UNDER_REPAIR").length,
-      totalValue,
-      simCount,
-      activeSimMonthly,
-    };
-  }, [items]);
-
-  const onSave = (draft: Asset) => {
-    if (draft.type === "SIM") {
-      if (!draft.simNumber?.trim()) {
-        toast({ title: "SIM number is required", variant: "destructive" });
-        return;
-      }
-    } else if (!draft.name.trim()) {
-      toast({ title: "Name is required", variant: "destructive" });
-      return;
     }
-    const existing = items.find((a) => a.id === draft.id);
-    const finalAsset: Asset =
-      existing != null
-        ? draft
-        : { ...draft, id: draft.id || nextAssetId(items) };
-    setItems((prev) =>
-      existing != null
-        ? prev.map((a) => (a.id === finalAsset.id ? finalAsset : a))
-        : [finalAsset, ...prev],
-    );
-    setEditing(null);
-    toast({
-      title: existing ? "Asset updated" : "Asset added",
-      description: `${finalAsset.id} · ${displayName(finalAsset)}`,
-    });
+    if (filters.type) result = result.filter(a => a.type === filters.type);
+    if (filters.status) result = result.filter(a => a.status === filters.status);
+    return applyAdvancedFilters(result, conditions, filterFields);
+  }, [items, filters, conditions, filterFields]);
+
+  const columns: ColumnDef<Asset>[] = useMemo(() => [
+    {
+      id: "id",
+      header: "Asset ID",
+      width: 120,
+      pinned: true,
+      cell: (a) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{a.id}</span>,
+    },
+    {
+      id: "name",
+      header: "Asset Name / Info",
+      width: 300,
+      cell: (a) => {
+        const Icon = ASSET_TYPE_ICON[a.type];
+        return (
+          <div className="flex items-center gap-3 min-w-0">
+             <div className="p-2 rounded-lg bg-slate-50 text-slate-500 group-hover:bg-white group-hover:text-primary transition-colors">
+                <Icon className="h-4 w-4" />
+             </div>
+             <div className="min-w-0">
+                <div className="font-semibold truncate uppercase text-[12px]">{displayName(a)}</div>
+                <div className="text-[10px] text-muted-foreground truncate uppercase">{a.type === 'SIM' ? a.carrier : `S/N: ${a.serialNo || 'N/A'}`}</div>
+             </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (a) => {
+        const colors: Record<string, string> = {
+          AVAILABLE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+          ASSIGNED: "bg-blue-100 text-blue-800 border-blue-200",
+          UNDER_REPAIR: "bg-amber-100 text-amber-800 border-amber-200",
+          RETIRED: "bg-slate-100 text-slate-800 border-slate-200",
+        };
+        return <Badge variant="outline" className={`${colors[a.status]} text-[10px] font-bold uppercase`}>{a.status.replace('_', ' ')}</Badge>;
+      },
+    },
+    {
+      id: "assignedTo",
+      header: "Assignee",
+      width: 180,
+      cell: (a) => (
+        <div className="flex items-center gap-2">
+           <User className="h-3.5 w-3.5 text-muted-foreground" />
+           <span className="text-xs font-medium">{a.assignedTo || "—"}</span>
+        </div>
+      ),
+    },
+    {
+      id: "value",
+      header: "Value / Cost",
+      width: 140,
+      cell: (a) => (
+        <div className="font-mono text-xs font-semibold tabular-nums">
+           ₹{formatINR(a.type === 'SIM' ? (a.monthlyCost || 0) : a.value)}
+           {a.type === 'SIM' && <span className="text-[10px] text-muted-foreground ml-1">/MO</span>}
+        </div>
+      ),
+    },
+  ], []);
+
+  const handleSave = (draft: Asset) => {
+    if (editingId) {
+      setItems(items.map(i => i.id === editingId ? draft : i));
+      toast({ title: "Asset Updated", description: `${draft.id} successfully updated.` });
+    } else {
+      const newId = `AST-${String(items.length + 1).padStart(4, '0')}`;
+      const final = { ...draft, id: newId };
+      setItems([final, ...items]);
+      toast({ title: "Asset Created", description: `${newId} added to register.` });
+    }
+    setFormOpen(false);
+    setEditingId(null);
   };
 
-  const onDelete = (asset: Asset) => {
-    setItems((prev) => prev.filter((a) => a.id !== asset.id));
-    setDeleting(null);
-    toast({
-      title: "Asset deleted",
-      description: `${asset.id} · ${displayName(asset)}`,
-    });
+  const handleDelete = () => {
+    if (!deletingId) return;
+    setItems(items.filter(i => i.id !== deletingId));
+    if (selectedId === deletingId) setSelectedId(null);
+    setDeletingId(null);
+    toast({ title: "Asset Deleted", variant: "destructive" });
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1.5">
-          <PageBackLink href="/admin/modules" label="Modules" />
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
-            <Package className="h-5 w-5 text-gray-500" /> Asset Management
-          </h1>
-          <p className="mt-1 text-sm text-gray-600 max-w-2xl">
-            Track every physical asset the company owns — laptops, monitors,
-            phones, accessories, and corporate SIM cards. Assign to employees,
-            log repairs, and retire when end-of-life. Pick <strong>SIM card</strong>{" "}
-            as the type to capture carrier, plan, and monthly cost.
-          </p>
-        </div>
-        <Button onClick={() => setEditing({ ...EMPTY })}>
-          <Plus className="h-4 w-4 mr-1.5" /> Add asset
-        </Button>
-      </div>
+    <>
+      <WorkspaceShell
+        scope="asset-management"
+        selectedId={selectedId}
+        onCloseSelection={() => setSelectedId(null)}
+        header={
+          <>
+            <WorkspaceHeader
+              icon={<Package className="h-5 w-5 text-slate-600" />}
+              title="Asset Management"
+              subtitle={`${filteredItems.length} assets registered`}
+            >
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search assets..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && setFilters(f => ({ ...f, search: searchInput }))}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
+              </div>
+              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <ManageColumnsButton tableId="asset-management" columns={columns} />
+              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
+                <Plus className="h-4 w-4 mr-1.5" /> Add Asset
+              </Button>
+            </WorkspaceHeader>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
-        <KpiCard label="Total assets" value={stats.total.toString()} />
-        <KpiCard label="Assigned" value={stats.assigned.toString()} tone="primary" />
-        <KpiCard label="Available" value={stats.available.toString()} tone="success" />
-        <KpiCard label="Under repair" value={stats.underRepair.toString()} tone="warning" />
-        <KpiCard
-          label={`SIMs · ₹${formatINR(stats.activeSimMonthly)}/mo`}
-          value={stats.simCount.toString()}
-          tone="primary"
-        />
-      </div>
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+              <ViewsBar
+                views={views.views}
+                activeId={views.activeId}
+                onSelect={(id) => {
+                   views.select(id);
+                   const v = views.views.find(x => x.id === id);
+                   if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
+                   else { setFilters({ search: "", type: "", status: "" }); setSearchInput(""); }
+                }}
+                onSave={(name) => views.save(name, filters)}
+                onDelete={views.remove}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", type: "", status: "" }) !== JSON.stringify(filters)}
+              />
+            </div>
 
-      <Card className="mb-4">
-        <CardContent className="p-3 flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search name, ID, serial, assignee…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-          <Select
-            value={statusFilter || "ALL"}
-            onValueChange={(v) =>
-              setStatusFilter(v === "ALL" ? "" : (v as AssetStatus))
-            }
-          >
-            <SelectTrigger className="h-8 w-[160px] text-sm">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All statuses</SelectItem>
-              {(Object.keys(STATUS_LABEL) as AssetStatus[]).map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_LABEL[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={typeFilter || "ALL"}
-            onValueChange={(v) =>
-              setTypeFilter(v === "ALL" ? "" : (v as AssetType))
-            }
-          >
-            <SelectTrigger className="h-8 w-[140px] text-sm">
-              <SelectValue placeholder="All types" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All types</SelectItem>
-              {(Object.keys(ASSET_TYPE_LABEL) as AssetType[]).map((t) => (
-                <SelectItem key={t} value={t}>
-                  {ASSET_TYPE_LABEL[t]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[110px]">Asset ID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead className="w-[120px]">Type</TableHead>
-              <TableHead className="w-[130px]">Status</TableHead>
-              <TableHead>Assigned to</TableHead>
-              <TableHead className="w-[110px]">Purchased</TableHead>
-              <TableHead className="text-right w-[110px]">Value</TableHead>
-              <TableHead className="w-[80px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground text-sm">
-                  {items.length === 0
-                    ? "No assets yet. Click \"Add asset\" to register the first one."
-                    : "No assets match these filters."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              filtered.map((a) => {
-                const Icon = ASSET_TYPE_ICON[a.type];
-                return (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-mono text-xs">{a.id}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{displayName(a)}</div>
-                      {a.type === "SIM" ? (
-                        (a.simNumber || a.carrier) && (
-                          <div className="text-[11px] text-muted-foreground tabular-nums">
-                            {a.simNumber
-                              ? `${a.countryCode ?? DEFAULT_COUNTRY_CODE} ${a.simNumber}`
-                              : "—"}
-                            {a.carrier ? ` · ${a.carrier}` : ""}
-                            {a.plan ? ` · ${PLAN_TYPE_LABEL[a.plan]}` : ""}
-                          </div>
-                        )
-                      ) : (
-                        a.serialNo && (
-                          <div className="text-[11px] text-muted-foreground">
-                            S/N {a.serialNo}
-                          </div>
-                        )
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                        {ASSET_TYPE_LABEL[a.type]}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATUS_VARIANT[a.status]} className="text-[10px]">
-                        {STATUS_LABEL[a.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{a.assignedTo || "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {a.purchaseDate || "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {a.type === "SIM" ? (
-                        a.monthlyCost ? (
-                          <>
-                            ₹{formatINR(a.monthlyCost)}
-                            <span className="text-[10px] text-muted-foreground font-normal">
-                              /mo
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )
-                      ) : (
-                        <>₹{formatINR(a.value)}</>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setEditing(a)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => setDeleting(a)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <AssetDialog
-        open={editing != null}
-        draft={editing}
-        onCancel={() => setEditing(null)}
-        onSave={onSave}
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips label="Type" value={filters.type} onChange={(v) => setFilters(f => ({ ...f, type: v }))} options={TYPE_OPTIONS} />
+              <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", type: "", status: "" }); setSearchInput(""); }} />
+            </div>
+          </>
+        }
+        list={
+          <DataTable<Asset>
+            tableId="asset-management"
+            columns={columns}
+            rows={filteredItems}
+            rowId={(a) => a.id}
+            isLoading={loading}
+            selectedId={selectedId}
+            onRowClick={(a) => setSelectedId(a.id)}
+          />
+        }
+        preview={selectedId ? (
+          <AssetPreview 
+            id={selectedId} 
+            items={items} 
+            onEdit={(id) => { setEditingId(id); setFormOpen(true); }} 
+            onDelete={(id) => setDeletingId(id)} 
+          />
+        ) : null}
+        previewHeader={selectedId ? <PreviewHeader id={selectedId} items={items} /> : null}
       />
 
-      <AlertDialog open={deleting != null} onOpenChange={(o) => !o && setDeleting(null)}>
+      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle className="uppercase tracking-tight font-bold">{editingId ? 'Edit Asset' : 'Register New Asset'}</SheetTitle>
+          </SheetHeader>
+          <AssetForm
+            initial={editingId ? items.find(i => i.id === editingId) : undefined}
+            onCancel={() => setFormOpen(false)}
+            onSubmit={handleSave}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete asset?</AlertDialogTitle>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleting && (
-                <>
-                  This will permanently remove <strong>{deleting.id}</strong> ·{" "}
-                  {displayName(deleting)} from the register. This cannot be undone.
-                </>
-              )}
+              This will permanently delete the asset record from the system. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleting && onDelete(deleting)}>
-              Delete
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete Asset</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+function PreviewHeader({ id, items }: { id: string, items: Asset[] }) {
+  const a = items.find(x => x.id === id);
+  if (!a) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{a.id}</Badge>
+      <span className="font-bold text-sm truncate uppercase tracking-tight">{displayName(a)}</span>
     </div>
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "primary" | "success" | "warning";
-}) {
-  const toneClass: Record<typeof tone, string> = {
-    neutral: "text-gray-900",
-    primary: "text-blue-700",
-    success: "text-emerald-700",
-    warning: "text-amber-700",
-  } as const;
+function AssetPreview({ id, items, onEdit, onDelete }: { id: string, items: Asset[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+  const a = items.find(x => x.id === id);
+  if (!a) return null;
+  const Icon = ASSET_TYPE_ICON[a.type];
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
-          {label}
+    <div className="p-6 space-y-8">
+      <div className="flex items-start justify-between">
+        <div className="flex gap-4">
+           <div className={`p-4 rounded-2xl bg-slate-950 text-white shadow-xl`}>
+              <Icon className="h-8 w-8" />
+           </div>
+           <div>
+              <h2 className="text-2xl font-black uppercase tracking-tighter leading-none mb-1">{displayName(a)}</h2>
+              <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">{ASSET_TYPE_LABEL[a.type]}</p>
+           </div>
         </div>
-        <div className={`text-2xl font-bold tabular-nums mt-1 ${toneClass[tone]}`}>
-          {value}
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl" onClick={() => onEdit(a.id)}><Pencil className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => onDelete(a.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+         <Card className="p-4 bg-slate-50 border-0 shadow-sm flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Status</span>
+            <div className="flex items-center gap-2">
+               <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+               <span className="font-bold uppercase text-sm tracking-tight">{a.status.replace('_', ' ')}</span>
+            </div>
+         </Card>
+         <Card className="p-4 bg-slate-50 border-0 shadow-sm flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Valuation</span>
+            <div className="flex items-baseline gap-1">
+               <span className="text-lg font-black tabular-nums">₹{formatINR(a.type === 'SIM' ? (a.monthlyCost || 0) : a.value)}</span>
+               {a.type === 'SIM' && <span className="text-[10px] font-bold text-muted-foreground">/MO</span>}
+            </div>
+         </Card>
+      </div>
+
+      <div className="space-y-6">
+         <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 border-b pb-2">Technical Specifications</h3>
+         <div className="grid grid-cols-2 gap-y-6">
+            {a.type !== 'SIM' ? (
+               <>
+                  <Fact label="Serial Number" value={a.serialNo || "NOT RECORDED"} icon={Tag} />
+                  <Fact label="Purchase Date" value={a.purchaseDate} icon={Calendar} />
+                  <Fact label="Assignee" value={a.assignedTo || "UNASSIGNED"} icon={User} />
+               </>
+            ) : (
+               <>
+                  <Fact label="SIM Number" value={`${a.countryCode} ${a.simNumber}`} icon={SimIcon} />
+                  <Fact label="Carrier" value={a.carrier || "N/A"} icon={SimIcon} />
+                  <Fact label="Plan" value={a.plan || "N/A"} icon={ShieldCheck} />
+                  <Fact label="IMEI" value={a.imei || "N/A"} icon={Info} />
+               </>
+            )}
+         </div>
+      </div>
+
+      <Card className="p-5 border-0 bg-slate-950 text-slate-400">
+         <div className="flex items-start gap-3">
+            <Info className="h-4 w-4 mt-1 shrink-0" />
+            <div className="space-y-2">
+               <span className="text-[10px] font-bold uppercase tracking-widest">Asset Notes</span>
+               <p className="text-sm text-slate-200 leading-relaxed italic">{a.notes || "No special notes recorded for this asset."}</p>
+            </div>
+         </div>
+      </Card>
+    </div>
   );
 }
 
-function AssetDialog({
-  open,
-  draft,
-  onCancel,
-  onSave,
-}: {
-  open: boolean;
-  draft: Asset | null;
-  onCancel: () => void;
-  onSave: (a: Asset) => void;
-}) {
-  const [form, setForm] = useState<Asset>(EMPTY);
-  useEffect(() => {
-    if (draft) setForm(draft);
-  }, [draft]);
-
-  const isEdit = !!draft?.id;
-
-  const isSim = form.type === "SIM";
+function AssetForm({ initial, onCancel, onSubmit }: { initial?: Asset, onCancel: () => void, onSubmit: (data: Asset) => void }) {
+  const [formData, setFormData] = useState<Asset>(initial || { ...EMPTY, id: 'AUTO' });
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit asset" : "Add asset"}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? `Update details for ${form.id}.`
-              : isSim
-                ? "Register a corporate SIM. ID is generated automatically."
-                : "Register a new physical asset. ID is generated automatically."}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="p-6 space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Asset Type</Label>
+          <Select value={formData.type} onValueChange={v => setFormData({ ...formData, type: v as AssetType })}>
+            <SelectTrigger className="h-12 border-slate-200 focus:ring-slate-900">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Current Status</Label>
+          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as AssetStatus })}>
+            <SelectTrigger className="h-12 border-slate-200 focus:ring-slate-900">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs">Type</Label>
-            <Select
-              value={form.type}
-              onValueChange={(v) => {
-                const next = v as AssetType;
-                setForm({
-                  ...form,
-                  type: next,
-                  // First time switching to SIM, pre-fill the country code so
-                  // the user doesn't see the dropdown sitting on an empty
-                  // value and forget to pick one.
-                  countryCode:
-                    next === "SIM" && !form.countryCode
-                      ? DEFAULT_COUNTRY_CODE
-                      : form.countryCode,
-                });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(ASSET_TYPE_LABEL) as AssetType[]).map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {ASSET_TYPE_LABEL[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Status</Label>
-            <Select
-              value={form.status}
-              onValueChange={(v) => setForm({ ...form, status: v as AssetStatus })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(STATUS_LABEL) as AssetStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="space-y-2">
+        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{formData.type === 'SIM' ? 'Line Label' : 'Asset Name'}</Label>
+        <Input 
+          value={formData.name} 
+          onChange={e => setFormData({ ...formData, name: e.target.value })} 
+          placeholder={formData.type === 'SIM' ? "e.g. Sales Primary Line" : "e.g. MacBook Pro M3"}
+          className="h-12 border-slate-200"
+        />
+      </div>
 
-          <div className="col-span-2">
-            <Label className="text-xs">
-              {isSim ? "Label (optional)" : "Name"}
-            </Label>
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder={
-                isSim
-                  ? "e.g. Sales team primary line · Field engineer (Mumbai)"
-                  : "e.g. Dell Latitude 7430"
-              }
-            />
-            {isSim && (
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Carrier + plan type + number already identify the SIM. Use this
-                field for a purpose label — leave blank and we'll auto-display
-                "SIM · {`{carrier}`} · ●●●● {`{last 4}`}".
-              </p>
-            )}
+      {formData.type !== 'SIM' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Serial Number</Label>
+            <Input value={formData.serialNo} onChange={e => setFormData({ ...formData, serialNo: e.target.value })} className="h-12 border-slate-200" />
           </div>
-
-          {isSim ? (
-            <>
-              <div className="col-span-2">
-                <Label className="text-xs">SIM number</Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={form.countryCode ?? DEFAULT_COUNTRY_CODE}
-                    onValueChange={(v) =>
-                      setForm({ ...form, countryCode: v })
-                    }
-                  >
-                    <SelectTrigger className="w-[120px] shrink-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COUNTRY_CODE_OPTIONS.map((o) => (
-                        <SelectItem key={o.code} value={o.code}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    className="flex-1"
-                    value={form.simNumber ?? ""}
-                    onChange={(e) =>
-                      setForm({ ...form, simNumber: e.target.value })
-                    }
-                    placeholder="98765 43210"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">Carrier</Label>
-                <Select
-                  value={form.carrier ?? ""}
-                  onValueChange={(v) => setForm({ ...form, carrier: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select carrier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CARRIER_OPTIONS.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Plan type</Label>
-                <Select
-                  value={form.plan ?? ""}
-                  onValueChange={(v) =>
-                    setForm({ ...form, plan: v as PlanType })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Corporate / Individual" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(PLAN_TYPE_LABEL) as PlanType[]).map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {PLAN_TYPE_LABEL[p]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Monthly cost (₹)</Label>
-                <Input
-                  type="number"
-                  value={form.monthlyCost || ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      monthlyCost: Number(e.target.value) || 0,
-                    })
-                  }
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">IMEI of paired device</Label>
-                <Input
-                  value={form.imei ?? ""}
-                  onChange={(e) => setForm({ ...form, imei: e.target.value })}
-                  placeholder="Optional"
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="col-span-2">
-                <Label className="text-xs">Serial number</Label>
-                <Input
-                  value={form.serialNo}
-                  onChange={(e) =>
-                    setForm({ ...form, serialNo: e.target.value })
-                  }
-                  placeholder="Manufacturer serial / IMEI"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Value (₹)</Label>
-                <Input
-                  type="number"
-                  value={form.value || ""}
-                  onChange={(e) =>
-                    setForm({ ...form, value: Number(e.target.value) || 0 })
-                  }
-                  placeholder="0"
-                />
-              </div>
-              <div />
-            </>
-          )}
-
-          <div className="col-span-2">
-            <Label className="text-xs">Assigned to</Label>
-            <Input
-              value={form.assignedTo}
-              onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-              placeholder={
-                isSim
-                  ? "Employee name (leave blank if pool)"
-                  : "Employee name (leave blank if unassigned)"
-              }
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">
-              {isSim ? "Activated on" : "Purchase date"}
-            </Label>
-            <Input
-              type="date"
-              value={form.purchaseDate}
-              onChange={(e) =>
-                setForm({ ...form, purchaseDate: e.target.value })
-              }
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Notes</Label>
-            <Input
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              placeholder="Optional"
-            />
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Purchase Value (₹)</Label>
+            <Input type="number" value={formData.value} onChange={e => setFormData({ ...formData, value: Number(e.target.value) })} className="h-12 border-slate-200 font-mono" />
           </div>
         </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+             <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">SIM Number</Label>
+             <div className="flex gap-2">
+                <Select value={formData.countryCode} onValueChange={v => setFormData({...formData, countryCode: v})}>
+                   <SelectTrigger className="w-24 h-12 border-slate-200"><SelectValue /></SelectTrigger>
+                   <SelectContent>{COUNTRY_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.code}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input value={formData.simNumber} onChange={e => setFormData({ ...formData, simNumber: e.target.value })} className="h-12 border-slate-200 flex-1" />
+             </div>
+          </div>
+          <div className="space-y-2">
+             <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Monthly Cost (₹)</Label>
+             <Input type="number" value={formData.monthlyCost} onChange={e => setFormData({ ...formData, monthlyCost: Number(e.target.value) })} className="h-12 border-slate-200 font-mono" />
+          </div>
+        </div>
+      )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={() => onSave(form)}>
-            {isEdit ? "Save changes" : isSim ? "Add SIM" : "Add asset"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Purchase Date</Label>
+          <Input type="date" value={formData.purchaseDate} onChange={e => setFormData({ ...formData, purchaseDate: e.target.value })} className="h-12 border-slate-200" />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Assigned To</Label>
+          <Input value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })} placeholder="Employee Name" className="h-12 border-slate-200" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Asset Notes</Label>
+        <Input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="h-12 border-slate-200" />
+      </div>
+
+      <div className="flex justify-end gap-3 pt-6 border-t">
+        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Cancel</Button>
+        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
+           {initial ? 'Update Asset' : 'Register Asset'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Fact({ label, value, icon: Icon }: { label: string; value: string; icon?: any }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+      <div className="flex items-center gap-2 text-sm font-bold text-slate-900 uppercase tracking-tight">
+        {Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}
+        {value}
+      </div>
+    </div>
   );
 }

@@ -1,40 +1,40 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+/**
+ * Self Target — premium workspace layout.
+ */
+
+import { useMemo, useState, useEffect } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Target, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
+  CheckCircle2, Type, FileText, Zap, UserCircle, Clock
+} from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  WorkspaceShell, WorkspaceHeader,
+  DataTable, type ColumnDef,
+  FilterChips, ActiveFilterPills,
+  ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
+} from "@/components/real-estate/workspace";
+import { useToast } from "@/hooks/use-toast";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { useToast } from '@/hooks/use-toast';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { usePermissions } from '@/hooks/usePermissions';
-import { Target, Plus, Trash2, Edit2, CheckCircle2, Clock, LayoutGrid, List, Type, FileText, Calendar, Zap } from 'lucide-react';
-import { useGetEmployeeListQuery } from '@/lib/api/employees';
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from "@/components/ui/select";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle
+} from "@/components/ui/sheet";
 
 interface SelfTarget {
   id: string;
@@ -48,44 +48,43 @@ interface SelfTarget {
   employeeId: string;
 }
 
+const STATUS_OPTIONS = [
+  { value: "not-started", label: "Not Started" },
+  { value: "in-progress", label: "In Progress" },
+  { value: "completed", label: "Completed" },
+];
+
+interface Filters {
+  search: string;
+  status: string;
+}
+
+const EMPTY_FILTERS: Filters = { search: "", status: "" };
+
 export default function SelfTargetPage() {
-  const { user, isLoading: userLoading } = useCurrentUser();
+  const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const { toast } = useToast();
+  
   const [targets, setTargets] = useState<SelfTarget[]>([]);
   const [loading, setLoading] = useState(true);
-  const [layout, setLayout] = useState<'list' | 'form'>('list');
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [employeeFilter, setEmployeeFilter] = useState<string>('all');
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    targetDate: '',
-    status: 'not-started',
-    progress: 0,
-  });
-  const { toast } = useToast();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [searchInput, setSearchInput] = useState("");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
-  // Employee Master lookup
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const { data: empData } = useGetEmployeeListQuery();
   const employees = empData?.employees ?? [];
-  const employeeLookup = new Map(employees.map(e => [e.id, e]));
   const currentEmployee = employees.find(e => e.userId === user?.id);
-  const getEmployeeName = (id: string) => employeeLookup.get(id)?.employeeName ?? id;
+
+  const views = useSavedViews<Filters>("self-targets");
 
   useEffect(() => {
     if (user?.id) {
-      loadTargets();
-    }
-  }, [user?.id, isAdmin, employees.length]);
-
-  const loadTargets = async () => {
-    try {
-      if (!user?.id) return;
-      setLoading(false);
-      const allTargets: SelfTarget[] = [
+      const mock: SelfTarget[] = [
         {
           id: '1',
           title: 'Complete Advanced TypeScript Course',
@@ -108,543 +107,305 @@ export default function SelfTargetPage() {
           userId: user.id,
           employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
-        {
-          id: '3',
-          title: 'Lead Project Documentation',
-          description: 'Create comprehensive documentation for the new module',
-          targetDate: '2026-07-15',
-          status: 'not-started',
-          progress: 0,
-          createdAt: '2026-05-01',
-          userId: user.id,
-          employeeId: currentEmployee?.id || '',
-        },
       ];
-      if (isAdmin) {
-        setTargets(allTargets);
-      } else {
-        const userTargets = allTargets.filter(t => t.employeeId === currentEmployee?.id);
-        setTargets(userTargets);
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load targets',
-        variant: 'destructive',
-      });
+      setTargets(isAdmin ? mock : mock.filter(t => t.employeeId === currentEmployee?.id));
+      setLoading(false);
     }
+  }, [user?.id, isAdmin, employees.length]);
+
+  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((f) => ({ ...f, [key]: value }));
   };
 
-  const handleSubmit = async () => {
-    if (!formData.title || !formData.targetDate) {
-      toast({
-        title: 'Error',
-        description: 'Please fill in all required fields',
-        variant: 'destructive',
-      });
-      return;
+  const filterFields: FilterField[] = useMemo(() => [
+    { id: "title", label: "Title", type: "text" },
+    { id: "description", label: "Description", type: "text" },
+    { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "targetDate", label: "Target Date", type: "date" },
+  ], []);
+
+  const items = useMemo(() => {
+    let result = targets;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(t => t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
     }
+    if (filters.status) result = result.filter(t => t.status === filters.status);
+    return applyAdvancedFilters(result, conditions, filterFields);
+  }, [targets, filters, conditions, filterFields]);
 
-    if (editingId) {
-      setTargets(
-        targets.map((t) =>
-          t.id === editingId ? { ...t, ...formData } : t
-        )
-      );
-      toast({
-        title: 'Success',
-        description: 'Target updated successfully',
-      });
-    } else {
-      const newTarget: SelfTarget = {
-        id: Date.now().toString(),
-        title: formData.title,
-        description: formData.description,
-        targetDate: formData.targetDate,
-        status: formData.status as 'not-started' | 'in-progress' | 'completed',
-        progress: formData.progress,
-        createdAt: new Date().toISOString().split('T')[0],
-        userId: user?.id || '',
-        employeeId: currentEmployee?.id || '',
-      };
-      setTargets([newTarget, ...targets]);
-      toast({
-        title: 'Success',
-        description: 'Target created successfully',
-      });
-    }
-
-    setDialogOpen(false);
-    setFormData({
-      title: '',
-      description: '',
-      targetDate: '',
-      status: 'not-started',
-      progress: 0,
-    });
-    setEditingId(null);
-  };
-
-  const handleEdit = (target: SelfTarget) => {
-    setFormData({
-      title: target.title,
-      description: target.description,
-      targetDate: target.targetDate,
-      status: target.status,
-      progress: target.progress,
-    });
-    setEditingId(target.id);
-    setDialogOpen(true);
-  };
+  const columns: ColumnDef<SelfTarget>[] = useMemo(() => [
+    {
+      id: "title",
+      header: "Goal / Target",
+      width: 300,
+      pinned: true,
+      cell: (t) => (
+        <div className="min-w-0">
+          <div className="font-medium truncate uppercase">{t.title}</div>
+          <div className="text-[11px] text-muted-foreground truncate">{t.description}</div>
+        </div>
+      ),
+    },
+    {
+      id: "progress",
+      header: "Progress",
+      width: 150,
+      cell: (t) => (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] font-bold">
+            <span>{t.progress}%</span>
+          </div>
+          <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+             <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${t.progress}%` }} />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (t) => {
+        const colors: Record<string, string> = {
+          "not-started": "bg-gray-100 text-gray-800",
+          "in-progress": "bg-blue-100 text-blue-800",
+          completed: "bg-green-100 text-green-800",
+        };
+        return <Badge variant="outline" className={`${colors[t.status]} text-[10px]`}>{t.status.toUpperCase()}</Badge>;
+      },
+    },
+    {
+      id: "date",
+      header: "Target Date",
+      width: 130,
+      cell: (t) => <span className="text-xs text-muted-foreground">{new Date(t.targetDate).toLocaleDateString()}</span>,
+    },
+  ], []);
 
   const handleDelete = (id: string) => {
-    setTargets(targets.filter((t) => t.id !== id));
-    toast({
-      title: 'Success',
-      description: 'Target deleted successfully',
-    });
+    if (!confirm("Delete this target?")) return;
+    setTargets(targets.filter(t => t.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    toast({ title: "Target deleted" });
   };
-
-  const getStatusIcon = (status: string) => {
-    return status === 'completed' ? (
-      <CheckCircle2 className="w-5 h-5 text-green-600" />
-    ) : (
-      <Clock className="w-5 h-5 text-yellow-600" />
-    );
-  };
-
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, any> = {
-      'not-started': 'secondary',
-      'in-progress': 'default',
-      'completed': 'default',
-    };
-    const labels: Record<string, string> = {
-      'not-started': 'Not Started',
-      'in-progress': 'In Progress',
-      'completed': 'Completed',
-    };
-    return (
-      <Badge
-        variant={variants[status]}
-        className={
-          status === 'completed'
-            ? 'bg-green-100 text-green-800'
-            : status === 'in-progress'
-            ? 'bg-blue-100 text-blue-800'
-            : ''
-        }
-      >
-        {labels[status]}
-      </Badge>
-    );
-  };
-
-  const filteredTargets = targets.filter((target) => {
-    const matchesSearch = target.title
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    const matchesStatus =
-      statusFilter === 'all' || target.status === statusFilter;
-    const matchesEmployee = employeeFilter === 'all' || target.employeeId === employeeFilter;
-    return matchesSearch && matchesStatus && matchesEmployee;
-  });
-
-  const uniqueEmployees = Array.from(
-    new Set(targets.map(t => t.employeeId).filter(Boolean))
-  ).sort();
 
   return (
-    <div className="max-w-7xl mx-auto p-3 sm:p-6 lg:p-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
-            <Target className="w-8 h-8 text-blue-600" />
-            Self Target
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Set and track your personal performance targets and goals.
-          </p>
+    <>
+      <WorkspaceShell
+        scope="self-targets"
+        selectedId={selectedId}
+        onCloseSelection={() => setSelectedId(null)}
+        header={
+          <>
+            <WorkspaceHeader
+              icon={<Target className="h-5 w-5 text-blue-600" />}
+              title="Self Target"
+              subtitle={`${items.length} target${items.length === 1 ? "" : "s"}`}
+            >
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search targets..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && updateFilter("search", searchInput)}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
+              </div>
+              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <ManageColumnsButton tableId="self-targets" columns={columns} />
+              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => setCreateOpen(true)}>
+                <Plus className="h-4 w-4 mr-1.5" /> New Target
+              </Button>
+            </WorkspaceHeader>
+
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+              <ViewsBar
+                views={views.views}
+                activeId={views.activeId}
+                onSelect={(id) => {
+                   views.select(id);
+                   const v = views.views.find(x => x.id === id);
+                   if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
+                   else { setFilters(EMPTY_FILTERS); setSearchInput(""); }
+                }}
+                onSave={(name) => views.save(name, filters)}
+                onDelete={views.remove}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? EMPTY_FILTERS) !== JSON.stringify(filters)}
+              />
+            </div>
+
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
+            </div>
+          </>
+        }
+        list={
+          <DataTable<SelfTarget>
+            tableId="self-targets"
+            columns={columns}
+            rows={items}
+            rowId={(t) => t.id}
+            isLoading={loading}
+            selectedId={selectedId}
+            onRowClick={(t) => setSelectedId(t.id)}
+          />
+        }
+        preview={selectedId ? <TargetPreview id={selectedId} targets={targets} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        previewHeader={selectedId ? <PreviewHeader id={selectedId} targets={targets} /> : null}
+      />
+
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle>New Target</SheetTitle>
+          </SheetHeader>
+          <TargetForm
+            onCancel={() => setCreateOpen(false)}
+            onSubmit={(data) => {
+              const newT: SelfTarget = {
+                ...data,
+                id: Date.now().toString(),
+                createdAt: new Date().toISOString().split('T')[0],
+                userId: user?.id || '',
+                employeeId: currentEmployee?.id || '',
+                status: 'not-started'
+              };
+              setTargets([newT, ...targets]);
+              setCreateOpen(false);
+              toast({ title: "Target created" });
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={!!editingId} onOpenChange={(o) => !o && setEditingId(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          {editingId && (
+            <TargetForm
+              initial={targets.find(t => t.id === editingId)}
+              onCancel={() => setEditingId(null)}
+              onSubmit={(data) => {
+                setTargets(targets.map(t => t.id === editingId ? { ...t, ...data } : t));
+                setEditingId(null);
+                toast({ title: "Target updated" });
+              }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+function PreviewHeader({ id, targets }: { id: string, targets: SelfTarget[] }) {
+  const t = targets.find(x => x.id === id);
+  if (!t) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-[10px] uppercase">{t.status}</Badge>
+      <span className="font-semibold text-sm truncate uppercase">{t.title}</span>
+    </div>
+  );
+}
+
+function TargetPreview({ id, targets, onEdit, onDelete }: { id: string, targets: SelfTarget[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+  const t = targets.find(x => x.id === id);
+  if (!t) return null;
+
+  return (
+    <div className="p-5 space-y-6">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold uppercase">{t.title}</h2>
+          <div className="flex items-center gap-4 pt-1">
+             <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600">
+                <Zap className="h-3.5 w-3.5 fill-blue-600" /> {t.progress}% PROGRESS
+             </div>
+          </div>
         </div>
         <div className="flex gap-2">
-          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-            <Button
-              size="sm"
-              variant={layout === 'list' ? 'default' : 'ghost'}
-              onClick={() => setLayout('list')}
-              className="gap-2"
-            >
-              <List className="w-4 h-4" />
-              List
-            </Button>
-            <Button
-              size="sm"
-              variant={layout === 'form' ? 'default' : 'ghost'}
-              onClick={() => setLayout('form')}
-              className="gap-2"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Form
-            </Button>
-          </div>
-          <Button
-            onClick={() => {
-              setEditingId(null);
-              setFormData({
-                title: '',
-                description: '',
-                targetDate: '',
-                status: 'not-started',
-                progress: 0,
-              });
-              setDialogOpen(true);
-            }}
-            className="gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            New Target
-          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(t.id)}><Pencil className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
 
-      {layout === 'list' ? (
-        <>
-          <div className="mb-6 flex gap-3 sm:gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-[180px] sm:min-w-64">
-              <Label htmlFor="search" className="text-sm font-medium">
-                Search
-              </Label>
-              <Input
-                id="search"
-                placeholder="Search targets..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div className="w-36 sm:w-48">
-              <Label htmlFor="status-filter" className="text-sm font-medium">
-                Status
-              </Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="not-started">Not Started</SelectItem>
-                  <SelectItem value="in-progress">In Progress</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {isAdmin && (
-              <div className="w-36 sm:w-48">
-                <Label htmlFor="employee-filter" className="text-sm font-medium">
-                  Employee
-                </Label>
-                <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="All Employees" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Employees</SelectItem>
-                    {uniqueEmployees.map((empId) => (
-                      <SelectItem key={empId} value={empId}>
-                        {getEmployeeName(empId)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
+      <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${t.progress}%` }} />
+      </div>
 
-          {loading ? (
-            <div className="text-center py-12">Loading targets...</div>
-          ) : filteredTargets.length === 0 ? (
-            <Card className="text-center py-12">
-              <CardContent>
-                <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">No targets found</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Progress</TableHead>
-                    <TableHead>Target Date</TableHead>
-                    <TableHead className="w-20">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTargets.map((target) => (
-                    <TableRow key={target.id}>
-                      <TableCell className="text-sm font-medium">
-                        {getEmployeeName(target.employeeId)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {target.title}
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-600">
-                        {target.description}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(target.status)}</TableCell>
-                      <TableCell>
-                        <div className="w-full max-w-xs">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-blue-600 h-2 rounded-full"
-                                style={{ width: `${target.progress}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-medium min-w-10">
-                              {target.progress}%
-                            </span>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {new Date(target.targetDate).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(target)}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(target.id)}
-                          >
-                            <Trash2 className="w-4 h-4 text-red-600" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          )}
-        </>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {loading ? (
-            <div className="text-center py-12">Loading targets...</div>
-          ) : targets.length === 0 ? (
-            <Card className="text-center py-12 md:col-span-2">
-              <CardContent>
-                <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">No targets set yet</p>
-                <Button
-                  onClick={() => setDialogOpen(true)}
-                  variant="outline"
-                >
-                  Create your first target
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            targets.map((target) => (
-              <Card
-                key={target.id}
-                className="hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => handleEdit(target)}
-              >
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {target.title}
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {target.description}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(target.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 text-red-600" />
-                    </Button>
-                  </div>
+      <Card className="p-4 space-y-3">
+        <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Target Details</h3>
+        <p className="text-sm leading-relaxed">{t.description}</p>
+      </Card>
 
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(target.status)}
-                      {getStatusBadge(target.status)}
-                    </div>
-                    <span className="text-xs text-gray-600">
-                      {new Date(target.targetDate).toLocaleDateString()}
-                    </span>
-                  </div>
+      <div className="grid grid-cols-2 gap-4 text-sm pt-4 border-t">
+        <Fact label="Target Date" value={new Date(t.targetDate).toLocaleDateString()} icon={Calendar} />
+        <Fact label="Status" value={t.status.toUpperCase()} icon={CheckCircle2} />
+      </div>
+    </div>
+  );
+}
 
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{ width: `${target.progress}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-600 mt-2">
-                    {target.progress}% Complete
-                  </p>
-                </CardContent>
-              </Card>
-            ))
-          )}
+function TargetForm({ initial, onCancel, onSubmit }: { initial?: SelfTarget, onCancel: () => void, onSubmit: (data: any) => void }) {
+  const [formData, setFormData] = useState({
+    title: initial?.title || "",
+    description: initial?.description || "",
+    targetDate: initial?.targetDate || "",
+    status: initial?.status || "not-started",
+    progress: initial?.progress || 0,
+  });
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Title</Label>
+          <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Target title" />
         </div>
-      )}
+        <div className="space-y-2">
+          <Label>Target Date</Label>
+          <Input type="date" value={formData.targetDate} onChange={e => setFormData({ ...formData, targetDate: e.target.value })} />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Description</Label>
+        <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="min-h-[100px]" />
+      </div>
+      <div className="grid grid-cols-2 gap-4 items-end">
+        <div className="space-y-2">
+          <Label>Status</Label>
+          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Progress ({formData.progress}%)</Label>
+          <Input type="range" min="0" max="100" value={formData.progress} onChange={e => setFormData({ ...formData, progress: parseInt(e.target.value) })} />
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-4">
+        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
+           {initial ? 'Update Target' : 'Create Target'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[800px] p-0 overflow-hidden border-none shadow-2xl">
-          <div className="bg-gradient-to-r from-blue-600 to-cyan-500 p-5 text-white">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-3 text-xl font-bold">
-                <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
-                  <Target className="w-5 h-5 text-white" />
-                </div>
-                {editingId ? 'Edit Target' : 'New Target'}
-              </DialogTitle>
-              <DialogDescription className="text-blue-50 text-sm mt-0.5">
-                Aim high. Set personal performance targets and track your journey.
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-
-          <div className="p-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
-            <div className="grid gap-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-2 space-y-2">
-                  <Label htmlFor="title" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    <Type className="w-4 h-4 text-blue-600" />
-                    Target Title <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="title"
-                    placeholder="e.g., Achieve 95% Code Coverage"
-                    value={formData.title}
-                    onChange={(e) =>
-                      setFormData({ ...formData, title: e.target.value })
-                    }
-                    className="h-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="targetDate" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-600" />
-                    Completion Date <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="targetDate"
-                    type="date"
-                    value={formData.targetDate}
-                    onChange={(e) =>
-                      setFormData({ ...formData, targetDate: e.target.value })
-                    }
-                    className="h-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-600" />
-                  Detailed Description
-                </Label>
-                <Textarea
-                  id="description"
-                  placeholder="Break down your target into actionable steps..."
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData({ ...formData, description: e.target.value })
-                  }
-                  className="min-h-[80px] border-gray-200 focus:border-blue-500 focus:ring-blue-500 transition-all resize-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                <div className="space-y-2">
-                  <Label htmlFor="status" className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                    Status
-                  </Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, status: value as any })
-                    }
-                  >
-                    <SelectTrigger id="status" className="h-10 border-gray-200">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="not-started">Not Started</SelectItem>
-                      <SelectItem value="in-progress">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100">
-                  <div className="flex justify-between items-center mb-4">
-                    <Label htmlFor="progress" className="text-xs font-bold text-blue-900 flex items-center gap-2">
-                      <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                      PROGRESS: {formData.progress}%
-                    </Label>
-                  </div>
-                  <Input
-                    id="progress"
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={formData.progress}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        progress: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className="h-1.5 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600 w-full"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
-            <Button 
-              variant="outline" 
-              onClick={() => setDialogOpen(false)}
-              className="h-10 px-6 font-medium"
-            >
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleSubmit} 
-              className="h-10 px-8 font-bold bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all active:scale-95 flex gap-2"
-            >
-              {editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {editingId ? 'Save Changes' : 'Create Target'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+function Fact({ label, value, icon: Icon }: { label: string; value: string; icon?: any }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase">{label}</p>
+      <div className="flex items-center gap-1.5 text-sm font-medium">
+        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+        {value}
+      </div>
     </div>
   );
 }

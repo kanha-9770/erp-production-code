@@ -1,59 +1,44 @@
 "use client";
 
+/**
+ * Performance Appraisal — Premium Workspace Layout.
+ * Tracks employee reviews, ratings, and development feedback.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import {
-  TrendingUp,
-  Plus,
-  Search,
-  Pencil,
-  Trash2,
-  Star,
-  StarHalf,
-  CheckCircle2,
-  Clock,
-  Eye,
+  TrendingUp, Plus, Search, Pencil, Trash2, Star, StarHalf,
+  CheckCircle2, Clock, Eye, Calendar, User, UserCheck, MessageSquare,
+  Award, TrendingDown, ClipboardCheck, ArrowRight
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  WorkspaceShell, WorkspaceHeader,
+  DataTable, type ColumnDef,
+  FilterChips, ActiveFilterPills,
+  ViewsBar, useSavedViews,
+  AdvancedFilter, applyAdvancedFilters,
+  type FilterField, type FilterCondition,
+  ManageColumnsButton,
+} from "@/components/real-estate/workspace";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import PageBackLink from "@/components/shared/page-back-link";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle
+} from "@/components/ui/sheet";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+
+// --- Types & Constants ---
 
 type AppraisalStatus = "PENDING" | "IN_REVIEW" | "COMPLETED" | "ACKNOWLEDGED";
 type Cycle = "Q1" | "Q2" | "Q3" | "Q4" | "MID_YEAR" | "ANNUAL";
@@ -64,7 +49,7 @@ interface Appraisal {
   reviewer: string;
   cycle: Cycle;
   year: number;
-  rating: number; // 0-5, allow halves
+  rating: number; // 0-5
   strengths: string;
   improvements: string;
   comments: string;
@@ -72,37 +57,23 @@ interface Appraisal {
   submittedAt: string;
 }
 
+const STATUS_OPTIONS = [
+  { value: "PENDING", label: "Pending" },
+  { value: "IN_REVIEW", label: "In Review" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "ACKNOWLEDGED", label: "Acknowledged" },
+];
+
+const CYCLE_OPTIONS = [
+  { value: "Q1", label: "Q1" },
+  { value: "Q2", label: "Q2" },
+  { value: "Q3", label: "Q3" },
+  { value: "Q4", label: "Q4" },
+  { value: "MID_YEAR", label: "Mid-year" },
+  { value: "ANNUAL", label: "Annual" },
+];
+
 const STORAGE_KEY = "performance-appraisal:v1";
-
-const STATUS_LABEL: Record<AppraisalStatus, string> = {
-  PENDING: "Pending",
-  IN_REVIEW: "In Review",
-  COMPLETED: "Completed",
-  ACKNOWLEDGED: "Acknowledged",
-};
-
-const STATUS_VARIANT: Record<AppraisalStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  PENDING: "secondary",
-  IN_REVIEW: "outline",
-  COMPLETED: "default",
-  ACKNOWLEDGED: "default",
-};
-
-const STATUS_ICON: Record<AppraisalStatus, React.ComponentType<{ className?: string }>> = {
-  PENDING: Clock,
-  IN_REVIEW: Eye,
-  COMPLETED: CheckCircle2,
-  ACKNOWLEDGED: CheckCircle2,
-};
-
-const CYCLE_LABEL: Record<Cycle, string> = {
-  Q1: "Q1",
-  Q2: "Q2",
-  Q3: "Q3",
-  Q4: "Q4",
-  MID_YEAR: "Mid-year",
-  ANNUAL: "Annual",
-};
 
 const SEED: Appraisal[] = [
   {
@@ -110,10 +81,9 @@ const SEED: Appraisal[] = [
     employee: "Riya Sharma",
     reviewer: "Sanjay Pillai",
     cycle: "ANNUAL",
-    year: new Date().getFullYear() - 1,
+    year: 2024,
     rating: 4.5,
-    strengths:
-      "Owned the ticket-resolution initiative end-to-end. Strong stakeholder communication.",
+    strengths: "Owned the ticket-resolution initiative end-to-end. Strong stakeholder communication.",
     improvements: "Delegate more to L1 — currently a bottleneck on escalations.",
     comments: "Promotion candidate for next cycle.",
     status: "COMPLETED",
@@ -124,7 +94,7 @@ const SEED: Appraisal[] = [
     employee: "Arjun Mehta",
     reviewer: "Sanjay Pillai",
     cycle: "ANNUAL",
-    year: new Date().getFullYear() - 1,
+    year: 2024,
     rating: 5,
     strengths: "Exceeded sales target by 38%. Mentored 3 new joiners successfully.",
     improvements: "Documentation discipline on closed deals.",
@@ -132,72 +102,21 @@ const SEED: Appraisal[] = [
     status: "ACKNOWLEDGED",
     submittedAt: "2025-01-14",
   },
-  {
-    id: "APR-0003",
-    employee: "Priya Kapoor",
-    reviewer: "Anita Rao",
-    cycle: "MID_YEAR",
-    year: new Date().getFullYear(),
-    rating: 0,
-    strengths: "",
-    improvements: "",
-    comments: "",
-    status: "PENDING",
-    submittedAt: "",
-  },
 ];
 
-function loadAppraisals(): Appraisal[] {
-  if (typeof window === "undefined") return SEED;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return SEED;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Appraisal[]) : SEED;
-  } catch {
-    return SEED;
-  }
-}
-
-function saveAppraisals(items: Appraisal[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-}
-
-function nextAppraisalId(items: Appraisal[]): string {
-  const nums = items
-    .map((a) => Number(a.id.replace(/[^0-9]/g, "")))
-    .filter((n) => Number.isFinite(n));
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `APR-${String(next).padStart(4, "0")}`;
-}
-
 const EMPTY: Appraisal = {
-  id: "",
-  employee: "",
-  reviewer: "",
-  cycle: "ANNUAL",
-  year: new Date().getFullYear(),
-  rating: 0,
-  strengths: "",
-  improvements: "",
-  comments: "",
-  status: "PENDING",
-  submittedAt: "",
+  id: "", employee: "", reviewer: "", cycle: "ANNUAL", year: new Date().getFullYear(),
+  rating: 0, strengths: "", improvements: "", comments: "", status: "PENDING", submittedAt: ""
 };
 
-function StarRow({ rating }: { rating: number }) {
-  // Show a 5-star row with full / half / empty states. Decoupled from the
-  // editing dialog so the table cell can render compactly.
-  const stars: React.ReactNode[] = [];
+// --- Components ---
+
+function StarRating({ rating }: { rating: number }) {
+  const stars = [];
   for (let i = 1; i <= 5; i++) {
-    if (rating >= i) {
-      stars.push(<Star key={i} className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />);
-    } else if (rating >= i - 0.5) {
-      stars.push(<StarHalf key={i} className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />);
-    } else {
-      stars.push(<Star key={i} className="h-3.5 w-3.5 text-gray-300" />);
-    }
+    if (rating >= i) stars.push(<Star key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />);
+    else if (rating >= i - 0.5) stars.push(<StarHalf key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />);
+    else stars.push(<Star key={i} className="h-3 w-3 text-slate-200" />);
   }
   return <div className="flex items-center gap-0.5">{stars}</div>;
 }
@@ -205,468 +124,390 @@ function StarRow({ rating }: { rating: number }) {
 export default function PerformanceAppraisalPage() {
   const { toast } = useToast();
   const [items, setItems] = useState<Appraisal[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"" | AppraisalStatus>("");
-  const [cycleFilter, setCycleFilter] = useState<"" | Cycle>("");
-  const [editing, setEditing] = useState<Appraisal | null>(null);
-  const [deleting, setDeleting] = useState<Appraisal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  const [filters, setFilters] = useState({ search: "", cycle: "", status: "" });
+  const [searchInput, setSearchInput] = useState("");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const views = useSavedViews<typeof filters>("performance-appraisal");
 
   useEffect(() => {
-    setItems(loadAppraisals());
-    setLoaded(true);
+    if (typeof window !== "undefined") {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setItems(JSON.parse(raw));
+      else setItems(SEED);
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (loaded) saveAppraisals(items);
-  }, [items, loaded]);
+    if (!loading) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }, [items, loading]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((a) => {
-      if (statusFilter && a.status !== statusFilter) return false;
-      if (cycleFilter && a.cycle !== cycleFilter) return false;
-      if (!q) return true;
-      return (
-        a.employee.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
+  const filterFields: FilterField[] = useMemo(() => [
+    { id: "employee", label: "Employee", type: "text" },
+    { id: "reviewer", label: "Reviewer", type: "text" },
+    { id: "cycle", label: "Cycle", type: "select", options: CYCLE_OPTIONS },
+    { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "rating", label: "Rating", type: "number" },
+  ], []);
+
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(a => 
+        a.employee.toLowerCase().includes(q) || 
+        a.id.toLowerCase().includes(q) || 
         a.reviewer.toLowerCase().includes(q)
       );
-    });
-  }, [items, search, statusFilter, cycleFilter]);
-
-  const stats = useMemo(() => {
-    const completed = items.filter(
-      (a) => a.status === "COMPLETED" || a.status === "ACKNOWLEDGED",
-    );
-    const avg =
-      completed.length === 0
-        ? 0
-        : completed.reduce((s, a) => s + a.rating, 0) / completed.length;
-    return {
-      total: items.length,
-      pending: items.filter((a) => a.status === "PENDING").length,
-      inReview: items.filter((a) => a.status === "IN_REVIEW").length,
-      completed: completed.length,
-      avgRating: Number(avg.toFixed(2)),
-    };
-  }, [items]);
-
-  const onSave = (draft: Appraisal) => {
-    if (!draft.employee.trim()) {
-      toast({ title: "Employee is required", variant: "destructive" });
-      return;
     }
-    if (!draft.reviewer.trim()) {
-      toast({ title: "Reviewer is required", variant: "destructive" });
-      return;
+    if (filters.cycle) result = result.filter(a => a.cycle === filters.cycle);
+    if (filters.status) result = result.filter(a => a.status === filters.status);
+    return applyAdvancedFilters(result, conditions, filterFields);
+  }, [items, filters, conditions, filterFields]);
+
+  const columns: ColumnDef<Appraisal>[] = useMemo(() => [
+    {
+      id: "id",
+      header: "Appraisal ID",
+      width: 120,
+      pinned: true,
+      cell: (a) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{a.id}</span>,
+    },
+    {
+      id: "employee",
+      header: "Employee / Reviewer",
+      width: 280,
+      cell: (a) => (
+        <div className="min-w-0">
+           <div className="font-bold truncate uppercase text-[12px]">{a.employee}</div>
+           <div className="text-[10px] text-muted-foreground truncate uppercase flex items-center gap-1">
+              <UserCheck className="h-3 w-3" /> REVIEWED BY {a.reviewer || "PENDING"}
+           </div>
+        </div>
+      ),
+    },
+    {
+      id: "cycle",
+      header: "Cycle",
+      width: 130,
+      cell: (a) => <Badge variant="outline" className="text-[10px] font-bold uppercase">{a.cycle} {a.year}</Badge>,
+    },
+    {
+      id: "rating",
+      header: "Performance Rating",
+      width: 160,
+      cell: (a) => (
+        <div className="space-y-1">
+           <StarRating rating={a.rating} />
+           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{a.rating > 0 ? `${a.rating} / 5.0` : 'NOT RATED'}</div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (a) => {
+        const colors: Record<string, string> = {
+          PENDING: "bg-slate-100 text-slate-800",
+          IN_REVIEW: "bg-amber-100 text-amber-800",
+          COMPLETED: "bg-emerald-100 text-emerald-800",
+          ACKNOWLEDGED: "bg-blue-100 text-blue-800",
+        };
+        return <Badge variant="outline" className={`${colors[a.status]} text-[10px] font-bold uppercase`}>{a.status.replace('_', ' ')}</Badge>;
+      },
+    },
+  ], []);
+
+  const handleSave = (draft: Appraisal) => {
+    if (editingId) {
+      setItems(items.map(i => i.id === editingId ? draft : i));
+      toast({ title: "Appraisal Updated" });
+    } else {
+      const newId = `APR-${String(items.length + 1).padStart(4, '0')}`;
+      setItems([{ ...draft, id: newId }, ...items]);
+      toast({ title: "Appraisal Created" });
     }
-    const existing = items.find((a) => a.id === draft.id);
-    const finalAppraisal: Appraisal =
-      existing != null ? draft : { ...draft, id: draft.id || nextAppraisalId(items) };
-    setItems((prev) =>
-      existing != null
-        ? prev.map((a) => (a.id === finalAppraisal.id ? finalAppraisal : a))
-        : [finalAppraisal, ...prev],
-    );
-    setEditing(null);
-    toast({
-      title: existing ? "Appraisal updated" : "Appraisal added",
-      description: `${finalAppraisal.id} · ${finalAppraisal.employee}`,
-    });
+    setFormOpen(false);
+    setEditingId(null);
   };
 
-  const onDelete = (appraisal: Appraisal) => {
-    setItems((prev) => prev.filter((a) => a.id !== appraisal.id));
-    setDeleting(null);
-    toast({
-      title: "Appraisal deleted",
-      description: `${appraisal.id} · ${appraisal.employee}`,
-    });
+  const handleDelete = () => {
+    if (!deletingId) return;
+    setItems(items.filter(i => i.id !== deletingId));
+    if (selectedId === deletingId) setSelectedId(null);
+    setDeletingId(null);
+    toast({ title: "Appraisal Deleted", variant: "destructive" });
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1.5">
-          <PageBackLink href="/admin/modules" label="Modules" />
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-gray-500" /> Performance Appraisal
-          </h1>
-          <p className="mt-1 text-sm text-gray-600 max-w-2xl">
-            Periodic reviews with reviewer, rating, strengths, and growth areas.
-            Each appraisal closes a cycle and feeds into compensation,
-            promotion, and L&amp;D decisions.
-          </p>
-        </div>
-        <Button onClick={() => setEditing({ ...EMPTY })}>
-          <Plus className="h-4 w-4 mr-1.5" /> Start appraisal
-        </Button>
-      </div>
+    <>
+      <WorkspaceShell
+        scope="performance-appraisal"
+        selectedId={selectedId}
+        onCloseSelection={() => setSelectedId(null)}
+        header={
+          <>
+            <WorkspaceHeader
+              icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
+              title="Performance Appraisal"
+              subtitle={`${filteredItems.length} reviews in cycle`}
+            >
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search employee, reviewer..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && setFilters(f => ({ ...f, search: searchInput }))}
+                  className="pl-8 h-8 w-64 text-sm"
+                />
+              </div>
+              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <ManageColumnsButton tableId="performance-appraisal" columns={columns} />
+              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
+                <Plus className="h-4 w-4 mr-1.5" /> Start Appraisal
+              </Button>
+            </WorkspaceHeader>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <KpiCard label="Total reviews" value={stats.total.toString()} />
-        <KpiCard label="Pending" value={stats.pending.toString()} tone="warning" />
-        <KpiCard label="In review" value={stats.inReview.toString()} tone="primary" />
-        <KpiCard
-          label="Avg rating"
-          value={stats.avgRating ? `${stats.avgRating} / 5` : "—"}
-          tone="success"
-        />
-      </div>
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+              <ViewsBar
+                views={views.views}
+                activeId={views.activeId}
+                onSelect={(id) => {
+                   views.select(id);
+                   const v = views.views.find(x => x.id === id);
+                   if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
+                   else { setFilters({ search: "", cycle: "", status: "" }); setSearchInput(""); }
+                }}
+                onSave={(name) => views.save(name, filters)}
+                onDelete={views.remove}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", cycle: "", status: "" }) !== JSON.stringify(filters)}
+              />
+            </div>
 
-      <Card className="mb-4">
-        <CardContent className="p-3 flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search employee, ID, reviewer…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-          <Select
-            value={statusFilter || "ALL"}
-            onValueChange={(v) =>
-              setStatusFilter(v === "ALL" ? "" : (v as AppraisalStatus))
-            }
-          >
-            <SelectTrigger className="h-8 w-[150px] text-sm">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All statuses</SelectItem>
-              {(Object.keys(STATUS_LABEL) as AppraisalStatus[]).map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_LABEL[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={cycleFilter || "ALL"}
-            onValueChange={(v) =>
-              setCycleFilter(v === "ALL" ? "" : (v as Cycle))
-            }
-          >
-            <SelectTrigger className="h-8 w-[140px] text-sm">
-              <SelectValue placeholder="All cycles" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All cycles</SelectItem>
-              {(Object.keys(CYCLE_LABEL) as Cycle[]).map((c) => (
-                <SelectItem key={c} value={c}>
-                  {CYCLE_LABEL[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[110px]">Appraisal ID</TableHead>
-              <TableHead>Employee</TableHead>
-              <TableHead>Reviewer</TableHead>
-              <TableHead className="w-[130px]">Cycle</TableHead>
-              <TableHead className="w-[130px]">Rating</TableHead>
-              <TableHead className="w-[150px]">Status</TableHead>
-              <TableHead className="w-[110px]">Submitted</TableHead>
-              <TableHead className="w-[80px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground text-sm">
-                  {items.length === 0
-                    ? "No appraisals yet. Click \"Start appraisal\" to begin the first review."
-                    : "No appraisals match these filters."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              filtered.map((a) => {
-                const Icon = STATUS_ICON[a.status];
-                return (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-mono text-xs">{a.id}</TableCell>
-                    <TableCell className="font-medium">{a.employee}</TableCell>
-                    <TableCell className="text-sm">{a.reviewer || "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {CYCLE_LABEL[a.cycle]} {a.year}
-                    </TableCell>
-                    <TableCell>
-                      {a.rating > 0 ? (
-                        <div className="flex items-center gap-1.5">
-                          <StarRow rating={a.rating} />
-                          <span className="text-[11px] tabular-nums text-muted-foreground">
-                            {a.rating.toFixed(1)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                        <Badge variant={STATUS_VARIANT[a.status]} className="text-[10px]">
-                          {STATUS_LABEL[a.status]}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {a.submittedAt || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setEditing(a)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => setDeleting(a)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <AppraisalDialog
-        open={editing != null}
-        draft={editing}
-        onCancel={() => setEditing(null)}
-        onSave={onSave}
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips label="Cycle" value={filters.cycle} onChange={(v) => setFilters(f => ({ ...f, cycle: v }))} options={CYCLE_OPTIONS} />
+              <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", cycle: "", status: "" }); setSearchInput(""); }} />
+            </div>
+          </>
+        }
+        list={
+          <DataTable<Appraisal>
+            tableId="performance-appraisal"
+            columns={columns}
+            rows={filteredItems}
+            rowId={(a) => a.id}
+            isLoading={loading}
+            selectedId={selectedId}
+            onRowClick={(a) => setSelectedId(a.id)}
+          />
+        }
+        preview={selectedId ? (
+          <AppraisalPreview 
+            id={selectedId} 
+            items={items} 
+            onEdit={(id) => { setEditingId(id); setFormOpen(true); }} 
+            onDelete={(id) => setDeletingId(id)} 
+          />
+        ) : null}
+        previewHeader={selectedId ? <PreviewHeader id={selectedId} items={items} /> : null}
       />
 
-      <AlertDialog open={deleting != null} onOpenChange={(o) => !o && setDeleting(null)}>
+      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
+            <SheetTitle className="uppercase tracking-tight font-black">{editingId ? 'Edit Review' : 'New Performance Review'}</SheetTitle>
+          </SheetHeader>
+          <AppraisalForm
+            initial={editingId ? items.find(i => i.id === editingId) : undefined}
+            onCancel={() => setFormOpen(false)}
+            onSubmit={handleSave}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete appraisal?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleting && (
-                <>
-                  This will permanently remove <strong>{deleting.id}</strong> ·{" "}
-                  {deleting.employee} from the register. This cannot be undone.
-                </>
-              )}
-            </AlertDialogDescription>
+            <AlertDialogTitle>Delete this appraisal?</AlertDialogTitle>
+            <AlertDialogDescription>This action will permanently remove the performance record. It cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleting && onDelete(deleting)}>
-              Delete
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete Record</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+function PreviewHeader({ id, items }: { id: string, items: Appraisal[] }) {
+  const a = items.find(x => x.id === id);
+  if (!a) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{a.id}</Badge>
+      <span className="font-bold text-sm truncate uppercase tracking-tight">{a.employee}</span>
     </div>
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "primary" | "success" | "warning";
-}) {
-  const toneClass: Record<typeof tone, string> = {
-    neutral: "text-gray-900",
-    primary: "text-blue-700",
-    success: "text-emerald-700",
-    warning: "text-amber-700",
-  } as const;
+function AppraisalPreview({ id, items, onEdit, onDelete }: { id: string, items: Appraisal[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+  const a = items.find(x => x.id === id);
+  if (!a) return null;
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
-          {label}
+    <div className="p-6 space-y-8">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+           <h2 className="text-3xl font-black uppercase tracking-tighter leading-none">{a.employee}</h2>
+           <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px] font-black uppercase tracking-[0.1em]">{a.cycle} {a.year} CYCLE</Badge>
+              <div className="h-1 w-1 rounded-full bg-slate-300" />
+              <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-tight">
+                 <UserCheck className="h-3.5 w-3.5" /> Reviewed by {a.reviewer}
+              </div>
+           </div>
         </div>
-        <div className={`text-2xl font-bold tabular-nums mt-1 ${toneClass[tone]}`}>
-          {value}
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl" onClick={() => onEdit(a.id)}><Pencil className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(a.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+         <Card className="p-5 border-0 bg-slate-50 flex flex-col justify-between overflow-hidden relative">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Overall Score</span>
+            <div className="flex items-baseline gap-2 relative z-10">
+               <span className="text-4xl font-black">{a.rating.toFixed(1)}</span>
+               <span className="text-xs font-bold text-slate-400">/ 5.0</span>
+            </div>
+            <div className="mt-3 relative z-10"><StarRating rating={a.rating} /></div>
+            <Award className="absolute -bottom-4 -right-4 h-24 w-24 text-slate-100 -rotate-12" />
+         </Card>
+         <Card className="p-5 border-0 bg-slate-50 flex flex-col justify-between">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Status & Submission</span>
+            <div className="space-y-1">
+               <div className="font-black text-sm uppercase tracking-tight">{a.status.replace('_', ' ')}</div>
+               <div className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                  <Calendar className="h-3 w-3" /> {a.submittedAt || 'NOT YET SUBMITTED'}
+               </div>
+            </div>
+            <div className="mt-4"><Badge className="bg-emerald-500 text-white border-0 font-black text-[9px] uppercase tracking-widest px-2">VALIDATED</Badge></div>
+         </Card>
+      </div>
+
+      <div className="space-y-6">
+         <Section icon={Award} title="Top Strengths" content={a.strengths} color="text-emerald-600" bg="bg-emerald-50" />
+         <Section icon={TrendingDown} title="Growth Areas" content={a.improvements} color="text-amber-600" bg="bg-amber-50" />
+         <Section icon={MessageSquare} title="Executive Summary" content={a.comments} color="text-blue-600" bg="bg-blue-50" />
+      </div>
+    </div>
   );
 }
 
-function AppraisalDialog({
-  open,
-  draft,
-  onCancel,
-  onSave,
-}: {
-  open: boolean;
-  draft: Appraisal | null;
-  onCancel: () => void;
-  onSave: (a: Appraisal) => void;
-}) {
-  const [form, setForm] = useState<Appraisal>(EMPTY);
-  useEffect(() => {
-    if (draft) setForm(draft);
-  }, [draft]);
+function Section({ icon: Icon, title, content, color, bg }: { icon: any, title: string, content: string, color: string, bg: string }) {
+   return (
+      <div className="space-y-3">
+         <div className="flex items-center gap-2">
+            <div className={`p-1.5 rounded-lg ${bg} ${color}`}><Icon className="h-4 w-4" /></div>
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">{title}</h3>
+         </div>
+         <p className="text-sm font-medium leading-relaxed text-slate-700 bg-slate-50/50 p-4 rounded-xl border border-slate-100">{content || "No detailed observation recorded for this category."}</p>
+      </div>
+   );
+}
 
-  const isEdit = !!draft?.id;
+function AppraisalForm({ initial, onCancel, onSubmit }: { initial?: Appraisal, onCancel: () => void, onSubmit: (data: Appraisal) => void }) {
+  const [formData, setFormData] = useState<Appraisal>(initial || { ...EMPTY });
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit appraisal" : "Start appraisal"}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? `Update details for ${form.id}.`
-              : "Create a new performance review. ID is generated automatically."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <Label className="text-xs">Employee</Label>
-            <Input
-              value={form.employee}
-              onChange={(e) => setForm({ ...form, employee: e.target.value })}
-              placeholder="Employee name"
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Reviewer</Label>
-            <Input
-              value={form.reviewer}
-              onChange={(e) => setForm({ ...form, reviewer: e.target.value })}
-              placeholder="Manager / reviewer name"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Cycle</Label>
-            <Select
-              value={form.cycle}
-              onValueChange={(v) => setForm({ ...form, cycle: v as Cycle })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(CYCLE_LABEL) as Cycle[]).map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {CYCLE_LABEL[c]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Year</Label>
-            <Input
-              type="number"
-              value={form.year}
-              onChange={(e) =>
-                setForm({ ...form, year: Number(e.target.value) || new Date().getFullYear() })
-              }
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Rating (0-5)</Label>
-            <Input
-              type="number"
-              min={0}
-              max={5}
-              step={0.5}
-              value={form.rating || ""}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  rating: Math.max(0, Math.min(5, Number(e.target.value) || 0)),
-                })
-              }
-              placeholder="e.g. 4.5"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Status</Label>
-            <Select
-              value={form.status}
-              onValueChange={(v) => setForm({ ...form, status: v as AppraisalStatus })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(STATUS_LABEL) as AppraisalStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Strengths</Label>
-            <Textarea
-              value={form.strengths}
-              onChange={(e) => setForm({ ...form, strengths: e.target.value })}
-              placeholder="What did the employee do well this cycle?"
-              rows={2}
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Areas of improvement</Label>
-            <Textarea
-              value={form.improvements}
-              onChange={(e) => setForm({ ...form, improvements: e.target.value })}
-              placeholder="Where should the employee focus next cycle?"
-              rows={2}
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Reviewer comments</Label>
-            <Textarea
-              value={form.comments}
-              onChange={(e) => setForm({ ...form, comments: e.target.value })}
-              placeholder="Promotion / retention / L&D notes"
-              rows={2}
-            />
-          </div>
-          <div className="col-span-2">
-            <Label className="text-xs">Submitted on</Label>
-            <Input
-              type="date"
-              value={form.submittedAt}
-              onChange={(e) => setForm({ ...form, submittedAt: e.target.value })}
-            />
-          </div>
+    <div className="p-6 space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Employee Name</Label>
+          <Input value={formData.employee} onChange={e => setFormData({ ...formData, employee: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. John Doe" />
         </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Primary Reviewer</Label>
+          <Input value={formData.reviewer} onChange={e => setFormData({ ...formData, reviewer: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. Manager Name" />
+        </div>
+      </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={() => onSave(form)}>
-            {isEdit ? "Save changes" : "Create appraisal"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Cycle</Label>
+          <Select value={formData.cycle} onValueChange={v => setFormData({ ...formData, cycle: v as Cycle })}>
+            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+            <SelectContent>{CYCLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Year</Label>
+          <Input type="number" value={formData.year} onChange={e => setFormData({ ...formData, year: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Current Status</Label>
+          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as AppraisalStatus })}>
+            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
+            <SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4 shadow-2xl">
+         <div className="flex items-center justify-between">
+            <Label className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Performance Rating Score</Label>
+            <span className="text-2xl font-black text-amber-400">{formData.rating.toFixed(1)} <span className="text-xs text-slate-600">/ 5.0</span></span>
+         </div>
+         <Input 
+           type="range" min="0" max="5" step="0.5" 
+           value={formData.rating} 
+           onChange={e => setFormData({ ...formData, rating: Number(e.target.value) })}
+           className="h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-400 w-full"
+         />
+         <div className="flex justify-between text-[9px] font-bold text-slate-600 uppercase tracking-widest">
+            <span>Critical</span>
+            <span>Needs Impr.</span>
+            <span>Satisfactory</span>
+            <span>Good</span>
+            <span>Excellent</span>
+            <span>Exceptional</span>
+         </div>
+      </div>
+
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Core Strengths & Achievements</Label>
+          <Textarea value={formData.strengths} onChange={e => setFormData({ ...formData, strengths: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Highlight key wins..." />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Opportunities for Growth</Label>
+          <Textarea value={formData.improvements} onChange={e => setFormData({ ...formData, improvements: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Identify focus areas..." />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Reviewer's Final Summary</Label>
+          <Textarea value={formData.comments} onChange={e => setFormData({ ...formData, comments: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Promotion / L&D notes..." />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-6 border-t">
+        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Discard</Button>
+        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
+           {initial ? 'Save Review' : 'Authorize Appraisal'}
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -145,6 +145,7 @@ interface Props<T> {
   isLoading?: boolean;
   /** Header label shown above every column — matches the image's "EMPLOYEE MASTER" badge. */
   recordLabel?: string;
+  selectedId?: string | null;
   onRowClick?: (row: T) => void;
   onView?: (row: T) => void;
   onEdit?: (row: T) => void;
@@ -153,6 +154,8 @@ interface Props<T> {
   onImport?: (file: File) => Promise<void> | void;
   /** Right-aligned slot for an extra action button (e.g. "New employee"). */
   extraToolbarActions?: React.ReactNode;
+  /** Hide the internal toolbar when the parent provides one (e.g. WorkspaceShell). */
+  hideToolbar?: boolean;
 }
 
 const KIND_ICON: Record<FieldKind, React.ComponentType<{ className?: string }>> = {
@@ -382,13 +385,16 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
     title = "Records",
     storageKey,
     isLoading,
+    isLoading,
     recordLabel = "EMPLOYEE MASTER",
+    selectedId,
     onRowClick,
     onView,
     onEdit,
     onDelete,
     onImport,
     extraToolbarActions,
+    hideToolbar,
   } = props;
 
   const { toast } = useToast();
@@ -707,7 +713,8 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
 
       {/* Toolbar — wraps gracefully on narrow viewports, but stays on one row
           whenever the container is wide enough. */}
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b bg-background print:hidden">
+      {!hideToolbar && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b bg-background print:hidden">
         {/* Filter — opens the structured sidebar where rules are built
             per-field with kind-aware operators. The active rule count is
             shown as a badge so users can see at a glance whether any
@@ -879,6 +886,7 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
 
           {extraToolbarActions}
         </div>
+      )}
       </div>
 
       {/* Selection summary */}
@@ -1034,12 +1042,14 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
             ) : pageRows.map((row, idx) => {
               const id = rowId(row);
               const checked = selected.has(id);
+              const isSelected = id === selectedId;
               return (
                 <tr
                   key={id}
                   className={cn(
                     "group hover:bg-muted/30 cursor-pointer",
                     checked && "bg-primary/5",
+                    isSelected && "bg-primary/[0.08] hover:bg-primary/[0.12]",
                   )}
                   onClick={() => onRowClick?.(row)}
                 >
