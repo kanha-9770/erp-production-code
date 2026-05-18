@@ -329,6 +329,7 @@ model Organization {
   jobOffers           JobOffer[]
   appointmentLetters  AppointmentLetter[]
   employeeReferrals   EmployeeReferral[]
+  engagementTeams     EngagementTeam[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1359,7 +1360,15 @@ model Employee {
   yearsOfAgreement           Int?            @map("years_of_agreement")
   bonusAfterYears            Int?            @map("bonus_after_years")
   companyName                String?         @map("company_name")
+  // Legacy free-text team name. Kept for backward compatibility — new code
+  // should write to `engagementTeamId` and let serializers fall back to the
+  // related team's name. Will be deprecated once all writers are migrated.
   employeeEngagementTeamName String?         @map("employee_engagement_team_name")
+  // FK to EngagementTeam. Engagement pages (Kaizen, Suggestion, etc.) filter
+  // by this so members of one team can't see another team's records. HR /
+  // Admin bypass the filter and see everything.
+  engagementTeamId           String?         @map("engagement_team_id")
+  engagementTeam             EngagementTeam? @relation(fields: [engagementTeamId], references: [id], onDelete: SetNull)
   totalSalary                Decimal?        @map("total_salary")
   givenSalary                Decimal?        @map("given_salary")
   bonusAmount                Decimal?        @map("bonus_amount")
@@ -1378,7 +1387,37 @@ model Employee {
   @@index([status])
   @@index([dateOfJoining])
   @@index([dateOfLeaving])
+  @@index([engagementTeamId])
   @@map("employees")
+}
+
+// Engagement Team — groups employees for the Employee Engagement module
+// (Kaizen, Problem Registration, Self-Initiative, Self-Target, Suggestion).
+// Members of a team see only their own team's data; HR / Admin see all.
+// Created and managed from Settings → Employee Engagement → Teams.
+model EngagementTeam {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  // Optional human-friendly description shown on the teams admin page.
+  description    String?  @db.Text
+  // Optional UI color (hex, e.g. "#3b82f6") so teams can be visually
+  // distinguished in lists. Defaults to a neutral gray in the UI.
+  color          String?
+  // Optional team lead. Just a soft reference — deleting the user doesn't
+  // delete the team, it just clears the lead.
+  leadUserId     String?  @map("lead_user_id")
+  isActive       Boolean  @default(true) @map("is_active")
+  members        Employee[]
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Team names are unique within an organization (case-sensitive at the DB
+  // level; the API normalises whitespace + case before insert).
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("engagement_teams")
 }
 
 // Workforce planning record — represents the intent to hire N people for a

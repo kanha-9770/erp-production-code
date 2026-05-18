@@ -92,6 +92,7 @@ const settingsData: SettingCategory[] = [
       { name: "Team Attendance", href: "/attendance/team" },
       { name: "Regularizations", href: "/attendance/regularizations" },
       { name: "Attendance Configuration", href: "/settings/attendance-config" },
+      { name: "Employee Engagement", href: "/settings/employee-engagement" },
     ],
   },
   {

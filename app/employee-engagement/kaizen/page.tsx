@@ -22,6 +22,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,8 +72,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "" };
 export default function KaizenPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [kaizens, setKaizens] = useState<Kaizen[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -84,10 +89,20 @@ export default function KaizenPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  // employeeId → engagementTeamId map used by the visibility filter so we
+  // can answer "is this record's author on my team?" in O(1).
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) {
+      m.set(e.id, (e as any).engagementTeamId ?? null);
+    }
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("kaizens");
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !visibility.loading) {
       const mock: Kaizen[] = [
         {
           id: '1',
@@ -116,10 +131,14 @@ export default function KaizenPage() {
           employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
       ];
-      setKaizens(isAdmin ? mock : mock.filter(k => k.employeeId === currentEmployee?.id));
+      // Team-scoped visibility: Admin/HR (seeAll) see everything; team
+      // members see only entries from authors on their own team; users
+      // without a team see only their own.
+      const allow = makeEngagementFilter<Kaizen>(visibility, employeeToTeam);
+      setKaizens(mock.filter(allow));
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, isAdmin, employees.length, visibility, employeeToTeam]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));

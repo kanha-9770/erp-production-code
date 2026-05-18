@@ -25,6 +25,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,8 +86,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
 export default function EmployeeSuggestionPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [suggestions, setSuggestions] = useState<EmployeeSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -98,10 +103,17 @@ export default function EmployeeSuggestionPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  // employeeId → team map for the visibility filter (O(1) lookups).
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("employee-suggestions");
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !visibility.loading) {
       // Mock data for now as per original file
       const mock: EmployeeSuggestion[] = [
         {
@@ -127,10 +139,13 @@ export default function EmployeeSuggestionPage() {
           employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
       ];
-      setSuggestions(isAdmin ? mock : mock.filter(s => s.employeeId === currentEmployee?.id));
+      // Team-scoped visibility: Admin/HR see all, team members see same-team
+      // entries, unassigned users see only their own.
+      const allow = makeEngagementFilter<EmployeeSuggestion>(visibility, employeeToTeam);
+      setSuggestions(mock.filter(allow));
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, isAdmin, employees.length, visibility, employeeToTeam]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));

@@ -21,6 +21,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,8 +68,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "" };
 export default function SelfTargetPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [targets, setTargets] = useState<SelfTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -80,10 +85,16 @@ export default function SelfTargetPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("self-targets");
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !visibility.loading) {
       const mock: SelfTarget[] = [
         {
           id: '1',
@@ -108,10 +119,11 @@ export default function SelfTargetPage() {
           employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
       ];
-      setTargets(isAdmin ? mock : mock.filter(t => t.employeeId === currentEmployee?.id));
+      const allow = makeEngagementFilter<SelfTarget>(visibility, employeeToTeam);
+      setTargets(mock.filter(allow));
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, isAdmin, employees.length, visibility, employeeToTeam]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));

@@ -21,6 +21,7 @@ export interface EmployeeListItem {
   dateOfLeaving: string | null;
   companyName: string | null;
   employeeEngagementTeamName: string | null;
+  engagementTeamId: string | null;
   gender: "MALE" | "FEMALE" | "OTHER" | null;
   shiftType: string | null;
 }

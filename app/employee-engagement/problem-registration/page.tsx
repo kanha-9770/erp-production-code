@@ -21,6 +21,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,8 +78,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", severity: "" };
 export default function ProblemRegistrationPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [problems, setProblems] = useState<ProblemRegistration[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -90,10 +95,16 @@ export default function ProblemRegistrationPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("problem-registrations");
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !visibility.loading) {
       const mock: ProblemRegistration[] = [
         {
           id: '1',
@@ -120,10 +131,11 @@ export default function ProblemRegistrationPage() {
           employeeId: employees[1]?.id || currentEmployee?.id || '',
         },
       ];
-      setProblems(isAdmin ? mock : mock.filter(p => p.employeeId === currentEmployee?.id));
+      const allow = makeEngagementFilter<ProblemRegistration>(visibility, employeeToTeam);
+      setProblems(mock.filter(allow));
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, isAdmin, employees.length, visibility, employeeToTeam]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));

@@ -369,8 +369,9 @@ export const UserManagementHandlers = {
         emailAddress1: true, personalContact: true,
         dateOfJoining: true, dateOfLeaving: true,
         companyName: true, employeeEngagementTeamName: true,
+        engagementTeamId: true,
         gender: true, shiftType: true,
-      };
+      } as any;
 
       let employees;
 
@@ -673,6 +674,14 @@ function sanitizeEmployeePayload(
   strField("outTime");
   strField("companyName");
   strField("employeeEngagementTeamName");
+  // FK to EngagementTeam — accept null/"" to clear. We trust the client-side
+  // dropdown to only feed valid team ids; if not, Prisma's FK constraint
+  // will reject the write.
+  if ("engagementTeamId" in body) {
+    const raw = body.engagementTeamId;
+    data.engagementTeamId =
+      typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  }
 
   if ("gender" in body) {
     const g = String(body.gender || "").toUpperCase();
