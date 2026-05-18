@@ -16,6 +16,8 @@ import {
   LeaveError,
   isValidDateStr,
 } from '@/lib/hr/leave-service';
+import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +64,18 @@ export async function POST(
       userId: authUser.id,
       newEndDate: body.newEndDate,
       reason: typeof body.reason === 'string' ? body.reason.slice(0, 2000) : null,
+    });
+    // Workflow rule fire — approvers can subscribe to shortenStatus =
+    // PENDING to be notified that an early-return needs review.
+    buildLeaveRecordData(updated).then((recordData) => {
+      fireWorkflow({
+        moduleName: 'Leave',
+        action: 'Edit',
+        organizationId: authUser.organizationId!,
+        userId: authUser.id,
+        recordId: updated.id,
+        recordData,
+      });
     });
     return NextResponse.json({ success: true, request: updated }, { headers: NO_STORE });
   } catch (e) {

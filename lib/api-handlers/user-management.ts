@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
+import { fireWorkflow } from "@/lib/workflow/static-triggers";
 import bcrypt from "bcryptjs";
 
 // Compensation fields on Employee that affect the payroll engine. When any
@@ -564,6 +565,18 @@ export const UserManagementHandlers = {
       // New employee → drop the live payroll cache so they appear in the
       // dashboard on the next fetch instead of waiting for the 5s TTL.
       if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
+      // Fire any workflow rule attached to the Employee Master module so
+      // welcome emails / onboarding notifications can run.
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Employee Master",
+          action: "Create",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: employee.id,
+          recordData: employee as any,
+        });
+      }
       return NextResponse.json({ success: true, employee }, { status: 201 });
     }, "createEmployee");
   },
@@ -602,6 +615,19 @@ export const UserManagementHandlers = {
         invalidatePayrollCache(authUser.organizationId);
       }
 
+      // Status changes, role/dept changes, etc. → workflow rules fire so
+      // notifications / field-update actions can run.
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Employee Master",
+          action: "Edit",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: employee.id,
+          recordData: employee as any,
+        });
+      }
+
       return NextResponse.json({ success: true, employee });
     }, "updateEmployee");
   },
@@ -627,6 +653,16 @@ export const UserManagementHandlers = {
       // Drop the live payroll cache so the deleted row disappears from the
       // dashboard on the next fetch.
       if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Employee Master",
+          action: "Delete",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: id,
+          recordData: { id },
+        });
+      }
       return NextResponse.json({ success: true });
     }, "deleteEmployee");
   },

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
+import { fireWorkflow } from "@/lib/workflow/static-triggers";
 
 const STATUSES = ["DRAFT", "ISSUED", "SIGNED", "REVOKED"] as const;
 
@@ -232,6 +233,16 @@ export const AppointmentLetterHandlers = {
           createdById: authUser.id,
         },
       });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Appointment Letter",
+          action: "Create",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: letter.id,
+          recordData: letter as any,
+        });
+      }
       return NextResponse.json({ success: true, letter }, { status: 201 });
     }, "create");
   },
@@ -328,6 +339,17 @@ export const AppointmentLetterHandlers = {
         );
       }
 
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Appointment Letter",
+          action: "Edit",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: letter.id,
+          recordData: letter as any,
+        });
+      }
+
       return NextResponse.json({ success: true, letter, autoCreatedEmployee });
     }, "update");
   },
@@ -346,6 +368,16 @@ export const AppointmentLetterHandlers = {
           { status: 404 },
         );
       await (prisma as any).appointmentLetter.delete({ where: { id } });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Appointment Letter",
+          action: "Delete",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: id,
+          recordData: { id },
+        });
+      }
       return NextResponse.json({ success: true });
     }, "remove");
   },

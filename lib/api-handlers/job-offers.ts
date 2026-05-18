@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { fireWorkflow } from "@/lib/workflow/static-triggers";
 
 const STATUSES = [
   "DRAFT",
@@ -251,6 +252,16 @@ export const JobOfferHandlers = {
           createdById: authUser.id,
         },
       });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Offer",
+          action: "Create",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: offer.id,
+          recordData: offer as any,
+        });
+      }
       return NextResponse.json({ success: true, offer }, { status: 201 });
     }, "create");
   },
@@ -335,6 +346,16 @@ export const JobOfferHandlers = {
         where: { id },
         data,
       });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Offer",
+          action: "Edit",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: offer.id,
+          recordData: offer as any,
+        });
+      }
       return NextResponse.json({ success: true, offer });
     }, "update");
   },
@@ -353,6 +374,16 @@ export const JobOfferHandlers = {
           { status: 404 },
         );
       await (prisma as any).jobOffer.delete({ where: { id } });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Offer",
+          action: "Delete",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: id,
+          recordData: { id },
+        });
+      }
       return NextResponse.json({ success: true });
     }, "remove");
   },

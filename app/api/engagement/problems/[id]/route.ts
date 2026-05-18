@@ -10,6 +10,7 @@ import {
   serializeProblem,
   PROBLEM_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,7 @@ export async function PATCH(
   }
   const loaded = await loadAndAuthorize(request, params.id);
   if ('error' in loaded) return loaded.error;
+  const { authUser } = loaded;
 
   const patch: Record<string, unknown> = {};
   if (body.title !== undefined) patch.title = body.title.trim().slice(0, 200);
@@ -80,8 +82,17 @@ export async function PATCH(
     data: patch,
     include: PROBLEM_INCLUDE,
   });
+  const wire = serializeProblem(updated);
+  fireWorkflow({
+    moduleName: 'Problem Registration',
+    action: 'Edit',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, problem: serializeProblem(updated) },
+    { success: true, problem: wire },
     { headers: NO_STORE },
   );
 }
@@ -92,6 +103,15 @@ export async function DELETE(
 ) {
   const loaded = await loadAndAuthorize(request, params.id);
   if ('error' in loaded) return loaded.error;
+  const { authUser, row } = loaded;
   await (prisma as any).engagementProblem.delete({ where: { id: params.id } });
+  fireWorkflow({
+    moduleName: 'Problem Registration',
+    action: 'Delete',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: params.id,
+    recordData: { id: params.id, title: row.title, userId: row.userId },
+  });
   return NextResponse.json({ success: true }, { headers: NO_STORE });
 }

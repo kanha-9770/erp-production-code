@@ -14,6 +14,7 @@ import {
   listTeams,
   EngagementTeamError,
 } from '@/lib/hr/engagement-team-service';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,14 @@ export async function POST(request: NextRequest) {
       description: body.description ?? null,
       color: body.color ?? null,
       leadUserId: body.leadUserId ?? null,
+    });
+    fireWorkflow({
+      moduleName: 'Engagement Team',
+      action: 'Create',
+      organizationId: authUser.organizationId,
+      userId: authUser.id,
+      recordId: team.id,
+      recordData: team as any,
     });
     return NextResponse.json({ success: true, team }, { headers: NO_STORE });
   } catch (e) {

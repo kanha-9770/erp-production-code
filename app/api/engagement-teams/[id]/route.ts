@@ -14,6 +14,7 @@ import {
   updateTeam,
   EngagementTeamError,
 } from '@/lib/hr/engagement-team-service';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +63,14 @@ export async function PATCH(
       leadUserId: body.leadUserId,
       isActive: body.isActive,
     });
+    fireWorkflow({
+      moduleName: 'Engagement Team',
+      action: 'Edit',
+      organizationId: authUser.organizationId,
+      userId: authUser.id,
+      recordId: team.id,
+      recordData: team as any,
+    });
     return NextResponse.json({ success: true, team }, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof EngagementTeamError) return err(e.message, e.status, e.code);
@@ -83,6 +92,14 @@ export async function DELETE(
 
   try {
     await deleteTeam(params.id, authUser.organizationId);
+    fireWorkflow({
+      moduleName: 'Engagement Team',
+      action: 'Delete',
+      organizationId: authUser.organizationId,
+      userId: authUser.id,
+      recordId: params.id,
+      recordData: { id: params.id },
+    });
     return NextResponse.json({ success: true }, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof EngagementTeamError) return err(e.message, e.status, e.code);

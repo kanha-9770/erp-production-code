@@ -12,6 +12,8 @@ import {
   getRequest,
   LeaveError,
 } from '@/lib/hr/leave-service';
+import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
@@ -93,6 +95,19 @@ export async function POST(
     // payable / unpaid-leave counts for the affected month(s). Invalidate
     // the live payroll cache so the next read recomputes from truth.
     invalidatePayrollCache(authUser.organizationId);
+    // Fire any workflow rule the admin built against "Leave" with
+    // condition `status = APPROVED` (or REJECTED) so e-mails / in-app
+    // notifications go out.
+    buildLeaveRecordData(updated).then((recordData) => {
+      fireWorkflow({
+        moduleName: 'Leave',
+        action: 'Edit',
+        organizationId: authUser.organizationId!,
+        userId: authUser.id,
+        recordId: updated.id,
+        recordData,
+      });
+    });
     return NextResponse.json(
       { success: true, request: updated },
       { headers: NO_STORE },

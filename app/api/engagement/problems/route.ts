@@ -12,6 +12,7 @@ import {
   serializeProblem,
   PROBLEM_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,8 +82,17 @@ export async function POST(request: NextRequest) {
     },
     include: PROBLEM_INCLUDE,
   });
+  const wire = serializeProblem(created);
+  fireWorkflow({
+    moduleName: 'Problem Registration',
+    action: 'Create',
+    organizationId: authUser.organizationId,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, problem: serializeProblem(created) },
+    { success: true, problem: wire },
     { headers: NO_STORE },
   );
 }

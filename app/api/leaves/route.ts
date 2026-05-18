@@ -21,6 +21,8 @@ import {
   type LeaveRequestStatus,
   isValidDateStr,
 } from '@/lib/hr/leave-service';
+import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -170,6 +172,19 @@ export async function POST(request: NextRequest) {
       reason: typeof body.reason === 'string' ? body.reason.slice(0, 2000) : null,
       attachmentUrl,
       isEmergency: body.isEmergency === true,
+    });
+    // Fire workflow rules attached to "Leave" / "Leave Management" / etc.
+    // Awaited the recordData lookup (cheap) but fire-and-forget the trigger
+    // itself so a slow workflow runtime can't delay the user's response.
+    buildLeaveRecordData(created).then((recordData) => {
+      fireWorkflow({
+        moduleName: 'Leave',
+        action: 'Create',
+        organizationId: authUser.organizationId!,
+        userId: authUser.id,
+        recordId: created.id,
+        recordData,
+      });
     });
     return NextResponse.json({ success: true, request: created }, { headers: NO_STORE });
   } catch (e) {

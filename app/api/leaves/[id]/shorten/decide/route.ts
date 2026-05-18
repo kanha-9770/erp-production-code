@@ -16,6 +16,8 @@ import {
   getRequest,
   LeaveError,
 } from '@/lib/hr/leave-service';
+import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
@@ -75,6 +77,18 @@ export async function POST(
     // the leave's date range, which affects payroll computations for the
     // affected month(s).
     invalidatePayrollCache(authUser.organizationId);
+    // Workflow rules can fire on shortenStatus = APPROVED / REJECTED to
+    // notify the applicant their early-return was decided.
+    buildLeaveRecordData(updated).then((recordData) => {
+      fireWorkflow({
+        moduleName: 'Leave',
+        action: 'Edit',
+        organizationId: authUser.organizationId!,
+        userId: authUser.id,
+        recordId: updated.id,
+        recordData,
+      });
+    });
     return NextResponse.json({ success: true, request: updated }, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof LeaveError) return err(e.message, e.status, e.code);

@@ -7,6 +7,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { cancelLeave, getRequest, LeaveError } from '@/lib/hr/leave-service';
+import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
@@ -69,6 +71,18 @@ export async function POST(
     // days from the payroll month. Drop the cache so the next read sees
     // truth.
     invalidatePayrollCache(authUser.organizationId);
+    // Workflow rules can listen for status = CANCELLED to e.g. notify the
+    // approver that an upcoming leave was withdrawn.
+    buildLeaveRecordData(updated).then((recordData) => {
+      fireWorkflow({
+        moduleName: 'Leave',
+        action: 'Edit',
+        organizationId: authUser.organizationId!,
+        userId: authUser.id,
+        recordId: updated.id,
+        recordData,
+      });
+    });
     return NextResponse.json(
       { success: true, request: updated },
       { headers: NO_STORE },

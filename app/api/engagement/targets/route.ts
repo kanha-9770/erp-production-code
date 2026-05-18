@@ -12,6 +12,7 @@ import {
   serializeTarget,
   TARGET_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,8 +85,17 @@ export async function POST(request: NextRequest) {
     },
     include: TARGET_INCLUDE,
   });
+  const wire = serializeTarget(created);
+  fireWorkflow({
+    moduleName: 'Self Target',
+    action: 'Create',
+    organizationId: authUser.organizationId,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, target: serializeTarget(created) },
+    { success: true, target: wire },
     { headers: NO_STORE },
   );
 }

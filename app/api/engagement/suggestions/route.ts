@@ -12,6 +12,7 @@ import {
   serializeSuggestion,
   SUGGESTION_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,8 +82,17 @@ export async function POST(request: NextRequest) {
     },
     include: SUGGESTION_INCLUDE,
   });
+  const wire = serializeSuggestion(created);
+  fireWorkflow({
+    moduleName: 'Employee Suggestion',
+    action: 'Create',
+    organizationId: authUser.organizationId,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, suggestion: serializeSuggestion(created) },
+    { success: true, suggestion: wire },
     { headers: NO_STORE },
   );
 }

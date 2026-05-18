@@ -12,6 +12,7 @@ import {
   serializeInitiative,
   INITIATIVE_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,8 +84,17 @@ export async function POST(request: NextRequest) {
     },
     include: INITIATIVE_INCLUDE,
   });
+  const wire = serializeInitiative(created);
+  fireWorkflow({
+    moduleName: 'Self Initiative',
+    action: 'Create',
+    organizationId: authUser.organizationId,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, initiative: serializeInitiative(created) },
+    { success: true, initiative: wire },
     { headers: NO_STORE },
   );
 }

@@ -10,6 +10,7 @@ import {
   serializeInitiative,
   INITIATIVE_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ export async function PATCH(
   }
   const loaded = await loadAndAuthorize(request, params.id);
   if ('error' in loaded) return loaded.error;
-  const { row } = loaded;
+  const { authUser, row } = loaded;
 
   const patch: Record<string, unknown> = {};
   if (body.title !== undefined) patch.title = body.title.trim().slice(0, 200);
@@ -91,8 +92,17 @@ export async function PATCH(
     data: patch,
     include: INITIATIVE_INCLUDE,
   });
+  const wire = serializeInitiative(updated);
+  fireWorkflow({
+    moduleName: 'Self Initiative',
+    action: 'Edit',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, initiative: serializeInitiative(updated) },
+    { success: true, initiative: wire },
     { headers: NO_STORE },
   );
 }
@@ -103,6 +113,15 @@ export async function DELETE(
 ) {
   const loaded = await loadAndAuthorize(request, params.id);
   if ('error' in loaded) return loaded.error;
+  const { authUser, row } = loaded;
   await (prisma as any).engagementInitiative.delete({ where: { id: params.id } });
+  fireWorkflow({
+    moduleName: 'Self Initiative',
+    action: 'Delete',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: params.id,
+    recordData: { id: params.id, title: row.title, userId: row.userId },
+  });
   return NextResponse.json({ success: true }, { headers: NO_STORE });
 }

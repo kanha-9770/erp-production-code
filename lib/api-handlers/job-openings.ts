@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { fireWorkflow } from "@/lib/workflow/static-triggers";
 
 const EMPLOYMENT_TYPES = [
   "FULL_TIME",
@@ -194,6 +195,16 @@ export const JobOpeningHandlers = {
           createdById: authUser.id,
         },
       });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Opening",
+          action: "Create",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: opening.id,
+          recordData: opening as any,
+        });
+      }
       return NextResponse.json({ success: true, opening }, { status: 201 });
     }, "create");
   },
@@ -260,6 +271,16 @@ export const JobOpeningHandlers = {
         where: { id },
         data,
       });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Opening",
+          action: "Edit",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: opening.id,
+          recordData: opening as any,
+        });
+      }
       return NextResponse.json({ success: true, opening });
     }, "update");
   },
@@ -278,6 +299,16 @@ export const JobOpeningHandlers = {
           { status: 404 },
         );
       await (prisma as any).jobOpening.delete({ where: { id } });
+      if (authUser.organizationId) {
+        fireWorkflow({
+          moduleName: "Job Opening",
+          action: "Delete",
+          organizationId: authUser.organizationId,
+          userId: authUser.id,
+          recordId: id,
+          recordData: { id },
+        });
+      }
       return NextResponse.json({ success: true });
     }, "remove");
   },

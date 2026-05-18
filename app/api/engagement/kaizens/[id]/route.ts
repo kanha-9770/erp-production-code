@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { serializeKaizen, KAIZEN_INCLUDE } from '@/lib/hr/engagement-serializers';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,8 +114,17 @@ export async function PATCH(
     data: patch,
     include: KAIZEN_INCLUDE,
   });
+  const wire = serializeKaizen(updated, authUser.id);
+  fireWorkflow({
+    moduleName: 'Kaizen',
+    action: 'Edit',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: wire.id,
+    recordData: wire as any,
+  });
   return NextResponse.json(
-    { success: true, kaizen: serializeKaizen(updated, authUser.id) },
+    { success: true, kaizen: wire },
     { headers: NO_STORE },
   );
 }
@@ -125,6 +135,15 @@ export async function DELETE(
 ) {
   const loaded = await loadAndAuthorize(request, params.id, true);
   if ('error' in loaded) return loaded.error;
+  const { authUser, row } = loaded;
   await (prisma as any).engagementKaizen.delete({ where: { id: params.id } });
+  fireWorkflow({
+    moduleName: 'Kaizen',
+    action: 'Delete',
+    organizationId: authUser.organizationId!,
+    userId: authUser.id,
+    recordId: params.id,
+    recordData: { id: params.id, title: row.title, userId: row.userId },
+  });
   return NextResponse.json({ success: true }, { headers: NO_STORE });
 }
