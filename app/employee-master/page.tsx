@@ -236,10 +236,16 @@ export default function EmployeeMasterListPage() {
       id: "status",
       header: "Status",
       width: 140,
+      // Don't let the column be resized below the badge width — otherwise
+      // "ACTIVE" / "ON_LEAVE" / "TERMINATED" get clipped mid-word.
+      minWidth: 110,
       sortKey: "status",
       group: "Overview",
       cell: (e) => (
-        <Badge variant={STATUS_VARIANT[e.status ?? "ACTIVE"]} className="text-[10px]">
+        <Badge
+          variant={STATUS_VARIANT[e.status ?? "ACTIVE"]}
+          className="text-[10px] whitespace-nowrap"
+        >
           {e.status ?? "ACTIVE"}
         </Badge>
       ),

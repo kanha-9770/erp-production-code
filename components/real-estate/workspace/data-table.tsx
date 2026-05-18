@@ -279,23 +279,35 @@ export function DataTable<T>({
         >
           <colgroup>
             <col style={{ width: ROW_GUTTER_WIDTH }} />
-            {visible.map((c) => (
-              <col
-                key={c.id}
-                style={{
-                  width: prefs.width[c.id] ?? c.width ?? 140,
-                  minWidth: c.minWidth ?? 60,
-                }}
-              />
-            ))}
+            {visible.map((c) => {
+              // table-layout: fixed uses the col's width verbatim and
+              // largely ignores minWidth, so a saved-too-narrow user width
+              // can clip cell content (e.g. status badges). Floor the width
+              // at the column's minWidth here so the saved value gets
+              // bumped up to a sensible minimum at render time.
+              const minW = c.minWidth ?? 60;
+              const saved = prefs.width[c.id] ?? c.width ?? 140;
+              const effective = Math.max(saved, minW);
+              return (
+                <col
+                  key={c.id}
+                  style={{
+                    width: effective,
+                    minWidth: minW,
+                  }}
+                />
+              );
+            })}
           </colgroup>
 
-          {/* Header */}
-          <thead className="sticky top-0 z-30">
+          {/* Header — bg-muted (fully opaque, NOT bg-muted/70) so vertical
+              scroll doesn't bleed row content through the sticky header.
+              Same reason for the gutter corner cell below. */}
+          <thead className="sticky top-0 z-30 bg-muted">
             <tr>
               {/* Row gutter corner */}
               <th
-                className="bg-muted/70 border-b border-r border-border h-9 sticky left-0 z-40"
+                className="bg-muted border-b border-r border-border h-9 sticky left-0 z-40"
                 aria-hidden
               />
               {visible.map((col, idx) => {
@@ -306,14 +318,30 @@ export function DataTable<T>({
                   <th
                     key={col.id}
                     className={cn(
-                      "h-9 bg-muted/70 border-b border-r border-border select-none",
+                      "h-9 border-b border-r border-border select-none",
                       "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
                       col.align === "right" ? "text-right" : "text-left",
                       cellPad,
                       "relative group",
-                      isPinned && "sticky z-30 shadow-[1px_0_0_0_var(--border)]",
+                      // Non-pinned headers use FULLY OPAQUE bg-muted (not
+                      // /70) so vertical-scrolling rows can't bleed through
+                      // the sticky header. Pinned headers get an inline
+                      // opaque background below for the same reason.
+                      !isPinned && "bg-muted",
+                      isPinned && "sticky",
                     )}
-                    style={isPinned ? { left: offsets[idx] } : undefined}
+                    style={
+                      isPinned
+                        ? {
+                            left: offsets[idx],
+                            position: "sticky",
+                            zIndex: 35,
+                            isolation: "isolate",
+                            backgroundColor: "hsl(var(--muted))",
+                            boxShadow: "1px 0 0 0 hsl(var(--border))",
+                          }
+                        : undefined
+                    }
                   >
                     <div className="flex items-center gap-1 -my-0.5">
                       <button
@@ -446,13 +474,38 @@ export function DataTable<T>({
                             cellPad,
                             col.align === "right" && "text-right tabular-nums",
                             col.cellClassName,
-                            isPinned && "sticky z-10 bg-background shadow-[1px_0_0_0_var(--border)]",
+                            // Non-pinned cells: tint via bg classes as usual.
                             !isPinned && "z-0",
-                            isPinned && isRowSelected && "bg-primary/[0.04]",
-                            isInCellRange && !isFocus && "bg-primary/[0.10]",
-                            isFocus && "bg-primary/[0.18] ring-2 ring-primary ring-inset",
+                            !isPinned && isInCellRange && !isFocus && "bg-primary/[0.10]",
+                            !isPinned && isFocus && "bg-primary/[0.18] ring-2 ring-primary ring-inset",
+                            // Pinned cells get inline-style opaque background
+                            // + isolation below so horizontally-scrolling
+                            // non-pinned content can't bleed through.
+                            isPinned && "sticky",
                           )}
-                          style={isPinned ? { left: offsets[cIdx] } : undefined}
+                          style={
+                            isPinned
+                              ? {
+                                  left: offsets[cIdx],
+                                  position: "sticky",
+                                  zIndex: 25,
+                                  isolation: "isolate",
+                                  backgroundColor: "hsl(var(--background))",
+                                  boxShadow: [
+                                    "1px 0 0 0 hsl(var(--border))",
+                                    isFocus
+                                      ? "inset 0 0 0 100vw hsl(var(--primary) / 0.18)"
+                                      : isInCellRange
+                                        ? "inset 0 0 0 100vw hsl(var(--primary) / 0.10)"
+                                        : isRowSelected
+                                          ? "inset 0 0 0 100vw hsl(var(--primary) / 0.04)"
+                                          : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(", "),
+                                }
+                              : undefined
+                          }
                         >
                           {col.cell(row)}
                         </td>

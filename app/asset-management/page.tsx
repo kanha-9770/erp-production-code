@@ -438,6 +438,8 @@ export default function AssetManagementPage() {
       id: "status",
       header: "Status",
       width: 130,
+      // Floor wide enough for "UNDER REPAIR" — the longest badge label.
+      minWidth: 130,
       cell: (a) => {
         const colors: Record<string, string> = {
           AVAILABLE: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -445,7 +447,14 @@ export default function AssetManagementPage() {
           UNDER_REPAIR: "bg-amber-100 text-amber-800 border-amber-200",
           RETIRED: "bg-slate-100 text-slate-800 border-slate-200",
         };
-        return <Badge variant="outline" className={`${colors[a.status]} text-[10px] font-bold uppercase`}>{a.status.replace('_', ' ')}</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className={`${colors[a.status]} text-[10px] font-bold uppercase whitespace-nowrap`}
+          >
+            {a.status.replace('_', ' ')}
+          </Badge>
+        );
       },
     },
     {
@@ -628,6 +637,7 @@ export default function AssetManagementPage() {
       id: "simStatus",
       header: "SIM Status",
       width: 130,
+      minWidth: 110,
       defaultHidden: true,
       group: "SIM Details",
       cell: (a) => {
@@ -639,7 +649,10 @@ export default function AssetManagementPage() {
           LOST: "bg-red-100 text-red-800 border-red-200",
         };
         return (
-          <Badge variant="outline" className={`${colors[a.simStatus]} text-[10px] font-bold uppercase`}>
+          <Badge
+            variant="outline"
+            className={`${colors[a.simStatus]} text-[10px] font-bold uppercase whitespace-nowrap`}
+          >
             {a.simStatus}
           </Badge>
         );
