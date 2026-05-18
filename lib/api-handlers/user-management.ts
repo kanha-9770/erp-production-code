@@ -368,15 +368,42 @@ export const UserManagementHandlers = {
         (ua: any) => ua.role.name.toLowerCase().includes("admin")
       ) ?? false;
 
+      // Mirror EmployeeListItem — selects every field exposed by the static
+      // Employee Form so the Employee Master table can offer a column for
+      // each one via the Manage Columns dialog. Keep this in sync with the
+      // EmployeeListItem interface in lib/api/employees.ts.
       const employeeSelect = {
-        id: true, userId: true, employeeName: true, department: true,
-        designation: true, totalSalary: true, givenSalary: true,
-        bonusAmount: true, nightAllowance: true, overTime: true,
-        oneHourExtra: true, status: true,
-        emailAddress1: true, personalContact: true,
+        // Identifiers + Section 1 (Personal)
+        id: true, userId: true, employeeName: true,
+        salutation: true, firstName: true, lastName: true,
+        dob: true, placeOfBirth: true, bloodGroup: true,
+        maritalStatus: true, nationality: true, gender: true,
+        // Section 2 (Contact)
+        emailAddress1: true, emailAddress2: true, personalContact: true,
+        alternateNo1: true, alternateNo2: true,
+        currentCity: true, currentState: true, currentCountry: true,
+        permanentCity: true, permanentState: true, permanentCountry: true,
+        emergencyContactName: true, emergencyPhone: true, emergencyRelation: true,
+        // Section 3 (Employment)
+        employmentType: true, department: true, designation: true,
+        companyName: true, branch: true, status: true,
         dateOfJoining: true, dateOfLeaving: true,
-        companyName: true, employeeEngagementTeamName: true,
-        gender: true, shiftType: true,
+        shiftType: true, inTime: true, outTime: true,
+        totalWorkingHours: true, employeeEngagementTeamName: true,
+        yearsOfAgreement: true,
+        // Section 4 (Documents)
+        aadharCardNo: true, aadharCardUpload: true,
+        panCardUpload: true, passportUpload: true,
+        // Section 5 (Salary & Compensation)
+        salaryMode: true, baseSalary: true, totalSalary: true,
+        perHourSalary: true, isOvertimeApplicable: true,
+        overTime: true, bonusAmount: true, bonusAfterYears: true,
+        incrementMonth: true,
+        givenSalary: true, nightAllowance: true, oneHourExtra: true,
+        // Section 6 (Bank)
+        bankName: true, bankAccountNo: true, ifscCode: true, swiftCode: true,
+        // Section 7 (Exit / Resignation)
+        resignationLetterDate: true, reasonOfLeaving: true, noticeServed: true,
       };
 
       let employees;

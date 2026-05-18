@@ -2,31 +2,15 @@ import { baseApi } from "./baseApi";
 
 export type EmployeeStatus = "ACTIVE" | "INACTIVE" | "ON_LEAVE" | "TERMINATED";
 
+// Mirrors every field the Employee Form (static layout) collects, so the
+// Employee Master table can render a column for any of them via the
+// Manage Columns dialog. Keep this in sync with `employeeSelect` in
+// lib/api-handlers/user-management.ts.
 export interface EmployeeListItem {
+  // Identifiers + Section 1 (Personal)
   id: string;
   userId: string | null;
   employeeName: string;
-  department: string | null;
-  designation: string | null;
-  totalSalary: string | number | null;
-  givenSalary: string | number | null;
-  bonusAmount: string | number | null;
-  nightAllowance: string | number | null;
-  overTime: string | number | null;
-  oneHourExtra: string | number | null;
-  status: EmployeeStatus | null;
-  emailAddress1: string | null;
-  personalContact: string | null;
-  dateOfJoining: string | null;
-  dateOfLeaving: string | null;
-  companyName: string | null;
-  employeeEngagementTeamName: string | null;
-  gender: "MALE" | "FEMALE" | "OTHER" | null;
-  shiftType: string | null;
-}
-
-export interface EmployeeDetail extends EmployeeListItem {
-  // Section 1 — Personal information
   salutation: string | null;
   firstName: string | null;
   lastName: string | null;
@@ -35,71 +19,97 @@ export interface EmployeeDetail extends EmployeeListItem {
   bloodGroup: string | null;
   maritalStatus: string | null;
   nationality: string | null;
-  employeeImage: string | null;
-  // Legacy address-ish holdovers
-  nativePlace: string | null;
-  country: string | null;
-  permanentAddress: string | null;
-  currentAddress: string | null;
+  gender: "MALE" | "FEMALE" | "OTHER" | null;
 
-  // Section 2 — Contact information
+  // Section 2 (Contact)
+  emailAddress1: string | null;
+  emailAddress2: string | null;
+  personalContact: string | null;
   alternateNo1: string | null;
   alternateNo2: string | null;
-  emailAddress2: string | null;
-  currentAddressLine1: string | null;
-  currentAddressLine2: string | null;
   currentCity: string | null;
   currentState: string | null;
-  currentPostalCode: string | null;
   currentCountry: string | null;
-  currentAccommodationType: string | null;
-  permanentSameAsCurrent: boolean | null;
-  permanentAddressLine1: string | null;
-  permanentAddressLine2: string | null;
   permanentCity: string | null;
   permanentState: string | null;
-  permanentPostalCode: string | null;
   permanentCountry: string | null;
-  permanentAccommodationType: string | null;
   emergencyContactName: string | null;
   emergencyPhone: string | null;
   emergencyRelation: string | null;
-  // Multi-contact list (above three are the legacy primary mirror).
-  emergencyContacts: Array<{ name: string; phone: string; relation: string }> | null;
 
-  // Section 3 — Employment details
+  // Section 3 (Employment)
   employmentType: string | null;
+  department: string | null;
+  designation: string | null;
+  companyName: string | null;
   branch: string | null;
+  status: EmployeeStatus | null;
+  dateOfJoining: string | null;
+  dateOfLeaving: string | null;
+  shiftType: string | null;
   inTime: string | null;
   outTime: string | null;
   totalWorkingHours: string | number | null;
-  incrementMonth: number | null;
+  employeeEngagementTeamName: string | null;
   yearsOfAgreement: number | null;
-  bonusAfterYears: number | null;
 
-  // Section 4 — Document uploads
+  // Section 4 (Documents)
   aadharCardNo: string | null;
   aadharCardUpload: string | null;
   panCardUpload: string | null;
   passportUpload: string | null;
 
-  // Section 5 — Salary & compensation
+  // Section 5 (Salary & Compensation)
   salaryMode: string | null;
   baseSalary: string | number | null;
+  totalSalary: string | number | null;
   perHourSalary: string | number | null;
   isOvertimeApplicable: boolean | null;
+  overTime: string | number | null;
+  bonusAmount: string | number | null;
+  bonusAfterYears: number | null;
+  incrementMonth: number | null;
+  givenSalary: string | number | null;
+  nightAllowance: string | number | null;
+  oneHourExtra: string | number | null;
 
-  // Section 6 — Bank details
+  // Section 6 (Bank)
   bankName: string | null;
   bankAccountNo: string | null;
   ifscCode: string | null;
   swiftCode: string | null;
 
-  // Section 7 — Exit / Resignation
+  // Section 7 (Exit / Resignation)
   resignationLetterDate: string | null;
   reasonOfLeaving: string | null;
   noticeServed: boolean | null;
+}
 
+// Fields returned only on the GET /api/employees/[id] detail endpoint —
+// everything in the list response PLUS richer/legacy fields not shown in
+// the master table. Extends EmployeeListItem so detail consumers get
+// everything in one shape.
+export interface EmployeeDetail extends EmployeeListItem {
+  // Section 1 extras (legacy / detail-only)
+  employeeImage: string | null;
+  nativePlace: string | null;
+  country: string | null;
+  permanentAddress: string | null;
+  currentAddress: string | null;
+
+  // Section 2 extras (structured address lines + accommodation + multi-contact)
+  currentAddressLine1: string | null;
+  currentAddressLine2: string | null;
+  currentPostalCode: string | null;
+  currentAccommodationType: string | null;
+  permanentSameAsCurrent: boolean | null;
+  permanentAddressLine1: string | null;
+  permanentAddressLine2: string | null;
+  permanentPostalCode: string | null;
+  permanentAccommodationType: string | null;
+  emergencyContacts: Array<{ name: string; phone: string; relation: string }> | null;
+
+  // Misc
   companySimIssue: boolean | null;
   createdAt: string;
   updatedAt: string;

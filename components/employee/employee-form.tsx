@@ -539,7 +539,11 @@ export function EmployeeForm({
   const [values, setValues] = useState<EmployeeFormValues>(() =>
     initial ? fromEmployee(initial) : EMPTY,
   );
+  // Top-of-form banner message (for cross-field errors like "fix the
+  // highlighted fields"). Field-level red borders + inline messages live
+  // in the `errors` map below, keyed by EmployeeFormValues field name.
   const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [openingBuilder, setOpeningBuilder] = useState(false);
 
   // Per-hour salary derived from monthly CTC ÷ (22 working days × hours/day).
@@ -709,45 +713,64 @@ export function EmployeeForm({
     v: EmployeeFormValues[K],
   ) => {
     setValues((prev) => ({ ...prev, [k]: v }));
+    // Clear the field's red highlight + inline message as soon as the user
+    // starts fixing it — matches the UX from the Asset form.
+    if (errors[k as string]) {
+      setErrors((e) => {
+        const next = { ...e };
+        delete next[k as string];
+        return next;
+      });
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    // First Name is the required identity field on the new layout. Last
-    // Name is also flagged as required on the form, but we accept First
-    // Name alone to support single-name entries (common in some regions).
+
+    // Collect every missing/invalid field in one pass so the user sees
+    // ALL the highlights, not just the first one. Keyed by field name so
+    // each input below can read its own error.
+    const next: Record<string, string> = {};
     if (!values.firstName.trim() && !values.employeeName.trim()) {
-      return setError("First name is required");
+      next.firstName = "First name is required";
     }
     if (
       values.emailAddress1 &&
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress1)
-    )
-      return setError("Personal email is not a valid address");
+    ) {
+      next.emailAddress1 = "Not a valid email address";
+    }
     if (
       values.emailAddress2 &&
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress2)
-    )
-      return setError("Company email is not a valid address");
+    ) {
+      next.emailAddress2 = "Not a valid email address";
+    }
     if (!splitPhone(values.personalContact).number) {
-      return setError("Cell number is required");
+      next.personalContact = "Cell number is required";
     }
     const primaryContact = values.emergencyContacts[0];
     if (!primaryContact?.name?.trim()) {
-      return setError("Emergency contact name is required");
+      next.emergencyContact0Name = "Contact name is required";
     }
     if (!splitPhone(primaryContact?.phone ?? "").number) {
-      return setError("Emergency phone is required");
+      next.emergencyContact0Phone = "Phone is required";
     }
     if (!values.companyName.trim()) {
-      return setError("Company is required");
+      next.companyName = "Company is required";
     }
     if (!values.dateOfJoining) {
-      return setError("Date of joining is required");
+      next.dateOfJoining = "Date of joining is required";
     }
     if (values.totalSalary !== "" && Number(values.totalSalary) < 0) {
-      return setError("Total salary must be a non-negative number");
+      next.baseSalary = "Must be a non-negative number";
+    }
+
+    setErrors(next);
+    if (Object.keys(next).length > 0) {
+      setError(`Please fix the highlighted fields (${Object.keys(next).length}).`);
+      return;
     }
 
     // Only forward the face photo if (a) a usable descriptor was extracted
@@ -783,11 +806,12 @@ export function EmployeeForm({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="First Name *">
+          <Field label="First Name *" error={errors.firstName}>
             <Input
               value={values.firstName}
               onChange={(e) => set("firstName", e.target.value)}
               placeholder="First name"
+              className={errors.firstName ? "border-destructive" : ""}
             />
           </Field>
           <Field label="Last Name *">
@@ -978,27 +1002,30 @@ export function EmployeeForm({
       <SectionHeader index={2} title="Contact Information" subtitle="Email, phone, addresses, emergency" />
       <Card>
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
-          <Field label="Personal Email *">
+          <Field label="Personal Email" error={errors.emailAddress1}>
             <Input
               type="email"
               value={values.emailAddress1}
               onChange={(e) => set("emailAddress1", e.target.value)}
               placeholder="personal@example.com"
+              className={errors.emailAddress1 ? "border-destructive" : ""}
             />
           </Field>
-          <Field label="Company Email">
+          <Field label="Company Email" error={errors.emailAddress2}>
             <Input
               type="email"
               value={values.emailAddress2}
               onChange={(e) => set("emailAddress2", e.target.value)}
               placeholder="work@company.com"
+              className={errors.emailAddress2 ? "border-destructive" : ""}
             />
           </Field>
-          <Field label="Cell Number *" className="sm:col-span-2">
+          <Field label="Cell Number *" className="sm:col-span-2" error={errors.personalContact}>
             <PhoneInput
               value={values.personalContact}
               onChange={(v) => set("personalContact", v)}
               placeholder="Primary phone"
+              hasError={!!errors.personalContact}
             />
           </Field>
 
@@ -1171,7 +1198,8 @@ export function EmployeeForm({
                 >
                   <div className="sm:col-span-4 space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">
-                      Contact Name {isPrimary && "*"}
+                      Contact Name{" "}
+                      {isPrimary && <span className="text-destructive">*</span>}
                     </Label>
                     <Input
                       value={contact.name}
@@ -1179,23 +1207,52 @@ export function EmployeeForm({
                         const next = [...values.emergencyContacts];
                         next[idx] = { ...next[idx], name: e.target.value };
                         set("emergencyContacts", next);
+                        if (isPrimary && errors.emergencyContact0Name) {
+                          setErrors((er) => {
+                            const n = { ...er };
+                            delete n.emergencyContact0Name;
+                            return n;
+                          });
+                        }
                       }}
                       placeholder="Full name"
+                      className={isPrimary && errors.emergencyContact0Name ? "border-destructive" : ""}
                     />
+                    {isPrimary && errors.emergencyContact0Name && (
+                      <p className="text-[11px] text-destructive flex items-center gap-1">
+                        <span aria-hidden>⚠</span>
+                        {errors.emergencyContact0Name}
+                      </p>
+                    )}
                   </div>
                   <div className="sm:col-span-5 space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">
-                      Phone {isPrimary && "*"}
+                      Phone{" "}
+                      {isPrimary && <span className="text-destructive">*</span>}
                     </Label>
                     <PhoneInput
                       value={contact.phone}
+                      hasError={isPrimary && !!errors.emergencyContact0Phone}
                       onChange={(v) => {
                         const next = [...values.emergencyContacts];
                         next[idx] = { ...next[idx], phone: v };
                         set("emergencyContacts", next);
+                        if (isPrimary && errors.emergencyContact0Phone) {
+                          setErrors((er) => {
+                            const n = { ...er };
+                            delete n.emergencyContact0Phone;
+                            return n;
+                          });
+                        }
                       }}
                       placeholder="Phone"
                     />
+                    {isPrimary && errors.emergencyContact0Phone && (
+                      <p className="text-[11px] text-destructive flex items-center gap-1">
+                        <span aria-hidden>⚠</span>
+                        {errors.emergencyContact0Phone}
+                      </p>
+                    )}
                   </div>
                   <div className="sm:col-span-2 space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">
@@ -1288,11 +1345,12 @@ export function EmployeeForm({
               onChange={(v) => set("department", v)}
             />
           </Field>
-          <Field label="Company *">
+          <Field label="Company *" error={errors.companyName}>
             <Input
               value={values.companyName}
               onChange={(e) => set("companyName", e.target.value)}
               placeholder="Company name"
+              className={errors.companyName ? "border-destructive" : ""}
             />
           </Field>
           <Field label="Branch">
@@ -1302,11 +1360,12 @@ export function EmployeeForm({
               placeholder="Branch / location"
             />
           </Field>
-          <Field label="Date of Joining *">
+          <Field label="Date of Joining *" error={errors.dateOfJoining}>
             <Input
               type="date"
               value={values.dateOfJoining}
               onChange={(e) => set("dateOfJoining", e.target.value)}
+              className={errors.dateOfJoining ? "border-destructive" : ""}
             />
           </Field>
           <Field label="Shift Type">
@@ -1465,6 +1524,7 @@ export function EmployeeForm({
           <Field
             label="Salary Amount (Monthly CTC)"
             hint="Drives the payslip via the assigned Pay Rule Profile. Pay-rule bonuses (statutory / performance / festival / joining / retention) are absorbed into this CTC."
+            error={errors.baseSalary}
           >
             <Input
               type="number"
@@ -1478,6 +1538,7 @@ export function EmployeeForm({
                 set("totalSalary", e.target.value);
               }}
               placeholder="e.g. 50000"
+              className={errors.baseSalary ? "border-destructive" : ""}
             />
           </Field>
           <Field
@@ -1683,17 +1744,37 @@ function Field({
   hint,
   children,
   className,
+  error,
 }: {
   label: string;
   hint?: string;
   children: React.ReactNode;
   className?: string;
+  // When set, the field renders an inline red message and the asterisk
+  // in `label` (if any) is colored red. The actual red border on the
+  // input has to be applied where the input is rendered (we don't wrap
+  // children) because the Input component takes its own className.
+  error?: string;
 }) {
+  // Detect a trailing "*" and color it red — purely cosmetic so required
+  // fields stand out even before submit.
+  const hasAsterisk = label.endsWith("*");
+  const cleanLabel = hasAsterisk ? label.replace(/\s*\*$/, "") : label;
   return (
     <div className={`space-y-1.5 ${className ?? ""}`}>
-      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      <Label className="text-xs font-medium text-muted-foreground">
+        {cleanLabel}
+        {hasAsterisk && <span className="text-destructive ml-1">*</span>}
+      </Label>
       {children}
-      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+      {error ? (
+        <p className="text-[11px] text-destructive flex items-center gap-1">
+          <span aria-hidden>⚠</span>
+          {error}
+        </p>
+      ) : (
+        hint && <p className="text-[11px] text-muted-foreground">{hint}</p>
+      )}
     </div>
   );
 }
@@ -1946,10 +2027,15 @@ function PhoneInput({
   value,
   onChange,
   placeholder,
+  hasError,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  // When true, the number input renders with a red border to flag a
+  // validation issue. The parent's <Field error="…"> still owns the
+  // inline message text.
+  hasError?: boolean;
 }) {
   const { code, number } = splitPhone(value);
   const emit = (nextCode: string, nextNumber: string) => {
@@ -1984,7 +2070,7 @@ function PhoneInput({
         value={number}
         onChange={(e) => emit(code, e.target.value)}
         placeholder={placeholder}
-        className="flex-1"
+        className={`flex-1 ${hasError ? "border-destructive" : ""}`}
       />
     </div>
   );

@@ -336,6 +336,32 @@ export default function AssetManagementPage() {
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
     { id: "assignedTo", label: "Assigned To", type: "text" },
     { id: "value", label: "Value", type: "number" },
+    // Employee assignment
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "department", label: "Department", type: "text" },
+    // Asset-physical
+    { id: "serialNo", label: "Serial Number", type: "text" },
+    { id: "assetModel", label: "Model", type: "text" },
+    // SIM-specific
+    { id: "simNumber", label: "Mobile No.", type: "text" },
+    { id: "imsiNumber", label: "IMSI Number", type: "text" },
+    { id: "carrier", label: "Service Provider", type: "text" },
+    {
+      id: "simType",
+      label: "SIM Type",
+      type: "select",
+      options: SIM_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+    },
+    {
+      id: "simStatus",
+      label: "SIM Status",
+      type: "select",
+      options: SIM_STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+    },
+    { id: "rechargeAmount", label: "Recharge Amount", type: "number" },
+    { id: "monthlyCost", label: "Monthly Cost", type: "number" },
   ], []);
 
   const filteredItems = useMemo(() => {
@@ -354,10 +380,32 @@ export default function AssetManagementPage() {
         a.serialNo.toLowerCase().includes(q)
       );
     }
-    if (filters.type) result = result.filter(a => a.type === filters.type);
-    if (filters.status) result = result.filter(a => a.status === filters.status);
+    // Case-insensitive + trimmed match — defensive against any rows where
+    // type/status was saved in a different case (legacy data, manual JSON
+    // edits, etc.). Without this, `a.type === filters.type` silently drops
+    // rows that look identical to the human eye.
+    if (filters.type) {
+      const want = filters.type.trim().toUpperCase();
+      result = result.filter(a => (a.type ?? "").toString().trim().toUpperCase() === want);
+    }
+    if (filters.status) {
+      const want = filters.status.trim().toUpperCase();
+      result = result.filter(a => (a.status ?? "").toString().trim().toUpperCase() === want);
+    }
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [items, filters, conditions, filterFields]);
+
+  // Clear the selection when the currently-selected asset is no longer in
+  // the filtered list. Without this the preview pane keeps rendering the
+  // previously-selected asset alongside an "empty" or "wrong-type" table,
+  // which looks like the filter is broken (a stale row appears beside the
+  // freshly-filtered list).
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!filteredItems.some((a) => a.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [filteredItems, selectedId]);
 
   const columns: ColumnDef<Asset>[] = useMemo(() => [
     {
@@ -421,6 +469,223 @@ export default function AssetManagementPage() {
            {a.type === 'SIM' && <span className="text-[10px] text-muted-foreground ml-1">/MO</span>}
         </div>
       ),
+    },
+    {
+      id: "type",
+      header: "Asset Type",
+      width: 120,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="text-xs font-medium uppercase">{ASSET_TYPE_LABEL[a.type] || a.type}</span>,
+    },
+    {
+      id: "serialNo",
+      header: "Serial Number",
+      width: 150,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="font-mono text-xs text-muted-foreground">{a.serialNo || "—"}</span>,
+    },
+    {
+      id: "purchaseDate",
+      header: "Purchase Date",
+      width: 130,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="text-xs">{new Date(a.purchaseDate).toLocaleDateString("en-IN")}</span>,
+    },
+    {
+      id: "assetModel",
+      header: "Model",
+      width: 150,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="text-xs">{a.assetModel || "—"}</span>,
+    },
+    {
+      id: "configuration",
+      header: "Configuration",
+      width: 180,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="text-xs text-muted-foreground">{a.configuration || "—"}</span>,
+    },
+    {
+      id: "notes",
+      header: "Notes",
+      width: 200,
+      defaultHidden: true,
+      group: "Asset",
+      cell: (a) => <span className="text-xs text-muted-foreground truncate">{a.notes || "—"}</span>,
+    },
+
+    // ── Employee assignment columns ────────────────────────────────────
+    // Same data the form's "User & Assignment" section collects.
+    {
+      id: "employeeId",
+      header: "Employee ID",
+      width: 130,
+      defaultHidden: true,
+      group: "User & Assignment",
+      cell: (a) => <span className="font-mono text-xs text-muted-foreground">{a.employeeId || "—"}</span>,
+    },
+    {
+      id: "firstName",
+      header: "First Name",
+      width: 130,
+      defaultHidden: true,
+      group: "User & Assignment",
+      cell: (a) => <span className="text-xs">{a.firstName || "—"}</span>,
+    },
+    {
+      id: "lastName",
+      header: "Last Name",
+      width: 130,
+      defaultHidden: true,
+      group: "User & Assignment",
+      cell: (a) => <span className="text-xs">{a.lastName || "—"}</span>,
+    },
+    {
+      id: "department",
+      header: "Department",
+      width: 140,
+      defaultHidden: true,
+      group: "User & Assignment",
+      cell: (a) => <span className="text-xs">{a.department || "—"}</span>,
+    },
+
+    // ── SIM-card columns ────────────────────────────────────────────────
+    // Populated only when type === "SIM"; non-SIM rows show "—".
+    {
+      id: "mobileNo",
+      header: "Mobile No.",
+      width: 160,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => {
+        if (a.type !== "SIM") return <span className="text-xs text-muted-foreground">—</span>;
+        const num = `${a.countryCode ?? ""} ${a.simNumber ?? ""}`.trim();
+        return <span className="font-mono text-xs">{num || "—"}</span>;
+      },
+    },
+    {
+      id: "imsiNumber",
+      header: "IMSI Number",
+      width: 160,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="font-mono text-xs text-muted-foreground">{a.imsiNumber || "—"}</span>,
+    },
+    {
+      id: "carrier",
+      header: "Service Provider",
+      width: 140,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs">{a.carrier || "—"}</span>,
+    },
+    {
+      id: "simType",
+      header: "SIM Type",
+      width: 110,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs uppercase">{a.simType ?? "—"}</span>,
+    },
+    {
+      id: "planType",
+      header: "Plan Type",
+      width: 140,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs">{a.planType || "—"}</span>,
+    },
+    {
+      id: "plan",
+      header: "Plan Category",
+      width: 130,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs">{a.plan ?? "—"}</span>,
+    },
+    {
+      id: "simIssueBy",
+      header: "SIM Issued By",
+      width: 150,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs">{a.simIssueBy || "—"}</span>,
+    },
+    {
+      id: "simLocation",
+      header: "SIM Location",
+      width: 150,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => <span className="text-xs">{a.simLocation || "—"}</span>,
+    },
+    {
+      id: "simStatus",
+      header: "SIM Status",
+      width: 130,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => {
+        if (!a.simStatus) return <span className="text-xs text-muted-foreground">—</span>;
+        const colors: Record<string, string> = {
+          ACTIVE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+          INACTIVE: "bg-slate-100 text-slate-800 border-slate-200",
+          SUSPENDED: "bg-amber-100 text-amber-800 border-amber-200",
+          LOST: "bg-red-100 text-red-800 border-red-200",
+        };
+        return (
+          <Badge variant="outline" className={`${colors[a.simStatus]} text-[10px] font-bold uppercase`}>
+            {a.simStatus}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "rechargeDate",
+      header: "Recharge Date",
+      width: 130,
+      defaultHidden: true,
+      group: "SIM Details",
+      cell: (a) => (
+        <span className="text-xs">
+          {a.rechargeDate
+            ? new Date(a.rechargeDate).toLocaleDateString("en-IN")
+            : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "rechargeAmount",
+      header: "Recharge Amount",
+      width: 140,
+      defaultHidden: true,
+      align: "right",
+      group: "SIM Details",
+      cell: (a) =>
+        a.rechargeAmount ? (
+          <span className="font-mono text-xs tabular-nums">₹{formatINR(a.rechargeAmount)}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "monthlyCost",
+      header: "Monthly Cost",
+      width: 130,
+      defaultHidden: true,
+      align: "right",
+      group: "SIM Details",
+      cell: (a) =>
+        a.monthlyCost ? (
+          <span className="font-mono text-xs tabular-nums">₹{formatINR(a.monthlyCost)}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
   ], []);
 
@@ -497,7 +762,11 @@ export default function AssetManagementPage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="asset-management" columns={columns} />
+              <ManageColumnsButton
+                tableId="asset-management"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1.5" /> Add Asset
               </Button>
