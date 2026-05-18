@@ -247,6 +247,11 @@ model User {
   jobOffers           JobOffer[]               @relation("JobOfferCreator")
   appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
   employeeReferrals   EmployeeReferral[]       @relation("EmployeeReferralCreator")
+  engagementKaizens      EngagementKaizen[]
+  engagementSuggestions  EngagementSuggestion[]
+  engagementProblems     EngagementProblem[]
+  engagementInitiatives  EngagementInitiative[]
+  engagementTargets      EngagementTarget[]
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -329,6 +334,7 @@ model Organization {
   jobOffers           JobOffer[]
   appointmentLetters  AppointmentLetter[]
   employeeReferrals   EmployeeReferral[]
+  engagementTeams     EngagementTeam[]
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
@@ -1402,7 +1408,17 @@ model Employee {
   yearsOfAgreement           Int?            @map("years_of_agreement")
   bonusAfterYears            Int?            @map("bonus_after_years")
   companyName                String?         @map("company_name")
+  // Legacy free-text team name. Kept for backward compatibility — new code
+  // should write to `engagementTeamId` and let serializers fall back to the
+  // related team's name. Will be deprecated once all writers are migrated.
   employeeEngagementTeamName String?         @map("employee_engagement_team_name")
+
+  // FK to EngagementTeam. Engagement pages (Kaizen, Suggestion, etc.) filter
+  // by this so members of one team can't see another team's records. HR /
+  // Admin bypass the filter and see everything.
+  engagementTeamId           String?         @map("engagement_team_id")
+  engagementTeam             EngagementTeam? @relation(fields: [engagementTeamId], references: [id], onDelete: SetNull)
+
   // ── 4. Document uploads ────────────────────────────────────────────
   aadharCardUpload           String?         @map("aadhar_card_upload")
   aadharCardNo               String?         @map("aadhar_card_no")
@@ -1443,7 +1459,145 @@ model Employee {
   @@index([status])
   @@index([dateOfJoining])
   @@index([dateOfLeaving])
+  @@index([engagementTeamId])
   @@map("employees")
+}
+
+// Engagement records — the five domain tables backing the Employee
+// Engagement pages. Each row carries `userId` (author) so the engagement-
+// scope helper can join to Employee → EngagementTeam to enforce the
+// "members only see their team" rule. Status is stored as a plain string
+// so the front-end can add new options without a schema migration.
+
+model EngagementKaizen {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  currentState    String   @db.Text @map("current_state")
+  proposedState   String   @db.Text @map("proposed_state")
+  benefits        String   @db.Text
+  status          String   @default("idea") // idea | approved | in-implementation | implemented
+  votes           Int      @default(0)
+  votedByUserIds  String[] @default([]) @map("voted_by_user_ids")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_kaizens")
+}
+
+model EngagementSuggestion {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  suggestion      String   @db.Text
+  category        String
+  status          String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
+  feedback        String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_suggestions")
+}
+
+model EngagementProblem {
+  id                String   @id @default(cuid())
+  organizationId    String   @map("organization_id")
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String
+  description       String   @db.Text
+  severity          String   @default("medium") // low | medium | high | critical
+  category          String
+  status            String   @default("open")   // open | in-review | resolved | closed
+  proposedSolution  String   @db.Text @map("proposed_solution")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@map("engagement_problems")
+}
+
+model EngagementInitiative {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  // YYYY-MM-DD strings to match the rest of the app's date handling.
+  startDate       String   @map("start_date")
+  endDate         String   @map("end_date")
+  status          String   @default("planning") // planning | in-progress | completed | on-hold
+  category        String
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_initiatives")
+}
+
+model EngagementTarget {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  targetDate      String   @map("target_date")
+  status          String   @default("not-started") // not-started | in-progress | completed
+  progress        Int      @default(0) // 0–100, percent
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_targets")
+}
+
+// Engagement Team — groups employees for the Employee Engagement module
+// (Kaizen, Problem Registration, Self-Initiative, Self-Target, Suggestion).
+// Members of a team see only their own team's data; HR / Admin see all.
+// Created and managed from Settings → Employee Engagement → Teams.
+model EngagementTeam {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  // Optional human-friendly description shown on the teams admin page.
+  description    String?  @db.Text
+  // Optional UI color (hex, e.g. "#3b82f6") so teams can be visually
+  // distinguished in lists. Defaults to a neutral gray in the UI.
+  color          String?
+  // Optional team lead. Just a soft reference — deleting the user doesn't
+  // delete the team, it just clears the lead.
+  leadUserId     String?  @map("lead_user_id")
+  isActive       Boolean  @default(true) @map("is_active")
+  members        Employee[]
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Team names are unique within an organization (case-sensitive at the DB
+  // level; the API normalises whitespace + case before insert).
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("engagement_teams")
 }
 
 // Workforce planning record — represents the intent to hire N people for a

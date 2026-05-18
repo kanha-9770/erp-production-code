@@ -4,7 +4,7 @@
  * Self Target — premium workspace layout.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Target, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
   CheckCircle2, Type, FileText, Zap, UserCircle, Clock
@@ -21,6 +21,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,8 +68,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "" };
 export default function SelfTargetPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [targets, setTargets] = useState<SelfTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -80,38 +85,37 @@ export default function SelfTargetPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("self-targets");
 
-  useEffect(() => {
-    if (user?.id) {
-      const mock: SelfTarget[] = [
-        {
-          id: '1',
-          title: 'Complete Advanced TypeScript Course',
-          description: 'Master advanced TypeScript concepts and patterns',
-          targetDate: '2026-06-30',
-          status: 'in-progress',
-          progress: 65,
-          createdAt: '2026-04-10',
-          userId: user.id,
-          employeeId: employees[0]?.id || currentEmployee?.id || '',
-        },
-        {
-          id: '2',
-          title: 'Improve Code Review Quality',
-          description: 'Provide detailed and constructive code reviews',
-          targetDate: '2026-08-31',
-          status: 'in-progress',
-          progress: 45,
-          createdAt: '2026-04-15',
-          userId: user.id,
-          employeeId: employees[1]?.id || currentEmployee?.id || '',
-        },
-      ];
-      setTargets(isAdmin ? mock : mock.filter(t => t.employeeId === currentEmployee?.id));
+  const loadTargets = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/engagement/targets", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Failed to load targets");
+      const rows: SelfTarget[] = json.targets ?? [];
+      const allow = makeEngagementFilter<SelfTarget>(visibility, employeeToTeam);
+      setTargets(rows.filter(allow));
+    } catch (e: any) {
+      toast({ title: "Failed to load targets", description: e?.message, variant: "destructive" });
+      setTargets([]);
+    } finally {
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, visibility, employeeToTeam, toast]);
+
+  useEffect(() => {
+    if (user?.id && !visibility.loading) loadTargets();
+  }, [user?.id, isAdmin, employees.length, visibility, loadTargets]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -183,11 +187,21 @@ export default function SelfTargetPage() {
     },
   ], []);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("Delete this target?")) return;
-    setTargets(targets.filter(t => t.id !== id));
-    if (selectedId === id) setSelectedId(null);
-    toast({ title: "Target deleted" });
+    try {
+      const res = await fetch(`/api/engagement/targets/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Delete failed");
+      setTargets(targets.filter(t => t.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      toast({ title: "Target deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -264,18 +278,22 @@ export default function SelfTargetPage() {
           </SheetHeader>
           <TargetForm
             onCancel={() => setCreateOpen(false)}
-            onSubmit={(data) => {
-              const newT: SelfTarget = {
-                ...data,
-                id: Date.now().toString(),
-                createdAt: new Date().toISOString().split('T')[0],
-                userId: user?.id || '',
-                employeeId: currentEmployee?.id || '',
-                status: 'not-started'
-              };
-              setTargets([newT, ...targets]);
-              setCreateOpen(false);
-              toast({ title: "Target created" });
+            onSubmit={async (data) => {
+              try {
+                const res = await fetch("/api/engagement/targets", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify(data),
+                });
+                const json = await res.json();
+                if (!res.ok || !json?.success) throw new Error(json?.error ?? "Create failed");
+                setTargets([json.target as SelfTarget, ...targets]);
+                setCreateOpen(false);
+                toast({ title: "Target created" });
+              } catch (e: any) {
+                toast({ title: "Could not create", description: e?.message, variant: "destructive" });
+              }
             }}
           />
         </SheetContent>
@@ -287,10 +305,22 @@ export default function SelfTargetPage() {
             <TargetForm
               initial={targets.find(t => t.id === editingId)}
               onCancel={() => setEditingId(null)}
-              onSubmit={(data) => {
-                setTargets(targets.map(t => t.id === editingId ? { ...t, ...data } : t));
-                setEditingId(null);
-                toast({ title: "Target updated" });
+              onSubmit={async (data) => {
+                try {
+                  const res = await fetch(`/api/engagement/targets/${editingId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Update failed");
+                  setTargets(targets.map(t => t.id === editingId ? (json.target as SelfTarget) : t));
+                  setEditingId(null);
+                  toast({ title: "Target updated" });
+                } catch (e: any) {
+                  toast({ title: "Could not update", description: e?.message, variant: "destructive" });
+                }
               }}
             />
           )}

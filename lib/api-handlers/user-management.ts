@@ -390,6 +390,10 @@ export const UserManagementHandlers = {
         dateOfJoining: true, dateOfLeaving: true,
         shiftType: true, inTime: true, outTime: true,
         totalWorkingHours: true, employeeEngagementTeamName: true,
+        // engagementTeamId picked up from the incoming branch — keeps the
+        // FK link to the engagement-team lookup table so the table can show
+        // both the name AND the id for joins/filters.
+        engagementTeamId: true,
         yearsOfAgreement: true,
         // Section 4 (Documents)
         aadharCardNo: true, aadharCardUpload: true,
@@ -750,6 +754,14 @@ function sanitizeEmployeePayload(
   strField("outTime");
   strField("companyName");
   strField("employeeEngagementTeamName");
+  // FK to EngagementTeam — accept null/"" to clear. We trust the client-side
+  // dropdown to only feed valid team ids; if not, Prisma's FK constraint
+  // will reject the write.
+  if ("engagementTeamId" in body) {
+    const raw = body.engagementTeamId;
+    data.engagementTeamId =
+      typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  }
 
   // Section 4 — Document uploads
   strField("aadharCardNo");

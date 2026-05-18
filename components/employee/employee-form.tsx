@@ -121,6 +121,10 @@ export interface EmployeeFormValues {
   inTime: string;
   outTime: string;
   totalWorkingHours: string;
+  /** FK id of the EngagementTeam this employee belongs to. The legacy
+   *  `employeeEngagementTeamName` is derived from the team's name on save
+   *  so old readers keep working. Empty string = unassigned. */
+  engagementTeamId: string;
   employeeEngagementTeamName: string;
   yearsOfAgreement: string;
 
@@ -210,6 +214,7 @@ const EMPTY: EmployeeFormValues = {
   inTime: "",
   outTime: "",
   totalWorkingHours: "8",
+  engagementTeamId: "",
   employeeEngagementTeamName: "",
   yearsOfAgreement: "",
 
@@ -321,6 +326,7 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     inTime: e.inTime ?? "",
     outTime: e.outTime ?? "",
     totalWorkingHours: numStr(e.totalWorkingHours),
+    engagementTeamId: (e as any).engagementTeamId ?? "",
     employeeEngagementTeamName: e.employeeEngagementTeamName ?? "",
     yearsOfAgreement: e.yearsOfAgreement != null ? String(e.yearsOfAgreement) : "",
 
@@ -461,6 +467,9 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
     inTime: trimOrNull(values.inTime),
     outTime: trimOrNull(values.outTime),
     totalWorkingHours: values.totalWorkingHours,
+    // FK to EngagementTeam; legacy display field kept in sync so old readers
+    // that look up by name still work.
+    engagementTeamId: values.engagementTeamId || null,
     employeeEngagementTeamName: trimOrNull(values.employeeEngagementTeamName),
     yearsOfAgreement: values.yearsOfAgreement,
 
@@ -545,6 +554,36 @@ export function EmployeeForm({
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [openingBuilder, setOpeningBuilder] = useState(false);
+
+  // Engagement teams — populated once so the team picker dropdown can render
+  // a curated list (managed at Settings → Employee Engagement) instead of a
+  // free-text input. Inactive teams are filtered out for new picks but kept
+  // visible when this employee was already assigned to one (so HR sees the
+  // old assignment instead of a blank).
+  const [teams, setTeams] = useState<
+    Array<{ id: string; name: string; color: string | null; isActive: boolean }>
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/engagement-teams', {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        const json = await res.json();
+        if (!cancelled && res.ok && json?.success) {
+          setTeams(json.teams ?? []);
+        }
+      } catch {
+        // Soft-fail: form stays usable without teams; field just shows
+        // "No teams configured yet" in the dropdown.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Per-hour salary derived from monthly CTC ÷ (22 working days × hours/day).
   // 22 matches the engine's `calculateDailyPayroll` standard divisor. Hours/
@@ -1408,28 +1447,55 @@ export function EmployeeForm({
               placeholder="8"
             />
           </Field>
-          <Field label="Employee Engagement Team Name">
+          <Field label="Employee Engagement Team">
             <Select
-              value={values.employeeEngagementTeamName || undefined}
-              onValueChange={(v) => set("employeeEngagementTeamName", v)}
+              value={values.engagementTeamId || "__none__"}
+              onValueChange={(v) => {
+                if (v === "__none__") {
+                  set("engagementTeamId", "");
+                  set("employeeEngagementTeamName", "");
+                  return;
+                }
+                const picked = teams.find((t) => t.id === v);
+                set("engagementTeamId", v);
+                // Keep the legacy display field in sync with the chosen team
+                // so old readers (grid, reports) that look up by name still work.
+                set("employeeEngagementTeamName", picked?.name ?? "");
+              }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a team" />
+                <SelectValue placeholder="No team" />
               </SelectTrigger>
               <SelectContent>
-                {/* Surface a legacy free-text value so old employees keep
-                    their team on edit even if it's not in this list. */}
-                {values.employeeEngagementTeamName &&
-                  !ENGAGEMENT_TEAMS.includes(values.employeeEngagementTeamName) && (
-                    <SelectItem value={values.employeeEngagementTeamName}>
-                      {values.employeeEngagementTeamName} (legacy)
-                    </SelectItem>
-                  )}
-                {ENGAGEMENT_TEAMS.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
-                  </SelectItem>
-                ))}
+                <SelectItem value="__none__">— No team —</SelectItem>
+                {teams.length === 0 ? (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">
+                    No teams configured. Create one in Settings →
+                    Employee Engagement.
+                  </div>
+                ) : (
+                  teams
+                    // Keep the currently-assigned team visible even if it's
+                    // been deactivated — otherwise the dropdown silently
+                    // drops the existing choice.
+                    .filter((t) => t.isActive || t.id === values.engagementTeamId)
+                    .map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full"
+                            style={{ backgroundColor: t.color ?? "#94a3b8" }}
+                          />
+                          {t.name}
+                          {!t.isActive && (
+                            <span className="text-[10px] text-muted-foreground">
+                              (inactive)
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))
+                )}
               </SelectContent>
             </Select>
           </Field>

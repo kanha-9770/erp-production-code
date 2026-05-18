@@ -51,6 +51,9 @@ export interface EmployeeListItem {
   outTime: string | null;
   totalWorkingHours: string | number | null;
   employeeEngagementTeamName: string | null;
+  // FK to the engagement-teams lookup row — useful for joins / filters
+  // when the same team name appears across multiple records.
+  engagementTeamId: string | null;
   yearsOfAgreement: number | null;
 
   // Section 4 (Documents)

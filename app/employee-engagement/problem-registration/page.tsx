@@ -4,7 +4,7 @@
  * Problem Registration — premium workspace layout.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   AlertCircle, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
   CheckCircle2, AlertTriangle, Type, FileText, Tag, UserCircle
@@ -21,6 +21,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,8 +78,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", severity: "" };
 export default function ProblemRegistrationPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [problems, setProblems] = useState<ProblemRegistration[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -90,40 +95,37 @@ export default function ProblemRegistrationPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("problem-registrations");
 
-  useEffect(() => {
-    if (user?.id) {
-      const mock: ProblemRegistration[] = [
-        {
-          id: '1',
-          title: 'Slow API Response Times',
-          description: 'API endpoints are responding slowly during peak hours',
-          severity: 'high',
-          category: 'technical',
-          registrationDate: '2026-05-01',
-          status: 'in-review',
-          proposedSolution: 'Implement caching and database optimization',
-          userId: user.id,
-          employeeId: employees[0]?.id || currentEmployee?.id || '',
-        },
-        {
-          id: '2',
-          title: 'Outdated Documentation',
-          description: 'Project documentation is not updated with recent changes',
-          severity: 'medium',
-          category: 'process',
-          registrationDate: '2026-04-28',
-          status: 'open',
-          proposedSolution: 'Schedule documentation review and update sessions',
-          userId: user.id,
-          employeeId: employees[1]?.id || currentEmployee?.id || '',
-        },
-      ];
-      setProblems(isAdmin ? mock : mock.filter(p => p.employeeId === currentEmployee?.id));
+  const loadProblems = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/engagement/problems", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Failed to load problems");
+      const rows: ProblemRegistration[] = json.problems ?? [];
+      const allow = makeEngagementFilter<ProblemRegistration>(visibility, employeeToTeam);
+      setProblems(rows.filter(allow));
+    } catch (e: any) {
+      toast({ title: "Failed to load problems", description: e?.message, variant: "destructive" });
+      setProblems([]);
+    } finally {
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, visibility, employeeToTeam, toast]);
+
+  useEffect(() => {
+    if (user?.id && !visibility.loading) loadProblems();
+  }, [user?.id, isAdmin, employees.length, visibility, loadProblems]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -197,11 +199,21 @@ export default function ProblemRegistrationPage() {
     },
   ], []);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("Delete this problem record?")) return;
-    setProblems(problems.filter(p => p.id !== id));
-    if (selectedId === id) setSelectedId(null);
-    toast({ title: "Problem deleted" });
+    try {
+      const res = await fetch(`/api/engagement/problems/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Delete failed");
+      setProblems(problems.filter(p => p.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      toast({ title: "Problem deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -279,18 +291,22 @@ export default function ProblemRegistrationPage() {
           </SheetHeader>
           <ProblemForm
             onCancel={() => setCreateOpen(false)}
-            onSubmit={(data) => {
-              const newP: ProblemRegistration = {
-                ...data,
-                id: Date.now().toString(),
-                registrationDate: new Date().toISOString().split('T')[0],
-                userId: user?.id || '',
-                employeeId: currentEmployee?.id || '',
-                status: 'open'
-              };
-              setProblems([newP, ...problems]);
-              setCreateOpen(false);
-              toast({ title: "Problem registered" });
+            onSubmit={async (data) => {
+              try {
+                const res = await fetch("/api/engagement/problems", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify(data),
+                });
+                const json = await res.json();
+                if (!res.ok || !json?.success) throw new Error(json?.error ?? "Submit failed");
+                setProblems([json.problem as ProblemRegistration, ...problems]);
+                setCreateOpen(false);
+                toast({ title: "Problem registered" });
+              } catch (e: any) {
+                toast({ title: "Could not register", description: e?.message, variant: "destructive" });
+              }
             }}
           />
         </SheetContent>
@@ -302,10 +318,22 @@ export default function ProblemRegistrationPage() {
             <ProblemForm
               initial={problems.find(p => p.id === editingId)}
               onCancel={() => setEditingId(null)}
-              onSubmit={(data) => {
-                setProblems(problems.map(p => p.id === editingId ? { ...p, ...data } : p));
-                setEditingId(null);
-                toast({ title: "Problem updated" });
+              onSubmit={async (data) => {
+                try {
+                  const res = await fetch(`/api/engagement/problems/${editingId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Update failed");
+                  setProblems(problems.map(p => p.id === editingId ? (json.problem as ProblemRegistration) : p));
+                  setEditingId(null);
+                  toast({ title: "Problem updated" });
+                } catch (e: any) {
+                  toast({ title: "Could not update", description: e?.message, variant: "destructive" });
+                }
               }}
             />
           )}

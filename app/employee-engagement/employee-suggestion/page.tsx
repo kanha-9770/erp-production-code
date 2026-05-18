@@ -7,7 +7,7 @@
  * advanced filtering, and spreadsheet-style DataTable.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   MessageSquare, Plus, Search, Mail, Phone, Calendar, 
   Briefcase, Pencil, ExternalLink, Trash2, UserCircle,
@@ -25,6 +25,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,8 +86,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
 export default function EmployeeSuggestionPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [suggestions, setSuggestions] = useState<EmployeeSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -98,39 +103,40 @@ export default function EmployeeSuggestionPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  // employeeId → team map for the visibility filter (O(1) lookups).
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("employee-suggestions");
 
-  useEffect(() => {
-    if (user?.id) {
-      // Mock data for now as per original file
-      const mock: EmployeeSuggestion[] = [
-        {
-          id: '1',
-          title: 'Flexible Work Hours Policy',
-          suggestion: 'Implement flexible work hours to improve work-life balance',
-          category: 'hr-policy',
-          status: 'accepted',
-          submissionDate: '2026-04-10',
-          feedback: 'Great idea! We are planning to implement this next quarter.',
-          userId: user.id,
-          employeeId: employees[0]?.id || currentEmployee?.id || '',
-        },
-        {
-          id: '2',
-          title: 'Weekly Tech Talks',
-          suggestion: 'Organize weekly tech talks to share knowledge',
-          category: 'learning',
-          status: 'implemented',
-          submissionDate: '2026-03-15',
-          feedback: 'Implemented! First tech talk is scheduled for next week.',
-          userId: user.id,
-          employeeId: employees[1]?.id || currentEmployee?.id || '',
-        },
-      ];
-      setSuggestions(isAdmin ? mock : mock.filter(s => s.employeeId === currentEmployee?.id));
+  // Pulls the team-scoped list from /api/engagement/suggestions. The server
+  // already enforces visibility; the client filter is defensive only.
+  const loadSuggestions = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/engagement/suggestions", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Failed to load suggestions");
+      const rows: EmployeeSuggestion[] = json.suggestions ?? [];
+      const allow = makeEngagementFilter<EmployeeSuggestion>(visibility, employeeToTeam);
+      setSuggestions(rows.filter(allow));
+    } catch (e: any) {
+      toast({ title: "Failed to load suggestions", description: e?.message, variant: "destructive" });
+      setSuggestions([]);
+    } finally {
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, visibility, employeeToTeam, toast]);
+
+  useEffect(() => {
+    if (user?.id && !visibility.loading) loadSuggestions();
+  }, [user?.id, isAdmin, employees.length, visibility, loadSuggestions]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -197,11 +203,21 @@ export default function EmployeeSuggestionPage() {
     },
   ], []);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("Delete this suggestion?")) return;
-    setSuggestions(suggestions.filter(s => s.id !== id));
-    if (selectedId === id) setSelectedId(null);
-    toast({ title: "Suggestion deleted" });
+    try {
+      const res = await fetch(`/api/engagement/suggestions/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Delete failed");
+      setSuggestions(suggestions.filter(s => s.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      toast({ title: "Suggestion deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -279,18 +295,22 @@ export default function EmployeeSuggestionPage() {
           </SheetHeader>
           <SuggestionForm
             onCancel={() => setCreateOpen(false)}
-            onSubmit={(data) => {
-              const newS: EmployeeSuggestion = {
-                ...data,
-                id: Date.now().toString(),
-                submissionDate: new Date().toISOString().split('T')[0],
-                userId: user?.id || '',
-                employeeId: currentEmployee?.id || '',
-                status: 'submitted'
-              };
-              setSuggestions([newS, ...suggestions]);
-              setCreateOpen(false);
-              toast({ title: "Suggestion submitted" });
+            onSubmit={async (data) => {
+              try {
+                const res = await fetch("/api/engagement/suggestions", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify(data),
+                });
+                const json = await res.json();
+                if (!res.ok || !json?.success) throw new Error(json?.error ?? "Submit failed");
+                setSuggestions([json.suggestion as EmployeeSuggestion, ...suggestions]);
+                setCreateOpen(false);
+                toast({ title: "Suggestion submitted" });
+              } catch (e: any) {
+                toast({ title: "Could not submit", description: e?.message, variant: "destructive" });
+              }
             }}
           />
         </SheetContent>
@@ -302,10 +322,22 @@ export default function EmployeeSuggestionPage() {
             <SuggestionForm
               initial={suggestions.find(s => s.id === editingId)}
               onCancel={() => setEditingId(null)}
-              onSubmit={(data) => {
-                setSuggestions(suggestions.map(s => s.id === editingId ? { ...s, ...data } : s));
-                setEditingId(null);
-                toast({ title: "Suggestion updated" });
+              onSubmit={async (data) => {
+                try {
+                  const res = await fetch(`/api/engagement/suggestions/${editingId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Update failed");
+                  setSuggestions(suggestions.map(s => s.id === editingId ? (json.suggestion as EmployeeSuggestion) : s));
+                  setEditingId(null);
+                  toast({ title: "Suggestion updated" });
+                } catch (e: any) {
+                  toast({ title: "Could not update", description: e?.message, variant: "destructive" });
+                }
               }}
             />
           )}

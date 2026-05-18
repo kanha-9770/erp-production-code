@@ -4,7 +4,7 @@
  * Self Initiative — premium workspace layout.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Lightbulb, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
   CheckCircle2, Type, FileText, Tag, UserCircle, Clock, Save
@@ -21,6 +21,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
+import {
+  useEngagementVisibility,
+  makeEngagementFilter,
+} from "@/hooks/useEngagementVisibility";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,8 +80,9 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
 export default function SelfInitiativePage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  const visibility = useEngagementVisibility();
   const { toast } = useToast();
-  
+
   const [initiatives, setInitiatives] = useState<SelfInitiative[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -92,40 +97,37 @@ export default function SelfInitiativePage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
+  const employeeToTeam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const e of employees) m.set(e.id, (e as any).engagementTeamId ?? null);
+    return m;
+  }, [employees]);
+
   const views = useSavedViews<Filters>("self-initiatives");
 
-  useEffect(() => {
-    if (user?.id) {
-      const mock: SelfInitiative[] = [
-        {
-          id: '1',
-          title: 'Mentorship Program for Juniors',
-          description: 'Guide junior developers in their career growth',
-          startDate: '2026-04-01',
-          endDate: '2026-12-31',
-          status: 'in-progress',
-          category: 'mentoring',
-          createdAt: '2026-03-20',
-          userId: user.id,
-          employeeId: employees[0]?.id || currentEmployee?.id || '',
-        },
-        {
-          id: '2',
-          title: 'Process Automation Initiative',
-          description: 'Automate repetitive team tasks and workflows',
-          startDate: '2026-05-01',
-          endDate: '2026-08-31',
-          status: 'in-progress',
-          category: 'process-improvement',
-          createdAt: '2026-04-25',
-          userId: user.id,
-          employeeId: employees[1]?.id || currentEmployee?.id || '',
-        },
-      ];
-      setInitiatives(isAdmin ? mock : mock.filter(i => i.employeeId === currentEmployee?.id));
+  const loadInitiatives = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/engagement/initiatives", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Failed to load initiatives");
+      const rows: SelfInitiative[] = json.initiatives ?? [];
+      const allow = makeEngagementFilter<SelfInitiative>(visibility, employeeToTeam);
+      setInitiatives(rows.filter(allow));
+    } catch (e: any) {
+      toast({ title: "Failed to load initiatives", description: e?.message, variant: "destructive" });
+      setInitiatives([]);
+    } finally {
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length]);
+  }, [user?.id, visibility, employeeToTeam, toast]);
+
+  useEffect(() => {
+    if (user?.id && !visibility.loading) loadInitiatives();
+  }, [user?.id, isAdmin, employees.length, visibility, loadInitiatives]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -191,11 +193,21 @@ export default function SelfInitiativePage() {
     },
   ], []);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("Delete this initiative?")) return;
-    setInitiatives(initiatives.filter(i => i.id !== id));
-    if (selectedId === id) setSelectedId(null);
-    toast({ title: "Initiative deleted" });
+    try {
+      const res = await fetch(`/api/engagement/initiatives/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Delete failed");
+      setInitiatives(initiatives.filter(i => i.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      toast({ title: "Initiative deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -274,22 +286,35 @@ export default function SelfInitiativePage() {
           <InitiativeForm
             initial={editingId ? initiatives.find(i => i.id === editingId) : undefined}
             onCancel={() => { setCreateOpen(false); setEditingId(null); }}
-            onSubmit={(data) => {
-              if (editingId) {
-                setInitiatives(initiatives.map(i => i.id === editingId ? { ...i, ...data } : i));
-              } else {
-                const newI: SelfInitiative = {
-                  ...data,
-                  id: Date.now().toString(),
-                  createdAt: new Date().toISOString().split('T')[0],
-                  userId: user?.id || '',
-                  employeeId: currentEmployee?.id || '',
-                };
-                setInitiatives([newI, ...initiatives]);
+            onSubmit={async (data) => {
+              try {
+                if (editingId) {
+                  const res = await fetch(`/api/engagement/initiatives/${editingId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Update failed");
+                  setInitiatives(initiatives.map(i => i.id === editingId ? (json.initiative as SelfInitiative) : i));
+                } else {
+                  const res = await fetch("/api/engagement/initiatives", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Create failed");
+                  setInitiatives([json.initiative as SelfInitiative, ...initiatives]);
+                }
+                setCreateOpen(false);
+                setEditingId(null);
+                toast({ title: editingId ? "Initiative updated" : "Initiative created" });
+              } catch (e: any) {
+                toast({ title: "Could not save", description: e?.message, variant: "destructive" });
               }
-              setCreateOpen(false);
-              setEditingId(null);
-              toast({ title: editingId ? "Initiative updated" : "Initiative created" });
             }}
           />
         </SheetContent>
