@@ -9,7 +9,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Package, Plus, Search, Pencil, Trash2, Laptop, Smartphone, Monitor,
   Headphones, HardDrive, Calendar, User, IndianRupee, Tag, Info,
-  MoreVertical, Filter, Smartphone as SimIcon, ShieldCheck
+  MoreVertical, Filter, Smartphone as SimIcon, ShieldCheck,
+  Computer, Tablet, Keyboard, Mouse, Printer, Camera, Car, Armchair,
+  IdCard,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -39,34 +41,117 @@ import {
 
 // --- Types & Constants ---
 
-type AssetType = "LAPTOP" | "PHONE" | "MONITOR" | "ACCESSORY" | "SIM" | "OTHER";
+// Asset categories — mirrors the dynamic form-builder Asset Management
+// dropdown so users see the same options in both surfaces. Keep SIM in the
+// list since the form has a dedicated SIM details section that's
+// triggered when the user selects this type. PHONE/ACCESSORY are kept as
+// legacy aliases so existing localStorage data (saved before this list
+// expanded) still loads without re-categorizing.
+type AssetType =
+  | "LAPTOP"
+  | "DESKTOP"
+  | "MOBILE_PHONE"
+  | "TABLET"
+  | "MONITOR"
+  | "HEADPHONE"
+  | "KEYBOARD"
+  | "MOUSE"
+  | "PRINTER"
+  | "CAMERA"
+  | "VEHICLE"
+  | "FURNITURE"
+  | "ID_CARD"
+  | "SIM"
+  | "OTHER"
+  // Legacy aliases — accepted on read so old localStorage records still
+  // hydrate, but not surfaced in the dropdown.
+  | "PHONE"
+  | "ACCESSORY";
 type AssetStatus = "AVAILABLE" | "ASSIGNED" | "UNDER_REPAIR" | "RETIRED";
 type PlanType = "CORPORATE" | "INDIVIDUAL";
+type SimType = "PREPAID" | "POSTPAID";
+type SimStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "LOST";
 
 interface Asset {
   id: string;
   name: string;
   type: AssetType;
-  serialNo: string;
   status: AssetStatus;
-  assignedTo: string;
   purchaseDate: string;
   value: number;
   notes: string;
+
+  // User & assignment — every asset (incl. SIM) can be assigned to an employee.
+  employeeId?: string;
+  firstName?: string;
+  lastName?: string;
+  department?: string;
+  assignedTo?: string; // legacy single-string field kept for back-compat
+
+  // Non-SIM physical fields.
+  serialNo: string;
+  assetModel?: string;
+  configuration?: string;
+
+  // SIM-specific fields. Drawn from the SIM Management screen — surfaced
+  // only when type === "SIM" so the form swap happens cleanly on dropdown
+  // change.
   countryCode?: string;
-  simNumber?: string;
+  simNumber?: string;       // Mobile No.
+  imsiNumber?: string;
   imei?: string;
-  carrier?: string;
+  carrier?: string;          // Service Provider
+  simType?: SimType;
+  planType?: string;
+  simIssueBy?: string;
+  simLocation?: string;
+  simStatus?: SimStatus;
   plan?: PlanType;
+  rechargeDate?: string;
+  rechargeAmount?: number;
   monthlyCost?: number;
 }
 
 const ASSET_TYPE_LABEL: Record<AssetType, string> = {
-  LAPTOP: "Laptop", PHONE: "Phone", MONITOR: "Monitor", ACCESSORY: "Accessory", SIM: "SIM card", OTHER: "Other"
+  LAPTOP: "Laptop",
+  DESKTOP: "Desktop",
+  MOBILE_PHONE: "Mobile Phone",
+  TABLET: "Tablet",
+  MONITOR: "Monitor",
+  HEADPHONE: "Headphone",
+  KEYBOARD: "Keyboard",
+  MOUSE: "Mouse",
+  PRINTER: "Printer",
+  CAMERA: "Camera",
+  VEHICLE: "Vehicle",
+  FURNITURE: "Furniture",
+  ID_CARD: "ID Card",
+  SIM: "SIM card",
+  OTHER: "Other",
+  // Legacy aliases — labels shown as fallbacks in the table when an old
+  // record loads. They never appear in the dropdown.
+  PHONE: "Phone (legacy)",
+  ACCESSORY: "Accessory (legacy)",
 };
 
 const ASSET_TYPE_ICON: Record<AssetType, any> = {
-  LAPTOP: Laptop, PHONE: Smartphone, MONITOR: Monitor, ACCESSORY: Headphones, SIM: SimIcon, OTHER: HardDrive
+  LAPTOP: Laptop,
+  DESKTOP: Computer,
+  MOBILE_PHONE: Smartphone,
+  TABLET: Tablet,
+  MONITOR: Monitor,
+  HEADPHONE: Headphones,
+  KEYBOARD: Keyboard,
+  MOUSE: Mouse,
+  PRINTER: Printer,
+  CAMERA: Camera,
+  VEHICLE: Car,
+  FURNITURE: Armchair,
+  ID_CARD: IdCard,
+  SIM: SimIcon,
+  OTHER: HardDrive,
+  PHONE: Smartphone,
+  ACCESSORY: Headphones,
 };
 
 const STATUS_OPTIONS = [
@@ -76,13 +161,52 @@ const STATUS_OPTIONS = [
   { value: "RETIRED", label: "Retired" },
 ];
 
-const TYPE_OPTIONS = (Object.keys(ASSET_TYPE_LABEL) as AssetType[]).map(t => ({ value: t, label: ASSET_TYPE_LABEL[t] }));
+// Filter out the legacy aliases so the dropdown only shows the canonical
+// list. Legacy values still render correctly in the table/preview via the
+// label and icon maps above.
+const LEGACY_ASSET_TYPES: ReadonlySet<AssetType> = new Set(["PHONE", "ACCESSORY"]);
+const TYPE_OPTIONS = (Object.keys(ASSET_TYPE_LABEL) as AssetType[])
+  .filter((t) => !LEGACY_ASSET_TYPES.has(t))
+  .map((t) => ({ value: t, label: ASSET_TYPE_LABEL[t] }));
 
 const CARRIER_OPTIONS = ["Airtel", "Jio", "Vi", "BSNL", "MTNL"] as const;
 const COUNTRY_CODE_OPTIONS = [
   { code: "+91", label: "India (+91)" },
   { code: "+1", label: "US (+1)" },
   { code: "+44", label: "UK (+44)" },
+];
+
+// Common departments — drives the Department dropdown. Free-text fallback
+// is exposed via the "+ Add new" item so HR can register a fresh dept
+// without leaving the form.
+const DEPARTMENT_OPTIONS = [
+  "Engineering",
+  "Sales",
+  "Marketing",
+  "Operations",
+  "HR",
+  "Finance",
+  "IT",
+  "Production",
+  "Admin",
+  "Customer Support",
+];
+
+const SIM_TYPE_OPTIONS: { value: SimType; label: string }[] = [
+  { value: "PREPAID", label: "Prepaid" },
+  { value: "POSTPAID", label: "Postpaid" },
+];
+
+const SIM_STATUS_OPTIONS: { value: SimStatus; label: string }[] = [
+  { value: "ACTIVE", label: "Active" },
+  { value: "INACTIVE", label: "Inactive" },
+  { value: "SUSPENDED", label: "Suspended" },
+  { value: "LOST", label: "Lost / Damaged" },
+];
+
+const PLAN_TYPE_OPTIONS: { value: PlanType; label: string }[] = [
+  { value: "CORPORATE", label: "Corporate" },
+  { value: "INDIVIDUAL", label: "Individual" },
 ];
 
 const STORAGE_KEY = "asset-management:v3";
@@ -144,8 +268,34 @@ function displayName(a: Asset) {
 }
 
 const EMPTY: Asset = {
-  id: "", name: "", type: "LAPTOP", serialNo: "", status: "AVAILABLE", assignedTo: "",
-  purchaseDate: new Date().toISOString().slice(0, 10), value: 0, notes: ""
+  id: "",
+  name: "",
+  type: "LAPTOP",
+  status: "AVAILABLE",
+  purchaseDate: new Date().toISOString().slice(0, 10),
+  value: 0,
+  notes: "",
+  serialNo: "",
+  assetModel: "",
+  configuration: "",
+  employeeId: "",
+  firstName: "",
+  lastName: "",
+  department: "",
+  assignedTo: "",
+  countryCode: "+91",
+  simNumber: "",
+  imsiNumber: "",
+  carrier: "Airtel",
+  simType: "POSTPAID",
+  planType: "",
+  simIssueBy: "",
+  simLocation: "",
+  simStatus: "ACTIVE",
+  plan: "CORPORATE",
+  rechargeDate: "",
+  rechargeAmount: 0,
+  monthlyCost: 0,
 };
 
 // --- Main Component ---
@@ -192,10 +342,15 @@ export default function AssetManagementPage() {
     let result = items;
     if (filters.search) {
       const q = filters.search.toLowerCase();
-      result = result.filter(a => 
-        a.name.toLowerCase().includes(q) || 
-        a.id.toLowerCase().includes(q) || 
-        a.assignedTo.toLowerCase().includes(q) ||
+      result = result.filter(a =>
+        a.name.toLowerCase().includes(q) ||
+        a.id.toLowerCase().includes(q) ||
+        (a.assignedTo ?? "").toLowerCase().includes(q) ||
+        (a.firstName ?? "").toLowerCase().includes(q) ||
+        (a.lastName ?? "").toLowerCase().includes(q) ||
+        (a.employeeId ?? "").toLowerCase().includes(q) ||
+        (a.department ?? "").toLowerCase().includes(q) ||
+        (a.simNumber ?? "").toLowerCase().includes(q) ||
         a.serialNo.toLowerCase().includes(q)
       );
     }
@@ -269,15 +424,42 @@ export default function AssetManagementPage() {
     },
   ], []);
 
+  // Auto-mint Asset ID when the user leaves it blank or set to the sentinel
+  // "AUTO". Otherwise respect what they typed — the form treats Asset ID as
+  // a required user-editable field (matches the screenshot's red error).
+  const nextAssetId = () => {
+    const used = new Set(items.map((i) => i.id));
+    let n = items.length + 1;
+    while (used.has(`AST-${String(n).padStart(4, "0")}`)) n++;
+    return `AST-${String(n).padStart(4, "0")}`;
+  };
+
   const handleSave = (draft: Asset) => {
+    // SIM Status drives the asset-level status so the table filter chips and
+    // the AVAILABLE/ASSIGNED/UNDER_REPAIR/RETIRED counts stay accurate for
+    // SIMs too. Non-SIM assets use the status the form set directly.
+    const derivedStatus: AssetStatus =
+      draft.type === "SIM"
+        ? draft.simStatus === "ACTIVE"
+          ? "ASSIGNED"
+          : draft.simStatus === "SUSPENDED"
+            ? "UNDER_REPAIR"
+            : draft.simStatus === "LOST"
+              ? "RETIRED"
+              : "AVAILABLE"
+        : draft.status;
+
     if (editingId) {
-      setItems(items.map(i => i.id === editingId ? draft : i));
-      toast({ title: "Asset Updated", description: `${draft.id} successfully updated.` });
+      const finalId = draft.id?.trim() && draft.id !== "AUTO" ? draft.id : editingId;
+      const next = { ...draft, id: finalId, status: derivedStatus };
+      setItems(items.map((i) => (i.id === editingId ? next : i)));
+      toast({ title: "Asset Updated", description: `${finalId} successfully updated.` });
     } else {
-      const newId = `AST-${String(items.length + 1).padStart(4, '0')}`;
-      const final = { ...draft, id: newId };
+      const typed = draft.id?.trim();
+      const finalId = typed && typed !== "AUTO" ? typed : nextAssetId();
+      const final = { ...draft, id: finalId, status: derivedStatus };
       setItems([final, ...items]);
-      toast({ title: "Asset Created", description: `${newId} added to register.` });
+      toast({ title: "Asset Created", description: `${finalId} added to register.` });
     }
     setFormOpen(false);
     setEditingId(null);
@@ -454,15 +636,28 @@ function AssetPreview({ id, items, onEdit, onDelete }: { id: string, items: Asse
             {a.type !== 'SIM' ? (
                <>
                   <Fact label="Serial Number" value={a.serialNo || "NOT RECORDED"} icon={Tag} />
+                  <Fact label="Asset Model" value={a.assetModel || "NOT RECORDED"} icon={Tag} />
                   <Fact label="Purchase Date" value={a.purchaseDate} icon={Calendar} />
+                  <Fact label="Configuration" value={a.configuration || "—"} icon={Info} />
                   <Fact label="Assignee" value={a.assignedTo || "UNASSIGNED"} icon={User} />
+                  <Fact label="Employee ID" value={a.employeeId || "—"} icon={User} />
+                  <Fact label="Department" value={a.department || "—"} icon={ShieldCheck} />
                </>
             ) : (
                <>
-                  <Fact label="SIM Number" value={`${a.countryCode} ${a.simNumber}`} icon={SimIcon} />
-                  <Fact label="Carrier" value={a.carrier || "N/A"} icon={SimIcon} />
-                  <Fact label="Plan" value={a.plan || "N/A"} icon={ShieldCheck} />
-                  <Fact label="IMEI" value={a.imei || "N/A"} icon={Info} />
+                  <Fact label="Mobile No." value={`${a.countryCode ?? ""} ${a.simNumber ?? ""}`.trim() || "—"} icon={SimIcon} />
+                  <Fact label="IMSI" value={a.imsiNumber || "N/A"} icon={Info} />
+                  <Fact label="Service Provider" value={a.carrier || "N/A"} icon={SimIcon} />
+                  <Fact label="SIM Type" value={a.simType || "N/A"} icon={ShieldCheck} />
+                  <Fact label="Plan Type" value={a.planType || "—"} icon={ShieldCheck} />
+                  <Fact label="Plan Category" value={a.plan || "—"} icon={ShieldCheck} />
+                  <Fact label="SIM Issue By" value={a.simIssueBy || "—"} icon={Info} />
+                  <Fact label="SIM Location" value={a.simLocation || "—"} icon={Info} />
+                  <Fact label="SIM Status" value={a.simStatus || "—"} icon={ShieldCheck} />
+                  <Fact label="Assignee" value={a.assignedTo || "UNASSIGNED"} icon={User} />
+                  <Fact label="Department" value={a.department || "—"} icon={ShieldCheck} />
+                  <Fact label="Recharge Date" value={a.rechargeDate || "—"} icon={Calendar} />
+                  <Fact label="Recharge Amount" value={a.rechargeAmount ? `₹${formatINR(a.rechargeAmount)}` : "—"} icon={IndianRupee} />
                </>
             )}
          </div>
@@ -482,97 +677,341 @@ function AssetPreview({ id, items, onEdit, onDelete }: { id: string, items: Asse
 }
 
 function AssetForm({ initial, onCancel, onSubmit }: { initial?: Asset, onCancel: () => void, onSubmit: (data: Asset) => void }) {
-  const [formData, setFormData] = useState<Asset>(initial || { ...EMPTY, id: 'AUTO' });
+  const [formData, setFormData] = useState<Asset>(initial ? { ...EMPTY, ...initial } : { ...EMPTY, id: '' });
+  const isSim = formData.type === 'SIM';
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Department dropdown supports a "+ Add new" item that flips into a free-
+  // text input — keeps HR unblocked when a fresh department appears.
+  const [deptMode, setDeptMode] = useState<"select" | "custom">(
+    formData.department && !DEPARTMENT_OPTIONS.includes(formData.department) ? "custom" : "select",
+  );
+
+  const update = <K extends keyof Asset>(key: K, value: Asset[K]) => {
+    setFormData((d) => ({ ...d, [key]: value }));
+    // Clear that field's error as soon as the user starts fixing it — same
+    // pattern as the screenshots: typing in the field hides the red error.
+    if (errors[key as string]) {
+      setErrors((e) => {
+        const next = { ...e };
+        delete next[key as string];
+        return next;
+      });
+    }
+  };
+
+  // Compose the legacy `assignedTo` from first+last so the table column /
+  // search index keep working without an extra pass.
+  const handleSubmit = () => {
+    const next: Record<string, string> = {};
+    if (!formData.id?.trim()) next.id = "Asset ID is required";
+    if (!formData.type) next.type = "Asset Type is required";
+    if (isSim) {
+      if (!formData.simNumber?.trim()) next.simNumber = "Mobile No. is required";
+      if (!formData.carrier?.trim()) next.carrier = "Service Provider is required";
+      if (!formData.simType) next.simType = "SIM Type is required";
+      if (!formData.simStatus) next.simStatus = "SIM Status is required";
+    } else {
+      if (!formData.status) next.status = "Asset Status is required";
+    }
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+
+    const composed = [formData.firstName, formData.lastName].filter((s) => s?.trim()).join(" ").trim();
+    onSubmit({ ...formData, assignedTo: composed || formData.assignedTo || "" });
+  };
 
   return (
     <div className="p-6 space-y-8">
+      {/* ─── Section 1: Asset / SIM Details ─────────────────────────── */}
+      <SectionHeader index={1} title={isSim ? "SIM Details" : "Asset"} subtitle={isSim ? "Number, provider, plan" : "Company asset allocation"} />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Asset Type</Label>
-          <Select value={formData.type} onValueChange={v => setFormData({ ...formData, type: v as AssetType })}>
-            <SelectTrigger className="h-12 border-slate-200 focus:ring-slate-900">
-              <SelectValue />
-            </SelectTrigger>
+        <FormField label="Asset ID *" error={errors.id}>
+          <Input
+            value={formData.id || ""}
+            onChange={(e) => update("id", e.target.value)}
+            placeholder="e.g. AST-0001"
+            className={`h-11 ${errors.id ? "border-destructive" : ""}`}
+          />
+        </FormField>
+        <FormField label="Asset Type *" error={errors.type}>
+          <Select value={formData.type} onValueChange={(v) => update("type", v as AssetType)}>
+            <SelectTrigger className={`h-11 ${errors.type ? "border-destructive" : ""}`}><SelectValue /></SelectTrigger>
             <SelectContent>
-              {TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
+              {TYPE_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Current Status</Label>
-          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as AssetStatus })}>
-            <SelectTrigger className="h-12 border-slate-200 focus:ring-slate-900">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        </FormField>
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{formData.type === 'SIM' ? 'Line Label' : 'Asset Name'}</Label>
-        <Input 
-          value={formData.name} 
-          onChange={e => setFormData({ ...formData, name: e.target.value })} 
-          placeholder={formData.type === 'SIM' ? "e.g. Sales Primary Line" : "e.g. MacBook Pro M3"}
-          className="h-12 border-slate-200"
+      {/* Asset Name / Line Label — always visible. */}
+      <FormField label={isSim ? "Line Label" : "Asset Name"}>
+        <Input
+          value={formData.name}
+          onChange={(e) => update("name", e.target.value)}
+          placeholder={isSim ? "e.g. Sales Primary Line" : "e.g. MacBook Pro M3"}
+          className="h-11"
         />
+      </FormField>
+
+      {/* Non-SIM block: serial, model, configuration, value. Hidden when
+          Asset Type = SIM, replaced by the SIM block below. */}
+      {!isSim && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Asset Serial No.">
+              <Input value={formData.serialNo} onChange={(e) => update("serialNo", e.target.value)} className="h-11" />
+            </FormField>
+            <FormField label="Asset Model">
+              <Input value={formData.assetModel} onChange={(e) => update("assetModel", e.target.value)} placeholder="Make/model" className="h-11" />
+            </FormField>
+          </div>
+          <FormField label="Configuration">
+            <textarea
+              value={formData.configuration}
+              onChange={(e) => update("configuration", e.target.value)}
+              placeholder="Specifications"
+              rows={3}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
+          </FormField>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Purchase Date">
+              <Input type="date" value={formData.purchaseDate} onChange={(e) => update("purchaseDate", e.target.value)} className="h-11" />
+            </FormField>
+            <FormField label="Purchase Value (₹)">
+              <Input type="number" value={formData.value} onChange={(e) => update("value", Number(e.target.value))} className="h-11 font-mono" />
+            </FormField>
+          </div>
+          <FormField label="Asset Status *" error={errors.status}>
+            <Select value={formData.status} onValueChange={(v) => update("status", v as AssetStatus)}>
+              <SelectTrigger className={`h-11 ${errors.status ? "border-destructive" : ""}`}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FormField>
+        </>
+      )}
+
+      {/* SIM block: every field from the SIM Management screen, revealed
+          only when Asset Type = SIM. */}
+      {isSim && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Mobile No. *" error={errors.simNumber}>
+              <div className="flex gap-2">
+                <Select value={formData.countryCode} onValueChange={(v) => update("countryCode", v)}>
+                  <SelectTrigger className="w-[88px] h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COUNTRY_CODE_OPTIONS.map((o) => <SelectItem key={o.code} value={o.code}>{o.code}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={formData.simNumber}
+                  onChange={(e) => update("simNumber", e.target.value.replace(/[^\d\s]/g, ""))}
+                  placeholder="98765 43210"
+                  className={`h-11 flex-1 ${errors.simNumber ? "border-destructive" : ""}`}
+                />
+              </div>
+            </FormField>
+            <FormField label="IMSI Number">
+              <Input value={formData.imsiNumber} onChange={(e) => update("imsiNumber", e.target.value)} placeholder="IMSI" className="h-11" />
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Service Provider *" error={errors.carrier}>
+              <Select value={formData.carrier} onValueChange={(v) => update("carrier", v)}>
+                <SelectTrigger className={`h-11 ${errors.carrier ? "border-destructive" : ""}`}>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CARRIER_OPTIONS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="SIM Type *" error={errors.simType}>
+              <Select value={formData.simType} onValueChange={(v) => update("simType", v as SimType)}>
+                <SelectTrigger className={`h-11 ${errors.simType ? "border-destructive" : ""}`}>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SIM_TYPE_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="Plan Type">
+              <Input value={formData.planType} onChange={(e) => update("planType", e.target.value)} placeholder="Plan name" className="h-11" />
+            </FormField>
+            <FormField label="Plan Category">
+              <Select value={formData.plan} onValueChange={(v) => update("plan", v as PlanType)}>
+                <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PLAN_TYPE_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="SIM Issue By">
+              <Input value={formData.simIssueBy} onChange={(e) => update("simIssueBy", e.target.value)} placeholder="Issuing authority" className="h-11" />
+            </FormField>
+            <FormField label="SIM Location">
+              <Input value={formData.simLocation} onChange={(e) => update("simLocation", e.target.value)} placeholder="Branch / site" className="h-11" />
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormField label="SIM Status *" error={errors.simStatus}>
+              <Select value={formData.simStatus} onValueChange={(v) => update("simStatus", v as SimStatus)}>
+                <SelectTrigger className={`h-11 ${errors.simStatus ? "border-destructive" : ""}`}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SIM_STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="Monthly Cost (₹)">
+              <Input type="number" value={formData.monthlyCost} onChange={(e) => update("monthlyCost", Number(e.target.value))} className="h-11 font-mono" />
+            </FormField>
+          </div>
+        </>
+      )}
+
+      {/* ─── Section 2: User & Assignment ─────────────────────────────── */}
+      <SectionHeader
+        index={2}
+        title={isSim ? "User & Recharge" : "User & Assignment"}
+        subtitle={isSim ? "Assigned employee and recharge history" : "Assigned employee"}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <FormField label="Employee ID">
+          <Input value={formData.employeeId} onChange={(e) => update("employeeId", e.target.value)} placeholder="Assigned to" className="h-11" />
+        </FormField>
+        <FormField label="First Name">
+          <Input value={formData.firstName} onChange={(e) => update("firstName", e.target.value)} className="h-11" />
+        </FormField>
       </div>
 
-      {formData.type !== 'SIM' ? (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <FormField label="Last Name">
+          <Input value={formData.lastName} onChange={(e) => update("lastName", e.target.value)} className="h-11" />
+        </FormField>
+        <FormField label="Department">
+          {deptMode === "select" ? (
+            <Select
+              value={formData.department || undefined}
+              onValueChange={(v) => {
+                if (v === "__new__") {
+                  setDeptMode("custom");
+                  update("department", "");
+                  return;
+                }
+                update("department", v);
+              }}
+            >
+              <SelectTrigger className="h-11"><SelectValue placeholder="Select an option" /></SelectTrigger>
+              <SelectContent>
+                {/* Surface a legacy free-text value so editing keeps it. */}
+                {formData.department && !DEPARTMENT_OPTIONS.includes(formData.department) && (
+                  <SelectItem value={formData.department}>{formData.department} (legacy)</SelectItem>
+                )}
+                {DEPARTMENT_OPTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                <SelectItem value="__new__">+ Add new department…</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex gap-2">
+              <Input
+                value={formData.department}
+                onChange={(e) => update("department", e.target.value)}
+                placeholder="e.g. Engineering"
+                className="h-11 flex-1"
+                autoFocus
+              />
+              <Button type="button" variant="outline" size="sm" onClick={() => setDeptMode("select")}>Pick existing</Button>
+            </div>
+          )}
+        </FormField>
+      </div>
+
+      {/* Recharge details — SIM-only. */}
+      {isSim && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Serial Number</Label>
-            <Input value={formData.serialNo} onChange={e => setFormData({ ...formData, serialNo: e.target.value })} className="h-12 border-slate-200" />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Purchase Value (₹)</Label>
-            <Input type="number" value={formData.value} onChange={e => setFormData({ ...formData, value: Number(e.target.value) })} className="h-12 border-slate-200 font-mono" />
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-             <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">SIM Number</Label>
-             <div className="flex gap-2">
-                <Select value={formData.countryCode} onValueChange={v => setFormData({...formData, countryCode: v})}>
-                   <SelectTrigger className="w-24 h-12 border-slate-200"><SelectValue /></SelectTrigger>
-                   <SelectContent>{COUNTRY_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.code}</SelectItem>)}</SelectContent>
-                </Select>
-                <Input value={formData.simNumber} onChange={e => setFormData({ ...formData, simNumber: e.target.value })} className="h-12 border-slate-200 flex-1" />
-             </div>
-          </div>
-          <div className="space-y-2">
-             <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Monthly Cost (₹)</Label>
-             <Input type="number" value={formData.monthlyCost} onChange={e => setFormData({ ...formData, monthlyCost: Number(e.target.value) })} className="h-12 border-slate-200 font-mono" />
-          </div>
+          <FormField label="Recharge Date">
+            <Input type="date" value={formData.rechargeDate} onChange={(e) => update("rechargeDate", e.target.value)} className="h-11" />
+          </FormField>
+          <FormField label="Recharge Amount (₹)">
+            <Input type="number" value={formData.rechargeAmount} onChange={(e) => update("rechargeAmount", Number(e.target.value))} className="h-11 font-mono" />
+          </FormField>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Purchase Date</Label>
-          <Input type="date" value={formData.purchaseDate} onChange={e => setFormData({ ...formData, purchaseDate: e.target.value })} className="h-12 border-slate-200" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Assigned To</Label>
-          <Input value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })} placeholder="Employee Name" className="h-12 border-slate-200" />
-        </div>
-      </div>
+      <FormField label="Remarks">
+        <textarea
+          value={formData.notes}
+          onChange={(e) => update("notes", e.target.value)}
+          placeholder="Notes"
+          rows={3}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        />
+      </FormField>
 
-      <div className="space-y-2">
-        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Asset Notes</Label>
-        <Input value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="h-12 border-slate-200" />
-      </div>
+      {Object.keys(errors).length > 0 && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span className="font-semibold">Please fix the highlighted fields</span> · {Object.keys(errors).length} {Object.keys(errors).length === 1 ? "issue" : "issues"} above.
+        </div>
+      )}
 
       <div className="flex justify-end gap-3 pt-6 border-t">
         <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Cancel</Button>
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           {initial ? 'Update Asset' : 'Register Asset'}
+        <Button
+          onClick={handleSubmit}
+          className={
+            Object.keys(errors).length > 0
+              ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95"
+              : "bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95"
+          }
+        >
+          {Object.keys(errors).length > 0 ? "Fix Errors" : initial ? 'Update Asset' : 'Register Asset'}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function SectionHeader({ index, title, subtitle }: { index: number; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-start gap-3 pt-2">
+      <span className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">{index}</span>
+      <div>
+        <p className="text-base font-semibold leading-tight">{title}</p>
+        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium text-muted-foreground">
+        {label.replace(/\s\*$/, "")}
+        {label.endsWith("*") && <span className="text-destructive ml-1">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-destructive flex items-center gap-1">
+          <span aria-hidden>⚠</span>
+          {error}
+        </p>
+      )}
     </div>
   );
 }
