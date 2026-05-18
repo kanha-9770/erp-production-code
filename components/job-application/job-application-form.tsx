@@ -251,7 +251,19 @@ export function JobApplicationForm({
         applicantResumeName: file.name,
       }));
     } catch (err: any) {
-      setError(err?.message || "Resume upload failed");
+      // RTK Query errors expose the server response on `err.data`; native
+      // errors thrown above use `err.message`. Pull from both so the user
+      // sees what actually went wrong (e.g. FTP unreachable, file too big)
+      // instead of a generic "Resume upload failed".
+      const detail =
+        err?.data?.details ||
+        err?.data?.error ||
+        err?.error ||
+        err?.message ||
+        (typeof err === "string" ? err : null);
+      setError(
+        detail ? `Resume upload failed: ${detail}` : "Resume upload failed",
+      );
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }

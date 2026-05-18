@@ -63,6 +63,14 @@ interface ListResponse {
 interface SingleResponse {
   success: boolean;
   letter: AppointmentLetter;
+  // Populated when the create/update path detected a SIGNED transition and
+  // ran the auto-onboarding helper. One of the two will be set; both may be
+  // absent when the letter did not transition into SIGNED.
+  autoCreatedEmployee?: {
+    id: string;
+    alreadyExisted?: boolean;
+  } | null;
+  autoCreateEmployeeError?: string | null;
 }
 
 export const appointmentLettersApi = baseApi.injectEndpoints({
