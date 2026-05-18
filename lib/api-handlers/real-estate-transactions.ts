@@ -8,11 +8,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 import {
   calculateCommission,
   closeTransaction,
+  markTransactionClosed,
+  postCommissions,
   reverseTransaction,
 } from "@/lib/real-estate/commission-engine";
 
@@ -26,6 +28,18 @@ async function requireAuth(request: NextRequest) {
       { status: 403 },
     );
   return user as { id: string; email: string; organizationId: string };
+}
+
+async function requireAdmin(auth: { id: string; organizationId: string }) {
+  const admin = await isUserAdmin(auth.id, auth.organizationId);
+  if (!admin)
+    throw NextResponse.json(
+      {
+        error:
+          "Only an organization admin can close transactions. Closing is performed by admin at month-end.",
+      },
+      { status: 403 },
+    );
 }
 
 async function handle(fn: () => Promise<NextResponse>, label: string) {
@@ -61,6 +75,20 @@ function serializeSplit<T extends Record<string, any>>(s: T): any {
     percent: s.percent != null ? Number(s.percent) : 0,
     amount: s.amount != null ? Number(s.amount) : 0,
   };
+}
+
+// Parse a "YYYY-MM" string into a [from, to) UTC range. Returns null when the
+// input is missing or malformed so callers can treat it as "no filter".
+function monthRange(month: string | null | undefined): { from: Date; to: Date } | null {
+  if (!month) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const monthIdx = Number(m[2]) - 1; // 0-based
+  if (monthIdx < 0 || monthIdx > 11) return null;
+  const from = new Date(Date.UTC(year, monthIdx, 1));
+  const to = new Date(Date.UTC(year, monthIdx + 1, 1));
+  return { from, to };
 }
 
 function serializeRule<T extends Record<string, any>>(r: T): any {
@@ -284,6 +312,9 @@ export const TransactionHandlers = {
   },
 
   // POST /api/real-estate/transactions/[id]/close
+  // Agent-callable. Flips status PENDING → CLOSED with proof (CONTRACT or
+  // SALE_DEED). No commissions are posted here; the admin posts those in
+  // a separate step (see postCommissions / bulkPostCommissions below).
   async close(request: NextRequest, id: string): Promise<NextResponse> {
     return handle(async () => {
       const auth = await requireAuth(request);
@@ -294,18 +325,40 @@ export const TransactionHandlers = {
       if (!txn)
         return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      // Close does a lot inside one atomic boundary: calc splits, write
-      // CommissionSplit + WalletLedger rows for every upline level, append the
-      // area ledger, check + grant designation milestones, write the audit
-      // row. On a 10-deep upline that's ~30 round-trips — well past Prisma's
-      // 5-second default. Bump both maxWait and timeout to keep close atomic
-      // without false-failing on slow Postgres.
       const result = await prisma.$transaction(
-        async (tx) => closeTransaction(tx, id, auth.id),
+        async (tx) => markTransactionClosed(tx, id, auth.id),
+        { maxWait: 5_000, timeout: 15_000 },
+      );
+
+      return NextResponse.json({
+        success: true,
+        data: { id: result.id, closedAt: result.closedAt },
+      });
+    }, "close");
+  },
+
+  // POST /api/real-estate/transactions/[id]/post-commissions
+  // Admin-only. Runs the engine on an already-CLOSED transaction so the
+  // beneficiary wallets get credited (ON_HOLD until the rule's hold period
+  // elapses). Refuses on PENDING / CANCELLED / already-posted deals.
+  async postCommissions(request: NextRequest, id: string): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      await requireAdmin(auth);
+      const txn = await prisma.transaction.findFirst({
+        where: { id, organizationId: auth.organizationId },
+        select: { id: true },
+      });
+      if (!txn)
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+      // Posting fans out into ~30 round-trips on a 10-deep upline, so we
+      // keep the same maxWait/timeout the original close used.
+      const result = await prisma.$transaction(
+        async (tx) => postCommissions(tx, id, auth.id),
         { maxWait: 10_000, timeout: 60_000 },
       );
 
-      
       return NextResponse.json({
         success: true,
         data: {
@@ -321,7 +374,162 @@ export const TransactionHandlers = {
           })),
         },
       });
-    }, "close");
+    }, "postCommissions");
+  },
+
+  // GET /api/real-estate/transactions/post-commissions?month=YYYY-MM&agentIds=a,b,c
+  // Lists CLOSED transactions whose commissions haven't been posted yet
+  // (no CommissionSplit rows on them). Admin filters by month and/or by
+  // listing/selling agent. Used by the admin Post-Commissions queue.
+  async listEligibleForPost(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      await requireAdmin(auth);
+
+      const url = new URL(request.url);
+      const month = url.searchParams.get("month"); // "YYYY-MM"
+      const range = monthRange(month);
+      const agentIdsCsv = url.searchParams.get("agentIds");
+      const agentIds = agentIdsCsv
+        ? agentIdsCsv
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+
+      const where: Prisma.TransactionWhereInput = {
+        organizationId: auth.organizationId,
+        status: "CLOSED",
+        commissionSplits: { none: {} },
+        ...(range
+          ? { closedAt: { gte: range.from, lt: range.to } }
+          : {}),
+        ...(agentIds.length > 0
+          ? {
+              OR: [
+                { listingAgentId: { in: agentIds } },
+                { sellingAgentId: { in: agentIds } },
+              ],
+            }
+          : {}),
+      };
+
+      const items = await prisma.transaction.findMany({
+        where,
+        orderBy: { closedAt: "asc" },
+        include: {
+          property: { select: { id: true, title: true, code: true, city: true } },
+          buyer: { select: { id: true, name: true } },
+          _count: { select: { documents: true } },
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: items.map(serializeTransaction),
+        meta: {
+          total: items.length,
+          month: month ?? null,
+          agentIds,
+        },
+      });
+    }, "listEligibleForPost");
+  },
+
+  // POST /api/real-estate/transactions/post-commissions
+  // Body: { month?: "YYYY-MM", ids?: string[], agentIds?: string[] }
+  // Posts commissions on every matching CLOSED-without-splits transaction.
+  // Each runs in its own Prisma $transaction (postCommissions is heavy —
+  // ~30 round-trips for a 10-deep upline — so we don't wrap the batch in
+  // one outer txn). Returns a per-item result so the admin can see which
+  // deals were posted and which failed.
+  async bulkPostCommissions(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+      await requireAdmin(auth);
+
+      const body = await request.json().catch(() => ({}));
+      const month: string | undefined = body.month;
+      const ids: string[] | undefined = Array.isArray(body.ids)
+        ? body.ids.filter((v: any) => typeof v === "string")
+        : undefined;
+      const agentIds: string[] | undefined = Array.isArray(body.agentIds)
+        ? body.agentIds.filter((v: any) => typeof v === "string")
+        : undefined;
+      const range = monthRange(month);
+
+      // When the admin selects specific txn ids, those win. Otherwise we
+      // filter by month + agentIds (any of the listing/selling agents
+      // matching) so "post commissions for all of Aarav's closed deals in
+      // May" is a single click.
+      const useExplicitIds = ids && ids.length > 0;
+      const where: Prisma.TransactionWhereInput = {
+        organizationId: auth.organizationId,
+        status: "CLOSED",
+        commissionSplits: { none: {} },
+        ...(useExplicitIds ? { id: { in: ids } } : {}),
+        ...(!useExplicitIds && range
+          ? { closedAt: { gte: range.from, lt: range.to } }
+          : {}),
+        ...(!useExplicitIds && agentIds && agentIds.length > 0
+          ? {
+              OR: [
+                { listingAgentId: { in: agentIds } },
+                { sellingAgentId: { in: agentIds } },
+              ],
+            }
+          : {}),
+      };
+
+      const candidates = await prisma.transaction.findMany({
+        where,
+        select: { id: true, code: true },
+        orderBy: { closedAt: "asc" },
+      });
+
+      const results: Array<{
+        id: string;
+        code: string | null;
+        ok: boolean;
+        baseCommission?: number;
+        splitsCount?: number;
+        error?: string;
+      }> = [];
+
+      for (const c of candidates) {
+        try {
+          const r = await prisma.$transaction(
+            async (tx) => postCommissions(tx, c.id, auth.id),
+            { maxWait: 10_000, timeout: 60_000 },
+          );
+          results.push({
+            id: c.id,
+            code: c.code,
+            ok: true,
+            baseCommission: Number(r.baseCommission),
+            splitsCount: r.splits.length,
+          });
+        } catch (e: any) {
+          results.push({
+            id: c.id,
+            code: c.code,
+            ok: false,
+            error: e?.message || "Failed to post commissions",
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          posted: results.filter((r) => r.ok).length,
+          failed: results.filter((r) => !r.ok).length,
+          month: month ?? null,
+          agentIds: agentIds ?? [],
+          results,
+        },
+      });
+    }, "bulkPostCommissions");
   },
 
   // POST /api/real-estate/transactions/[id]/cancel

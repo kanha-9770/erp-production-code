@@ -195,7 +195,16 @@ export default function EmployeeMasterListPage() {
     return pills;
   }, [filters]);
 
-  const columns: ColumnDef<EmployeeListItem>[] = useMemo(() => [
+  const columns: ColumnDef<EmployeeListItem>[] = useMemo(() => {
+    // Tag a section's columns with their `group` so the Manage Columns
+    // dialog renders them under that heading. Saves repeating
+    // `group: "Section X"` on every column definition.
+    const inGroup = (
+      group: string,
+      cols: ColumnDef<EmployeeListItem>[],
+    ): ColumnDef<EmployeeListItem>[] => cols.map((c) => ({ ...c, group }));
+
+    return [
     {
       id: "avatar",
       header: "",
@@ -228,6 +237,7 @@ export default function EmployeeMasterListPage() {
       header: "Status",
       width: 140,
       sortKey: "status",
+      group: "Overview",
       cell: (e) => (
         <Badge variant={STATUS_VARIANT[e.status ?? "ACTIVE"]} className="text-[10px]">
           {e.status ?? "ACTIVE"}
@@ -240,12 +250,14 @@ export default function EmployeeMasterListPage() {
       width: 130,
       align: "right",
       sortKey: "totalSalary",
+      group: "Overview",
       cell: (e) => <span className="font-semibold">₹{Number(e.totalSalary || 0).toLocaleString()}</span>,
     },
     {
       id: "contact",
       header: "Contact",
       width: 220,
+      group: "Overview",
       cell: (e) => (
         <div className="flex flex-col text-xs gap-0.5">
           <div className="flex items-center gap-1.5 text-primary hover:underline truncate">
@@ -264,6 +276,7 @@ export default function EmployeeMasterListPage() {
       header: "Joined",
       width: 130,
       sortKey: "dateOfJoining",
+      group: "Overview",
       cell: (e) => (
         <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
           <Calendar className="h-3 w-3" />
@@ -271,7 +284,530 @@ export default function EmployeeMasterListPage() {
         </span>
       ),
     },
-  ], []);
+
+    // ── Optional columns (mirror every Employee Form field) ────────────
+    // All defaultHidden so the default view stays compact. HR opens the
+    // Manage Columns dialog and toggles whichever fields they need for the
+    // task at hand (payroll review, exit tracking, KYC audit, etc.).
+    //
+    // Sections are tagged via the `inGroup` helper so the dialog can render
+    // them under a section header (Personal / Contact / Employment / etc.).
+
+    // Section 1 — Personal Information
+    ...inGroup("Personal Information", [
+    {
+      id: "salutation",
+      header: "Salutation",
+      width: 100,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.salutation ?? "—"}</span>,
+    },
+    {
+      id: "firstName",
+      header: "First Name",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-sm">{e.firstName ?? "—"}</span>,
+    },
+    {
+      id: "lastName",
+      header: "Last Name",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-sm">{e.lastName ?? "—"}</span>,
+    },
+    {
+      id: "dob",
+      header: "Date of Birth",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="text-xs text-muted-foreground">
+          {e.dob ? new Date(e.dob).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "gender",
+      header: "Gender",
+      width: 100,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs uppercase">{e.gender ?? "—"}</span>,
+    },
+    {
+      id: "placeOfBirth",
+      header: "Place of Birth",
+      width: 160,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.placeOfBirth ?? "—"}</span>,
+    },
+    {
+      id: "bloodGroup",
+      header: "Blood Group",
+      width: 110,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs font-medium">{e.bloodGroup ?? "—"}</span>,
+    },
+    {
+      id: "maritalStatus",
+      header: "Marital Status",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.maritalStatus ?? "—"}</span>,
+    },
+    {
+      id: "nationality",
+      header: "Nationality",
+      width: 120,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.nationality ?? "—"}</span>,
+    },
+    ]),
+
+    // Section 2 — Contact Information
+    ...inGroup("Contact Information", [
+    {
+      id: "emailAddress1",
+      header: "Personal Email",
+      width: 220,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.emailAddress1 ?? "—"}</span>,
+    },
+    {
+      id: "emailAddress2",
+      header: "Company Email",
+      width: 220,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.emailAddress2 ?? "—"}</span>,
+    },
+    {
+      id: "personalContact",
+      header: "Cell Number",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.personalContact ?? "—"}</span>,
+    },
+    {
+      id: "alternateNo1",
+      header: "Alternate No 1",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.alternateNo1 ?? "—"}</span>,
+    },
+    {
+      id: "alternateNo2",
+      header: "Alternate No 2",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.alternateNo2 ?? "—"}</span>,
+    },
+    {
+      id: "currentCity",
+      header: "Current City",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.currentCity ?? "—"}</span>,
+    },
+    {
+      id: "currentState",
+      header: "Current State",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.currentState ?? "—"}</span>,
+    },
+    {
+      id: "currentCountry",
+      header: "Current Country",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.currentCountry ?? "—"}</span>,
+    },
+    {
+      id: "permanentCity",
+      header: "Permanent City",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.permanentCity ?? "—"}</span>,
+    },
+    {
+      id: "permanentState",
+      header: "Permanent State",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.permanentState ?? "—"}</span>,
+    },
+    {
+      id: "permanentCountry",
+      header: "Permanent Country",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.permanentCountry ?? "—"}</span>,
+    },
+    {
+      id: "emergencyContactName",
+      header: "Emergency Contact",
+      width: 180,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.emergencyContactName ?? "—"}</span>,
+    },
+    {
+      id: "emergencyPhone",
+      header: "Emergency Phone",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.emergencyPhone ?? "—"}</span>,
+    },
+    {
+      id: "emergencyRelation",
+      header: "Emergency Relation",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.emergencyRelation ?? "—"}</span>,
+    },
+    ]),
+
+    // Section 3 — Employment Details
+    ...inGroup("Employment Details", [
+    {
+      id: "employmentType",
+      header: "Employment Type",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs uppercase">{e.employmentType ?? "—"}</span>,
+    },
+    {
+      id: "department",
+      header: "Department",
+      width: 160,
+      defaultHidden: true,
+      sortKey: "department",
+      cell: (e) => <span className="text-sm">{e.department ?? "—"}</span>,
+    },
+    {
+      id: "designation",
+      header: "Designation",
+      width: 180,
+      defaultHidden: true,
+      sortKey: "designation",
+      cell: (e) => <span className="text-sm">{e.designation ?? "—"}</span>,
+    },
+    {
+      id: "companyName",
+      header: "Company",
+      width: 160,
+      defaultHidden: true,
+      cell: (e) => <span className="text-sm">{e.companyName ?? "—"}</span>,
+    },
+    {
+      id: "branch",
+      header: "Branch",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.branch ?? "—"}</span>,
+    },
+    {
+      id: "shiftType",
+      header: "Shift Type",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs uppercase">{e.shiftType ?? "—"}</span>,
+    },
+    {
+      id: "inTime",
+      header: "In Time",
+      width: 100,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.inTime ?? "—"}</span>,
+    },
+    {
+      id: "outTime",
+      header: "Out Time",
+      width: 100,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.outTime ?? "—"}</span>,
+    },
+    {
+      id: "totalWorkingHours",
+      header: "Working Hours/Day",
+      width: 150,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="font-mono text-xs tabular-nums">
+          {e.totalWorkingHours != null ? `${e.totalWorkingHours}h` : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "engagementTeam",
+      header: "Engagement Team",
+      width: 180,
+      defaultHidden: true,
+      cell: (e) => <span className="text-sm">{e.employeeEngagementTeamName ?? "—"}</span>,
+    },
+    {
+      id: "yearsOfAgreement",
+      header: "Years of Agreement",
+      width: 150,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="font-mono text-xs tabular-nums">
+          {e.yearsOfAgreement != null ? `${e.yearsOfAgreement} yr` : "—"}
+        </span>
+      ),
+    },
+    ]),
+
+    // Section 4 — Document Uploads
+    ...inGroup("Document Uploads", [
+    {
+      id: "aadharCardNo",
+      header: "Aadhaar Number",
+      width: 170,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.aadharCardNo ?? "—"}</span>,
+    },
+    {
+      id: "aadharCardUpload",
+      header: "Aadhaar Upload",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) =>
+        e.aadharCardUpload ? (
+          <a href={e.aadharCardUpload} target="_blank" rel="noreferrer" className="text-xs text-primary underline-offset-2 hover:underline">
+            View
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "panCardUpload",
+      header: "PAN Upload",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) =>
+        e.panCardUpload ? (
+          <a href={e.panCardUpload} target="_blank" rel="noreferrer" className="text-xs text-primary underline-offset-2 hover:underline">
+            View
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "passportUpload",
+      header: "Passport Upload",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) =>
+        e.passportUpload ? (
+          <a href={e.passportUpload} target="_blank" rel="noreferrer" className="text-xs text-primary underline-offset-2 hover:underline">
+            View
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    ]),
+
+    // Section 5 — Salary & Compensation
+    ...inGroup("Salary & Compensation", [
+    {
+      id: "salaryMode",
+      header: "Salary Mode",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.salaryMode ?? "—"}</span>,
+    },
+    {
+      id: "baseSalary",
+      header: "Base Salary",
+      width: 130,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) =>
+        e.baseSalary ? (
+          <span className="font-mono text-xs tabular-nums">₹{Number(e.baseSalary).toLocaleString()}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "perHourSalary",
+      header: "Per Hour Salary",
+      width: 140,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) =>
+        e.perHourSalary ? (
+          <span className="font-mono text-xs tabular-nums">₹{Number(e.perHourSalary).toLocaleString()}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "isOvertimeApplicable",
+      header: "Overtime Applicable",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="text-xs font-medium">
+          {e.isOvertimeApplicable === true ? "Yes" : e.isOvertimeApplicable === false ? "No" : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "overTime",
+      header: "Overtime Rate",
+      width: 130,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) =>
+        e.overTime ? (
+          <span className="font-mono text-xs tabular-nums">₹{Number(e.overTime).toLocaleString()}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "bonusAmount",
+      header: "Bonus Amount",
+      width: 130,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) =>
+        e.bonusAmount ? (
+          <span className="font-mono text-xs tabular-nums">₹{Number(e.bonusAmount).toLocaleString()}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+    {
+      id: "bonusAfterYears",
+      header: "Bonus After (Yrs)",
+      width: 140,
+      align: "right",
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="font-mono text-xs tabular-nums">
+          {e.bonusAfterYears != null ? `${e.bonusAfterYears}` : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "incrementMonth",
+      header: "Increment Month",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => {
+        const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return (
+          <span className="text-xs">
+            {e.incrementMonth ? MONTHS[e.incrementMonth] ?? `${e.incrementMonth}` : "—"}
+          </span>
+        );
+      },
+    },
+    ]),
+
+    // Section 6 — Bank Details
+    ...inGroup("Bank Details", [
+    {
+      id: "bankName",
+      header: "Bank Name",
+      width: 160,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs">{e.bankName ?? "—"}</span>,
+    },
+    {
+      id: "bankAccountNo",
+      header: "Bank Account No",
+      width: 170,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs">{e.bankAccountNo ?? "—"}</span>,
+    },
+    {
+      id: "ifscCode",
+      header: "IFSC Code",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs uppercase">{e.ifscCode ?? "—"}</span>,
+    },
+    {
+      id: "swiftCode",
+      header: "SWIFT / BIC",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => <span className="font-mono text-xs uppercase">{e.swiftCode ?? "—"}</span>,
+    },
+    ]),
+
+    // Section 7 — Exit / Resignation
+    ...inGroup("Exit / Resignation", [
+    {
+      id: "resignationLetterDate",
+      header: "Resignation Date",
+      width: 150,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="text-xs text-muted-foreground">
+          {e.resignationLetterDate
+            ? new Date(e.resignationLetterDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+            : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "dateOfLeaving",
+      header: "Date of Leaving",
+      width: 140,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="text-sm text-muted-foreground">
+          {e.dateOfLeaving
+            ? new Date(e.dateOfLeaving).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+            : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "reasonOfLeaving",
+      header: "Reason of Leaving",
+      width: 200,
+      defaultHidden: true,
+      cell: (e) => <span className="text-xs text-muted-foreground truncate">{e.reasonOfLeaving ?? "—"}</span>,
+    },
+    {
+      id: "noticeServed",
+      header: "Notice Served",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="text-xs font-medium">
+          {e.noticeServed === true ? "Yes" : e.noticeServed === false ? "No" : "—"}
+        </span>
+      ),
+    },
+    ]),
+
+    // System / Identifiers
+    ...inGroup("System", [
+    {
+      id: "userId",
+      header: "User ID",
+      width: 130,
+      defaultHidden: true,
+      cell: (e) => (
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {e.userId ?? "—"}
+        </span>
+      ),
+    },
+    ]),
+  ];
+  }, []);
 
   const handleDelete = async (e: EmployeeListItem) => {
     if (!confirm(`Delete employee "${e.employeeName}"? This cannot be undone.`)) return;
@@ -315,7 +851,11 @@ export default function EmployeeMasterListPage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="employee-master" columns={columns} />
+              <ManageColumnsButton
+                tableId="employee-master"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-8" onClick={() => setCreateOpen(true)}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> New employee
               </Button>

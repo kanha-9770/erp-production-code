@@ -573,6 +573,11 @@ export interface Wallet {
     last_name: string | null;
     avatar: string | null;
   };
+  // Only set by GET /api/real-estate/wallets/me. Explains why
+  // `pendingBalance` is still on hold after the auto-release pass so the
+  // payouts UI can render an actionable next step.
+  heldReason?: null | "HOLD_PERIOD" | "COMPLIANCE" | "FROZEN";
+  nextReleaseAt?: string | null;
 }
 
 export interface LedgerEntry {

@@ -69,7 +69,10 @@ export const transactionsApi = baseApi.injectEndpoints({
       ],
     }),
 
-    closeTransaction: builder.mutation<SingleResponse<CommissionPreview>, string>({
+    closeTransaction: builder.mutation<
+      { success: boolean; data: { id: string; closedAt: string } },
+      string
+    >({
       query: (id) => ({
         url: `/real-estate/transactions/${id}/close`,
         method: "POST",
@@ -77,7 +80,75 @@ export const transactionsApi = baseApi.injectEndpoints({
       invalidatesTags: (_r, _e, id) => [
         { type: "Transaction", id },
         { type: "Transactions", id: "LIST" },
+        { type: "Transactions", id: "ELIGIBLE_FOR_POST" },
         { type: "Properties", id: "LIST" },
+      ],
+    }),
+
+    postCommissionsForTransaction: builder.mutation<
+      SingleResponse<CommissionPreview>,
+      string
+    >({
+      query: (id) => ({
+        url: `/real-estate/transactions/${id}/post-commissions`,
+        method: "POST",
+      }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Transaction", id },
+        { type: "Transactions", id: "LIST" },
+        { type: "Transactions", id: "ELIGIBLE_FOR_POST" },
+        { type: "MyWallet", id: "ME" },
+        { type: "MyLedger", id: "ME" },
+        { type: "Wallets", id: "LIST" },
+      ],
+    }),
+
+    getEligibleForPost: builder.query<
+      {
+        success: boolean;
+        data: Transaction[];
+        meta: { total: number; month: string | null; agentIds: string[] };
+      },
+      { month?: string; agentIds?: string[] } | void
+    >({
+      query: (params) => {
+        const flat: Record<string, any> = { ...(params ?? {}) };
+        if (Array.isArray(flat.agentIds)) {
+          flat.agentIds = flat.agentIds.join(",");
+        }
+        return `/real-estate/transactions/post-commissions${toQuery(flat)}`;
+      },
+      providesTags: [{ type: "Transactions", id: "ELIGIBLE_FOR_POST" }],
+    }),
+
+    bulkPostCommissions: builder.mutation<
+      {
+        success: boolean;
+        data: {
+          posted: number;
+          failed: number;
+          month: string | null;
+          agentIds: string[];
+          results: Array<{
+            id: string;
+            code: string | null;
+            ok: boolean;
+            baseCommission?: number;
+            splitsCount?: number;
+            error?: string;
+          }>;
+        };
+      },
+      { month?: string; ids?: string[]; agentIds?: string[] }
+    >({
+      query: (body) => ({
+        url: "/real-estate/transactions/post-commissions",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: [
+        { type: "Transactions", id: "LIST" },
+        { type: "Transactions", id: "ELIGIBLE_FOR_POST" },
         { type: "MyWallet", id: "ME" },
         { type: "MyLedger", id: "ME" },
         { type: "Wallets", id: "LIST" },
@@ -180,6 +251,9 @@ export const {
   useCreateTransactionMutation,
   useUpdateTransactionMutation,
   useCloseTransactionMutation,
+  usePostCommissionsForTransactionMutation,
+  useGetEligibleForPostQuery,
+  useBulkPostCommissionsMutation,
   useCancelTransactionMutation,
   usePreviewCommissionMutation,
   useAddTransactionDocumentMutation,

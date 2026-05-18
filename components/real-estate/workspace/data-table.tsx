@@ -56,6 +56,13 @@ export interface ColumnDef<T> {
   align?: "left" | "right";
   defaultHidden?: boolean;
   cellClassName?: string;
+  /**
+   * Logical section the column belongs to (e.g. "Personal Information",
+   * "Bank Details"). The Manage Columns dialog groups columns by this label
+   * so HR can find a field by section rather than scanning a flat list.
+   * Falls back to "Other" when unset.
+   */
+  group?: string;
 }
 
 interface DataTableProps<T> {
@@ -80,16 +87,16 @@ interface CellRef { r: number; c: number }
  */
 function useVisibleColumns<T>(
   columns: ColumnDef<T>[],
-  hidden: Record<string, true>,
+  hidden: Record<string, boolean>,
 ): ColumnDef<T>[] {
   return useMemo(() => {
     return columns.filter((c) => {
       if (c.pinned) return true;
-      const userHidden = hidden[c.id];
-      if (userHidden) return false;
-      const userTouched = hidden[c.id] !== undefined;
-      if (!userTouched && c.defaultHidden) return false;
-      return true;
+      // Tri-state: explicit override wins, otherwise honour defaultHidden.
+      const explicit = hidden[c.id];
+      if (explicit === true) return false;     // user hid it
+      if (explicit === false) return true;     // user showed it
+      return !c.defaultHidden;                  // no override → use default
     });
   }, [columns, hidden]);
 }
@@ -332,7 +339,7 @@ export function DataTable<T>({
                       {idx === visible.length - 1 && (
                         <SettingsMenu
                           columns={columns}
-                          isHidden={isHidden}
+                          hiddenMap={prefs.hidden}
                           toggleHidden={toggleHidden}
                           density={prefs.density}
                           setDensity={setDensity}
@@ -362,7 +369,7 @@ export function DataTable<T>({
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <tr key={`sk-${i}`}>
-                  <td className="border-b border-r border-border bg-muted/30 sticky left-0 z-20" />
+                  <td className="border-b border-r border-border bg-muted/30 sticky left-0 z-30" />
                   {visible.map((c) => (
                     <td
                       key={c.id}
@@ -404,7 +411,7 @@ export function DataTable<T>({
                     {/* Row number gutter — Excel-style 1, 2, 3 ... */}
                     <td
                       className={cn(
-                        "border-b border-r border-border bg-muted/40 text-center text-[10px] tabular-nums text-muted-foreground select-none sticky left-0 z-20",
+                        "border-b border-r border-border bg-muted/40 text-center text-[10px] tabular-nums text-muted-foreground select-none sticky left-0 z-30",
                         cellPad,
                         isInRange && "bg-primary/10 text-primary font-semibold",
                       )}
@@ -440,6 +447,7 @@ export function DataTable<T>({
                             col.align === "right" && "text-right tabular-nums",
                             col.cellClassName,
                             isPinned && "sticky z-10 bg-background shadow-[1px_0_0_0_var(--border)]",
+                            !isPinned && "z-0",
                             isPinned && isRowSelected && "bg-primary/[0.04]",
                             isInCellRange && !isFocus && "bg-primary/[0.10]",
                             isFocus && "bg-primary/[0.18] ring-2 ring-primary ring-inset",
@@ -512,15 +520,16 @@ function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
 
 function SettingsMenu<T>({
   columns,
-  isHidden,
+  hiddenMap,
   toggleHidden,
   density,
   setDensity,
   onCopy,
 }: {
   columns: ColumnDef<T>[];
-  isHidden: (id: string) => boolean;
-  toggleHidden: (id: string) => void;
+  // Raw hidden map so we can distinguish "explicit override" from "absent".
+  hiddenMap: Record<string, boolean>;
+  toggleHidden: (id: string, defaultHidden?: boolean) => void;
   density: "compact" | "comfortable";
   setDensity: (d: "compact" | "comfortable") => void;
   onCopy?: () => void;
@@ -583,15 +592,25 @@ function SettingsMenu<T>({
             Columns
           </div>
           {toggleable.map((c) => {
-            const hidden = isHidden(c.id);
+            // Effective visibility: explicit override wins, else fall back
+            // to defaultHidden. Matches useVisibleColumns above.
+            const explicit = hiddenMap[c.id];
+            const effectivelyHidden =
+              explicit === true
+                ? true
+                : explicit === false
+                  ? false
+                  : !!c.defaultHidden;
             return (
               <label
                 key={c.id}
                 className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-sm"
               >
                 <Checkbox
-                  checked={!hidden}
-                  onCheckedChange={() => toggleHidden(c.id)}
+                  checked={!effectivelyHidden}
+                  onCheckedChange={() =>
+                    toggleHidden(c.id, !!c.defaultHidden)
+                  }
                 />
                 <span className="flex-1 truncate">{c.header}</span>
               </label>

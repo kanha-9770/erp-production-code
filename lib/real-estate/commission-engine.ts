@@ -376,15 +376,33 @@ export async function closeTransaction(
   tx: Tx,
   transactionId: string,
   invokerUserId: string,
+  opts: { mode?: "close-and-post" | "post-only" } = {},
 ) {
+  const mode = opts.mode ?? "close-and-post";
   const transaction = await tx.transaction.findUniqueOrThrow({
     where: { id: transactionId },
     include: { property: true },
   });
-  if (transaction.status === "CLOSED")
-    throw new Error("Transaction already closed");
-  if (transaction.status === "CANCELLED")
-    throw new Error("Cannot close a cancelled transaction");
+
+  // Status guards depend on which step we're running. Agent close (the
+  // default) expects PENDING. Admin post expects CLOSED-but-not-posted-yet.
+  if (mode === "close-and-post") {
+    if (transaction.status === "CLOSED")
+      throw new Error("Transaction already closed");
+    if (transaction.status === "CANCELLED")
+      throw new Error("Cannot close a cancelled transaction");
+  } else {
+    if (transaction.status !== "CLOSED")
+      throw new Error(
+        `Commissions can only be posted on a CLOSED transaction (currently ${transaction.status}).`,
+      );
+    // Idempotency — refuse to double-post on top of existing splits.
+    const existingSplits = await tx.commissionSplit.count({
+      where: { transactionId },
+    });
+    if (existingSplits > 0)
+      throw new Error("Commissions have already been posted for this transaction.");
+  }
 
   // Engine selector — when this org has switched to the slab plan engine
   // (RebmSettings.planEngine === "SLAB"), hand off to the dedicated slab
@@ -396,7 +414,7 @@ export async function closeTransaction(
   });
   if (settings?.planEngine === "SLAB" && settings.activePlanId) {
     const { closeTransactionSlab } = await import("./slab-engine");
-    const slabResult = await closeTransactionSlab(tx, transactionId, invokerUserId);
+    const slabResult = await closeTransactionSlab(tx, transactionId, invokerUserId, { mode });
     // Adapt SlabCalculationResult → CalculationResult so the route handler's
     // response builder (which reads baseCommission / ruleId / ruleVersion /
     // splits) doesn't have to branch on engine.
@@ -418,38 +436,52 @@ export async function closeTransaction(
     };
   }
 
-  // Required documents check (FR-4.8).
-  const docs = await tx.transactionDocument.count({
-    where: { transactionId, type: { in: ["CONTRACT", "SALE_DEED"] } },
-  });
-  if (docs === 0)
-    throw new Error(
-      "Transaction needs a CONTRACT or SALE_DEED document attached before closing.",
-    );
-  if (transaction.property.status !== "UNDER_CONTRACT")
-    throw new Error(
-      `Property must be UNDER_CONTRACT to close (currently ${transaction.property.status}).`,
-    );
+  // Required documents check (FR-4.8). Only enforced at agent-close time —
+  // once the deal is already CLOSED the proof has been accepted.
+  if (mode === "close-and-post") {
+    const docs = await tx.transactionDocument.count({
+      where: { transactionId, type: { in: ["CONTRACT", "SALE_DEED"] } },
+    });
+    if (docs === 0)
+      throw new Error(
+        "Transaction needs a CONTRACT or SALE_DEED document attached before closing.",
+      );
+    if (transaction.property.status !== "UNDER_CONTRACT")
+      throw new Error(
+        `Property must be UNDER_CONTRACT to close (currently ${transaction.property.status}).`,
+      );
+  }
 
   const calc = await calculateCommission(tx, transactionId);
 
-  // Persist the rule snapshot on the transaction (FR-5.11 / BR-9).
+  // Persist the rule snapshot on the transaction (FR-5.11 / BR-9). In
+  // post-only mode the status is already CLOSED so we only stamp the rule
+  // version + base commission; the close-and-post path also flips status.
   await tx.transaction.update({
     where: { id: transactionId },
-    data: {
-      status: "CLOSED",
-      closedAt: new Date(),
-      commissionRuleId: calc.ruleId,
-      commissionRuleVersion: calc.ruleVersion,
-      baseCommission: calc.baseCommission,
-    },
+    data:
+      mode === "close-and-post"
+        ? {
+            status: "CLOSED",
+            closedAt: new Date(),
+            commissionRuleId: calc.ruleId,
+            commissionRuleVersion: calc.ruleVersion,
+            baseCommission: calc.baseCommission,
+          }
+        : {
+            commissionRuleId: calc.ruleId,
+            commissionRuleVersion: calc.ruleVersion,
+            baseCommission: calc.baseCommission,
+          },
   });
 
-  // Move property to SOLD.
-  await tx.property.update({
-    where: { id: transaction.propertyId },
-    data: { status: "SOLD", finalClosingAt: new Date() },
-  });
+  // Move property to SOLD on agent close. Already SOLD in post-only mode.
+  if (mode === "close-and-post") {
+    await tx.property.update({
+      where: { id: transaction.propertyId },
+      data: { status: "SOLD", finalClosingAt: new Date() },
+    });
+  }
 
   // Persist the splits + ledger entries. The brokerage row has no beneficiary
   // user (it's the house) — we still create the CommissionSplit row for
@@ -540,6 +572,67 @@ export async function closeTransaction(
   });
 
   return calc;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Two-step close + post (agent closes with proof, admin posts commissions)
+//
+// Agents flip a deal from PENDING → CLOSED with proof (CONTRACT/SALE_DEED).
+// That step locks the property to SOLD but writes NO splits or wallet rows.
+// The admin then reviews CLOSED-unposted deals and posts commissions in
+// bulk, which is what actually credits the beneficiary wallets.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Agent-facing close. Validates proof + property state and flips status
+// without posting commissions. Idempotent on already-CLOSED transactions —
+// throws so a double-tap from the UI is surfaced clearly.
+export async function markTransactionClosed(
+  tx: Tx,
+  transactionId: string,
+  invokerUserId: string,
+): Promise<{ id: string; closedAt: Date }> {
+  const txn = await tx.transaction.findUniqueOrThrow({
+    where: { id: transactionId },
+    include: { property: { select: { id: true, status: true } } },
+  });
+  if (txn.status === "CLOSED") throw new Error("Transaction already closed");
+  if (txn.status === "CANCELLED") throw new Error("Cannot close a cancelled transaction");
+
+  const docs = await tx.transactionDocument.count({
+    where: { transactionId, type: { in: ["CONTRACT", "SALE_DEED"] } },
+  });
+  if (docs === 0)
+    throw new Error(
+      "Upload a CONTRACT or SALE_DEED document before closing this transaction.",
+    );
+  if (txn.property.status !== "UNDER_CONTRACT")
+    throw new Error(
+      `Property must be UNDER_CONTRACT to close (currently ${txn.property.status}).`,
+    );
+
+  const closedAt = new Date();
+  await tx.transaction.update({
+    where: { id: transactionId },
+    data: { status: "CLOSED", closedAt },
+  });
+  await tx.property.update({
+    where: { id: txn.property.id },
+    data: { status: "SOLD", finalClosingAt: closedAt },
+  });
+
+  // Mark uploaded by the closer in case downstream wants to know who agent-closed
+  void invokerUserId;
+  return { id: transactionId, closedAt };
+}
+
+// Admin-only — run the engine on an already-CLOSED transaction and credit
+// beneficiary wallets. Delegates to whichever engine is active for the org.
+export async function postCommissions(
+  tx: Tx,
+  transactionId: string,
+  invokerUserId: string,
+) {
+  return closeTransaction(tx, transactionId, invokerUserId, { mode: "post-only" });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -649,14 +742,18 @@ export async function releaseDueCommissions(
   tx: Tx,
   organizationId: string,
   invokerUserId: string,
+  opts: { userId?: string } = {},
 ): Promise<{ released: number }> {
   // Find on-hold splits older than the rule's holdPeriodDays. We do this in
   // one query by joining splits → transaction → rule.
+  // When opts.userId is given, scope to that beneficiary only — the wallet
+  // GET handler uses this to auto-release on read so agents don't have to
+  // wait for an admin to click a button.
   const candidates = await tx.commissionSplit.findMany({
     where: {
       organizationId,
       status: "ON_HOLD",
-      beneficiaryUserId: { not: null },
+      beneficiaryUserId: opts.userId ? opts.userId : { not: null },
       ledgerEntryId: { not: null },
     },
     include: {
