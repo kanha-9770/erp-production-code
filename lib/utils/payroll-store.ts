@@ -33,6 +33,10 @@ export interface SampleEmployee {
   // this specific employee. Pro-rated by payable days like every other
   // earning, surfaced on the payslip as a "Bonus" line.
   bonusAmount: number;
+  // Per-employee override for the Pay Rule's overtime block. When explicitly
+  // `false`, the engine skips OT for this employee regardless of what the
+  // assigned profile says. Null/undefined/true defers to the profile.
+  isOvertimeApplicable?: boolean | null;
   matchKeys: string[];
   dateOfJoining: string | null;
   dateOfLeaving: string | null;
@@ -1506,6 +1510,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
             totalSalary: true,
             givenSalary: true,
             bonusAmount: true,
+            isOvertimeApplicable: true,
             dateOfJoining: true,
             dateOfLeaving: true,
           },
@@ -1568,6 +1573,10 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         department: u.employee?.department ?? u.department ?? '',
         totalSalary,
         bonusAmount: empBonus,
+        // Per-employee OT toggle from Employee Master. Null means the field
+        // wasn't set on this employee yet — the engine defaults that to "OT
+        // applies per pay rule" so older rows aren't accidentally disabled.
+        isOvertimeApplicable: u.employee?.isOvertimeApplicable ?? null,
         matchKeys,
         dateOfJoining: u.employee?.dateOfJoining
           ? new Date(u.employee.dateOfJoining).toISOString().slice(0, 10)

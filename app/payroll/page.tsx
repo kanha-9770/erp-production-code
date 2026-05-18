@@ -1758,19 +1758,21 @@ export default function PayrollPage() {
                           { label: 'Books & Periodicals', value: e.books },
                           { label: 'Uniform', value: e.uniform },
                           { label: 'Special Allowance', value: e.specialAllowance },
-                          { label: 'Bonus (Employee Master)', value: e.employeeBonus ?? 0 },
                           { label: 'Overtime', value: e.overtime },
                           // Profile-level bonuses from the assigned Pay Rule
-                          // Profile. These are smoothed monthly amounts: for
-                          // "Monthly" frequency you'll see the full bonus
-                          // every month; for annual/half-yearly/one-time the
-                          // value is divided across the period. Each row
-                          // auto-hides when the bonus is disabled (value=0).
-                          { label: 'Statutory Bonus', value: ba?.statutory ?? 0, sub: 'Payment of Bonus Act' },
-                          { label: 'Performance Bonus', value: ba?.performance ?? 0, sub: 'monthly accrual' },
-                          { label: 'Festival Bonus', value: ba?.festival ?? 0, sub: 'annualised' },
-                          { label: 'Joining Bonus', value: ba?.joining ?? 0, sub: 'amortised over clawback' },
-                          { label: 'Retention Bonus', value: ba?.retention ?? 0, sub: 'as per profile frequency' },
+                          // Profile. These are smoothed monthly amounts that
+                          // live INSIDE CTC (absorbed by the special-allowance
+                          // auto-balance, so gross still equals baseSalary).
+                          // Each row auto-hides when the bonus is disabled.
+                          { label: 'Statutory Bonus', value: ba?.statutory ?? 0, sub: 'inside CTC · Payment of Bonus Act' },
+                          { label: 'Performance Bonus', value: ba?.performance ?? 0, sub: 'inside CTC · monthly accrual' },
+                          { label: 'Festival Bonus', value: ba?.festival ?? 0, sub: 'inside CTC · annualised' },
+                          { label: 'Joining Bonus', value: ba?.joining ?? 0, sub: 'inside CTC · amortised over clawback' },
+                          { label: 'Retention Bonus', value: ba?.retention ?? 0, sub: 'inside CTC · profile frequency' },
+                          // Employee Master bonus is paid ABOVE CTC — it does
+                          // not shrink the structure base, it stacks on top
+                          // of gross as a separate line.
+                          { label: 'Bonus (Employee Master)', value: e.employeeBonus ?? 0, sub: 'above CTC · monthly top-up' },
                         ]
                       : [];
                     const visible = earnRows.filter((r) => r.value > 0);

@@ -247,6 +247,11 @@ model User {
   jobOffers           JobOffer[]               @relation("JobOfferCreator")
   appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
   employeeReferrals   EmployeeReferral[]       @relation("EmployeeReferralCreator")
+  engagementKaizens      EngagementKaizen[]
+  engagementSuggestions  EngagementSuggestion[]
+  engagementProblems     EngagementProblem[]
+  engagementInitiatives  EngagementInitiative[]
+  engagementTargets      EngagementTarget[]
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
@@ -1329,31 +1334,74 @@ model Employee {
   id                         String          @id @default(cuid())
   userId                     String?         @unique @map("user_id")
   user                       User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // ── 1. Personal information ──────────────────────────────────────────
+  // employeeName is kept as the displayed combined name for backwards
+  // compatibility with everything that reads it (the engine, payslips,
+  // attendance widgets…). firstName / lastName / salutation are the new
+  // canonical inputs; the form composes employeeName on save.
   employeeName               String          @map("employee_name")
+  salutation                 String?
+  firstName                  String?         @map("first_name")
+  lastName                   String?         @map("last_name")
   gender                     Gender?         @default(OTHER)
-  department                 String?
-  designation                String?
   dob                        DateTime?
+  placeOfBirth               String?         @map("place_of_birth")
+  bloodGroup                 String?         @map("blood_group")
+  maritalStatus              String?         @map("marital_status")
+  nationality                String?
+  employeeImage              String?         @map("employee_image")
+  // Legacy single-field address holdovers — preserved so prior data still
+  // displays. The structured Current/Permanent address columns below are
+  // the new source of truth going forward.
   nativePlace                String?         @map("native_place")
   country                    String?
   permanentAddress           String?         @map("permanent_address")
   currentAddress             String?         @map("current_address")
+  department                 String?
+  designation                String?
+  // ── 2. Contact information ──────────────────────────────────────────
   personalContact            String?         @map("personal_contact")
   alternateNo1               String?         @map("alternate_no_1")
   alternateNo2               String?         @map("alternate_no_2")
   emailAddress1              String?         @map("email_address_1")
   emailAddress2              String?         @map("email_address_2")
-  aadharCardUpload           String?         @map("aadhar_card_upload")
-  aadharCardNo               String?         @map("aadhar_card_no")
-  panCardUpload              String?         @map("pan_card_upload")
-  passportUpload             String?         @map("passport_upload")
-  bankName                   String?         @map("bank_name")
-  bankAccountNo              String?         @map("bank_account_no")
-  ifscCode                   String?         @map("ifsc_code")
+  // Structured current address — what the form now collects. Falls back
+  // to currentAddress (above) for rows written before this change.
+  currentAddressLine1        String?         @map("current_address_line_1")
+  currentAddressLine2        String?         @map("current_address_line_2")
+  currentCity                String?         @map("current_city")
+  currentState               String?         @map("current_state")
+  currentPostalCode          String?         @map("current_postal_code")
+  currentCountry             String?         @map("current_country")
+  currentAccommodationType   String?         @map("current_accommodation_type")
+  // Structured permanent address. `permanentSameAsCurrent` is stored as a
+  // soft flag so the form can re-derive the toggle on edit; persistence
+  // of duplicated values is preserved either way.
+  permanentSameAsCurrent     Boolean?        @default(false) @map("permanent_same_as_current")
+  permanentAddressLine1      String?         @map("permanent_address_line_1")
+  permanentAddressLine2      String?         @map("permanent_address_line_2")
+  permanentCity              String?         @map("permanent_city")
+  permanentState             String?         @map("permanent_state")
+  permanentPostalCode        String?         @map("permanent_postal_code")
+  permanentCountry           String?         @map("permanent_country")
+  permanentAccommodationType String?         @map("permanent_accommodation_type")
+  emergencyContactName       String?         @map("emergency_contact_name")
+  emergencyPhone             String?         @map("emergency_phone")
+  emergencyRelation          String?         @map("emergency_relation")
+  // Additional emergency contacts beyond the primary three fields above.
+  // Stored as an array of `{ name, phone, relation }` JSON objects so HR
+  // can list multiple next-of-kin without adding more columns. The first
+  // row is mirrored to the legacy `emergencyContactName/Phone/Relation`
+  // columns for backward compatibility with older reports.
+  emergencyContacts          Json?           @map("emergency_contacts")
+  // ── 3. Employment details ───────────────────────────────────────────
+  employmentType             String?         @map("employment_type")
+  branch                     String?
   status                     EmployeeStatus? @default(ACTIVE)
   shiftType                  String?         @map("shift_type")
   inTime                     String?         @map("in_time")
   outTime                    String?         @map("out_time")
+  totalWorkingHours          Decimal?        @default(8) @map("total_working_hours")
   dateOfJoining              DateTime?       @map("date_of_joining")
   dateOfLeaving              DateTime?       @map("date_of_leaving")
   incrementMonth             Int?            @map("increment_month")
@@ -1364,17 +1412,41 @@ model Employee {
   // should write to `engagementTeamId` and let serializers fall back to the
   // related team's name. Will be deprecated once all writers are migrated.
   employeeEngagementTeamName String?         @map("employee_engagement_team_name")
+
   // FK to EngagementTeam. Engagement pages (Kaizen, Suggestion, etc.) filter
   // by this so members of one team can't see another team's records. HR /
   // Admin bypass the filter and see everything.
   engagementTeamId           String?         @map("engagement_team_id")
   engagementTeam             EngagementTeam? @relation(fields: [engagementTeamId], references: [id], onDelete: SetNull)
+
+  // ── 4. Document uploads ────────────────────────────────────────────
+  aadharCardUpload           String?         @map("aadhar_card_upload")
+  aadharCardNo               String?         @map("aadhar_card_no")
+  panCardUpload              String?         @map("pan_card_upload")
+  passportUpload             String?         @map("passport_upload")
+  // ── 5. Salary & compensation ───────────────────────────────────────
+  salaryMode                 String?         @map("salary_mode")
+  baseSalary                 Decimal?        @map("base_salary")
+  perHourSalary              Decimal?        @map("per_hour_salary")
+  isOvertimeApplicable       Boolean?        @default(false) @map("is_overtime_applicable")
   totalSalary                Decimal?        @map("total_salary")
   givenSalary                Decimal?        @map("given_salary")
   bonusAmount                Decimal?        @map("bonus_amount")
   nightAllowance             Decimal?        @map("night_allowance")
   overTime                   Decimal?        @map("over_time")
   oneHourExtra               Decimal?        @map("one_hour_extra")
+  // ── 6. Bank details ────────────────────────────────────────────────
+  bankName                   String?         @map("bank_name")
+  bankAccountNo              String?         @map("bank_account_no")
+  ifscCode                   String?         @map("ifsc_code")
+  // SWIFT / BIC code for international wire transfers (8 or 11 chars).
+  // Optional — domestic-only employees won't fill this.
+  swiftCode                  String?         @map("swift_code")
+  // ── 7. Exit / Resignation ──────────────────────────────────────────
+  resignationLetterDate      DateTime?       @map("resignation_letter_date")
+  reasonOfLeaving            String?         @map("reason_of_leaving")
+  noticeServed               Boolean?        @default(false) @map("notice_served")
+  // Misc
   companySimIssue            Boolean?        @default(false) @map("company_sim_issue")
   formRecords14              FormRecord14[]
   referralsMade              EmployeeReferral[]
@@ -1389,6 +1461,114 @@ model Employee {
   @@index([dateOfLeaving])
   @@index([engagementTeamId])
   @@map("employees")
+}
+
+// Engagement records — the five domain tables backing the Employee
+// Engagement pages. Each row carries `userId` (author) so the engagement-
+// scope helper can join to Employee → EngagementTeam to enforce the
+// "members only see their team" rule. Status is stored as a plain string
+// so the front-end can add new options without a schema migration.
+
+model EngagementKaizen {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  currentState    String   @db.Text @map("current_state")
+  proposedState   String   @db.Text @map("proposed_state")
+  benefits        String   @db.Text
+  status          String   @default("idea") // idea | approved | in-implementation | implemented
+  votes           Int      @default(0)
+  votedByUserIds  String[] @default([]) @map("voted_by_user_ids")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_kaizens")
+}
+
+model EngagementSuggestion {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  suggestion      String   @db.Text
+  category        String
+  status          String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
+  feedback        String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_suggestions")
+}
+
+model EngagementProblem {
+  id                String   @id @default(cuid())
+  organizationId    String   @map("organization_id")
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String
+  description       String   @db.Text
+  severity          String   @default("medium") // low | medium | high | critical
+  category          String
+  status            String   @default("open")   // open | in-review | resolved | closed
+  proposedSolution  String   @db.Text @map("proposed_solution")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@map("engagement_problems")
+}
+
+model EngagementInitiative {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  // YYYY-MM-DD strings to match the rest of the app's date handling.
+  startDate       String   @map("start_date")
+  endDate         String   @map("end_date")
+  status          String   @default("planning") // planning | in-progress | completed | on-hold
+  category        String
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_initiatives")
+}
+
+model EngagementTarget {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  description     String   @db.Text
+  targetDate      String   @map("target_date")
+  status          String   @default("not-started") // not-started | in-progress | completed
+  progress        Int      @default(0) // 0–100, percent
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("engagement_targets")
 }
 
 // Engagement Team — groups employees for the Employee Engagement module

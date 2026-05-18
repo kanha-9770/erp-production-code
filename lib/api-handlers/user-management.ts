@@ -22,15 +22,22 @@ import bcrypt from "bcryptjs";
 const PAYROLL_RELEVANT_EMPLOYEE_FIELDS = new Set([
   "totalSalary",
   "givenSalary",
+  "baseSalary",
+  "perHourSalary",
+  "totalWorkingHours",
+  "isOvertimeApplicable",
   "bonusAmount",
   "nightAllowance",
   "overTime",
   "oneHourExtra",
   "dateOfJoining",
   "dateOfLeaving",
+  "resignationLetterDate",
   "status",
   "department",
   "designation",
+  "employmentType",
+  "branch",
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -650,11 +657,22 @@ function sanitizeEmployeePayload(
     data[target] = !!body[key];
   };
 
+  // Section 1 — Personal information
   if ("employeeName" in body) data.employeeName = String(body.employeeName).trim();
-  strField("department");
-  strField("designation");
+  strField("salutation");
+  strField("firstName");
+  strField("lastName");
+  strField("placeOfBirth");
+  strField("bloodGroup");
+  strField("maritalStatus");
+  strField("nationality");
+  strField("employeeImage");
   strField("nativePlace");
   strField("country");
+  strField("department");
+  strField("designation");
+
+  // Section 2 — Contact information (legacy single-field addresses + structured)
   strField("permanentAddress");
   strField("currentAddress");
   strField("personalContact");
@@ -662,13 +680,45 @@ function sanitizeEmployeePayload(
   strField("alternateNo2");
   strField("emailAddress1");
   strField("emailAddress2");
-  strField("aadharCardNo");
-  strField("aadharCardUpload");
-  strField("panCardUpload");
-  strField("passportUpload");
-  strField("bankName");
-  strField("bankAccountNo");
-  strField("ifscCode");
+  strField("currentAddressLine1");
+  strField("currentAddressLine2");
+  strField("currentCity");
+  strField("currentState");
+  strField("currentPostalCode");
+  strField("currentCountry");
+  strField("currentAccommodationType");
+  strField("permanentAddressLine1");
+  strField("permanentAddressLine2");
+  strField("permanentCity");
+  strField("permanentState");
+  strField("permanentPostalCode");
+  strField("permanentCountry");
+  strField("permanentAccommodationType");
+  strField("emergencyContactName");
+  strField("emergencyPhone");
+  strField("emergencyRelation");
+  // emergencyContacts: stored as JSON array of {name, phone, relation}. The
+  // form sends an array; we accept null/undefined → wipe, and otherwise
+  // coerce to a plain array of normalized objects so junk values can't
+  // poison the column.
+  if ("emergencyContacts" in body) {
+    const raw = body.emergencyContacts;
+    if (Array.isArray(raw)) {
+      data.emergencyContacts = raw
+        .map((c: any) => ({
+          name: typeof c?.name === "string" ? c.name.trim() : "",
+          phone: typeof c?.phone === "string" ? c.phone.trim() : "",
+          relation: typeof c?.relation === "string" ? c.relation.trim() : "",
+        }))
+        .filter((c) => c.name || c.phone);
+    } else if (raw === null || raw === undefined) {
+      data.emergencyContacts = null;
+    }
+  }
+
+  // Section 3 — Employment details
+  strField("employmentType");
+  strField("branch");
   strField("shiftType");
   strField("inTime");
   strField("outTime");
@@ -683,6 +733,24 @@ function sanitizeEmployeePayload(
       typeof raw === "string" && raw.trim() ? raw.trim() : null;
   }
 
+  // Section 4 — Document uploads
+  strField("aadharCardNo");
+  strField("aadharCardUpload");
+  strField("panCardUpload");
+  strField("passportUpload");
+
+  // Section 5 — Salary & compensation
+  strField("salaryMode");
+
+  // Section 6 — Bank details
+  strField("bankName");
+  strField("bankAccountNo");
+  strField("ifscCode");
+  strField("swiftCode");
+
+  // Section 7 — Exit / Resignation
+  strField("reasonOfLeaving");
+
   if ("gender" in body) {
     const g = String(body.gender || "").toUpperCase();
     data.gender = ["MALE", "FEMALE", "OTHER"].includes(g) ? g : "OTHER";
@@ -696,6 +764,9 @@ function sanitizeEmployeePayload(
 
   numField("totalSalary");
   numField("givenSalary");
+  numField("baseSalary");
+  numField("perHourSalary");
+  numField("totalWorkingHours");
   numField("bonusAmount");
   numField("nightAllowance");
   numField("overTime");
@@ -708,8 +779,12 @@ function sanitizeEmployeePayload(
   dateField("dob");
   dateField("dateOfJoining");
   dateField("dateOfLeaving");
+  dateField("resignationLetterDate");
 
   boolField("companySimIssue");
+  boolField("isOvertimeApplicable");
+  boolField("noticeServed");
+  boolField("permanentSameAsCurrent");
 
   return data;
 }

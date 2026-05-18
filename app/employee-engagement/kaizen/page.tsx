@@ -4,7 +4,7 @@
  * Kaizen — premium workspace layout.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
   ThumbsUp, CheckCircle2, Lightbulb, Zap, Type, FileText, Layout,
@@ -101,44 +101,37 @@ export default function KaizenPage() {
 
   const views = useSavedViews<Filters>("kaizens");
 
-  useEffect(() => {
-    if (user?.id && !visibility.loading) {
-      const mock: Kaizen[] = [
-        {
-          id: '1',
-          title: 'Implement Automated Testing Pipeline',
-          description: 'Set up CI/CD pipeline with automated tests',
-          currentState: 'Manual testing process',
-          proposedState: 'Automated testing with CI/CD pipeline',
-          benefits: '30% reduction in testing time, fewer production bugs',
-          status: 'in-implementation',
-          submissionDate: '2026-04-15',
-          votes: 12,
-          hasVoted: false,
-          employeeId: employees[0]?.id || currentEmployee?.id || '',
-        },
-        {
-          id: '2',
-          title: 'Optimize Database Query Performance',
-          description: 'Analyze and optimize slow database queries',
-          currentState: 'Slow query response times',
-          proposedState: 'Optimized queries with proper indexing',
-          benefits: '50% improvement in API response time',
-          status: 'approved',
-          submissionDate: '2026-04-20',
-          votes: 8,
-          hasVoted: true,
-          employeeId: employees[1]?.id || currentEmployee?.id || '',
-        },
-      ];
-      // Team-scoped visibility: Admin/HR (seeAll) see everything; team
-      // members see only entries from authors on their own team; users
-      // without a team see only their own.
+  // Fetches the team-scoped list from the API. The server already applies
+  // visibility (Admin/HR see all; team members see own team; unassigned see
+  // own), but we run the same client filter as a defensive layer so a stale
+  // response can't bleed across teams.
+  const loadKaizens = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/engagement/kaizens", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error ?? "Failed to load kaizens");
+      }
+      const rows: Kaizen[] = json.kaizens ?? [];
       const allow = makeEngagementFilter<Kaizen>(visibility, employeeToTeam);
-      setKaizens(mock.filter(allow));
+      setKaizens(rows.filter(allow));
+    } catch (e: any) {
+      toast({ title: "Failed to load kaizens", description: e?.message, variant: "destructive" });
+      setKaizens([]);
+    } finally {
       setLoading(false);
     }
-  }, [user?.id, isAdmin, employees.length, visibility, employeeToTeam]);
+  }, [user?.id, visibility, employeeToTeam, toast]);
+
+  useEffect(() => {
+    if (user?.id && !visibility.loading) {
+      loadKaizens();
+    }
+  }, [user?.id, isAdmin, employees.length, visibility, loadKaizens]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -208,19 +201,49 @@ export default function KaizenPage() {
     },
   ], []);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("Delete this kaizen?")) return;
-    setKaizens(kaizens.filter(k => k.id !== id));
-    if (selectedId === id) setSelectedId(null);
-    toast({ title: "Kaizen deleted" });
+    try {
+      const res = await fetch(`/api/engagement/kaizens/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Delete failed");
+      setKaizens(kaizens.filter(k => k.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      toast({ title: "Kaizen deleted" });
+    } catch (e: any) {
+      toast({ title: "Could not delete", description: e?.message, variant: "destructive" });
+    }
   };
 
-  const handleVote = (id: string) => {
+  const handleVote = async (id: string) => {
+    const target = kaizens.find(k => k.id === id);
+    if (!target) return;
+    const nextVote = !target.hasVoted;
+    // Optimistic update so the UI is responsive; if the API fails, restore.
     setKaizens(kaizens.map(k => k.id === id ? {
       ...k,
-      votes: k.hasVoted ? k.votes - 1 : k.votes + 1,
-      hasVoted: !k.hasVoted
+      votes: nextVote ? k.votes + 1 : Math.max(0, k.votes - 1),
+      hasVoted: nextVote,
     } : k));
+    try {
+      const res = await fetch(`/api/engagement/kaizens/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ vote: nextVote }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error ?? "Vote failed");
+      // Sync from server in case another voter raced us.
+      setKaizens(prev => prev.map(k => k.id === id ? { ...k, votes: json.kaizen.votes, hasVoted: json.kaizen.hasVoted } : k));
+    } catch (e: any) {
+      // Revert optimistic change.
+      setKaizens(prev => prev.map(k => k.id === id ? target : k));
+      toast({ title: "Vote failed", description: e?.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -297,18 +320,22 @@ export default function KaizenPage() {
           </SheetHeader>
           <KaizenForm
             onCancel={() => setCreateOpen(false)}
-            onSubmit={(data) => {
-              const newK: Kaizen = {
-                ...data,
-                id: Date.now().toString(),
-                submissionDate: new Date().toISOString().split('T')[0],
-                votes: 0,
-                hasVoted: false,
-                employeeId: currentEmployee?.id || ''
-              };
-              setKaizens([newK, ...kaizens]);
-              setCreateOpen(false);
-              toast({ title: "Kaizen submitted" });
+            onSubmit={async (data) => {
+              try {
+                const res = await fetch("/api/engagement/kaizens", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify(data),
+                });
+                const json = await res.json();
+                if (!res.ok || !json?.success) throw new Error(json?.error ?? "Submit failed");
+                setKaizens([json.kaizen as Kaizen, ...kaizens]);
+                setCreateOpen(false);
+                toast({ title: "Kaizen submitted" });
+              } catch (e: any) {
+                toast({ title: "Could not submit", description: e?.message, variant: "destructive" });
+              }
             }}
           />
         </SheetContent>
@@ -320,10 +347,22 @@ export default function KaizenPage() {
             <KaizenForm
               initial={kaizens.find(k => k.id === editingId)}
               onCancel={() => setEditingId(null)}
-              onSubmit={(data) => {
-                setKaizens(kaizens.map(k => k.id === editingId ? { ...k, ...data } : k));
-                setEditingId(null);
-                toast({ title: "Kaizen updated" });
+              onSubmit={async (data) => {
+                try {
+                  const res = await fetch(`/api/engagement/kaizens/${editingId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(data),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) throw new Error(json?.error ?? "Update failed");
+                  setKaizens(kaizens.map(k => k.id === editingId ? (json.kaizen as Kaizen) : k));
+                  setEditingId(null);
+                  toast({ title: "Kaizen updated" });
+                } catch (e: any) {
+                  toast({ title: "Could not update", description: e?.message, variant: "destructive" });
+                }
               }}
             />
           )}

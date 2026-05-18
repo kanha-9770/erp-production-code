@@ -27,23 +27,80 @@ export interface EmployeeListItem {
 }
 
 export interface EmployeeDetail extends EmployeeListItem {
+  // Section 1 — Personal information
+  salutation: string | null;
+  firstName: string | null;
+  lastName: string | null;
   dob: string | null;
+  placeOfBirth: string | null;
+  bloodGroup: string | null;
+  maritalStatus: string | null;
+  nationality: string | null;
+  employeeImage: string | null;
+  // Legacy address-ish holdovers
   nativePlace: string | null;
   country: string | null;
   permanentAddress: string | null;
   currentAddress: string | null;
+
+  // Section 2 — Contact information
   alternateNo1: string | null;
   alternateNo2: string | null;
   emailAddress2: string | null;
-  bankName: string | null;
-  bankAccountNo: string | null;
-  ifscCode: string | null;
+  currentAddressLine1: string | null;
+  currentAddressLine2: string | null;
+  currentCity: string | null;
+  currentState: string | null;
+  currentPostalCode: string | null;
+  currentCountry: string | null;
+  currentAccommodationType: string | null;
+  permanentSameAsCurrent: boolean | null;
+  permanentAddressLine1: string | null;
+  permanentAddressLine2: string | null;
+  permanentCity: string | null;
+  permanentState: string | null;
+  permanentPostalCode: string | null;
+  permanentCountry: string | null;
+  permanentAccommodationType: string | null;
+  emergencyContactName: string | null;
+  emergencyPhone: string | null;
+  emergencyRelation: string | null;
+  // Multi-contact list (above three are the legacy primary mirror).
+  emergencyContacts: Array<{ name: string; phone: string; relation: string }> | null;
+
+  // Section 3 — Employment details
+  employmentType: string | null;
+  branch: string | null;
   inTime: string | null;
   outTime: string | null;
+  totalWorkingHours: string | number | null;
   incrementMonth: number | null;
   yearsOfAgreement: number | null;
   bonusAfterYears: number | null;
+
+  // Section 4 — Document uploads
   aadharCardNo: string | null;
+  aadharCardUpload: string | null;
+  panCardUpload: string | null;
+  passportUpload: string | null;
+
+  // Section 5 — Salary & compensation
+  salaryMode: string | null;
+  baseSalary: string | number | null;
+  perHourSalary: string | number | null;
+  isOvertimeApplicable: boolean | null;
+
+  // Section 6 — Bank details
+  bankName: string | null;
+  bankAccountNo: string | null;
+  ifscCode: string | null;
+  swiftCode: string | null;
+
+  // Section 7 — Exit / Resignation
+  resignationLetterDate: string | null;
+  reasonOfLeaving: string | null;
+  noticeServed: boolean | null;
+
   companySimIssue: boolean | null;
   createdAt: string;
   updatedAt: string;
