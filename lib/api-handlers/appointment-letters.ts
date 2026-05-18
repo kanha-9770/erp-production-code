@@ -151,6 +151,14 @@ function sanitize(body: Record<string, any>, opts: { partial?: boolean } = {}) {
     data.status = "DRAFT";
   }
 
+  // Onboarding trigger guard: the PUT handler decides whether to auto-provision
+  // the Employee row by checking data.status === "SIGNED". If the client sent
+  // `signed: true` without explicitly bumping status (e.g. a flow that only
+  // flips the checkbox), force the transition here so the trigger still fires.
+  if (data.signed === true && !("status" in body)) {
+    data.status = "SIGNED";
+  }
+
   return data;
 }
 
@@ -233,6 +241,27 @@ export const AppointmentLetterHandlers = {
           createdById: authUser.id,
         },
       });
+
+      // Onboarding shortcut: HR sometimes creates an already-SIGNED letter
+      // directly (bulk import, copying an accepted offer, transferring an
+      // internal hire). In those cases there's no later PUT to trigger the
+      // employee provisioning, so do it here too.
+      let autoCreatedEmployee:
+        | { id: string; alreadyExisted?: boolean }
+        | null = null;
+      let autoCreateEmployeeError: string | null = null;
+      if (letter.status === "SIGNED") {
+        const result = await autoCreateEmployeeFromAppointmentLetter(letter.id, {
+          id: authUser.id,
+          organizationId: authUser.organizationId!,
+        });
+        if ("error" in result) autoCreateEmployeeError = result.error;
+        else autoCreatedEmployee = result;
+      }
+
+      // Workflow rules attached to "Appointment Letter" fire on every new
+      // letter regardless of status — admins can scope to status = SIGNED
+      // etc. in the rule's conditions.
       if (authUser.organizationId) {
         fireWorkflow({
           moduleName: "Appointment Letter",
@@ -243,7 +272,11 @@ export const AppointmentLetterHandlers = {
           recordData: letter as any,
         });
       }
-      return NextResponse.json({ success: true, letter }, { status: 201 });
+
+      return NextResponse.json(
+        { success: true, letter, autoCreatedEmployee, autoCreateEmployeeError },
+        { status: 201 },
+      );
     }, "create");
   },
 
@@ -326,17 +359,21 @@ export const AppointmentLetterHandlers = {
 
       // Auto-onboarding: when the letter transitions into SIGNED, the
       // candidate has accepted — provision the Employee row so HR doesn't
-      // have to retype the same details into Employee Master. Helper is
-      // idempotent and swallows its own errors so a failure here can never
-      // roll back a successful letter update.
+      // have to retype the same details into Employee Master. The helper is
+      // idempotent and returns either the employee ref or a structured
+      // error; a failure here must not roll back the successful letter
+      // update, so we report it alongside the OK response instead.
       let autoCreatedEmployee:
         | { id: string; alreadyExisted?: boolean }
         | null = null;
+      let autoCreateEmployeeError: string | null = null;
       if (data.status === "SIGNED" && existing.status !== "SIGNED") {
-        autoCreatedEmployee = await autoCreateEmployeeFromAppointmentLetter(
-          id,
-          { id: authUser.id, organizationId: authUser.organizationId! },
-        );
+        const result = await autoCreateEmployeeFromAppointmentLetter(id, {
+          id: authUser.id,
+          organizationId: authUser.organizationId!,
+        });
+        if ("error" in result) autoCreateEmployeeError = result.error;
+        else autoCreatedEmployee = result;
       }
 
       if (authUser.organizationId) {
@@ -350,7 +387,12 @@ export const AppointmentLetterHandlers = {
         });
       }
 
-      return NextResponse.json({ success: true, letter, autoCreatedEmployee });
+      return NextResponse.json({
+        success: true,
+        letter,
+        autoCreatedEmployee,
+        autoCreateEmployeeError,
+      });
     }, "update");
   },
 
@@ -388,13 +430,17 @@ export const AppointmentLetterHandlers = {
 // (snapshot at apply-time) or the JobOpening (definitive source), and uses
 // the same placeholder-User pattern as the manual createEmployee handler
 // (see lib/api-handlers/user-management.ts:436) so the row is visible to
-// admins of the creator's organization. Errors are logged and swallowed —
-// the caller is the appointment-letter update path and must not be
-// rolled back by an onboarding failure.
+// admins of the creator's organization. Errors are logged and returned as
+// a structured `{ error }` so the caller can surface them to HR without
+// rolling back the letter update.
+type AutoCreateResult =
+  | { id: string; alreadyExisted?: boolean }
+  | { error: string };
+
 async function autoCreateEmployeeFromAppointmentLetter(
   letterId: string,
   authUser: { id: string; organizationId: string },
-): Promise<{ id: string; alreadyExisted?: boolean } | null> {
+): Promise<AutoCreateResult> {
   try {
     const letter = await (prisma as any).appointmentLetter.findFirst({
       where: { id: letterId, organizationId: authUser.organizationId },
@@ -425,7 +471,10 @@ async function autoCreateEmployeeFromAppointmentLetter(
         },
       },
     });
-    if (!letter) return null;
+    if (!letter)
+      return {
+        error: "Appointment letter not found while provisioning employee",
+      };
 
     const name = String(
       letter.applicantName ||
@@ -566,7 +615,10 @@ async function autoCreateEmployeeFromAppointmentLetter(
     console.error(
       "[AppointmentLetterHandlers] auto-create employee failed:",
       err?.message,
+      err,
     );
-    return null;
+    return {
+      error: err?.message || "Failed to provision employee record",
+    };
   }
 }

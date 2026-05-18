@@ -615,10 +615,25 @@ export default function AppointmentLetterListPage() {
             )}
             onSave={async (next) => {
               try {
-                await updateLetter({
+                const res = await updateLetter({
                   id: l.id,
                   body: { status: next },
                 }).unwrap();
+                if (res?.autoCreatedEmployee) {
+                  toast({
+                    title: res.autoCreatedEmployee.alreadyExisted
+                      ? "Employee already in Employee Master"
+                      : "Employee added to Employee Master",
+                    description:
+                      "Onboarded automatically from the signed letter.",
+                  });
+                } else if (res?.autoCreateEmployeeError) {
+                  toast({
+                    title: "Letter saved, but employee onboarding failed",
+                    description: res.autoCreateEmployeeError,
+                    variant: "destructive",
+                  });
+                }
               } catch (err: any) {
                 toast({
                   title: "Update failed",
@@ -915,8 +930,23 @@ export default function AppointmentLetterListPage() {
               onCancel={() => setCreateOpen(false)}
               onSubmit={async (payload) => {
                 try {
-                  await createLetter(payload).unwrap();
+                  const res = await createLetter(payload).unwrap();
                   toast({ title: "Appointment letter created" });
+                  if (res?.autoCreatedEmployee) {
+                    toast({
+                      title: res.autoCreatedEmployee.alreadyExisted
+                        ? "Employee already in Employee Master"
+                        : "Employee added to Employee Master",
+                      description:
+                        "Onboarded automatically from the signed letter.",
+                    });
+                  } else if (res?.autoCreateEmployeeError) {
+                    toast({
+                      title: "Letter saved, but employee onboarding failed",
+                      description: res.autoCreateEmployeeError,
+                      variant: "destructive",
+                    });
+                  }
                   setCreateOpen(false);
                 } catch (e: any) {
                   toast({
@@ -1006,8 +1036,23 @@ function EditLetterForm({
       onCancel={onDone}
       onSubmit={async (payload) => {
         try {
-          await updateLetter({ id, body: payload }).unwrap();
+          const res = await updateLetter({ id, body: payload }).unwrap();
           toast({ title: "Appointment letter updated" });
+          if (res?.autoCreatedEmployee) {
+            toast({
+              title: res.autoCreatedEmployee.alreadyExisted
+                ? "Employee already in Employee Master"
+                : "Employee added to Employee Master",
+              description:
+                "Onboarded automatically from the signed letter.",
+            });
+          } else if (res?.autoCreateEmployeeError) {
+            toast({
+              title: "Letter saved, but employee onboarding failed",
+              description: res.autoCreateEmployeeError,
+              variant: "destructive",
+            });
+          }
           onDone();
         } catch (e: any) {
           toast({
