@@ -385,7 +385,6 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
     title = "Records",
     storageKey,
     isLoading,
-    isLoading,
     recordLabel = "EMPLOYEE MASTER",
     selectedId,
     onRowClick,
@@ -886,8 +885,8 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
 
           {extraToolbarActions}
         </div>
+        </div>
       )}
-      </div>
 
       {/* Selection summary */}
       {selected.size > 0 && (

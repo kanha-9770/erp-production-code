@@ -397,7 +397,11 @@ export function DataTable<T>({
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <tr key={`sk-${i}`}>
-                  <td className="border-b border-r border-border bg-muted/30 sticky left-0 z-30" />
+                  {/* Opaque background — translucent `/30` let scrolling
+                      data cells bleed through the sticky gutter, which made
+                      pill badges like "ACTIVE" appear to float outside the
+                      table on horizontal scroll. */}
+                  <td className="border-b border-r border-border bg-muted sticky left-0 z-30" />
                   {visible.map((c) => (
                     <td
                       key={c.id}
@@ -436,13 +440,24 @@ export function DataTable<T>({
                         : "hover:bg-muted/40",
                     )}
                   >
-                    {/* Row number gutter — Excel-style 1, 2, 3 ... */}
+                    {/* Row number gutter — Excel-style 1, 2, 3 ...
+                        Inline `backgroundColor` (opaque) + `isolation: isolate`
+                        so horizontally-scrolling data cells (and full-bleed
+                        badges like "ACTIVE") can't bleed through this sticky
+                        column. The original `bg-muted/40` was 40% transparent
+                        which let those badges peek out on the left. */}
                     <td
                       className={cn(
-                        "border-b border-r border-border bg-muted/40 text-center text-[10px] tabular-nums text-muted-foreground select-none sticky left-0 z-30",
+                        "border-b border-r border-border text-center text-[10px] tabular-nums text-muted-foreground select-none sticky left-0 z-30",
                         cellPad,
-                        isInRange && "bg-primary/10 text-primary font-semibold",
+                        isInRange && "text-primary font-semibold",
                       )}
+                      style={{
+                        backgroundColor: isInRange
+                          ? "hsl(var(--primary) / 0.10)"
+                          : "hsl(var(--muted))",
+                        isolation: "isolate",
+                      }}
                     >
                       {rIdx + 1}
                     </td>
