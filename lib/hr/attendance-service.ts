@@ -323,6 +323,86 @@ function findLeaveForToday(
 
 // ---- Status ---------------------------------------------------------------
 
+// 24-hour cap auto-checkout — always on, no admin toggle. When a user is
+// still checked in 24 hours after their checkInAt, close the row at exactly
+// checkInAt + 24h. This guarantees:
+//   1. Stale rows from prior days (user forgot to check out) get closed,
+//      freeing the next day's (userId, date) slot for a fresh check-in.
+//   2. The recorded `checkOutAt` reflects what payroll should see — capped
+//      at 24h, not whenever the lazy sweep happened to run. So a user who
+//      logs in two days later doesn't get credited for the gap.
+//
+// Runs at the top of getStatus and recordPunch, so any subsequent logic
+// sees the database already cleaned up. Scans by userId — indexed — so the
+// cost in the common case (no stale rows) is one cheap row count.
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+async function applyDayCapAutoCheckouts(
+  userId: string,
+  now: Date,
+): Promise<void> {
+  const cutoff = new Date(now.getTime() - TWENTY_FOUR_HOURS_MS);
+  // Only rows where checkInAt is older than 24h ago AND user hasn't already
+  // checked out. The `not: null` guard avoids matching legacy rows that
+  // never recorded a server-stamped checkInAt.
+  const stale = await prisma.attendance.findMany({
+    where: {
+      userId,
+      checkedIn: true,
+      checkedOut: false,
+      checkInAt: { lt: cutoff, not: null },
+    } as any,
+    select: {
+      id: true,
+      organizationId: true,
+      checkInAt: true,
+    } as any,
+  });
+  if (stale.length === 0) return;
+
+  // Group by org so we fetch each config at most once even when a user has
+  // multiple stale rows (rare but possible after a long outage).
+  const cfgByOrg = new Map<string | null, AttendanceConfig>();
+  for (const row of stale as any[]) {
+    const checkInAt: Date | null = (row as any).checkInAt;
+    if (!checkInAt) continue;
+
+    const orgId: string | null = row.organizationId ?? null;
+    let cfg = cfgByOrg.get(orgId);
+    if (!cfg) {
+      cfg = await getAttendanceConfig(orgId);
+      cfgByOrg.set(orgId, cfg);
+    }
+
+    const checkOutAt = new Date(checkInAt.getTime() + TWENTY_FOUR_HOURS_MS);
+    const workedMinutes = Math.max(
+      0,
+      diffMinutes(checkOutAt, checkInAt) - cfg.breakMinutes,
+    );
+    const overtimeThreshold = Math.round(cfg.overtimeAfterHours * 60);
+    const overtimeMinutes = Math.max(0, workedMinutes - overtimeThreshold);
+
+    // Conditional update keeps us race-safe against a parallel checkout — if
+    // someone else just closed the row, our updateMany matches 0 and we
+    // simply skip it.
+    await prisma.attendance.updateMany({
+      where: { id: row.id, checkedOut: false },
+      data: {
+        checkedOut: true,
+        checkOutAt,
+        checkOutTime: formatHHmm(checkOutAt),
+        checkOutSource: 'AUTO_24H',
+        isAutoCheckedOut: true,
+        // earlyOut is meaningless for a 24h cap — the user worked way past
+        // shift end. overtimeMinutes carries the excess.
+        earlyOutMinutes: 0,
+        overtimeMinutes,
+        status: 'PRESENT',
+      } as any,
+    });
+  }
+}
+
 // Lazy auto-checkout: when getStatus runs and finds the user still
 // checked in past the org's autoCheckoutAt wall-clock time, retroactively
 // close the day at that wall-clock time and mark the row isAutoCheckedOut.
@@ -376,13 +456,18 @@ export async function getStatus(
   userId: string,
   organizationId: string | null,
 ): Promise<AttendanceStatus> {
+  const now = new Date();
+  // 24-hour cap: close any prior-day rows where the user forgot to check
+  // out, BEFORE we read today's row. Without this, a stale Monday row
+  // would still show as "WORKING" on Tuesday and block today's check-in.
+  await applyDayCapAutoCheckouts(userId, now);
+
   const cfg = await getAttendanceConfig(organizationId);
   // Resolve the user's effective shift once up front. Late/grace/OT and the
   // shift block in the response all use the same window so an employee with
   // per-row inTime/outTime gets classified against their own hours instead of
   // the org default.
   const shift = await getEffectiveShift(userId, cfg);
-  const now = new Date();
   const date = todayKey(now);
   const month = date.slice(0, 7);
 
@@ -736,12 +821,17 @@ async function assertUserCanPunch(
 export async function recordPunch(
   input: PunchInput,
 ): Promise<{ status: AttendanceStatus; deduplicated: boolean }> {
+  const now = new Date();
+  // 24-hour cap: clean up any prior-day rows the user forgot to close so a
+  // fresh check-in on today's date isn't blocked by yesterday's open row.
+  // Cheap (indexed lookup, zero work in the common case).
+  await applyDayCapAutoCheckouts(input.userId, now);
+
   const cfg = await getAttendanceConfig(input.organizationId);
   // Per-employee shift override: pulled once so the IN's lateMinutes and the
   // OUT's earlyOutMinutes / overtimeMinutes are all computed against the
   // same window the widget/getStatus shows the user.
   const shift = await getEffectiveShift(input.userId, cfg);
-  const now = new Date();
   const date = todayKey(now);
   const source = input.source ?? 'WEB';
 

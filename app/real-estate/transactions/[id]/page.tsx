@@ -15,6 +15,7 @@ import { useState } from "react";
 import {
   useGetTransactionQuery,
   useCloseTransactionMutation,
+  usePostCommissionsForTransactionMutation,
   useCancelTransactionMutation,
   usePreviewCommissionMutation,
   useAddTransactionDocumentMutation,
@@ -43,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useGetUserQuery } from "@/lib/api/auth";
 import {
   ArrowLeft,
   Receipt,
@@ -84,7 +86,15 @@ export default function TransactionDetailPage() {
   const { toast } = useToast();
 
   const { data, isLoading, refetch } = useGetTransactionQuery(id);
+  const { data: userData } = useGetUserQuery();
+  // Closing a deal posts ledger entries to every beneficiary's wallet — it
+  // is restricted to org admins, who run it at month-end (the server enforces
+  // this; we mirror it in the UI so agents don't see a button that will 403).
+  const isAdminUser =
+    Boolean(userData?.user?.isAdmin) || Boolean(userData?.user?.isOrgOwner);
   const [closeTxn, { isLoading: closing }] = useCloseTransactionMutation();
+  const [postCommissions, { isLoading: posting }] =
+    usePostCommissionsForTransactionMutation();
   const [cancelTxn, { isLoading: cancelling }] = useCancelTransactionMutation();
   const [previewCommission, { isLoading: previewing, data: previewResp }] =
     usePreviewCommissionMutation();
@@ -94,16 +104,44 @@ export default function TransactionDetailPage() {
   const [cancelReason, setCancelReason] = useState("");
 
   const onClose = async () => {
-    if (!confirm("Close this transaction? The commission engine will fire and post ledger entries to all beneficiaries.")) return;
+    if (
+      !confirm(
+        "Close this transaction with proof? It will be sent to the admin queue for commission posting.",
+      )
+    )
+      return;
     try {
-      const res = await closeTxn(id).unwrap();
+      await closeTxn(id).unwrap();
       toast({
         title: "Transaction closed",
-        description: `Base commission ${formatCurrency(res.data.baseCommission)} distributed across ${res.data.splits.length} splits.`,
+        description: "Awaiting commission posting by admin.",
       });
       refetch();
     } catch (e: any) {
       toast({ title: "Could not close", description: e?.data?.error || e?.message, variant: "destructive" });
+    }
+  };
+
+  const onPostCommissions = async () => {
+    if (
+      !confirm(
+        "Post commissions for this transaction? The engine will fire and credit ledger entries to every beneficiary wallet.",
+      )
+    )
+      return;
+    try {
+      const res = await postCommissions(id).unwrap();
+      toast({
+        title: "Commissions posted",
+        description: `Base commission ${formatCurrency(res.data.baseCommission)} distributed across ${res.data.splits.length} splits.`,
+      });
+      refetch();
+    } catch (e: any) {
+      toast({
+        title: "Could not post commissions",
+        description: e?.data?.error || e?.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -158,6 +196,11 @@ export default function TransactionDetailPage() {
   const isPending = txn.status === "PENDING";
   const isClosed = txn.status === "CLOSED";
   const isCancelled = txn.status === "CANCELLED";
+  // CLOSED-but-not-yet-posted is the "awaiting admin posting" state. The
+  // detail endpoint returns commissionSplits[] — empty means commissions
+  // haven't been posted yet.
+  const splitsCount = (txn as any).commissionSplits?.length ?? 0;
+  const isClosedUnposted = isClosed && splitsCount === 0;
 
   return (
     <div className="container mx-auto p-4 sm:p-6 space-y-5 max-w-6xl">
@@ -192,14 +235,20 @@ export default function TransactionDetailPage() {
                 <Calculator className="h-4 w-4 mr-2" /> {previewing ? "Calculating…" : "Preview commission"}
               </Button>
               <Button onClick={onClose} disabled={closing}>
-                <Lock className="h-4 w-4 mr-2" /> {closing ? "Closing…" : "Close & post commissions"}
+                <Lock className="h-4 w-4 mr-2" /> {closing ? "Closing…" : "Close with proof"}
               </Button>
               <Button variant="destructive" onClick={() => setCancelOpen(true)}>
                 <XCircle className="h-4 w-4 mr-2" /> Cancel
               </Button>
             </>
           )}
-          {isClosed && (
+          {isClosedUnposted && isAdminUser && (
+            <Button onClick={onPostCommissions} disabled={posting}>
+              <Lock className="h-4 w-4 mr-2" />
+              {posting ? "Posting…" : "Post commissions"}
+            </Button>
+          )}
+          {isClosed && isAdminUser && (
             <Button variant="destructive" onClick={() => setCancelOpen(true)} disabled={cancelling}>
               <XCircle className="h-4 w-4 mr-2" /> Cancel & reverse
             </Button>
@@ -263,6 +312,30 @@ export default function TransactionDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Agent self-close requires proof. Spell it out so the agent knows
+          why the Close button can fail. */}
+      {isPending && (
+        <Card className="border-blue-400/30 bg-blue-50/60 dark:bg-blue-950/20">
+          <CardContent className="py-3 text-sm">
+            <span className="font-medium">Closing this deal:</span> upload a{" "}
+            <strong>CONTRACT</strong> or <strong>SALE_DEED</strong> as proof,
+            then close. Once closed, the admin will review and post commissions
+            to every beneficiary wallet.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* CLOSED but commissions not yet posted — explains the holding state. */}
+      {isClosedUnposted && (
+        <Card className="border-amber-400/40 bg-amber-50 dark:bg-amber-950/20">
+          <CardContent className="py-3 text-sm">
+            <span className="font-medium">Awaiting commission posting:</span>{" "}
+            the deal is closed. Wallet credits are pending until the admin
+            posts commissions{isAdminUser ? " — use the button above." : "."}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Cancellation reason banner */}
       {isCancelled && txn.cancellationReason && (

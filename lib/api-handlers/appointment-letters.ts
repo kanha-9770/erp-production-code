@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 
 const STATUSES = ["DRAFT", "ISSUED", "SIGNED", "REVOKED"] as const;
 
@@ -276,7 +277,7 @@ export const AppointmentLetterHandlers = {
 
       const existing = await (prisma as any).appointmentLetter.findFirst({
         where: { id, organizationId: authUser.organizationId },
-        select: { id: true },
+        select: { id: true, status: true },
       });
       if (!existing)
         return NextResponse.json(
@@ -311,7 +312,23 @@ export const AppointmentLetterHandlers = {
         where: { id },
         data,
       });
-      return NextResponse.json({ success: true, letter });
+
+      // Auto-onboarding: when the letter transitions into SIGNED, the
+      // candidate has accepted — provision the Employee row so HR doesn't
+      // have to retype the same details into Employee Master. Helper is
+      // idempotent and swallows its own errors so a failure here can never
+      // roll back a successful letter update.
+      let autoCreatedEmployee:
+        | { id: string; alreadyExisted?: boolean }
+        | null = null;
+      if (data.status === "SIGNED" && existing.status !== "SIGNED") {
+        autoCreatedEmployee = await autoCreateEmployeeFromAppointmentLetter(
+          id,
+          { id: authUser.id, organizationId: authUser.organizationId! },
+        );
+      }
+
+      return NextResponse.json({ success: true, letter, autoCreatedEmployee });
     }, "update");
   },
 
@@ -333,3 +350,191 @@ export const AppointmentLetterHandlers = {
     }, "remove");
   },
 };
+
+// Provision an Employee row from a SIGNED appointment letter. Pulls
+// department / designation / employmentType from the linked JobApplication
+// (snapshot at apply-time) or the JobOpening (definitive source), and uses
+// the same placeholder-User pattern as the manual createEmployee handler
+// (see lib/api-handlers/user-management.ts:436) so the row is visible to
+// admins of the creator's organization. Errors are logged and swallowed —
+// the caller is the appointment-letter update path and must not be
+// rolled back by an onboarding failure.
+async function autoCreateEmployeeFromAppointmentLetter(
+  letterId: string,
+  authUser: { id: string; organizationId: string },
+): Promise<{ id: string; alreadyExisted?: boolean } | null> {
+  try {
+    const letter = await (prisma as any).appointmentLetter.findFirst({
+      where: { id: letterId, organizationId: authUser.organizationId },
+      include: {
+        jobOffer: {
+          select: {
+            applicantName: true,
+            applicantEmail: true,
+            jobOpening: {
+              select: {
+                department: true,
+                designation: true,
+                employmentType: true,
+                salaryApprox: true,
+              },
+            },
+          },
+        },
+        jobApplication: {
+          select: {
+            applicantName: true,
+            applicantEmail: true,
+            applicantMobile: true,
+            department: true,
+            designation: true,
+            employmentType: true,
+          },
+        },
+      },
+    });
+    if (!letter) return null;
+
+    const name = String(
+      letter.applicantName ||
+        letter.jobOffer?.applicantName ||
+        letter.jobApplication?.applicantName ||
+        "",
+    ).trim();
+    const email =
+      String(
+        letter.applicantEmail ||
+          letter.jobOffer?.applicantEmail ||
+          letter.jobApplication?.applicantEmail ||
+          "",
+      ).trim() || null;
+
+    // Idempotency. Toggling the status SIGNED → DRAFT → SIGNED, or running
+    // two near-simultaneous PATCHes that both flip to SIGNED, must not
+    // create duplicate Employee rows. Match on email within org first;
+    // fall back to (name + joining date) for letters with no email.
+    if (email) {
+      const dup = await prisma.employee.findFirst({
+        where: {
+          emailAddress1: email,
+          user: { organizationId: authUser.organizationId },
+        },
+        select: { id: true },
+      });
+      if (dup) return { id: dup.id, alreadyExisted: true };
+    } else if (name && letter.appointmentDate) {
+      const dup = await prisma.employee.findFirst({
+        where: {
+          employeeName: name,
+          dateOfJoining: letter.appointmentDate,
+          user: { organizationId: authUser.organizationId },
+        },
+        select: { id: true },
+      });
+      if (dup) return { id: dup.id, alreadyExisted: true };
+    }
+
+    const department =
+      letter.jobApplication?.department ??
+      letter.jobOffer?.jobOpening?.department ??
+      null;
+    const designation =
+      letter.jobApplication?.designation ??
+      letter.jobOffer?.jobOpening?.designation ??
+      null;
+    const employmentType =
+      letter.jobApplication?.employmentType ??
+      letter.jobOffer?.jobOpening?.employmentType ??
+      null;
+    const personalContact = letter.jobApplication?.applicantMobile ?? null;
+
+    const nameParts = name.split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] ?? "";
+    const lastName = nameParts.slice(1).join(" ") || null;
+
+    // Same User-attachment dance as createEmployee: Employee has no org
+    // column of its own, so the row is only visible to the admin list query
+    // if it's linked to a User in the right org. Reuse the candidate's User
+    // if one already exists in this org and is free; otherwise mint a
+    // placeholder so the row lands without colliding with User.email's
+    // unique constraint or Employee.userId's unique constraint.
+    const candidateEmail =
+      email ||
+      `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`;
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: candidateEmail },
+      select: { id: true, organizationId: true },
+    });
+
+    let userId: string;
+    if (
+      existingUser &&
+      existingUser.organizationId === authUser.organizationId
+    ) {
+      const taken = await prisma.employee.findUnique({
+        where: { userId: existingUser.id },
+        select: { id: true },
+      });
+      if (taken) {
+        const u = await prisma.user.create({
+          data: {
+            email: `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`,
+            organizationId: authUser.organizationId,
+            status: "ACTIVE",
+            email_verified: true,
+            first_name: firstName,
+            last_name: lastName,
+          },
+        });
+        userId = u.id;
+      } else {
+        userId = existingUser.id;
+      }
+    } else {
+      const safeEmail = existingUser
+        ? `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`
+        : candidateEmail;
+      const u = await prisma.user.create({
+        data: {
+          email: safeEmail,
+          organizationId: authUser.organizationId,
+          status: "ACTIVE",
+          email_verified: true,
+          first_name: firstName,
+          last_name: lastName,
+        },
+      });
+      userId = u.id;
+    }
+
+    const employee = await prisma.employee.create({
+      data: {
+        userId,
+        employeeName: name || "Unnamed",
+        firstName: firstName || null,
+        lastName,
+        emailAddress1: email,
+        personalContact,
+        dateOfJoining: letter.appointmentDate,
+        companyName: letter.company ?? null,
+        department,
+        designation,
+        employmentType: employmentType ?? null,
+        status: "ACTIVE",
+      },
+    });
+
+    // New Employee → drop the live payroll cache so they appear in the
+    // dashboard on the next fetch instead of waiting for the 5s TTL.
+    invalidatePayrollCache(authUser.organizationId);
+
+    return { id: employee.id };
+  } catch (err: any) {
+    console.error(
+      "[AppointmentLetterHandlers] auto-create employee failed:",
+      err?.message,
+    );
+    return null;
+  }
+}

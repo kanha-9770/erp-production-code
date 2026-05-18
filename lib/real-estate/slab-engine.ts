@@ -102,7 +102,7 @@ interface ResolvedPlan {
   overrideLevels: Array<{ level: number; factor: Prisma.Decimal }>;
 }
 
-async function resolveActivePlan(tx: Tx, organizationId: string): Promise<ResolvedPlan> {
+export async function resolveActivePlan(tx: Tx, organizationId: string): Promise<ResolvedPlan> {
   const settings = await (tx as any).rebmSettings.findUnique({
     where: { organizationId },
   });
@@ -167,7 +167,7 @@ export function lookupSlabRate(
 // Agent area ledger — cumulative area per agent
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getAgentCumulativeArea(
+export async function getAgentCumulativeArea(
   tx: Tx,
   organizationId: string,
   agentId: string,
@@ -445,43 +445,67 @@ export async function closeTransactionSlab(
   tx: Tx,
   transactionId: string,
   invokerUserId: string,
+  opts: { mode?: "close-and-post" | "post-only" } = {},
 ) {
+  const mode = opts.mode ?? "close-and-post";
   const txn = await (tx as any).transaction.findUniqueOrThrow({
     where: { id: transactionId },
     include: { property: true },
   });
 
-  if (txn.status === "CLOSED") throw new Error("Transaction already closed");
-  if (txn.status === "CANCELLED") throw new Error("Cannot close a cancelled transaction");
+  // Status guards differ between agent-close (PENDING → CLOSED) and
+  // admin-post (CLOSED, splits still empty → write splits).
+  if (mode === "close-and-post") {
+    if (txn.status === "CLOSED") throw new Error("Transaction already closed");
+    if (txn.status === "CANCELLED") throw new Error("Cannot close a cancelled transaction");
 
-  const docs = await (tx as any).transactionDocument.count({
-    where: { transactionId, type: { in: ["CONTRACT", "SALE_DEED"] } },
-  });
-  if (docs === 0) {
-    throw new Error("Transaction needs a CONTRACT or SALE_DEED document before closing.");
-  }
-  if (txn.property.status !== "UNDER_CONTRACT") {
-    throw new Error(`Property must be UNDER_CONTRACT to close (currently ${txn.property.status}).`);
+    const docs = await (tx as any).transactionDocument.count({
+      where: { transactionId, type: { in: ["CONTRACT", "SALE_DEED"] } },
+    });
+    if (docs === 0) {
+      throw new Error("Transaction needs a CONTRACT or SALE_DEED document before closing.");
+    }
+    if (txn.property.status !== "UNDER_CONTRACT") {
+      throw new Error(`Property must be UNDER_CONTRACT to close (currently ${txn.property.status}).`);
+    }
+  } else {
+    if (txn.status !== "CLOSED") {
+      throw new Error(
+        `Commissions can only be posted on a CLOSED transaction (currently ${txn.status}).`,
+      );
+    }
+    const existing = await (tx as any).commissionSplit.count({
+      where: { transactionId },
+    });
+    if (existing > 0)
+      throw new Error("Commissions have already been posted for this transaction.");
   }
 
   const calc = await calculateSlabCommission(tx, transactionId);
   const plan = await resolveActivePlan(tx, txn.organizationId);
 
-  // Stamp transaction as closed
-  await (tx as any).transaction.update({
-    where: { id: transactionId },
-    data: {
-      status: "CLOSED",
-      closedAt: new Date(),
-      baseCommission: calc.directIncome.plus(calc.overrideTotal),
-    },
-  });
-
-  // Move property to SOLD
-  await (tx as any).property.update({
-    where: { id: txn.propertyId },
-    data: { status: "SOLD", finalClosingAt: new Date() },
-  });
+  // Stamp baseCommission on the transaction. In close-and-post mode we also
+  // flip status / property; in post-only mode the deal is already CLOSED so
+  // we just record the computed amount.
+  if (mode === "close-and-post") {
+    await (tx as any).transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: "CLOSED",
+        closedAt: new Date(),
+        baseCommission: calc.directIncome.plus(calc.overrideTotal),
+      },
+    });
+    await (tx as any).property.update({
+      where: { id: txn.propertyId },
+      data: { status: "SOLD", finalClosingAt: new Date() },
+    });
+  } else {
+    await (tx as any).transaction.update({
+      where: { id: transactionId },
+      data: { baseCommission: calc.directIncome.plus(calc.overrideTotal) },
+    });
+  }
 
   const settings = await (tx as any).rebmSettings.findUnique({
     where: { organizationId: txn.organizationId },

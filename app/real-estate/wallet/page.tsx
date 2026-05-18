@@ -10,6 +10,7 @@ import { useState } from "react";
 import {
   useGetMyWalletQuery,
   useGetMyLedgerQuery,
+  useGetMyPendingPostingQuery,
 } from "@/lib/api/real-estate/finance";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,9 @@ import {
   ShieldOff,
   Banknote,
   History,
+  Hourglass,
+  Ruler,
+  Info,
 } from "lucide-react";
 import {
   LEDGER_CATEGORY_LABEL,
@@ -44,6 +48,9 @@ import { SlabProgressCard } from "@/components/real-estate/slab-progress-card";
 export default function MyWalletPage() {
   const { data: walletResp, isLoading: walletLoading } = useGetMyWalletQuery();
   const wallet = walletResp?.data;
+  const { data: pendingResp, isLoading: pendingLoading } =
+    useGetMyPendingPostingQuery();
+  const pending = pendingResp?.data;
 
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
@@ -109,6 +116,13 @@ export default function MyWalletPage() {
           </>
         )}
       </div>
+
+      {/* Awaiting commission posting — preview of what admin will post.
+          Only renders when there's actually something pending so it doesn't
+          add visual noise to a quiet wallet. */}
+      {!pendingLoading && pending && pending.count > 0 && (
+        <PendingPostingCard pending={pending} currency={wallet?.currency ?? "INR"} />
+      )}
 
       {/* Slab progress — visible to every agent on the slab engine */}
       <SlabProgressCard />
@@ -218,6 +232,149 @@ export default function MyWalletPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function formatSqyd(n: number): string {
+  return `${new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2,
+  }).format(n)} sq.yd`;
+}
+
+function PendingPostingCard({
+  pending,
+  currency,
+}: {
+  pending: {
+    count: number;
+    estimatedCommission: number;
+    pendingAreaSqyd: number;
+    cumulativeAreaBefore: number;
+    cumulativeAreaAfter: number;
+    engine: "SLAB" | "LEGACY";
+    deals: Array<{
+      id: string;
+      code: string | null;
+      propertyTitle: string;
+      salePrice: number;
+      currency: string;
+      closedAt: string | null;
+      estimatedShare: number;
+      dealAreaSqyd: number;
+      isMySale: boolean;
+    }>;
+  };
+  currency: string;
+}) {
+  const showArea = pending.engine === "SLAB";
+  return (
+    <Card className="border-amber-400/40 bg-amber-50/60 dark:bg-amber-950/20">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <Hourglass className="h-4 w-4 text-amber-600" />
+          <CardTitle className="text-sm font-semibold">
+            Awaiting commission posting
+          </CardTitle>
+          <Badge variant="outline" className="text-[10px]">
+            {pending.count} deal{pending.count === 1 ? "" : "s"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className={`grid gap-3 ${showArea ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+          <div className="rounded-md bg-background/60 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Possible commission
+            </div>
+            <div className="text-xl font-bold tabular-nums mt-0.5">
+              {formatCurrency(pending.estimatedCommission, currency)}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Your projected share across {pending.count} closed deal
+              {pending.count === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          {showArea && (
+            <>
+              <div className="rounded-md bg-background/60 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <Ruler className="h-3 w-3" /> Pending area (your sales)
+                </div>
+                <div className="text-xl font-bold tabular-nums mt-0.5">
+                  {formatSqyd(pending.pendingAreaSqyd)}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Adds to your cumulative once admin posts
+                </p>
+              </div>
+
+              <div className="rounded-md bg-background/60 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Cumulative area after posting
+                </div>
+                <div className="text-xl font-bold tabular-nums mt-0.5">
+                  {formatSqyd(pending.cumulativeAreaAfter)}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
+                  From {formatSqyd(pending.cumulativeAreaBefore)} today
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
+          <span>
+            <strong>Note:</strong> these are projections based on the active
+            comp plan. Final commission is locked when the admin posts
+            commissions at month-end — slab rates can change if your team
+            crosses thresholds before then.
+          </span>
+        </p>
+
+        {pending.deals.length > 0 && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+              Show breakdown ({pending.deals.length})
+            </summary>
+            <ul className="mt-2 divide-y rounded-md border bg-background/60">
+              {pending.deals.map((d) => (
+                <li
+                  key={d.id}
+                  className="px-3 py-2 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] truncate">
+                      {d.code ?? d.id.slice(0, 8)}
+                      {d.isMySale && (
+                        <Badge variant="secondary" className="ml-2 text-[10px]">
+                          My sale
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground truncate text-[11px]">
+                      {d.propertyTitle}
+                    </div>
+                  </div>
+                  <div className="text-right tabular-nums shrink-0">
+                    <div className="font-medium">
+                      {formatCurrency(d.estimatedShare, d.currency)}
+                    </div>
+                    {showArea && d.dealAreaSqyd > 0 && (
+                      <div className="text-[10px] text-muted-foreground">
+                        {formatSqyd(d.dealAreaSqyd)}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

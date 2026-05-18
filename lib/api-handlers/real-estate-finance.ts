@@ -15,8 +15,17 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 import { WalletService } from "@/lib/real-estate/wallet-service";
-import { releaseDueCommissions } from "@/lib/real-estate/commission-engine";
-import { getSlabProgress } from "@/lib/real-estate/slab-engine";
+import {
+  calculateCommission,
+  releaseDueCommissions,
+} from "@/lib/real-estate/commission-engine";
+import {
+  calculateSlabCommission,
+  getAgentCumulativeArea,
+  getSlabProgress,
+  resolveActivePlan,
+  toSquareYards,
+} from "@/lib/real-estate/slab-engine";
 import {
   encryptAccountNumber,
   decryptAccountNumber,
@@ -50,6 +59,69 @@ async function handle(fn: () => Promise<NextResponse>, label: string) {
       { status: 500 },
     );
   }
+}
+
+// Given a user, figure out why their on-hold balance is still on hold after
+// the auto-release pass has run. The four states map cleanly onto things the
+// UI can either explain ("waiting until 12 Jun") or surface as an action
+// item ("complete KYC to unlock"). Returns nulls when nothing is on hold.
+async function computeHoldDiagnostics(
+  userId: string,
+  organizationId: string,
+): Promise<{
+  heldReason: null | "HOLD_PERIOD" | "COMPLIANCE" | "FROZEN";
+  nextReleaseAt: string | null;
+}> {
+  const wallet = await prisma.wallet.findUnique({
+    where: { userId },
+    select: { isFrozen: true, pendingBalance: true },
+  });
+  if (!wallet || Number(wallet.pendingBalance) <= 0)
+    return { heldReason: null, nextReleaseAt: null };
+
+  if (wallet.isFrozen) {
+    return { heldReason: "FROZEN", nextReleaseAt: null };
+  }
+
+  const splits = await prisma.commissionSplit.findMany({
+    where: {
+      organizationId,
+      beneficiaryUserId: userId,
+      status: "ON_HOLD",
+      ledgerEntryId: { not: null },
+    },
+    include: {
+      transaction: { select: { closedAt: true } },
+      rule: { select: { holdPeriodDays: true } },
+    },
+  });
+  if (splits.length === 0) return { heldReason: null, nextReleaseAt: null };
+
+  const now = Date.now();
+  let earliestDueAt: number | null = null;
+  let allPastHold = true;
+  for (const s of splits) {
+    const holdDays = s.rule?.holdPeriodDays ?? 7;
+    const closedAt = s.transaction?.closedAt?.getTime() ?? now;
+    const dueAt = closedAt + holdDays * 86_400_000;
+    if (dueAt > now) {
+      allPastHold = false;
+      if (earliestDueAt == null || dueAt < earliestDueAt) earliestDueAt = dueAt;
+    }
+  }
+
+  if (!allPastHold) {
+    return {
+      heldReason: "HOLD_PERIOD",
+      nextReleaseAt:
+        earliestDueAt != null ? new Date(earliestDueAt).toISOString() : null,
+    };
+  }
+
+  // Past hold for every split — the only thing left blocking release is the
+  // compliance gate (BR-5). Either the agent has no AgentProfile, or their
+  // status isn't COMPLIANT.
+  return { heldReason: "COMPLIANCE", nextReleaseAt: null };
 }
 
 function serializeWallet<T extends Record<string, any>>(w: T): any {
@@ -91,6 +163,23 @@ export const WalletHandlers = {
   async getMine(request: NextRequest): Promise<NextResponse> {
     return handle(async () => {
       const auth = await requireAuth(request);
+
+      // Auto-release on read. Any commission whose hold period has elapsed
+      // and whose agent is COMPLIANT gets flipped to RELEASED here so that
+      // `availableBalance` is always live — agents shouldn't have to wait for
+      // an admin to click "Release due" before they see what they earned.
+      // Scoped to this user's holds, so it's cheap.
+      try {
+        await prisma.$transaction(async (tx) => {
+          await releaseDueCommissions(tx, auth.organizationId, auth.id, {
+            userId: auth.id,
+          });
+        });
+      } catch (e: any) {
+        // Don't let a release failure block the wallet read.
+        console.warn("[FinanceHandlers] getMine auto-release skipped:", e?.message);
+      }
+
       const wallet = await prisma.wallet.findUnique({
         where: { userId: auth.id },
       });
@@ -100,8 +189,184 @@ export const WalletHandlers = {
         (await prisma.wallet.create({
           data: { organizationId: auth.organizationId, userId: auth.id },
         }));
-      return NextResponse.json({ success: true, data: serializeWallet(result) });
+
+      // After the release pass, anything still ON_HOLD is genuinely blocked.
+      // Compute *why* so the UI can tell the user what to do about it.
+      const holdInfo = await computeHoldDiagnostics(auth.id, auth.organizationId);
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...serializeWallet(result),
+          ...holdInfo,
+        },
+      });
     }, "getMine");
+  },
+
+  // GET /api/real-estate/wallet/pending-posting — projection for deals that
+  // are CLOSED but whose commissions haven't been posted by admin yet.
+  // Shows the caller what they'd earn once admin posts: their estimated
+  // share, the cumulative area those deals add (slab engine), and a list of
+  // deals so the UI can show a breakdown. Final numbers are authoritative
+  // only after posting — this endpoint is a preview.
+  async getMyPendingPosting(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const auth = await requireAuth(request);
+
+      // Active engine — slab if comp plan is ACTIVE, legacy otherwise. The
+      // preview calc branches the same way `closeTransaction` does.
+      const settings = await prisma.rebmSettings.findUnique({
+        where: { organizationId: auth.organizationId },
+        select: { planEngine: true, activePlanId: true },
+      });
+      const useSlab =
+        settings?.planEngine === "SLAB" && !!settings.activePlanId;
+
+      // CLOSED-unposted deals where I'm involved either as listing/selling
+      // agent OR (in slab mode) as a downline whose seller rolls up to me.
+      // Cheapest correct filter: pull every CLOSED-unposted deal in the org
+      // and let the preview engine tell us which splits land on me. The
+      // queue is small in practice (admin posts monthly).
+      const deals = await prisma.transaction.findMany({
+        where: {
+          organizationId: auth.organizationId,
+          status: "CLOSED",
+          commissionSplits: { none: {} },
+        },
+        select: {
+          id: true,
+          code: true,
+          salePrice: true,
+          currency: true,
+          closedAt: true,
+          listingAgentId: true,
+          sellingAgentId: true,
+          property: {
+            select: {
+              id: true,
+              title: true,
+              area: true,
+              areaUnit: true,
+            },
+          },
+        },
+        orderBy: { closedAt: "asc" },
+        take: 100,
+      });
+
+      type DealProjection = {
+        id: string;
+        code: string | null;
+        propertyTitle: string;
+        salePrice: number;
+        currency: string;
+        closedAt: string | null;
+        estimatedShare: number;
+        dealAreaSqyd: number;
+        isMySale: boolean; // true when I'm the direct seller — affects cumulative area
+      };
+
+      const projections: DealProjection[] = [];
+      let totalEstimatedShare = 0;
+      let pendingAreaForMe = new Prisma.Decimal(0);
+
+      for (const d of deals) {
+        let myShare = 0;
+        try {
+          const calc = useSlab
+            ? await calculateSlabCommission(prisma, d.id)
+            : await calculateCommission(prisma, d.id);
+
+          const splits = (calc as any).splits as Array<{
+            beneficiaryUserId?: string | null;
+            userId?: string | null;
+            amount: Prisma.Decimal | number | string;
+          }>;
+          for (const s of splits) {
+            const uid = s.beneficiaryUserId ?? s.userId ?? null;
+            if (uid === auth.id) myShare += Number(s.amount);
+          }
+        } catch {
+          // Calc failed (e.g., agent profile missing, no rule). Skip — we
+          // don't want a single bad deal to wipe the whole projection.
+          continue;
+        }
+
+        if (myShare <= 0) continue; // not a beneficiary on this deal
+
+        // Slab engine treats sellingAgentId ?? listingAgentId as the direct
+        // seller; legacy engine doesn't have a "seller" concept the same
+        // way. Treat me as the seller when listing/selling matches.
+        const sellerUserId = d.sellingAgentId ?? d.listingAgentId;
+        const isMySale = sellerUserId === auth.id;
+
+        let areaSqyd = new Prisma.Decimal(0);
+        try {
+          areaSqyd = toSquareYards(
+            new Prisma.Decimal(d.property.area ?? 0),
+            d.property.areaUnit,
+          );
+        } catch {
+          // Unknown unit — skip area on this deal.
+        }
+        if (isMySale) pendingAreaForMe = pendingAreaForMe.plus(areaSqyd);
+
+        totalEstimatedShare += myShare;
+        projections.push({
+          id: d.id,
+          code: d.code,
+          propertyTitle: d.property.title,
+          salePrice: Number(d.salePrice),
+          currency: d.currency,
+          closedAt: d.closedAt?.toISOString() ?? null,
+          estimatedShare: myShare,
+          dealAreaSqyd: Number(areaSqyd),
+          isMySale,
+        });
+      }
+
+      // Cumulative area (slab only — meaningless under legacy %). Show
+      // current personal cumulative + the pending pile so the agent can
+      // see where their slab rate is headed once admin posts.
+      let cumulativeAreaBefore = 0;
+      let cumulativeAreaAfter = 0;
+      if (useSlab) {
+        try {
+          const plan = await resolveActivePlan(prisma, auth.organizationId);
+          const profile = await prisma.agentProfile.findUnique({
+            where: { userId: auth.id },
+            select: { id: true },
+          });
+          if (profile) {
+            const cur = await getAgentCumulativeArea(
+              prisma,
+              auth.organizationId,
+              profile.id,
+              plan.id,
+              { slabs: plan.slabs },
+            );
+            cumulativeAreaBefore = Number(cur);
+            cumulativeAreaAfter = Number(cur.plus(pendingAreaForMe));
+          }
+        } catch {
+          // No active plan or agent profile — leave cumulative numbers at 0.
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          count: projections.length,
+          estimatedCommission: totalEstimatedShare,
+          pendingAreaSqyd: Number(pendingAreaForMe),
+          cumulativeAreaBefore,
+          cumulativeAreaAfter,
+          engine: useSlab ? "SLAB" : "LEGACY",
+          deals: projections,
+        },
+      });
+    }, "getMyPendingPosting");
   },
 
   // GET /api/real-estate/my-slab — current user's slab progress / rank
