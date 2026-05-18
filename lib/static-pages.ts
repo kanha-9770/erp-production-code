@@ -393,6 +393,14 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'wallet',
   },
   {
+    path: '/real-estate/admin/post-commissions',
+    label: 'Post Commissions',
+    group: 'Real Estate',
+    description: 'Review closed deals and post commissions in bulk',
+    adminOnly: true,
+    icon: 'receipt',
+  },
+  {
     path: '/real-estate/admin/payouts',
     label: 'Payout Approvals',
     group: 'Real Estate',

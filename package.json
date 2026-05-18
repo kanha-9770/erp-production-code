@@ -15,6 +15,7 @@
     "seed:re-team": "npx tsx scripts/seed-real-estate-team.ts",
     "seed:re-comp-plan": "npx tsx scripts/seed-real-estate-comp-plan.ts",
     "seed:re-properties": "npx tsx scripts/seed-real-estate-properties.ts",
+    "seed:re-transactions": "npx tsx scripts/seed-real-estate-transactions.ts",
     "setup:hr": "npx tsx scripts/setup-hr-production.ts",
     "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll",
     "test:e2e": "playwright test",

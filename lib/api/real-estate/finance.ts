@@ -72,6 +72,30 @@ export interface SlabProgress {
   designations: Array<{ code: string; name: string; minCumulativeArea: number; rewardType: string; rewardDescription: string; achieved: boolean }>;
 }
 
+// Projection of what the current user *would* earn once admin posts
+// commissions on every CLOSED-unposted deal in the org. Surface in the
+// wallet UI so agents can see their pipeline; final numbers only land
+// after admin runs the post.
+export interface PendingPostingProjection {
+  count: number;
+  estimatedCommission: number;
+  pendingAreaSqyd: number;
+  cumulativeAreaBefore: number;
+  cumulativeAreaAfter: number;
+  engine: "SLAB" | "LEGACY";
+  deals: Array<{
+    id: string;
+    code: string | null;
+    propertyTitle: string;
+    salePrice: number;
+    currency: string;
+    closedAt: string | null;
+    estimatedShare: number;
+    dealAreaSqyd: number;
+    isMySale: boolean;
+  }>;
+}
+
 export const financeApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // ─── Wallet ────────────────────────────────────────────────────────────
@@ -82,6 +106,17 @@ export const financeApi = baseApi.injectEndpoints({
 
     getMySlab: builder.query<SingleResponse<SlabProgress>, void>({
       query: () => "/real-estate/my-slab",
+      providesTags: [{ type: "MyWallet", id: "ME" }],
+    }),
+
+    getMyPendingPosting: builder.query<
+      {
+        success: boolean;
+        data: PendingPostingProjection;
+      },
+      void
+    >({
+      query: () => "/real-estate/wallet/pending-posting",
       providesTags: [{ type: "MyWallet", id: "ME" }],
     }),
 
@@ -271,6 +306,7 @@ export const financeApi = baseApi.injectEndpoints({
 
 export const {
   useGetMyWalletQuery,
+  useGetMyPendingPostingQuery,
   useGetMySlabQuery,
   useGetMyLedgerQuery,
   useGetAllWalletsQuery,

@@ -115,14 +115,14 @@ function deriveIdentity(p: SeedProperty): {
     p.unitNumber ?? p.code.match(/-(\d{3,})$/)?.[1] ?? null;
   const projectName =
     p.projectName ??
-    p.addressLine1
+    (p.addressLine1
       .split(",")[0]
       .replace(
         /\s*(Plot|Tower|Wing|Survey|Building|Block)\s+[A-Z0-9-]+.*$/i,
         "",
       )
       .trim() ||
-    null;
+      null);
   return {
     projectName,
     block: p.block ?? null,

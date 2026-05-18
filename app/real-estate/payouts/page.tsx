@@ -50,11 +50,15 @@ import {
   Send,
   History,
   CircleCheck,
+  Clock,
+  ShieldAlert,
+  ShieldOff,
 } from "lucide-react";
 import {
   WITHDRAWAL_STATUS_LABEL,
   WITHDRAWAL_STATUS_VARIANT,
   formatCurrency,
+  formatDate,
   formatDateTime,
 } from "@/components/real-estate/constants";
 
@@ -113,6 +117,14 @@ export default function PayoutsPage() {
           />
         </CardContent>
       </Card>
+
+      {/* On-hold explainer — closes the "wallet says I have money, payouts
+          says 0" loop. Money posted from a closed transaction lands here
+          first; it auto-releases once the hold period elapses and the agent
+          is COMPLIANT. */}
+      {(wallet?.pendingBalance ?? 0) > 0 && (
+        <HoldExplainer wallet={wallet!} />
+      )}
 
       {/* Bank accounts */}
       <Card>
@@ -551,6 +563,90 @@ function WithdrawalRow({ withdrawal }: { withdrawal: any }) {
         </Button>
       )}
     </li>
+  );
+}
+
+// Explains why pendingBalance isn't withdrawable. Server fills `heldReason`
+// after running an auto-release pass — anything still on hold is genuinely
+// blocked by hold-period, compliance, or a frozen wallet.
+function HoldExplainer({ wallet }: { wallet: any }) {
+  const pending = Number(wallet.pendingBalance ?? 0);
+  const reason: string | null = wallet.heldReason ?? null;
+  const next: string | null = wallet.nextReleaseAt ?? null;
+  const currency: string = wallet.currency ?? "INR";
+
+  const { Icon, title, tone, body, action } = (() => {
+    if (reason === "FROZEN")
+      return {
+        Icon: ShieldOff,
+        title: "Wallet frozen",
+        tone: "destructive" as const,
+        body:
+          wallet.freezeReason ??
+          "Your wallet is frozen by an admin. Releases and payouts are paused until it's unfrozen.",
+        action: null,
+      };
+    if (reason === "COMPLIANCE")
+      return {
+        Icon: ShieldAlert,
+        title: "Pending compliance verification",
+        tone: "warn" as const,
+        body:
+          "These commissions are past the hold period, but releases require a COMPLIANT KYC / license status (BR-5). Upload or verify your compliance documents to unlock them.",
+        action: (
+          <Button asChild size="sm" variant="outline">
+            <Link href="/real-estate/compliance">Open compliance</Link>
+          </Button>
+        ),
+      };
+    if (reason === "HOLD_PERIOD")
+      return {
+        Icon: Clock,
+        title: "Within hold period",
+        tone: "info" as const,
+        body: next
+          ? `These commissions auto-release as the hold period elapses. The next batch becomes withdrawable on ${formatDate(next)}.`
+          : "These commissions will auto-release as the hold period elapses.",
+        action: null,
+      };
+    // No heldReason but pending > 0 — auto-release didn't run, or there are
+    // entries with no rule attached. Show a generic explainer rather than a
+    // misleading "not blocked" message.
+    return {
+      Icon: Clock,
+      title: "Awaiting release",
+      tone: "info" as const,
+      body:
+        "Commissions land here first and become available once their hold period elapses.",
+      action: null,
+    };
+  })();
+
+  const toneClass =
+    tone === "destructive"
+      ? "border-destructive/40 bg-destructive/5"
+      : tone === "warn"
+        ? "border-amber-400/40 bg-amber-50 dark:bg-amber-950/20"
+        : "border-blue-400/30 bg-blue-50/60 dark:bg-blue-950/20";
+
+  return (
+    <Card className={toneClass}>
+      <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <Icon className="h-5 w-5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold flex items-center gap-2 flex-wrap">
+              {title}
+              <Badge variant="outline" className="font-mono tabular-nums">
+                {formatCurrency(pending, currency)} on hold
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">{body}</p>
+          </div>
+        </div>
+        {action}
+      </CardContent>
+    </Card>
   );
 }
 
