@@ -18,10 +18,13 @@
  */
 
 import { useMemo, useState } from "react";
-import { Columns3, RotateCcw, Check, GripVertical } from "lucide-react";
+import {
+  Columns3, RotateCcw, Check, Lock, Search, X, EyeOff, Eye,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -94,10 +97,11 @@ export function ManageColumnsButton<T>({
   };
 
   // The dialog variant matches the dynamic form-builder's "Manage Columns"
-  // modal — a centered card grid with a Select-All header and an Apply
-  // Changes footer. Keeps the same toggle / showAll / hideAll handlers so
-  // the underlying state still flows through useTablePrefs.
+  // modal. Section-grouped card grid with a search box, per-section bulk
+  // toggles, and a reset/apply footer. All state flows through the same
+  // useTablePrefs hook so changes propagate live to the DataTable.
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [search, setSearch] = useState("");
   if (variant === "dialog") {
     return (
       <>
@@ -117,61 +121,101 @@ export function ManageColumnsButton<T>({
             {visibleCount}/{totalCount}
           </Badge>
         </Button>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
-            <DialogHeader className="px-6 pt-6 pb-4 border-b">
-              <DialogTitle className="text-lg">Manage Columns</DialogTitle>
-              <DialogDescription>
-                Select which columns are visible. Pinned columns always show.
-              </DialogDescription>
+        <Dialog
+          open={dialogOpen}
+          onOpenChange={(o) => {
+            setDialogOpen(o);
+            if (!o) setSearch(""); // clear search on close so next open is fresh
+          }}
+        >
+          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]">
+            {/* ── Header ─────────────────────────────────────────────── */}
+            <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <DialogTitle className="text-base font-semibold flex items-center gap-2">
+                    <Columns3 className="h-4 w-4 text-muted-foreground" />
+                    Manage Columns
+                  </DialogTitle>
+                  <DialogDescription className="text-xs">
+                    Choose which columns appear in the table. Pinned columns always show.
+                  </DialogDescription>
+                </div>
+                <Badge variant="secondary" className="text-[11px] font-semibold tabular-nums shrink-0">
+                  {visibleCount} / {totalCount}
+                </Badge>
+              </div>
             </DialogHeader>
 
-            {/* Select All + counter. DIV not button (Radix Checkbox is
-                already a button — can't nest button-in-button). */}
-            <div className="px-6 py-3 flex items-center justify-between border-b">
-              <div
-                role="checkbox"
-                aria-checked={visibleCount === totalCount}
-                tabIndex={0}
-                onClick={() => {
-                  // If anything is hidden, show all; otherwise hide all
-                  // toggleable. Pinned columns are always preserved.
-                  if (hasAnyHidden) showAll();
-                  else hideAll();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    if (hasAnyHidden) showAll();
-                    else hideAll();
-                  }
-                }}
-                className="flex items-center gap-2 text-sm font-medium hover:opacity-80 cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-              >
-                <Checkbox
-                  checked={visibleCount === totalCount}
-                  tabIndex={-1}
-                  className="h-4 w-4 pointer-events-none"
+            {/* ── Toolbar (search + bulk actions) ────────────────────── */}
+            <div className="px-6 py-3 border-b shrink-0 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search columns…"
+                  className="h-8 pl-8 pr-8 text-sm"
                 />
-                Select All
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground"
+                    aria-label="Clear search"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {visibleCount} / {totalCount} visible
-              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={showAll}
+                disabled={!hasAnyHidden}
+                title="Show every column"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Show all
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={hideAll}
+                disabled={visibleCount <= columns.filter((c) => c.pinned).length}
+                title="Hide every non-pinned column"
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+                Hide all
+              </Button>
             </div>
 
-            {/* Section-grouped column list. Columns with a `group` field
-                are bucketed under their group's header; everything else
-                falls into "Other". Pinned columns always lead, regardless
-                of their group, so users see the locked rows first. */}
-            <div className="max-h-[55vh] overflow-y-auto px-6 py-4 space-y-5">
+            {/* ── Section-grouped column grid ────────────────────────── */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 min-h-0">
               {(() => {
-                // Bucket columns by group, preserving the order they were
-                // declared in the page's columns array (so sections stay
-                // in form-order automatically).
+                // Bucket columns by group (declaration order preserved so
+                // sections appear in form order). Pinned columns always
+                // land under "Always visible" at the top.
                 const groups: { name: string; columns: typeof columns }[] = [];
                 const byName = new Map<string, typeof columns>();
+                const searchLower = search.trim().toLowerCase();
                 for (const c of columns) {
+                  // Filter by search before grouping so empty sections
+                  // disappear instead of showing as headers with no cards.
+                  if (searchLower) {
+                    const label =
+                      typeof c.header === "string" ? c.header : c.id;
+                    if (
+                      !label.toLowerCase().includes(searchLower) &&
+                      !c.id.toLowerCase().includes(searchLower)
+                    ) {
+                      continue;
+                    }
+                  }
                   const name = c.pinned ? "Always visible" : (c.group ?? "Other");
                   if (!byName.has(name)) {
                     const arr: typeof columns = [];
@@ -180,8 +224,30 @@ export function ManageColumnsButton<T>({
                   }
                   byName.get(name)!.push(c);
                 }
+
+                // Empty-state when search filters out everything.
+                if (groups.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-sm text-muted-foreground">
+                      <Search className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                      No columns match <span className="font-medium text-foreground">"{search}"</span>
+                    </div>
+                  );
+                }
+
                 return groups.map((g) => {
-                  // Per-section visible count for the header pill.
+                  // Per-section bulk-toggle state.
+                  const sectionToggleable = g.columns.filter((c) => !c.pinned);
+                  const allOn = sectionToggleable.every((c) => {
+                    const explicit = prefs.hidden[c.id];
+                    const eff =
+                      explicit === true
+                        ? true
+                        : explicit === false
+                          ? false
+                          : !!c.defaultHidden;
+                    return !eff;
+                  });
                   const sectionVisible = g.columns.reduce((n, c) => {
                     if (c.pinned) return n + 1;
                     const explicit = prefs.hidden[c.id];
@@ -194,148 +260,147 @@ export function ManageColumnsButton<T>({
                     return eff ? n : n + 1;
                   }, 0);
                   const sectionTotal = g.columns.length;
-                  // Per-section bulk toggles. Skip pinned (they're locked).
-                  const sectionToggleable = g.columns.filter((c) => !c.pinned);
-                  const allOn = sectionToggleable.every((c) => {
-                    const explicit = prefs.hidden[c.id];
-                    const eff =
-                      explicit === true
-                        ? true
-                        : explicit === false
-                          ? false
-                          : !!c.defaultHidden;
-                    return !eff;
-                  });
                   const handleSectionToggle = () => {
                     for (const c of sectionToggleable) setColumnVisible(c.id, !allOn);
                   };
+                  const isAlwaysVisible = g.name === "Always visible";
                   return (
-                    <div key={g.name} className="space-y-3">
-                      <div className="flex items-center justify-between gap-3 sticky top-0 bg-background pt-1 pb-2 -mt-1 border-b">
+                    <section key={g.name} className="space-y-2.5">
+                      {/* Section header — non-sticky so it never overlaps
+                          the cards. Border-top + padding clearly separates
+                          one section from the next. */}
+                      <header className="flex items-center justify-between gap-3 pb-2 border-b border-border/60">
                         <div className="flex items-center gap-2 min-w-0">
-                          <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground/80">
+                          {isAlwaysVisible && (
+                            <Lock className="h-3 w-3 text-muted-foreground" />
+                          )}
+                          <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-foreground/70">
                             {g.name}
                           </h3>
-                          <Badge variant="secondary" className="text-[10px] font-semibold">
-                            {sectionVisible} / {sectionTotal}
-                          </Badge>
+                          <span className="text-[10px] text-muted-foreground tabular-nums font-medium">
+                            {sectionVisible}/{sectionTotal}
+                          </span>
                         </div>
                         {sectionToggleable.length > 0 && (
                           <button
                             type="button"
                             onClick={handleSectionToggle}
-                            className="text-[11px] font-medium text-primary hover:underline shrink-0"
+                            className="text-[11px] font-medium text-primary hover:underline shrink-0 transition-colors"
                           >
-                            {allOn ? "Hide all in section" : "Show all in section"}
+                            {allOn ? "Hide section" : "Show all"}
                           </button>
                         )}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      </header>
+
+                      {/* Cards. role=checkbox div pattern avoids the
+                          nested-button issue (Radix Checkbox is itself a
+                          button). pointer-events-none on the Checkbox lets
+                          the outer div handle the click. */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {g.columns.map((c) => {
-                  const isPinned = !!c.pinned;
-                  // Tri-state: explicit override wins, else defaultHidden.
-                  const explicit = prefs.hidden[c.id];
-                  const effectivelyHidden =
-                    explicit === true
-                      ? true
-                      : explicit === false
-                        ? false
-                        : !!c.defaultHidden;
-                  const isChecked = !effectivelyHidden;
-                  const isUntouched = explicit === undefined;
-                  const handleToggle = () => {
-                    if (isPinned) return;
-                    // Pass defaultHidden so the tri-state toggle knows what
-                    // the "no explicit override" case means and can flip
-                    // correctly even for defaultHidden columns.
-                    toggleHidden(c.id, !!c.defaultHidden);
-                  };
-                  return (
-                    <div
-                      key={c.id}
-                      role="checkbox"
-                      aria-checked={isChecked}
-                      aria-disabled={isPinned}
-                      tabIndex={isPinned ? -1 : 0}
-                      onClick={handleToggle}
-                      onKeyDown={(e) => {
-                        if (isPinned) return;
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          handleToggle();
-                        }
-                      }}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border bg-card px-3 py-3 text-left transition-colors select-none outline-none",
-                        "hover:border-primary/40 hover:bg-muted/30",
-                        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                        isChecked && "border-primary/40",
-                        isPinned
-                          ? "opacity-70 cursor-not-allowed hover:border-border hover:bg-card"
-                          : "cursor-pointer",
-                      )}
-                    >
-                      <Checkbox
-                        checked={isChecked}
-                        disabled={isPinned}
-                        // Pure visual indicator — clicks are handled by the
-                        // outer div above. tabIndex -1 so we don't get a
-                        // second tab-stop inside the card.
-                        tabIndex={-1}
-                        className="h-4 w-4 flex-none pointer-events-none"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {typeof c.header === "string" ? c.header : c.id}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {isPinned && (
-                            <Badge variant="outline" className="text-[9px] h-4 px-1">
-                              pinned
-                            </Badge>
-                          )}
-                          {c.defaultHidden && isUntouched && (
-                            <Badge variant="outline" className="text-[9px] h-4 px-1 text-muted-foreground">
-                              optional
-                            </Badge>
-                          )}
-                          {!isPinned && !c.defaultHidden && (
-                            <span className="text-[10px] text-muted-foreground">
-                              column · {c.id}
-                            </span>
-                          )}
-                        </div>
+                          const isPinned = !!c.pinned;
+                          const explicit = prefs.hidden[c.id];
+                          const effectivelyHidden =
+                            explicit === true
+                              ? true
+                              : explicit === false
+                                ? false
+                                : !!c.defaultHidden;
+                          const isChecked = !effectivelyHidden;
+                          const handleToggle = () => {
+                            if (isPinned) return;
+                            toggleHidden(c.id, !!c.defaultHidden);
+                          };
+                          const label =
+                            typeof c.header === "string" && c.header.trim().length > 0
+                              ? c.header
+                              : c.id;
+                          return (
+                            <div
+                              key={c.id}
+                              role="checkbox"
+                              aria-checked={isChecked}
+                              aria-disabled={isPinned}
+                              tabIndex={isPinned ? -1 : 0}
+                              onClick={handleToggle}
+                              onKeyDown={(e) => {
+                                if (isPinned) return;
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  handleToggle();
+                                }
+                              }}
+                              className={cn(
+                                "group flex items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-all select-none outline-none",
+                                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                                isPinned
+                                  ? "border-muted bg-muted/30 cursor-not-allowed"
+                                  : isChecked
+                                    ? "border-primary/40 bg-primary/[0.03] cursor-pointer hover:border-primary hover:bg-primary/[0.06]"
+                                    : "border-border bg-card cursor-pointer hover:border-primary/30 hover:bg-muted/40",
+                              )}
+                            >
+                              <Checkbox
+                                checked={isChecked}
+                                disabled={isPinned}
+                                tabIndex={-1}
+                                className="h-4 w-4 flex-none pointer-events-none"
+                              />
+                              <span
+                                className={cn(
+                                  "flex-1 min-w-0 truncate text-sm",
+                                  isChecked ? "font-medium text-foreground" : "text-foreground/80",
+                                )}
+                                title={label}
+                              >
+                                {label}
+                              </span>
+                              {isPinned && (
+                                <Lock className="h-3 w-3 text-muted-foreground flex-none" />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                      <GripVertical className="h-4 w-4 text-muted-foreground/40 flex-none pointer-events-none" />
-                    </div>
-                  );
-                })}
-                      </div>
-                    </div>
+                    </section>
                   );
                 });
               })()}
             </div>
 
-            <DialogFooter className="px-6 py-3 border-t flex items-center justify-between gap-2 sm:justify-between">
+            {/* ── Footer ─────────────────────────────────────────────── */}
+            <DialogFooter className="px-6 py-3 border-t flex items-center justify-between gap-2 sm:justify-between shrink-0">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 gap-1"
+                className="h-8 gap-1.5 text-xs"
                 onClick={reset}
                 title="Restore default columns"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Reset to defaults
               </Button>
-              <Button
-                type="button"
-                onClick={() => setDialogOpen(false)}
-                className="h-9 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-              >
-                Apply Changes
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 px-4 gap-1.5"
+                  onClick={() => setDialogOpen(false)}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Done
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
