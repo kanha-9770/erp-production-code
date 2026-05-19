@@ -356,10 +356,19 @@ export async function calculateSlabCommission(
     note: `Direct income @ ₹${sellerRate.toFixed(2)}/unit × ${dealArea.toFixed(2)} units (slab after deal)`,
   });
 
-  // Plan 3 — differential overrides up the upline chain (max 10 levels)
-  const upline = await walkUplineWithRates(
-    tx, txn.organizationId, sellerUserId, plan, 10, dealArea,
-  );
+  // Plan 3 — differential overrides up the upline chain. Walk only as deep
+  // as the plan's overrideLevels actually go; if the admin configured 3
+  // levels we don't waste round-trips on 7 more. If the plan configures
+  // levels up to L15, we walk to L15 — no hardcoded cap. Empty config = no
+  // override walk at all.
+  const maxDepth = plan.overrideLevels.length
+    ? Math.max(...plan.overrideLevels.map((l) => l.level))
+    : 0;
+  const upline = maxDepth
+    ? await walkUplineWithRates(
+        tx, txn.organizationId, sellerUserId, plan, maxDepth, dealArea,
+      )
+    : [];
 
   let overrideTotal = ZERO;
   let prevRate = sellerRate; // cascade: each level computes diff against the level below
@@ -367,25 +376,48 @@ export async function calculateSlabCommission(
   for (let i = 0; i < upline.length; i++) {
     const node = upline[i];
     const levelConfig = plan.overrideLevels.find((l) => l.level === i + 1);
-    if (!levelConfig) continue; // no config for this depth
+    if (!levelConfig) {
+      // No config for this depth — still advance prevRate so subsequent
+      // levels diff against the most recent upline rate seen, matching
+      // simulatePlan's cascade behaviour.
+      prevRate = node.slabRate;
+      continue;
+    }
 
     let overrideAmt: Prisma.Decimal;
+    let noteSuffix = "";
 
     if (plan.overrideMode === "DIFF_FACTOR") {
       // Factor is a flat ₹/sq.yd absolute amount regardless of rate difference
       overrideAmt = mul(dealArea, levelConfig.factor);
     } else {
-      // DIFF_RATE: differential = (uplineRate − prevRate) × dealArea × factor
+      // DIFF_RATE: differential = (uplineRate − prevRate) × dealArea × factor.
+      //
+      // In a low-volume / fresh org, uplines often sit on the same slab as
+      // the seller (their downline volume hasn't pushed them higher yet), so
+      // the differential collapses to zero and they'd otherwise earn nothing
+      // on every deal — including the "Awaiting commission posting" preview
+      // an upline sees on their wallet page. Fall back to the flat factor
+      // (₹/sq.yd × dealArea) so every configured upline level always earns
+      // something. Once the team is large enough that uplines sit on higher
+      // slabs, the differential takes over and rewards the rate gap.
       const rateDiff = node.slabRate.minus(prevRate);
-      if (rateDiff.lte(ZERO)) {
-        // No differential earned if upline is at same or lower slab
-        continue;
+      if (rateDiff.gt(ZERO)) {
+        overrideAmt = mulRaw(rateDiff, dealArea).times(levelConfig.factor)
+          .toDecimalPlaces(2, ROUND);
+      } else {
+        overrideAmt = mul(dealArea, levelConfig.factor);
+        noteSuffix = " (flat floor)";
       }
-      overrideAmt = mulRaw(rateDiff, dealArea).times(levelConfig.factor)
-        .toDecimalPlaces(2, ROUND);
     }
 
-    if (overrideAmt.lte(ZERO)) continue;
+    // Always advance prevRate (matches simulatePlan) — even when this level
+    // is skipped because of a non-positive override, the next level's diff
+    // should be against this level's rate.
+    if (overrideAmt.lte(ZERO)) {
+      prevRate = node.slabRate;
+      continue;
+    }
 
     splits.push({
       role: "OVERRIDE",
@@ -394,7 +426,7 @@ export async function calculateSlabCommission(
       userId: node.userId,
       amount: overrideAmt,
       rateApplied: node.slabRate,
-      note: `Override L${i + 1} @ factor ${levelConfig.factor.toFixed(4)} × ${dealArea.toFixed(2)} units`,
+      note: `Override L${i + 1} @ factor ${levelConfig.factor.toFixed(4)} × ${dealArea.toFixed(2)} units${noteSuffix}`,
     });
     overrideTotal = overrideTotal.plus(overrideAmt);
     prevRate = node.slabRate; // next level diffs against this level's rate
@@ -448,6 +480,13 @@ export async function closeTransactionSlab(
   opts: { mode?: "close-and-post" | "post-only" } = {},
 ) {
   const mode = opts.mode ?? "close-and-post";
+
+  // Exclusive row lock — see commission-engine.closeTransaction for the
+  // full rationale. Without this, two admins clicking "Post commissions"
+  // simultaneously both pass the splits-empty check on the same snapshot
+  // and write duplicate splits + ledger entries.
+  await (tx as any).$queryRaw`SELECT id FROM re_transactions WHERE id = ${transactionId} FOR UPDATE`;
+
   const txn = await (tx as any).transaction.findUniqueOrThrow({
     where: { id: transactionId },
     include: { property: true },
@@ -729,6 +768,17 @@ export async function reverseTransactionSlab(
     data: { status: "AVAILABLE" },
   });
 
+  // Revoke designation milestones whose threshold is no longer met. The area
+  // ledger has just had this deal's rows flipped to isReversed=true, so
+  // getEffectiveCumulativeArea recomputes the *new* (smaller) effective area
+  // for every agent whose subtree included the reversed deal. Walk every
+  // unique agent who has a RewardGrant for this org/plan; if their current
+  // effective area is now below `triggeredByArea`, mark the grant CANCELLED
+  // and (for CASH rewards previously credited) write an offsetting DEBIT so
+  // the bonus money flows back out. Without this, a fake/cancelled deal could
+  // permanently promote a senior + leave their ₹X cash bonus standing.
+  await revokeUnsupportedDesignations(tx, txn.organizationId, invokerUserId, reason);
+
   // Audit — same reasoning as the close path: ruleId NULL for slab audits,
   // plan reference stays in `inputs`. txn.commissionRuleId is also kept null
   // for slab closes, so we don't accidentally point at a non-existent rule.
@@ -744,6 +794,94 @@ export async function reverseTransactionSlab(
       createdById: invokerUserId,
     },
   });
+}
+
+// Revoke any PENDING / FULFILLED designation grants whose triggering area
+// threshold is no longer met by the agent's current effective area. Called
+// after reversing a deal so a now-unsupported promotion + its cash bonus
+// roll back. Idempotent — already-CANCELLED grants are skipped.
+async function revokeUnsupportedDesignations(
+  tx: Tx,
+  organizationId: string,
+  invokerUserId: string,
+  reason: string,
+): Promise<void> {
+  const settings = await (tx as any).rebmSettings.findUnique({
+    where: { organizationId },
+    select: { activePlanId: true },
+  });
+  if (!settings?.activePlanId) return;
+  const planId: string = settings.activePlanId;
+
+  // Only consider grants for the active plan — historical grants on retired
+  // plans aren't ours to claw back automatically.
+  const grants = await (tx as any).rewardGrant.findMany({
+    where: { organizationId, planId, status: { in: ["PENDING", "FULFILLED"] } },
+    select: {
+      id: true,
+      agentId: true,
+      designationCode: true,
+      designationName: true,
+      rewardType: true,
+      rewardCashAmount: true,
+      triggeredByArea: true,
+    },
+  });
+  if (grants.length === 0) return;
+
+  // Cache per-agent effective area so we don't recompute it for every grant
+  // an agent holds.
+  const effectiveByAgent = new Map<string, Prisma.Decimal>();
+
+  for (const g of grants) {
+    let effective = effectiveByAgent.get(g.agentId);
+    if (effective === undefined) {
+      effective = await getEffectiveCumulativeArea(
+        tx,
+        organizationId,
+        g.agentId,
+        planId,
+      );
+      effectiveByAgent.set(g.agentId, effective);
+    }
+    if (effective.gte(dec(g.triggeredByArea))) continue; // still earned, leave alone
+
+    // Threshold no longer met — cancel the grant.
+    await (tx as any).rewardGrant.update({
+      where: { id: g.id },
+      data: {
+        status: "CANCELLED",
+        notes: `Auto-cancelled: effective area dropped below ${dec(g.triggeredByArea).toFixed(2)} after deal reversal — ${reason}`,
+      },
+    });
+
+    // For cash rewards, the RELEASED bonus was credited to the agent's
+    // wallet at grant time. Write an offsetting DEBIT so the balance
+    // reflects the loss of the designation. Non-cash (trophy / certificate)
+    // grants have no ledger impact.
+    if (g.rewardType === "CASH" && g.rewardCashAmount) {
+      const agent = await (tx as any).agentProfile.findUnique({
+        where: { id: g.agentId },
+        select: { userId: true },
+      });
+      if (agent) {
+        const wallet = await WalletService.ensureWallet(tx, {
+          organizationId,
+          userId: agent.userId,
+        });
+        await WalletService.addEntry(tx, {
+          organizationId,
+          walletId: wallet.id,
+          type: "DEBIT",
+          category: "REVERSAL",
+          status: "RELEASED",
+          amount: dec(g.rewardCashAmount),
+          description: `Reversal of designation reward: ${g.designationName} (${g.designationCode}) — ${reason}`,
+          createdById: invokerUserId,
+        });
+      }
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -982,17 +1120,27 @@ export function simulatePlan(
 
   for (let i = 0; i < uplineRates.length; i++) {
     const levelConfig = plan.overrideLevels.find((l) => l.level === i + 1);
-    if (!levelConfig) continue;
-
     const node = uplineRates[i];
+    if (!levelConfig) {
+      prevRate = node.rate;
+      continue;
+    }
+
     let amt: Prisma.Decimal;
 
     if (plan.overrideMode === "DIFF_FACTOR") {
       amt = mul(dealArea, levelConfig.factor);
     } else {
+      // Match the engine: when DIFF_RATE produces no positive diff, fall
+      // back to a flat-factor floor so every configured upline level still
+      // earns. Keeps the plan-designer preview in lockstep with what
+      // calculateSlabCommission will produce at post time.
       const diff = node.rate.minus(prevRate);
-      if (diff.lte(ZERO)) { prevRate = node.rate; continue; }
-      amt = mulRaw(diff, dealArea).times(levelConfig.factor).toDecimalPlaces(2, ROUND);
+      if (diff.gt(ZERO)) {
+        amt = mulRaw(diff, dealArea).times(levelConfig.factor).toDecimalPlaces(2, ROUND);
+      } else {
+        amt = mul(dealArea, levelConfig.factor);
+      }
     }
 
     if (amt.lte(ZERO)) { prevRate = node.rate; continue; }
