@@ -6,9 +6,9 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
+  TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   ThumbsUp, CheckCircle2, Lightbulb, Zap, Type, FileText, Layout,
-  ArrowRight, Save, X, UserCircle
+  ArrowRight, Save, X, UserCircle, AlertCircle, Info, Paperclip, Upload
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -40,6 +40,7 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 
 interface Kaizen {
   id: string;
@@ -62,12 +63,37 @@ const STATUS_OPTIONS = [
   { value: "implemented", label: "Implemented" },
 ];
 
+const KAIZEN_AREA_FILTER_OPTIONS = [
+  { value: "safety", label: "Safety" },
+  { value: "quality", label: "Quality" },
+  { value: "cost", label: "Cost" },
+  { value: "delivery", label: "Delivery" },
+  { value: "morale", label: "Morale" },
+  { value: "environment", label: "Environment" },
+  { value: "productivity", label: "Productivity" },
+  { value: "other", label: "Other" },
+];
+
+const DEPARTMENT_FILTER_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
 interface Filters {
   search: string;
   status: string;
+  kaizenArea: string;
+  department: string;
 }
 
-const EMPTY_FILTERS: Filters = { search: "", status: "" };
+const EMPTY_FILTERS: Filters = { search: "", status: "", kaizenArea: "", department: "" };
 
 export default function KaizenPage() {
   const { user } = useCurrentUser();
@@ -138,10 +164,21 @@ export default function KaizenPage() {
   };
 
   const filterFields: FilterField[] = useMemo(() => [
-    { id: "title", label: "Title", type: "text" },
-    { id: "description", label: "Description", type: "text" },
+    { id: "title", label: "Theme", type: "text" },
+    { id: "description", label: "Problem", type: "text" },
+    { id: "currentState", label: "Why Analysis", type: "text" },
+    { id: "proposedState", label: "Result", type: "text" },
+    { id: "benefits", label: "Benefits", type: "text" },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
-    { id: "submissionDate", label: "Date", type: "date" },
+    { id: "kaizenArea", label: "Kaizen Area", type: "select", options: KAIZEN_AREA_FILTER_OPTIONS },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_FILTER_OPTIONS },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
+    { id: "employeeContributor", label: "Employee Contributor", type: "text" },
+    { id: "startDate", label: "Start Date", type: "date" },
+    { id: "submissionDate", label: "Submitted", type: "date" },
   ], []);
 
   const items = useMemo(() => {
@@ -151,6 +188,8 @@ export default function KaizenPage() {
       result = result.filter(k => k.title.toLowerCase().includes(q) || k.description.toLowerCase().includes(q));
     }
     if (filters.status) result = result.filter(k => k.status === filters.status);
+    if (filters.kaizenArea) result = result.filter(k => (k as any).kaizenArea === filters.kaizenArea);
+    if (filters.department) result = result.filter(k => (k as any).department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [kaizens, filters, conditions, filterFields]);
 
@@ -294,6 +333,8 @@ export default function KaizenPage() {
 
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <FilterChips label="Kaizen Area" value={filters.kaizenArea} onChange={(v) => updateFilter("kaizenArea", v)} options={KAIZEN_AREA_FILTER_OPTIONS} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
@@ -309,16 +350,19 @@ export default function KaizenPage() {
             onRowClick={(k) => setSelectedId(k.id)}
           />
         }
-        preview={selectedId ? <KaizenPreview id={selectedId} kaizens={kaizens} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} onVote={handleVote} /> : null}
+        preview={selectedId ? <KaizenPreview id={selectedId} kaizens={kaizens} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} onVote={handleVote} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} kaizens={kaizens} /> : null}
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle>New Kaizen</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Kaizen <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <KaizenForm
+            currentEmployee={currentEmployee}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -342,10 +386,16 @@ export default function KaizenPage() {
       </Sheet>
 
       <Sheet open={!!editingId} onOpenChange={(o) => !o && setEditingId(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+        <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Kaizen <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
+          </SheetHeader>
           {editingId && (
             <KaizenForm
               initial={kaizens.find(k => k.id === editingId)}
+              currentEmployee={currentEmployee}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -383,7 +433,7 @@ function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
   );
 }
 
-function KaizenPreview({ id, kaizens, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
+function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
 
@@ -403,6 +453,8 @@ function KaizenPreview({ id, kaizens, onEdit, onDelete, onVote }: { id: string, 
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(k.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <SubmitterDetails employeeId={k.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={k.submissionDate} />
 
       <Card className="p-4 space-y-3">
         <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Description</h3>
@@ -433,56 +485,391 @@ function KaizenPreview({ id, kaizens, onEdit, onDelete, onVote }: { id: string, 
   );
 }
 
-function KaizenForm({ initial, onCancel, onSubmit }: { initial?: Kaizen, onCancel: () => void, onSubmit: (data: any) => void }) {
+const KAIZEN_AREA_OPTIONS = [
+  { value: "safety", label: "Safety" },
+  { value: "quality", label: "Quality" },
+  { value: "cost", label: "Cost" },
+  { value: "delivery", label: "Delivery" },
+  { value: "morale", label: "Morale" },
+  { value: "environment", label: "Environment" },
+  { value: "productivity", label: "Productivity" },
+  { value: "other", label: "Other" },
+];
+
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
+function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: Kaizen,
+  currentEmployee?: any,
+  onCancel: () => void,
+  onSubmit: (data: any) => void
+}) {
   const [formData, setFormData] = useState({
-    title: initial?.title || "",
-    description: initial?.description || "",
-    currentState: initial?.currentState || "",
-    proposedState: initial?.proposedState || "",
+    // Section 1: Kaizen Info
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    middleName: "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
+    kaizenArea: "",
+    startDate: "",
+    theme: initial?.title || "",
+    // Section 2: Problem & Analysis
+    problem: initial?.description || "",
+    beforeMedia: "",
+    afterMedia: "",
+    whyAnalysis: initial?.currentState || "",
+    // Section 3: Result & Benefits
+    result: initial?.proposedState || "",
     benefits: initial?.benefits || "",
+    employeeContributor: "",
+    signature: "",
+    selfie: "",
+    employeeEngagementPoints: 0,
     status: initial?.status || "idea",
   });
 
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName.trim() ? "Last Name is required" : "",
+    kaizenArea: !formData.kaizenArea ? "Kaizen Area is required" : "",
+    startDate: !formData.startDate ? "Start Date is required" : "",
+    theme: !formData.theme.trim() ? "Theme is required" : "",
+    problem: !formData.problem.trim() ? "Problem is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    // Map sectioned fields back onto the persisted Kaizen schema:
+    //   theme → title, problem → description, whyAnalysis → currentState,
+    //   result → proposedState. Extra metadata is preserved on the wire so
+    //   future-aware backends can pick it up without breaking the current one.
+    onSubmit({
+      title: formData.theme,
+      description: formData.problem,
+      currentState: formData.whyAnalysis,
+      proposedState: formData.result,
+      benefits: formData.benefits,
+      status: formData.status,
+      employeeId: formData.employeeId,
+      firstName: formData.firstName,
+      middleName: formData.middleName,
+      lastName: formData.lastName,
+      department: formData.department,
+      employeeEngagementTeamName: formData.employeeEngagementTeamName,
+      kaizenArea: formData.kaizenArea,
+      startDate: formData.startDate,
+      beforeMedia: formData.beforeMedia,
+      afterMedia: formData.afterMedia,
+      employeeContributor: formData.employeeContributor,
+      signature: formData.signature,
+      selfie: formData.selfie,
+      employeeEngagementPoints: formData.employeeEngagementPoints,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Title</Label>
-          <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Kaizen title" />
-        </div>
-        <div className="space-y-2">
-          <Label>Status</Label>
-          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        {/* Section 1: Kaizen Info */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Kaizen Info</h3>
+              <p className="text-xs text-muted-foreground">Employee, area, theme, start date</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Middle Name">
+              <Input value={formData.middleName} onChange={e => setFormData({ ...formData, middleName: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+                placeholder="Team name"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Kaizen Area" required error={showErr("kaizenArea") ? errors.kaizenArea : ""}>
+              <Select value={formData.kaizenArea} onValueChange={v => setFormData({ ...formData, kaizenArea: v })}>
+                <SelectTrigger className={showErr("kaizenArea") ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {KAIZEN_AREA_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Start Date" required error={showErr("startDate") ? errors.startDate : ""}>
+              <Input
+                type="date"
+                value={formData.startDate}
+                onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                className={showErr("startDate") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Theme" required error={showErr("theme") ? errors.theme : ""}>
+                <Input
+                  value={formData.theme}
+                  onChange={e => setFormData({ ...formData, theme: e.target.value })}
+                  placeholder="Kaizen theme"
+                  className={showErr("theme") ? "border-red-500" : ""}
+                />
+              </FieldWrapper>
+            </div>
+          </div>
+        </Card>
+
+        {/* Section 2: Problem & Analysis */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">2</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Problem & Analysis</h3>
+              <p className="text-xs text-muted-foreground">Before/after media and why-analysis</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Problem" required error={showErr("problem") ? errors.problem : ""}>
+              <Textarea
+                value={formData.problem}
+                onChange={e => setFormData({ ...formData, problem: e.target.value })}
+                placeholder="Problem statement"
+                className={`min-h-[110px] ${showErr("problem") ? "border-red-500" : ""}`}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Before Media">
+              <FileFieldStub
+                value={formData.beforeMedia}
+                onChange={v => setFormData({ ...formData, beforeMedia: v })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="After Media">
+              <FileFieldStub
+                value={formData.afterMedia}
+                onChange={v => setFormData({ ...formData, afterMedia: v })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Why Analysis">
+              <Textarea
+                value={formData.whyAnalysis}
+                onChange={e => setFormData({ ...formData, whyAnalysis: e.target.value })}
+                placeholder="5-why / root cause"
+                className="min-h-[110px]"
+              />
+            </FieldWrapper>
+          </div>
+        </Card>
+
+        {/* Section 3: Result & Benefits */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">3</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Result & Benefits</h3>
+              <p className="text-xs text-muted-foreground">Result, benefits and signatures</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Result">
+              <Textarea
+                value={formData.result}
+                onChange={e => setFormData({ ...formData, result: e.target.value })}
+                placeholder="Measured result"
+                className="min-h-[100px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Benefits">
+              <Textarea
+                value={formData.benefits}
+                onChange={e => setFormData({ ...formData, benefits: e.target.value })}
+                placeholder="Benefits delivered"
+                className="min-h-[100px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Contributor">
+              <Input
+                value={formData.employeeContributor}
+                onChange={e => setFormData({ ...formData, employeeContributor: e.target.value })}
+                placeholder="Other contributors"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Signature" hint="Signature">
+              <FileFieldStub
+                value={formData.signature}
+                onChange={v => setFormData({ ...formData, signature: v })}
+                placeholder="Upload signature..."
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Selfie" hint="Selfie of contributor">
+              <FileFieldStub
+                value={formData.selfie}
+                onChange={v => setFormData({ ...formData, selfie: v })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Points">
+              <Input
+                type="number"
+                min={0}
+                value={formData.employeeEngagementPoints}
+                onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+              />
+            </FieldWrapper>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Status">
+                <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </FieldWrapper>
+            </div>
+          </div>
+        </Card>
       </div>
-      <div className="space-y-2">
-        <Label>Core Description</Label>
-        <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="min-h-[80px]" />
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Current Process</Label>
-          <Textarea value={formData.currentState} onChange={e => setFormData({ ...formData, currentState: e.target.value })} className="text-xs" />
-        </div>
-        <div className="space-y-2">
-          <Label>Proposed Improvement</Label>
-          <Textarea value={formData.proposedState} onChange={e => setFormData({ ...formData, proposedState: e.target.value })} className="text-xs" />
-        </div>
-      </div>
-      <div className="space-y-2">
-        <Label>Benefits</Label>
-        <Textarea value={formData.benefits} onChange={e => setFormData({ ...formData, benefits: e.target.value })} className="min-h-[60px]" />
-      </div>
-      <div className="flex justify-end gap-3 pt-4">
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           Save Kaizen
+
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Update Kaizen" : "Save Kaizen"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, hint, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {hint && <p className="text-[11px] text-muted-foreground -mt-1">{hint}</p>}
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FileFieldStub({ value, onChange, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="flex items-stretch border rounded-md overflow-hidden">
+      <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
+        <Paperclip className="h-3.5 w-3.5" />
+      </div>
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder || "Choose files..."}
+        className="border-0 rounded-none focus-visible:ring-0"
+      />
+      <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload file">
+        <Upload className="h-3.5 w-3.5" />
+        <span className="sr-only">Upload file</span>
+        <input
+          type="file"
+          aria-label="Upload file"
+          title="Upload file"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) onChange(f.name);
+          }}
+        />
+      </label>
     </div>
   );
 }
