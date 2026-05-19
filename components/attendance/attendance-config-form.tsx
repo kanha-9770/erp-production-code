@@ -39,6 +39,9 @@ interface AttendanceConfig {
   fullDayMinHours: number;
   overtimeAfterHours: number;
   breakMinutes: number;
+  monthlyHalfDayQuota: number;
+  monthlyShortLeaveQuota: number;
+  shortLeaveHours: number;
   weeklyOffDays: number[];
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
@@ -80,6 +83,9 @@ export function AttendanceConfigForm() {
     fullDayMinHours: string;
     overtimeAfterHours: string;
     breakMinutes: string;
+    monthlyHalfDayQuota: string;
+    monthlyShortLeaveQuota: string;
+    shortLeaveHours: string;
     weeklyOffDays: number[];
     autoCheckoutEnabled: boolean;
     autoCheckoutAt: string;
@@ -129,6 +135,9 @@ export function AttendanceConfigForm() {
         fullDayMinHours: String(c.fullDayMinHours),
         overtimeAfterHours: String(c.overtimeAfterHours),
         breakMinutes: String(c.breakMinutes),
+        monthlyHalfDayQuota: String(c.monthlyHalfDayQuota ?? 0),
+        monthlyShortLeaveQuota: String(c.monthlyShortLeaveQuota ?? 0),
+        shortLeaveHours: String(c.shortLeaveHours ?? 2),
         weeklyOffDays: c.weeklyOffDays ?? [],
         autoCheckoutEnabled: !!c.autoCheckoutAt,
         autoCheckoutAt: c.autoCheckoutAt ?? "23:00",
@@ -230,6 +239,9 @@ export function AttendanceConfigForm() {
       Number(form.fullDayMinHours) !== config.fullDayMinHours ||
       Number(form.overtimeAfterHours) !== config.overtimeAfterHours ||
       Number(form.breakMinutes) !== config.breakMinutes ||
+      Number(form.monthlyHalfDayQuota) !== (config.monthlyHalfDayQuota ?? 0) ||
+      Number(form.monthlyShortLeaveQuota) !== (config.monthlyShortLeaveQuota ?? 0) ||
+      Number(form.shortLeaveHours) !== (config.shortLeaveHours ?? 2) ||
       JSON.stringify([...form.weeklyOffDays].sort()) !==
         JSON.stringify([...(config.weeklyOffDays ?? [])].sort()) ||
       form.autoCheckoutEnabled !== !!config.autoCheckoutAt ||
@@ -338,6 +350,18 @@ export function AttendanceConfigForm() {
         Math.min(1.0, Number(form.faceMatchThreshold) || 0.55),
       );
 
+      // Monthly allowances — the company decides how many half-days and
+      // short leaves are forgiven per month before payroll docks pay.
+      const monthlyHalfDayQuota = Math.max(
+        0,
+        Math.floor(Number(form.monthlyHalfDayQuota) || 0),
+      );
+      const monthlyShortLeaveQuota = Math.max(
+        0,
+        Math.floor(Number(form.monthlyShortLeaveQuota) || 0),
+      );
+      const shortLeaveHours = Math.max(0, Number(form.shortLeaveHours) || 0);
+
       const payload = {
         defaultShiftStart: form.defaultShiftStart,
         defaultShiftEnd: form.defaultShiftEnd,
@@ -346,6 +370,9 @@ export function AttendanceConfigForm() {
         fullDayMinHours,
         overtimeAfterHours,
         breakMinutes,
+        monthlyHalfDayQuota,
+        monthlyShortLeaveQuota,
+        shortLeaveHours,
         weeklyOffDays: form.weeklyOffDays,
         autoCheckoutAt: form.autoCheckoutEnabled ? form.autoCheckoutAt : null,
         geofenceMode: form.geofenceMode,
@@ -561,6 +588,63 @@ export function AttendanceConfigForm() {
                   value={form.overtimeAfterHours}
                   onChange={(e) =>
                     updateForm("overtimeAfterHours", e.target.value)
+                  }
+                />
+              </Field>
+            </div>
+          </Section>
+
+          <Section
+            title="Monthly allowances"
+            hint="Free half-days / short leaves before payroll docks pay"
+            className="lg:col-span-2"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <Field
+                label="Half-days / month"
+                htmlFor="monthlyHalfDayQuota"
+                hint="Half-days the company forgives. Beyond this, each half-day costs 0.5 day pay."
+              >
+                <Input
+                  id="monthlyHalfDayQuota"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.monthlyHalfDayQuota}
+                  onChange={(e) =>
+                    updateForm("monthlyHalfDayQuota", e.target.value)
+                  }
+                />
+              </Field>
+              <Field
+                label="Short leaves / month"
+                htmlFor="monthlyShortLeaveQuota"
+                hint="Forgiven short-leave occurrences (e.g. coming late by < the window below)."
+              >
+                <Input
+                  id="monthlyShortLeaveQuota"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.monthlyShortLeaveQuota}
+                  onChange={(e) =>
+                    updateForm("monthlyShortLeaveQuota", e.target.value)
+                  }
+                />
+              </Field>
+              <Field
+                label="Short-leave window (hours)"
+                htmlFor="shortLeaveHours"
+                hint="Worked-hours deficit up to this counts as a short leave instead of a half-day."
+              >
+                <Input
+                  id="shortLeaveHours"
+                  type="number"
+                  min={0}
+                  step={0.25}
+                  value={form.shortLeaveHours}
+                  onChange={(e) =>
+                    updateForm("shortLeaveHours", e.target.value)
                   }
                 />
               </Field>

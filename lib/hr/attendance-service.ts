@@ -332,26 +332,49 @@ function findLeaveForToday(
 //      at 24h, not whenever the lazy sweep happened to run. So a user who
 //      logs in two days later doesn't get credited for the gap.
 //
-// Runs at the top of getStatus and recordPunch, so any subsequent logic
-// sees the database already cleaned up. Scans by userId — indexed — so the
-// cost in the common case (no stale rows) is one cheap row count.
+// Runs at the top of getStatus and recordPunch (per-user sweep) AND at the
+// top of the team-attendance GET (org-wide sweep) — without the latter, an
+// admin viewing /attendance/team would see "Working" rows from prior days
+// because the row's owner hasn't loaded their widget yet to trigger the
+// per-user sweep.
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
-async function applyDayCapAutoCheckouts(
-  userId: string,
+/**
+ * Sweep stale (checkedIn-but-not-checkedOut > 24h) Attendance rows and
+ * close them at checkInAt + 24h. Filter by either a single userId or an
+ * entire organizationId; passing neither is a no-op (defence against
+ * accidental table-wide sweeps).
+ *
+ * Exported so the team-attendance API can run the org-wide variant before
+ * it reads rows — otherwise its query returns stale "Working" rows from
+ * prior days for users who haven't opened their widget since.
+ */
+export async function applyDayCapAutoCheckouts(
+  filter: { userId?: string; organizationId?: string },
   now: Date,
 ): Promise<void> {
+  if (!filter.userId && !filter.organizationId) return;
   const cutoff = new Date(now.getTime() - TWENTY_FOUR_HOURS_MS);
   // Only rows where checkInAt is older than 24h ago AND user hasn't already
   // checked out. The `not: null` guard avoids matching legacy rows that
   // never recorded a server-stamped checkInAt.
+  const where: any = {
+    checkedIn: true,
+    checkedOut: false,
+    checkInAt: { lt: cutoff, not: null },
+  };
+  if (filter.userId) where.userId = filter.userId;
+  if (filter.organizationId) {
+    // Attendance.organizationId can legitimately be null on legacy rows;
+    // pick those up too via the user relation so the sweep still closes
+    // them. The `OR` lets either path match.
+    where.OR = [
+      { organizationId: filter.organizationId },
+      { user: { organizationId: filter.organizationId } },
+    ];
+  }
   const stale = await prisma.attendance.findMany({
-    where: {
-      userId,
-      checkedIn: true,
-      checkedOut: false,
-      checkInAt: { lt: cutoff, not: null },
-    } as any,
+    where,
     select: {
       id: true,
       organizationId: true,
@@ -460,7 +483,7 @@ export async function getStatus(
   // 24-hour cap: close any prior-day rows where the user forgot to check
   // out, BEFORE we read today's row. Without this, a stale Monday row
   // would still show as "WORKING" on Tuesday and block today's check-in.
-  await applyDayCapAutoCheckouts(userId, now);
+  await applyDayCapAutoCheckouts({ userId }, now);
 
   const cfg = await getAttendanceConfig(organizationId);
   // Resolve the user's effective shift once up front. Late/grace/OT and the
@@ -825,7 +848,7 @@ export async function recordPunch(
   // 24-hour cap: clean up any prior-day rows the user forgot to close so a
   // fresh check-in on today's date isn't blocked by yesterday's open row.
   // Cheap (indexed lookup, zero work in the common case).
-  await applyDayCapAutoCheckouts(input.userId, now);
+  await applyDayCapAutoCheckouts({ userId: input.userId }, now);
 
   const cfg = await getAttendanceConfig(input.organizationId);
   // Per-employee shift override: pulled once so the IN's lateMinutes and the

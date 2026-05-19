@@ -75,11 +75,27 @@ export interface SampleHoliday {
 export interface PayrollPolicy {
   weeklyOffDays: number[]; // 0=Sun … 6=Sat
   payableBasis: 'monthDays' | 'fixed26' | 'fixed30';
+  /** Monthly free allowances configured in Attendance Configuration. The
+   *  payroll engine forgives half-day pay deductions up to
+   *  `monthlyHalfDayQuota` per employee/month, and treats short-deficit
+   *  days within `shortLeaveHours` as short leaves rather than half-days
+   *  until `monthlyShortLeaveQuota` is exhausted. */
+  monthlyHalfDayQuota?: number;
+  monthlyShortLeaveQuota?: number;
+  shortLeaveHours?: number;
+  /** Full-day threshold (hours) mirrored from AttendanceConfiguration so
+   *  the engine can detect short-leave days uniformly even when the
+   *  classifier's internal constants drift. */
+  fullDayMinHours?: number;
 }
 
 const DEFAULT_POLICY: PayrollPolicy = {
   weeklyOffDays: [0],
   payableBasis: 'monthDays',
+  monthlyHalfDayQuota: 0,
+  monthlyShortLeaveQuota: 0,
+  shortLeaveHours: 2,
+  fullDayMinHours: 8,
 };
 
 // Salary structure + statutory config persisted via the configure wizard.
@@ -865,7 +881,22 @@ export async function getPayrollPolicy(organizationId: string): Promise<PayrollP
         cfg.payableBasis === 'fixed26' || cfg.payableBasis === 'fixed30'
           ? cfg.payableBasis
           : 'monthDays';
-      return { weeklyOffDays, payableBasis };
+      return {
+        weeklyOffDays,
+        payableBasis,
+        monthlyHalfDayQuota: Number.isFinite(cfg.monthlyHalfDayQuota)
+          ? Math.max(0, Math.floor(Number(cfg.monthlyHalfDayQuota)))
+          : 0,
+        monthlyShortLeaveQuota: Number.isFinite(cfg.monthlyShortLeaveQuota)
+          ? Math.max(0, Math.floor(Number(cfg.monthlyShortLeaveQuota)))
+          : 0,
+        shortLeaveHours: Number.isFinite(cfg.shortLeaveHours)
+          ? Math.max(0, Number(cfg.shortLeaveHours))
+          : 2,
+        fullDayMinHours: Number.isFinite(cfg.fullDayMinHours)
+          ? Math.max(0, Number(cfg.fullDayMinHours))
+          : 8,
+      };
     }
   } catch (err) {
     // AttendanceConfiguration table may not exist yet on a freshly cloned

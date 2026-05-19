@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { canApproveAttendance } from '@/lib/hr/attendance-permissions';
-import { distanceMeters, todayKey } from '@/lib/hr/attendance-service';
+import {
+  applyDayCapAutoCheckouts,
+  distanceMeters,
+  todayKey,
+} from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
+import { userHasRouteAccess } from '@/lib/auth/route-meta';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,16 +35,30 @@ export async function GET(request: NextRequest) {
       { status: 403 },
     );
   }
-  const allowed = await canApproveAttendance(
+  // Authorisation is layered:
+  //   1. Admins / configured attendance approvers (legacy gate).
+  //   2. Users whose role has been explicitly granted the route at
+  //      Settings → Permission → Route Permissions.
+  // The second branch is what makes "I gave my Team Lead role access to
+  // /attendance/team" actually work — without it, the API still 403s even
+  // though the sidebar (now) shows the link.
+  const approver = await canApproveAttendance(
     authUser.id,
     authUser.organizationId,
   );
+  const allowed =
+    approver ||
+    (await userHasRouteAccess(
+      authUser.id,
+      authUser.organizationId,
+      '/attendance/team',
+    ));
   if (!allowed) {
     return NextResponse.json(
       {
         success: false,
         error:
-          'Only admins or configured attendance approvers can view team attendance.',
+          'Only admins, configured attendance approvers, or roles granted /attendance/team can view team attendance.',
       },
       { status: 403 },
     );
@@ -68,6 +87,16 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  // 24-hour cap: close any prior-day rows where a teammate forgot to check
+  // out, BEFORE we read the attendance rows. Without this the team view
+  // shows yesterday's "Working" rows with no check-out time / worked / OT
+  // for users who haven't opened their own widget since punching in.
+  // Indexed lookup → zero work in the common case.
+  await applyDayCapAutoCheckouts(
+    { organizationId: authUser.organizationId },
+    new Date(),
+  );
 
   // Pull every active user in the org. We left-join attendance per (user,
   // date) below in JS — tractable for the dashboards we expect (≤500 users
