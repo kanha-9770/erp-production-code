@@ -193,52 +193,97 @@ export default function KaizenPage() {
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [kaizens, filters, conditions, filterFields]);
 
-  const columns: ColumnDef<Kaizen>[] = useMemo(() => [
-    {
-      id: "title",
-      header: "Kaizen Idea",
-      width: 300,
-      pinned: true,
-      cell: (k) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate uppercase">{k.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{k.description}</div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      width: 150,
-      cell: (k) => {
-        const colors: Record<string, string> = {
-          idea: "bg-gray-100 text-gray-800",
-          approved: "bg-blue-100 text-blue-800",
-          "in-implementation": "bg-yellow-100 text-yellow-800",
-          implemented: "bg-green-100 text-green-800",
-        };
-        return <Badge variant="outline" className={`${colors[k.status]} text-[10px]`}>{k.status.replace('-', ' ').toUpperCase()}</Badge>;
+  const columns: ColumnDef<Kaizen>[] = useMemo(() => {
+    // Helper for plain-text columns sourced from the (possibly extended)
+    // server payload. Many KaizenForm fields aren't in the typed interface
+    // because they're forwarded as-is to the backend, so we read them off
+    // the record dynamically.
+    const text = (k: Kaizen, key: string) => {
+      const v = (k as any)[key];
+      return v === null || v === undefined || v === "" ? "—" : String(v);
+    };
+    const dateCell = (k: Kaizen, key: string) => {
+      const v = (k as any)[key];
+      if (!v) return <span className="text-xs text-muted-foreground">—</span>;
+      const d = new Date(v);
+      return <span className="text-xs text-muted-foreground">{isNaN(d.getTime()) ? String(v) : d.toLocaleDateString()}</span>;
+    };
+    const plain = (k: Kaizen, key: string) => <span className="text-xs truncate">{text(k, key)}</span>;
+
+    return [
+      {
+        id: "title",
+        header: "Kaizen Idea",
+        width: 300,
+        pinned: true,
+        cell: (k) => (
+          <div className="min-w-0">
+            <div className="font-medium truncate uppercase">{k.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{k.description}</div>
+          </div>
+        ),
       },
-    },
-    {
-      id: "votes",
-      header: "Votes",
-      width: 100,
-      align: "center",
-      cell: (k) => (
-        <div className="flex items-center justify-center gap-1.5 font-medium text-sm">
-          <ThumbsUp className={`h-3.5 w-3.5 ${k.hasVoted ? 'text-blue-600 fill-blue-600' : 'text-muted-foreground'}`} />
-          {k.votes}
-        </div>
-      ),
-    },
-    {
-      id: "date",
-      header: "Submitted",
-      width: 130,
-      cell: (k) => <span className="text-xs text-muted-foreground">{new Date(k.submissionDate).toLocaleDateString()}</span>,
-    },
-  ], []);
+      {
+        id: "status",
+        header: "Status",
+        width: 150,
+        group: "Overview",
+        cell: (k) => {
+          const colors: Record<string, string> = {
+            idea: "bg-gray-100 text-gray-800",
+            approved: "bg-blue-100 text-blue-800",
+            "in-implementation": "bg-yellow-100 text-yellow-800",
+            implemented: "bg-green-100 text-green-800",
+          };
+          return <Badge variant="outline" className={`${colors[k.status]} text-[10px]`}>{k.status.replace('-', ' ').toUpperCase()}</Badge>;
+        },
+      },
+      {
+        id: "votes",
+        header: "Votes",
+        width: 100,
+        align: "center",
+        group: "Overview",
+        cell: (k) => (
+          <div className="flex items-center justify-center gap-1.5 font-medium text-sm">
+            <ThumbsUp className={`h-3.5 w-3.5 ${k.hasVoted ? 'text-blue-600 fill-blue-600' : 'text-muted-foreground'}`} />
+            {k.votes}
+          </div>
+        ),
+      },
+      {
+        id: "date",
+        header: "Submitted",
+        width: 130,
+        group: "Overview",
+        cell: (k) => <span className="text-xs text-muted-foreground">{new Date(k.submissionDate).toLocaleDateString()}</span>,
+      },
+
+      // ── Section 1: Kaizen Info ────────────────────────────────────────
+      { id: "employeeId", header: "Employee ID", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "employeeId") },
+      { id: "firstName", header: "First Name", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "firstName") },
+      { id: "middleName", header: "Middle Name", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "middleName") },
+      { id: "lastName", header: "Last Name", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "lastName") },
+      { id: "department", header: "Department", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "department") },
+      { id: "employeeEngagementTeamName", header: "Employee Engagement Team Name", width: 200, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "employeeEngagementTeamName") },
+      { id: "kaizenArea", header: "Kaizen Area", width: 140, group: "Kaizen Info", defaultHidden: true, cell: (k) => plain(k, "kaizenArea") },
+      { id: "startDate", header: "Start Date", width: 130, group: "Kaizen Info", defaultHidden: true, cell: (k) => dateCell(k, "startDate") },
+
+      // ── Section 2: Problem & Analysis ─────────────────────────────────
+      { id: "description", header: "Problem", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.description || "—"}</span> },
+      { id: "beforeMedia", header: "Before Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => plain(k, "beforeMedia") },
+      { id: "afterMedia", header: "After Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => plain(k, "afterMedia") },
+      { id: "currentState", header: "Why Analysis", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.currentState || "—"}</span> },
+
+      // ── Section 3: Result & Benefits ──────────────────────────────────
+      { id: "proposedState", header: "Result", width: 240, group: "Result & Benefits", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.proposedState || "—"}</span> },
+      { id: "benefits", header: "Benefits", width: 240, group: "Result & Benefits", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.benefits || "—"}</span> },
+      { id: "employeeContributor", header: "Employee Contributor", width: 180, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "employeeContributor") },
+      { id: "signature", header: "Signature", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "signature") },
+      { id: "selfie", header: "Selfie", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "selfie") },
+      { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Result & Benefits", defaultHidden: true, align: "right", cell: (k) => plain(k, "employeeEngagementPoints") },
+    ];
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this kaizen?")) return;

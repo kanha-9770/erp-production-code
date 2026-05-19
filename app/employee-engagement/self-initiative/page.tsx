@@ -174,46 +174,70 @@ export default function SelfInitiativePage() {
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [initiatives, filters, conditions, filterFields]);
 
-  const columns: ColumnDef<SelfInitiative>[] = useMemo(() => [
-    {
-      id: "title",
-      header: "Initiative",
-      width: 300,
-      pinned: true,
-      cell: (i) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate uppercase">{i.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{i.description}</div>
-        </div>
-      ),
-    },
-    {
-      id: "category",
-      header: "Category",
-      width: 150,
-      cell: (i) => <Badge variant="outline" className="capitalize text-[10px]">{i.category.replace('-', ' ')}</Badge>,
-    },
-    {
-      id: "status",
-      header: "Status",
-      width: 130,
-      cell: (i) => {
-        const colors: Record<string, string> = {
-          planning: "bg-gray-100 text-gray-800",
-          "in-progress": "bg-blue-100 text-blue-800",
-          completed: "bg-green-100 text-green-800",
-          "on-hold": "bg-red-100 text-red-800",
-        };
-        return <Badge variant="outline" className={`${colors[i.status]} text-[10px]`}>{i.status.toUpperCase()}</Badge>;
+  const columns: ColumnDef<SelfInitiative>[] = useMemo(() => {
+    const text = (i: SelfInitiative, key: string) => {
+      const v = (i as any)[key];
+      return v === null || v === undefined || v === "" ? "—" : String(v);
+    };
+    const plain = (i: SelfInitiative, key: string) => <span className="text-xs truncate">{text(i, key)}</span>;
+
+    return [
+      {
+        id: "title",
+        header: "Initiative",
+        width: 300,
+        pinned: true,
+        cell: (i) => (
+          <div className="min-w-0">
+            <div className="font-medium truncate uppercase">{i.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{i.description}</div>
+          </div>
+        ),
       },
-    },
-    {
-      id: "duration",
-      header: "Duration",
-      width: 200,
-      cell: (i) => <span className="text-xs text-muted-foreground">{new Date(i.startDate).toLocaleDateString()} — {new Date(i.endDate).toLocaleDateString()}</span>,
-    },
-  ], []);
+      {
+        id: "category",
+        header: "Category",
+        width: 150,
+        group: "Overview",
+        cell: (i) => <Badge variant="outline" className="capitalize text-[10px]">{i.category.replace('-', ' ')}</Badge>,
+      },
+      {
+        id: "status",
+        header: "Status",
+        width: 130,
+        group: "Overview",
+        cell: (i) => {
+          const colors: Record<string, string> = {
+            planning: "bg-gray-100 text-gray-800",
+            "in-progress": "bg-blue-100 text-blue-800",
+            completed: "bg-green-100 text-green-800",
+            "on-hold": "bg-red-100 text-red-800",
+          };
+          return <Badge variant="outline" className={`${colors[i.status]} text-[10px]`}>{i.status.toUpperCase()}</Badge>;
+        },
+      },
+      {
+        id: "duration",
+        header: "Duration",
+        width: 200,
+        group: "Overview",
+        cell: (i) => <span className="text-xs text-muted-foreground">{new Date(i.startDate).toLocaleDateString()} — {new Date(i.endDate).toLocaleDateString()}</span>,
+      },
+
+      // ── Self Initiative form fields ───────────────────────────────────
+      { id: "employeeId", header: "Employee ID", width: 140, group: "Self Initiative", defaultHidden: true, cell: (i) => plain(i, "employeeId") },
+      { id: "firstName", header: "First Name", width: 140, group: "Self Initiative", defaultHidden: true, cell: (i) => plain(i, "firstName") },
+      { id: "lastName", header: "Last Name", width: 140, group: "Self Initiative", defaultHidden: true, cell: (i) => plain(i, "lastName") },
+      { id: "department", header: "Department", width: 140, group: "Self Initiative", defaultHidden: true, cell: (i) => plain(i, "department") },
+      { id: "employeeEngagementTeamName", header: "Employee Engagement Team Name", width: 200, group: "Self Initiative", defaultHidden: true, cell: (i) => plain(i, "employeeEngagementTeamName") },
+      { id: "selfInitiativeCategory", header: "Self Initiative Category", width: 180, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs truncate">{i.category || "—"}</span> },
+      { id: "defineInitiative", header: "Define Initiative", width: 240, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs truncate">{i.title || "—"}</span> },
+      { id: "initiativeBenefits", header: "Initiative Benefits", width: 240, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs truncate">{i.description || "—"}</span> },
+      { id: "startDate", header: "Start Date", width: 130, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs text-muted-foreground">{i.startDate ? new Date(i.startDate).toLocaleDateString() : "—"}</span> },
+      { id: "endDate", header: "End Date", width: 130, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs text-muted-foreground">{i.endDate ? new Date(i.endDate).toLocaleDateString() : "—"}</span> },
+      { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Self Initiative", defaultHidden: true, align: "right", cell: (i) => plain(i, "employeeEngagementPoints") },
+    ];
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this initiative?")) return;
