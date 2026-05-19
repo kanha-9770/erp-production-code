@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
         employeeName: true,
         totalSalary: true,
         givenSalary: true,
+        dateOfJoining: true,
       },
     });
 
@@ -46,8 +47,27 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Restrict payroll history (and therefore all derived stats) to the
+    // period on or after the employee's joining month. Any rows dated
+    // before joining are excluded from both the table and the dashboard
+    // tiles. If joining date is not set, no cutoff is applied.
+    const joinYear = employee.dateOfJoining?.getUTCFullYear();
+    const joinMonth = employee.dateOfJoining
+      ? employee.dateOfJoining.getUTCMonth() + 1
+      : undefined;
+
     const records = await prisma.payrollRecord.findMany({
-      where: { employeeId: employee.id },
+      where: {
+        employeeId: employee.id,
+        ...(joinYear && joinMonth
+          ? {
+              OR: [
+                { year: { gt: joinYear } },
+                { year: joinYear, month: { gte: joinMonth } },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ year: "desc" }, { month: "desc" }],
     });
 
@@ -63,6 +83,9 @@ export async function GET(request: NextRequest) {
         name: employee.employeeName,
         totalSalary: toNum(employee.totalSalary),
         givenSalary: toNum(employee.givenSalary),
+        dateOfJoining: employee.dateOfJoining
+          ? employee.dateOfJoining.toISOString()
+          : null,
       },
       records: records.map((r) => ({
         id: r.id,

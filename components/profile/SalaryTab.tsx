@@ -69,7 +69,13 @@ interface SalaryRecord {
 interface SalaryResponse {
   success: boolean
   records: SalaryRecord[]
-  employee: { id: string; name: string; totalSalary: number; givenSalary: number } | null
+  employee: {
+    id: string
+    name: string
+    totalSalary: number
+    givenSalary: number
+    dateOfJoining: string | null
+  } | null
   reason?: string
   error?: string
 }
@@ -169,6 +175,8 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
     return `in ${y}`
   }, [selectedYear, selectedMonth, latestRecord])
 
+  const contractMonthly = state.data?.employee?.totalSalary ?? 0
+
   const summary = useMemo(() => {
     const total = filteredRecords.reduce((s, r) => s + r.netSalary, 0)
     const totalGross = filteredRecords.reduce((s, r) => s + r.grossSalary, 0)
@@ -177,10 +185,18 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
     const totalLoss = filteredRecords.reduce((s, r) => {
       const allowances = r.allowances as any
       const ot = Number(allowances?.earnings?.overtime || 0)
-      return s + Math.max(0, r.baseSalary - (r.grossSalary - ot))
+      // Cap the expected base by the current contract monthly so loss-of-pay
+      // can't read higher than what the employee is contracted to earn.
+      // Discrepancies happen when Employee.totalSalary was edited after the
+      // payroll record was generated.
+      const expectedBase =
+        contractMonthly > 0 && contractMonthly < r.baseSalary
+          ? contractMonthly
+          : r.baseSalary
+      return s + Math.max(0, expectedBase - (r.grossSalary - ot))
     }, 0)
     return { total, totalGross, totalDeductions, paidCount, totalLoss }
-  }, [filteredRecords])
+  }, [filteredRecords, contractMonthly])
 
   const chartData = useMemo(() => {
     // Reverse so chronological order (assuming records are descending)
@@ -207,6 +223,20 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
         currency: "INR",
         maximumFractionDigits: 0,
       }),
+    [],
+  )
+
+  // Compact INR (Lakh / Crore) — used on small screens so stat tiles don't
+  // overflow when the underlying number runs to 6+ digits.
+  const fmtShort = useMemo(
+    () => (n: number) => {
+      const abs = Math.abs(n)
+      const sign = n < 0 ? "-" : ""
+      if (abs >= 1_00_00_000) return `${sign}₹${(abs / 1_00_00_000).toFixed(abs % 1_00_00_000 === 0 ? 0 : 2)}Cr`
+      if (abs >= 1_00_000) return `${sign}₹${(abs / 1_00_000).toFixed(abs % 1_00_000 === 0 ? 0 : 2)}L`
+      if (abs >= 1_000) return `${sign}₹${(abs / 1_000).toFixed(abs % 1_000 === 0 ? 0 : 1)}K`
+      return `${sign}₹${abs}`
+    },
     [],
   )
 
@@ -269,19 +299,19 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
         fmt={fmt}
       />
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-xl font-bold tracking-tight">Salary Dashboard</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <h2 className="text-lg sm:text-xl font-bold tracking-tight">Salary Dashboard</h2>
         {years.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-muted-foreground mr-1">Period:</span>
-            <Select 
-              value={selectedYear || latestRecord?.year.toString() || "all"} 
+            <span className="text-xs sm:text-sm font-medium text-muted-foreground mr-0.5 sm:mr-1">Period:</span>
+            <Select
+              value={selectedYear || latestRecord?.year.toString() || "all"}
               onValueChange={(val) => {
                 setSelectedYear(val)
                 setSelectedMonth("all")
               }}
             >
-              <SelectTrigger className="w-[110px] h-9">
+              <SelectTrigger className="w-[100px] sm:w-[110px] h-8 sm:h-9 text-xs sm:text-sm">
                 <SelectValue placeholder="Year" />
               </SelectTrigger>
               <SelectContent>
@@ -295,11 +325,11 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
             </Select>
 
             {(selectedYear || latestRecord?.year.toString()) !== "all" && (
-              <Select 
-                value={selectedMonth || latestRecord?.month.toString() || "all"} 
+              <Select
+                value={selectedMonth || latestRecord?.month.toString() || "all"}
                 onValueChange={setSelectedMonth}
               >
-                <SelectTrigger className="w-[130px] h-9">
+                <SelectTrigger className="w-[120px] sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm">
                   <SelectValue placeholder="Month" />
                 </SelectTrigger>
                 <SelectContent>
@@ -316,11 +346,12 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
         )}
       </div>
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-5">
         <StatTile
           icon={<Banknote className="h-4 w-4" />}
           label="Total paid"
           value={fmt.format(summary.total)}
+          valueShort={fmtShort(summary.total)}
           tone="success"
           caption={`${filteredRecords.length} record${filteredRecords.length === 1 ? "" : "s"} ${periodLabel}`}
         />
@@ -328,6 +359,7 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
           icon={<TrendingUp className="h-4 w-4" />}
           label="Total gross"
           value={fmt.format(summary.totalGross)}
+          valueShort={fmtShort(summary.totalGross)}
           tone="info"
           caption="Before deductions"
         />
@@ -335,6 +367,7 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
           icon={<TrendingDown className="h-4 w-4" />}
           label="Total deductions"
           value={fmt.format(summary.totalDeductions)}
+          valueShort={fmtShort(summary.totalDeductions)}
           tone="warn"
           caption="PF, tax, other"
         />
@@ -342,6 +375,7 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
           icon={<AlertCircle className="h-4 w-4" />}
           label="Loss of Pay"
           value={fmt.format(summary.totalLoss)}
+          valueShort={fmtShort(summary.totalLoss)}
           tone="danger"
           caption="Due to absences"
         />
@@ -359,13 +393,13 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
       </div>
 
       <Card>
-        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0 border-b">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <ReceiptText className="h-4 w-4 text-primary" />
+        <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6 flex-row items-start sm:items-center justify-between gap-2 space-y-0 border-b">
+          <div className="min-w-0">
+            <CardTitle className="text-sm sm:text-base flex items-center gap-2">
+              <ReceiptText className="h-4 w-4 text-primary shrink-0" />
               Salary records
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 break-words">
               {(selectedYear || latestRecord?.year.toString()) === "all"
                 ? "All monthly payroll slips."
                 : `Monthly payroll slip${filteredRecords.length === 1 ? "" : "s"} ${periodLabel}.`}
@@ -394,43 +428,58 @@ function CompensationSnapshot({
   employee,
   fmt,
 }: {
-  employee: { id: string; name: string; totalSalary: number; givenSalary: number } | null
+  employee: {
+    id: string
+    name: string
+    totalSalary: number
+    givenSalary: number
+    dateOfJoining: string | null
+  } | null
   fmt: Intl.NumberFormat
 }) {
   if (!employee) return null
+  const joinedOn = employee.dateOfJoining
+    ? new Date(employee.dateOfJoining).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : null
   return (
     <Card className="border-border/70 shadow-sm overflow-hidden bg-card">
       <div
         aria-hidden
         className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500"
       />
-      <CardContent className="p-5 sm:p-6">
-        <div className="flex flex-wrap gap-5 items-start">
-          <div className="flex-1 min-w-[220px] space-y-1">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <CardContent className="p-4 sm:p-5 md:p-6">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 sm:gap-5 sm:items-start">
+          <div className="flex-1 min-w-0 sm:min-w-[220px] space-y-1">
+            <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Compensation on file
             </div>
-            <div className="text-base sm:text-lg font-semibold tracking-tight text-foreground">
+            <div className="text-base sm:text-lg font-semibold tracking-tight text-foreground break-words">
               {employee.name}
             </div>
             <p className="text-xs text-muted-foreground">
-              Contract figures from your HR Employee record.
+              {joinedOn
+                ? `Stats below cover payroll from your joining date — ${joinedOn}.`
+                : "Contract figures from your HR Employee record."}
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:min-w-[280px]">
-            <div className="rounded-lg border bg-muted/30 px-4 py-3">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full sm:w-auto sm:min-w-[280px]">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5 sm:px-4 sm:py-3 min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Total salary
               </div>
-              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground">
+              <div className="text-base sm:text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground break-words">
                 {fmt.format(employee.totalSalary)}
               </div>
             </div>
-            <div className="rounded-lg border bg-muted/30 px-4 py-3">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5 sm:px-4 sm:py-3 min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Given salary
               </div>
-              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground">
+              <div className="text-base sm:text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground break-words">
                 {fmt.format(employee.givenSalary)}
               </div>
             </div>
@@ -465,25 +514,27 @@ function StatTile({
   icon,
   label,
   value,
+  valueShort,
   tone,
   caption,
 }: {
   icon: React.ReactNode
   label: string
   value: string
+  valueShort?: string
   tone: ToneKey
   caption: string
 }) {
   return (
     <Card className="border-border/50 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
-      <CardContent className="p-5 relative z-10">
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <CardContent className="p-3 sm:p-4 lg:p-5 relative z-10">
+        <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3 lg:mb-4">
+          <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.06em] sm:tracking-[0.08em] text-muted-foreground leading-tight">
             {label}
           </span>
           <span
             className={cn(
-              "h-9 w-9 rounded-xl flex items-center justify-center ring-1 shadow-sm",
+              "h-7 w-7 sm:h-8 sm:w-8 lg:h-9 lg:w-9 rounded-lg sm:rounded-xl flex items-center justify-center ring-1 shadow-sm shrink-0",
               TONE_RING[tone],
             )}
             aria-hidden
@@ -493,13 +544,21 @@ function StatTile({
         </div>
         <div
           className={cn(
-            "text-2xl sm:text-3xl font-bold tabular-nums tracking-tight leading-none mb-1",
+            "text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums tracking-tight leading-tight mb-1 break-words",
             TONE_TEXT[tone],
           )}
+          title={value}
         >
-          {value}
+          {valueShort ? (
+            <>
+              <span className="sm:hidden">{valueShort}</span>
+              <span className="hidden sm:inline">{value}</span>
+            </>
+          ) : (
+            value
+          )}
         </div>
-        <div className="text-xs text-muted-foreground truncate">
+        <div className="text-[11px] sm:text-xs text-muted-foreground truncate">
           {caption}
         </div>
       </CardContent>
@@ -522,7 +581,7 @@ function SalaryTable({
   return (
     <div className="divide-y">
       {/* Header row */}
-      <div className="hidden md:grid grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_0.7fr_auto] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/30">
+      <div className="hidden md:grid grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_0.7fr_auto] gap-3 px-3 sm:px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/30">
         <span>Period</span>
         <span>Days</span>
         <span>Gross</span>
@@ -540,18 +599,22 @@ function SalaryTable({
             <button
               type="button"
               onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}
-              className="w-full grid grid-cols-[1fr_auto] md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_0.7fr_auto] gap-3 px-4 py-3 text-sm items-center text-left hover:bg-muted/30 transition-colors"
+              className="w-full grid grid-cols-[1fr_auto] md:grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_0.7fr_auto] gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 text-sm items-center text-left hover:bg-muted/30 transition-colors"
             >
-              <div className="min-w-0 flex items-center gap-2.5">
+              <div className="min-w-0 flex items-center gap-2 sm:gap-2.5">
                 <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
                   <CalendarDays className="h-4 w-4" />
                 </span>
-                <div className="min-w-0">
-                  <div className="font-medium truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate text-sm">
                     {MONTHS[r.month - 1] ?? r.month} {r.year}
                   </div>
-                  <div className="text-[11px] text-muted-foreground truncate md:hidden">
-                    Net {fmt.format(r.netSalary)} · {r.status}
+                  <div className="text-[11px] text-muted-foreground truncate md:hidden flex items-center gap-1.5 mt-0.5">
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                      {fmt.format(r.netSalary)}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <StatusBadge status={r.status} />
                   </div>
                 </div>
               </div>
@@ -640,7 +703,7 @@ function SalaryDetail({
       : null
 
   return (
-    <div className="px-4 pb-4 -mt-1 grid gap-4 md:grid-cols-3 text-sm bg-muted/20 border-t">
+    <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-2 grid gap-3 sm:gap-4 sm:grid-cols-2 md:grid-cols-3 text-sm bg-muted/20 border-t">
       <DetailGroup title="Attendance">
         <DetailRow label="Present days" value={String(record.presentDays)} />
         <DetailRow label="Leave days" value={String(record.leaveDays)} />
@@ -718,11 +781,11 @@ function DetailRow({
   bold?: boolean
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
-      <span className="text-muted-foreground truncate">{label}</span>
+    <div className="flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs">
+      <span className="text-muted-foreground truncate min-w-0">{label}</span>
       <span
         className={cn(
-          "tabular-nums shrink-0",
+          "tabular-nums shrink-0 text-right",
           bold ? "font-semibold text-foreground" : "text-foreground/90",
         )}
       >
@@ -741,14 +804,14 @@ function prettifyKey(k: string): string {
 
 function LoadingShell() {
   return (
-    <div className="space-y-6">
-      <Skeleton className="h-28" />
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-24" />
+    <div className="space-y-4 sm:space-y-6">
+      <Skeleton className="h-24 sm:h-28" />
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-20 sm:h-24" />
         ))}
       </div>
-      <Skeleton className="h-64" />
+      <Skeleton className="h-56 sm:h-64" />
     </div>
   )
 }
