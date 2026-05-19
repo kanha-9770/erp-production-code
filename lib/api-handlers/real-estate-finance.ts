@@ -21,8 +21,11 @@ import {
 } from "@/lib/real-estate/commission-engine";
 import {
   calculateSlabCommission,
+  getAgentPendingArea,
   getPostedCumulativeArea,
   getSlabProgress,
+  getTeamAreaTotals,
+  getTeamPendingArea,
   resolveActivePlan,
   toSquareYards,
 } from "@/lib/real-estate/slab-engine";
@@ -337,11 +340,24 @@ export const WalletHandlers = {
         });
       }
 
-      // Cumulative area (slab only — meaningless under legacy %). Show
-      // current personal cumulative + the pending pile so the agent can
-      // see where their slab rate is headed once admin posts.
+      // Cumulative area (slab only — meaningless under legacy %).
+      //
+      // Slab determination uses the agent's EFFECTIVE area = personal posted
+      // + personal pending (closed-unposted) + team posted + team pending.
+      // The card shows both the current effective cumulative and where it
+      // lands once every closed-unposted deal in the org is posted, so the
+      // agent can see the slab they're heading toward — including the lift
+      // their downline's pending production gives them.
+      //
+      // pendingAreaForMe (above) only counts deals where the agent is the
+      // direct seller, so it would read 0 for an upline whose team has
+      // pending deals — making it look like nothing's brewing even though
+      // their slab will jump on posting. That value is preserved in
+      // `pendingPersonalSqyd` for the "your sales" badge, but the cumulative
+      // numbers below sum personal + team so the slab story is honest.
       let cumulativeAreaBefore = 0;
       let cumulativeAreaAfter = 0;
+      let pendingTeamSqyd = 0;
       if (useSlab) {
         try {
           const plan = await resolveActivePlan(prisma, auth.organizationId);
@@ -350,14 +366,25 @@ export const WalletHandlers = {
             select: { id: true },
           });
           if (profile) {
-            const cur = await getPostedCumulativeArea(
-              prisma,
-              auth.organizationId,
-              profile.id,
-              plan.id,
-            );
-            cumulativeAreaBefore = Number(cur);
-            cumulativeAreaAfter = Number(cur.plus(pendingAreaForMe));
+            const [
+              personalPosted,
+              personalPending,
+              teamPosted,
+              teamPending,
+            ] = await Promise.all([
+              getPostedCumulativeArea(prisma, auth.organizationId, profile.id, plan.id),
+              getAgentPendingArea(prisma, auth.organizationId, profile.id),
+              getTeamAreaTotals(prisma, auth.organizationId, profile.id),
+              getTeamPendingArea(prisma, auth.organizationId, profile.id),
+            ]);
+            const effectiveBefore = personalPosted
+              .plus(new Prisma.Decimal(teamPosted.area));
+            const effectiveAfter = effectiveBefore
+              .plus(personalPending)
+              .plus(teamPending);
+            cumulativeAreaBefore = Number(effectiveBefore);
+            cumulativeAreaAfter = Number(effectiveAfter);
+            pendingTeamSqyd = Number(teamPending);
           }
         } catch {
           // No active plan or agent profile — leave cumulative numbers at 0.
@@ -369,7 +396,15 @@ export const WalletHandlers = {
         data: {
           count: projections.length,
           estimatedCommission: totalEstimatedShare,
+          // Personal pending (the agent's own direct sales not yet posted).
+          // Kept for the "your sales" UI badge.
           pendingAreaSqyd: Number(pendingAreaForMe),
+          // Team pending (downline closed-unposted production). Rolls into
+          // the agent's slab cumulative on posting — surfaced so an upline
+          // sees the lift their team brings even when their own pending = 0.
+          pendingTeamAreaSqyd: pendingTeamSqyd,
+          // Total pending lift on the slab cumulative = personal + team.
+          pendingTotalAreaSqyd: Number(pendingAreaForMe) + pendingTeamSqyd,
           cumulativeAreaBefore,
           cumulativeAreaAfter,
           engine: useSlab ? "SLAB" : "LEGACY",

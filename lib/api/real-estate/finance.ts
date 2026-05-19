@@ -79,8 +79,17 @@ export interface SlabProgress {
 export interface PendingPostingProjection {
   count: number;
   estimatedCommission: number;
+  // Pending area from the agent's own direct sales (closed-unposted).
   pendingAreaSqyd: number;
+  // Pending area from the agent's downline (closed-unposted). Rolls into the
+  // agent's effective slab cumulative on posting.
+  pendingTeamAreaSqyd: number;
+  // Total pending lift on the slab cumulative = personal + team.
+  pendingTotalAreaSqyd: number;
+  // Effective slab cumulative today (personal posted + team posted).
   cumulativeAreaBefore: number;
+  // Effective slab cumulative once every closed-unposted deal is posted
+  // (personal posted + personal pending + team posted + team pending).
   cumulativeAreaAfter: number;
   engine: "SLAB" | "LEGACY";
   deals: Array<{

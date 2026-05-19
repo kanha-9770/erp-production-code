@@ -249,6 +249,8 @@ function PendingPostingCard({
     count: number;
     estimatedCommission: number;
     pendingAreaSqyd: number;
+    pendingTeamAreaSqyd: number;
+    pendingTotalAreaSqyd: number;
     cumulativeAreaBefore: number;
     cumulativeAreaAfter: number;
     engine: "SLAB" | "LEGACY";
@@ -299,13 +301,15 @@ function PendingPostingCard({
             <>
               <div className="rounded-md bg-background/60 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Ruler className="h-3 w-3" /> Pending area (your sales)
+                  <Ruler className="h-3 w-3" /> Pending area
                 </div>
                 <div className="text-xl font-bold tabular-nums mt-0.5">
-                  {formatSqyd(pending.pendingAreaSqyd)}
+                  {formatSqyd(pending.pendingTotalAreaSqyd)}
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Adds to your cumulative once admin posts
+                <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
+                  {pending.pendingTeamAreaSqyd > 0
+                    ? `Your sales ${formatSqyd(pending.pendingAreaSqyd)} · Team ${formatSqyd(pending.pendingTeamAreaSqyd)}`
+                    : "Adds to your cumulative once admin posts"}
                 </p>
               </div>
 
