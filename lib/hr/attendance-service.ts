@@ -124,6 +124,23 @@ export interface AttendanceStatus {
      *  / outTime override rather than the org default. UI can flag this. */
     isCustom: boolean;
   };
+  /** Opt-in overtime state for the widget.
+   *  - availableAt: ISO of the moment the "Start Overtime" toggle becomes
+   *    enabled (shift end + cfg.overtimeStartBufferMinutes). Widget compares
+   *    `now` against this to enable / disable the toggle.
+   *  - optedIn: whether the employee has currently started an OT session.
+   *  - startedAt: when the OT session began (null when optedIn=false).
+   *  - maxHoursPerDay: labour-law daily cap for OT, surfaced so the widget
+   *    can warn the employee when they're about to hit it.
+   *  - requiresOptIn: mirrors AttendanceConfiguration.overtimeRequiresOptIn
+   *    so the widget knows whether to show the toggle at all. */
+  overtime: {
+    availableAt: string | null;
+    optedIn: boolean;
+    startedAt: string | null;
+    maxHoursPerDay: number;
+    requiresOptIn: boolean;
+  };
 }
 
 // ---- Date / time helpers --------------------------------------------------
@@ -672,7 +689,32 @@ export async function getStatus(
       radiusM: cfg.geofenceRadiusM,
     },
     shift: { start: shift.start, end: shift.end, isCustom: shift.isCustom },
+    overtime: {
+      // Toggle becomes available at (shift end + buffer). Computed against
+      // today's clock so timezone-aware widgets compare like-with-like.
+      availableAt: dateAtHHmm(
+        now,
+        addMinutesToHHmm(shift.end, cfg.overtimeStartBufferMinutes),
+      ).toISOString(),
+      optedIn: !!(row as any)?.overtimeOptedIn,
+      startedAt: (row as any)?.overtimeStartedAt
+        ? new Date((row as any).overtimeStartedAt).toISOString()
+        : null,
+      maxHoursPerDay: cfg.overtimeMaxHoursPerDay,
+      requiresOptIn: cfg.overtimeRequiresOptIn,
+    },
   };
+}
+
+// Add N minutes to an HH:mm string, wrapping past 24:00. Used to compute
+// the moment the OT toggle becomes available without going through a full
+// Date round-trip.
+function addMinutesToHHmm(hhmm: string, minutes: number): string {
+  const base = parseHHmm(hhmm) ?? 18 * 60;
+  const sum = ((base + minutes) % (24 * 60) + 24 * 60) % (24 * 60);
+  const h = Math.floor(sum / 60);
+  const m = sum % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 // ---- Punch ----------------------------------------------------------------
@@ -1140,14 +1182,36 @@ export async function recordPunch(
     const expectedOut = dateAtHHmm(now, shift.end);
     const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, now));
 
+    // Overtime computation. Two paths depending on the org policy:
+    //   - overtimeRequiresOptIn = true: OT runs from the moment the
+    //     employee toggled "Start Overtime" on (overtimeStartedAt) until
+    //     this check-out. Capped by overtimeMaxHoursPerDay.
+    //   - overtimeRequiresOptIn = false: legacy "anything past
+    //     overtimeAfterHours of worked time is OT" — preserved so orgs
+    //     that haven't enabled opt-in keep the same behaviour.
     let overtimeMinutes = 0;
     if (checkInAt) {
-      const workedMinutes = Math.max(
-        0,
-        diffMinutes(now, checkInAt) - cfg.breakMinutes,
-      );
-      const overtimeThreshold = Math.round(cfg.overtimeAfterHours * 60);
-      overtimeMinutes = Math.max(0, workedMinutes - overtimeThreshold);
+      if (cfg.overtimeRequiresOptIn) {
+        const otStart: Date | null = (existing as any).overtimeStartedAt
+          ? new Date((existing as any).overtimeStartedAt)
+          : null;
+        if ((existing as any).overtimeOptedIn && otStart) {
+          const rawOt = Math.max(0, diffMinutes(now, otStart));
+          const cap = Math.round(
+            Math.max(0, cfg.overtimeMaxHoursPerDay) * 60,
+          );
+          overtimeMinutes = cap > 0 ? Math.min(rawOt, cap) : rawOt;
+        }
+      } else {
+        const workedMinutes = Math.max(
+          0,
+          diffMinutes(now, checkInAt) - cfg.breakMinutes,
+        );
+        const overtimeThreshold = Math.round(cfg.overtimeAfterHours * 60);
+        const raw = Math.max(0, workedMinutes - overtimeThreshold);
+        const cap = Math.round(Math.max(0, cfg.overtimeMaxHoursPerDay) * 60);
+        overtimeMinutes = cap > 0 ? Math.min(raw, cap) : raw;
+      }
     }
 
     const outSource =
@@ -1381,4 +1445,86 @@ async function buildOutcome(
 ): Promise<PunchOutcome> {
   const status = await getStatus(input.userId, input.organizationId);
   return { status, deduplicated: false, attendanceId, changed };
+}
+
+// ---- Overtime opt-in -------------------------------------------------------
+
+export interface OvertimeToggleInput {
+  userId: string;
+  organizationId: string | null;
+  /** true → start an OT session, false → stop it. */
+  optIn: boolean;
+}
+
+/**
+ * Toggle the employee's overtime opt-in for today's attendance row.
+ *
+ *   - Must be currently checked-in (otherwise OT has nothing to attach to).
+ *   - When `optIn = true`, sets `overtimeStartedAt = now` only if it isn't
+ *     already set. Toggling on twice in a row keeps the original start so
+ *     the elapsed-time display in the widget doesn't jump backward.
+ *   - When `optIn = false`, clears `overtimeOptedIn` but preserves
+ *     `overtimeStartedAt` — payroll uses it as the audit trail for "the
+ *     employee tried OT but cancelled before checkout" and the check-out
+ *     calc gates on `overtimeOptedIn` so paused sessions contribute zero
+ *     OT minutes by design.
+ *   - Time-gates against `shift end + overtimeStartBufferMinutes` so the
+ *     toggle can't be flipped before the buffer elapses, matching the
+ *     widget's gating client-side.
+ */
+export async function setOvertimeOptIn(
+  input: OvertimeToggleInput,
+): Promise<AttendanceStatus> {
+  const cfg = await getAttendanceConfig(input.organizationId);
+  const shift = await getEffectiveShift(input.userId, cfg);
+  const now = new Date();
+  const date = todayKey(now);
+
+  const row = await prisma.attendance.findFirst({
+    where: { userId: input.userId, date },
+  });
+  if (!row || !row.checkedIn) {
+    throw new AttendanceError(
+      'NOT_CHECKED_IN',
+      'You need to check in before starting overtime.',
+      409,
+    );
+  }
+  if (row.checkedOut) {
+    throw new AttendanceError(
+      'ALREADY_CHECKED_OUT',
+      'You have already checked out — overtime cannot be toggled.',
+      409,
+    );
+  }
+
+  // Buffer gate: server-side mirror of the widget's clock check so a
+  // misbehaving client can't sneak an early OT start through.
+  if (input.optIn) {
+    const availableAt = dateAtHHmm(
+      now,
+      addMinutesToHHmm(shift.end, cfg.overtimeStartBufferMinutes),
+    );
+    if (now < availableAt) {
+      throw new AttendanceError(
+        'OT_NOT_AVAILABLE',
+        `Overtime starts at ${formatHHmm(availableAt)}. Try again then.`,
+        409,
+      );
+    }
+  }
+
+  const data: Record<string, unknown> = {
+    overtimeOptedIn: input.optIn,
+  };
+  if (input.optIn && !(row as any).overtimeStartedAt) {
+    data.overtimeStartedAt = now;
+  }
+
+  await prisma.attendance.update({
+    where: { id: row.id },
+    data: data as any,
+  });
+
+  return getStatus(input.userId, input.organizationId);
 }

@@ -93,6 +93,13 @@ interface AttendanceStatusPayload {
     radiusM: number | null;
   };
   shift: { start: string; end: string; isCustom: boolean };
+  overtime: {
+    availableAt: string | null;
+    optedIn: boolean;
+    startedAt: string | null;
+    maxHoursPerDay: number;
+    requiresOptIn: boolean;
+  };
 }
 
 const REFRESH_MS = 60_000;
@@ -549,7 +556,7 @@ export function AttendanceWidget({
   // Re-render when the user changes their saved timezone so the popover's
   // check-in/out clock labels switch zones live without a page reload.
   useUserTimezone();
-  const { loading, busy, error, status, punch } = useAttendance(enabled);
+  const { loading, busy, error, status, punch, refresh } = useAttendance(enabled);
   const [now, setNow] = useState<number>(() => Date.now());
   const [open, setOpen] = useState(false);
   // Camera capture flow. `captureType` records which punch is pending so
@@ -1084,6 +1091,11 @@ export function AttendanceWidget({
               <span>{error}</span>
             </div>
           )}
+          <OvertimeToggle
+            status={status}
+            now={new Date(now)}
+            onChanged={refresh}
+          />
           <ActionButton
             status={status}
             busy={busy}
@@ -1197,6 +1209,138 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex items-center justify-between text-xs">
       <span className="text-gray-500">{label}</span>
       <span className="font-medium text-gray-900">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Opt-in overtime toggle. ALWAYS visible whenever the org has opt-in OT
+ * enabled — the toggle is rendered disabled with an explanatory hint when
+ * the user can't act on it yet (not checked in, before shift end + buffer,
+ * already checked out, or on a holiday / leave). The button only becomes
+ * clickable in two cases:
+ *
+ *   - To turn OT ON: user is actively working AND `now >= availableAt`.
+ *   - To turn OT OFF: an OT session is currently in progress (regardless
+ *     of clock — pausing should always be possible).
+ *
+ * Toggling fires `POST /api/attendance/overtime` and re-fetches the
+ * status so the elapsed-time counter reflects the new session.
+ */
+function OvertimeToggle({
+  status,
+  now,
+  onChanged,
+}: {
+  status: AttendanceStatusPayload;
+  now: Date;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Whole card is hidden only when the feature itself is off org-wide.
+  if (!status.overtime.requiresOptIn) return null;
+
+  const availableAt = status.overtime.availableAt
+    ? new Date(status.overtime.availableAt)
+    : null;
+  const isAvailable = availableAt ? now >= availableAt : true;
+  const optedIn = status.overtime.optedIn;
+  const isWorking = status.canCheckOut; // checked-in, not checked-out
+
+  // Disabled when:
+  //  • a network round-trip is in flight,
+  //  • the user is trying to TURN ON OT but can't (not working OR shift
+  //    + buffer hasn't elapsed). They can always TURN OFF an active
+  //    session so a pause is never blocked.
+  const canTurnOn = isWorking && isAvailable;
+  const canTurnOff = optedIn; // pause is always allowed mid-session
+  const disabled = busy || (optedIn ? !canTurnOff : !canTurnOn);
+
+  // Pick the most actionable hint to show below the "Overtime" label.
+  // Order: in-session > not-checked-in > waiting-for-clock > ready.
+  const hint = optedIn && status.overtime.startedAt
+    ? `Started ${formatTimeShort(status.overtime.startedAt)}`
+    : !isWorking
+      ? "Check in first to enable overtime"
+      : !isAvailable && availableAt
+        ? `Available at ${formatTimeShort(availableAt.toISOString())}`
+        : "Toggle on to start your OT session";
+
+  const handleToggle = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/attendance/overtime", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ optIn: !optedIn }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error ?? "Failed to toggle overtime");
+      }
+      await onChanged();
+    } catch (e: any) {
+      setErr(e?.message ?? "Network error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "mb-2 rounded-md border px-3 py-2 text-xs flex items-center justify-between gap-2",
+        optedIn
+          ? "border-blue-300 bg-blue-50"
+          : canTurnOn
+            ? "border-gray-200 bg-white"
+            : "border-gray-200 bg-gray-50",
+      )}
+    >
+      <div className="min-w-0">
+        <div
+          className={cn(
+            "font-medium",
+            optedIn ? "text-blue-800" : "text-gray-800",
+          )}
+        >
+          Overtime
+          {status.overtime.maxHoursPerDay > 0 && (
+            <span className="ml-1 text-[10px] text-gray-500 font-normal">
+              · max {status.overtime.maxHoursPerDay}h/day
+            </span>
+          )}
+        </div>
+        <div className="text-[10px] text-gray-500 mt-0.5">{hint}</div>
+        {err && (
+          <div className="text-[10px] text-red-600 mt-0.5">{err}</div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={handleToggle}
+        disabled={disabled}
+        aria-pressed={optedIn}
+        // `title` exposes the same hint on hover so a disabled toggle is
+        // discoverable on desktops (where the underlying text below is
+        // small and might be missed).
+        title={hint}
+        className={cn(
+          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+          optedIn ? "bg-blue-600" : "bg-gray-300",
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow",
+            optedIn ? "translate-x-4" : "translate-x-0.5",
+          )}
+        />
+      </button>
     </div>
   );
 }
