@@ -71,6 +71,11 @@ export interface EmployeeFormValues {
   bloodGroup: string;
   maritalStatus: string;
   nationality: string;
+  // URL of the persisted profile photo (Employee.employeeImage). The
+  // form uses `photoPreview` for the in-browser preview of a freshly
+  // picked file; this string carries an already-uploaded URL across
+  // saves so re-opening the form shows the existing avatar.
+  employeeImage: string;
   // Legacy fields the form no longer surfaces but keeps in state so an
   // older saved employee round-trips without dropping data.
   nativePlace: string;
@@ -171,6 +176,7 @@ const EMPTY: EmployeeFormValues = {
   bloodGroup: "",
   maritalStatus: "",
   nationality: "Indian",
+  employeeImage: "",
   nativePlace: "",
   country: "India",
 
@@ -264,6 +270,7 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     bloodGroup: e.bloodGroup ?? "",
     maritalStatus: e.maritalStatus ?? "",
     nationality: e.nationality ?? "Indian",
+    employeeImage: e.employeeImage ?? "",
     nativePlace: e.nativePlace ?? "",
     country: e.country ?? "",
 
@@ -408,6 +415,7 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
     bloodGroup: trimOrNull(values.bloodGroup),
     maritalStatus: trimOrNull(values.maritalStatus),
     nationality: trimOrNull(values.nationality),
+    employeeImage: trimOrNull(values.employeeImage),
     nativePlace: trimOrNull(values.nativePlace),
     country: trimOrNull(values.country),
 
@@ -621,7 +629,13 @@ export function EmployeeForm({
   // computed in the browser as soon as a photo is picked, giving
   // immediate "face detected / not detected" feedback before submit.
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // photoPreview holds either a remote URL (already-saved employee image,
+  // shown on edit) or a freshly created blob: URL when the user picks a new
+  // file. Blob URLs need URL.revokeObjectURL on unmount; remote URLs don't,
+  // so the cleanup paths gate on the `blob:` prefix.
+  const [photoPreview, setPhotoPreview] = useState<string | null>(
+    initial?.employeeImage ? initial.employeeImage : null,
+  );
   const [photoDescriptor, setPhotoDescriptor] = useState<Float32Array | null>(
     null,
   );
@@ -634,15 +648,32 @@ export function EmployeeForm({
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Revoke any object URL when the preview changes or the form unmounts
-  // so we don't leak memory across re-picks.
+  // so we don't leak memory across re-picks. Remote (https://) URLs from
+  // the persisted employeeImage are not blob URLs and must not be revoked.
   useEffect(() => {
     return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
+      if (photoPreview && photoPreview.startsWith("blob:"))
+        URL.revokeObjectURL(photoPreview);
     };
   }, [photoPreview]);
 
+  // Sync the preview with the persisted URL whenever the parent passes a
+  // fresh `initial` (e.g. after save + refetch on reopen, or when the
+  // RTK cache lands the updated row). Skip the sync if the user has
+  // picked a new local photo this session — we don't want to wipe their
+  // in-progress pick.
+  useEffect(() => {
+    if (photoFile) return;
+    const url = initial?.employeeImage || null;
+    setPhotoPreview((prev) => {
+      if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return url;
+    });
+  }, [initial?.employeeImage, photoFile]);
+
   const onPhotoPicked = async (file: File | null) => {
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    if (photoPreview && photoPreview.startsWith("blob:"))
+      URL.revokeObjectURL(photoPreview);
     if (!file) {
       setPhotoFile(null);
       setPhotoPreview(null);
@@ -702,8 +733,9 @@ export function EmployeeForm({
     faceCount: number,
   ) => {
     const file = new File([blob], `capture_${Date.now()}.jpg`, { type: "image/jpeg" });
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
-    
+    if (photoPreview && photoPreview.startsWith("blob:"))
+      URL.revokeObjectURL(photoPreview);
+
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
     setPhotoDescriptor(descriptor);
@@ -944,9 +976,29 @@ export function EmployeeForm({
                     src={photoPreview}
                     alt="Selected employee photo"
                     className="h-full w-full object-cover"
+                    onError={(ev) => {
+                      // Make a broken/404 image URL visible instead of
+                      // silently showing an empty box. The persisted URL
+                      // sometimes won't resolve (upload host down, file
+                      // moved, CORS) — surface it so HR knows to reupload
+                      // rather than wondering why the avatar disappeared.
+                      const img = ev.currentTarget;
+                      img.style.display = "none";
+                      const fallback = img.nextElementSibling as HTMLElement | null;
+                      if (fallback) fallback.style.display = "flex";
+                    }}
                   />
                 ) : (
                   <Upload className="h-6 w-6 text-gray-400" />
+                )}
+                {photoPreview && (
+                  <div
+                    className="hidden h-full w-full flex-col items-center justify-center gap-1 text-[10px] text-red-600 text-center px-1"
+                    aria-hidden="true"
+                  >
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>Photo failed to load</span>
+                  </div>
                 )}
               </div>
               <div className="flex flex-col gap-2">
@@ -965,7 +1017,7 @@ export function EmployeeForm({
                     onClick={() => photoInputRef.current?.click()}
                   >
                     <Upload className="mr-1.5 h-3.5 w-3.5" />
-                    {photoFile ? "Replace photo" : "Choose images..."}
+                    {photoFile || photoPreview ? "Replace photo" : "Choose images..."}
                   </Button>
                   <Button
                     type="button"
@@ -976,12 +1028,18 @@ export function EmployeeForm({
                     <Camera className="mr-1.5 h-3.5 w-3.5" />
                     Take photo
                   </Button>
-                  {photoFile && (
+                  {(photoFile || photoPreview) && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={clearPhoto}
+                      onClick={() => {
+                        clearPhoto();
+                        // Mark the persisted URL for removal too — toApiPayload
+                        // reads values.employeeImage, so blanking it sends
+                        // null and the DB column gets cleared on save.
+                        set("employeeImage", "");
+                      }}
                     >
                       <X className="mr-1.5 h-3.5 w-3.5" />
                       Remove

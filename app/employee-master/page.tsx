@@ -957,6 +957,30 @@ export default function EmployeeMasterListPage() {
               onCancel={() => setCreateOpen(false)}
               onSubmit={async (payload, extras) => {
                 try {
+                  // If HR picked a new photo, upload it first and stamp the
+                  // resulting URL onto the payload so it persists as the
+                  // employee's avatar (Employee.employeeImage). The face
+                  // enroll call below is separate — it's only for biometric
+                  // attendance, not for storing the profile image.
+                  if (extras?.facePhoto) {
+                    const fd = new FormData();
+                    fd.append("file", extras.facePhoto);
+                    fd.append("type", "employee");
+                    const up = await fetch("/api/upload", { method: "POST", body: fd });
+                    const upJson = await up.json().catch(() => null);
+                    if (up.ok && upJson?.success && upJson.imageUrl) {
+                      payload.employeeImage = upJson.imageUrl;
+                    } else {
+                      toast({
+                        title: "Photo upload failed",
+                        description:
+                          upJson?.details ||
+                          upJson?.error ||
+                          `Server returned ${up.status}`,
+                        variant: "destructive",
+                      });
+                    }
+                  }
                   const result = await createEmployee(payload).unwrap();
                   const userId = result?.employee?.userId ?? null;
                   if (userId && extras?.facePhoto && extras?.faceDescriptor) {
@@ -1022,7 +1046,27 @@ function EmployeePreview({ id }: { id: string; onEdit: (id: string) => void; onD
     <div className="p-4 sm:p-5 space-y-6 max-w-2xl mx-auto pb-10">
       <div className="flex items-center gap-4">
         <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center border-2 border-background shadow-sm overflow-hidden">
-           <User2 className="h-10 w-10 text-primary" />
+           {e.employeeImage ? (
+             // eslint-disable-next-line @next/next/no-img-element
+             <img
+               src={e.employeeImage}
+               alt={e.employeeName}
+               className="h-full w-full object-cover"
+               onError={(ev) => {
+                 // Hide the broken image and fall back to the generic
+                 // icon below — the URL is saved but the host is down
+                 // or the file is missing.
+                 const img = ev.currentTarget;
+                 img.style.display = "none";
+                 const fb = img.nextElementSibling as HTMLElement | null;
+                 if (fb) fb.style.display = "block";
+               }}
+             />
+           ) : null}
+           <User2
+             className="h-10 w-10 text-primary"
+             style={{ display: e.employeeImage ? "none" : "block" }}
+           />
         </div>
         <div className="min-w-0">
           <h2 className="text-xl font-bold truncate uppercase">{e.employeeName}</h2>
@@ -1069,7 +1113,13 @@ function EmployeePreview({ id }: { id: string; onEdit: (id: string) => void; onD
 
 function EditEmployeeSheet({ id, onClose }: { id: string; onClose: () => void }) {
   const { toast } = useToast();
-  const { data, isLoading } = useGetEmployeeQuery(id);
+  // Force a refetch every time the sheet remounts so that the edit form
+  // always reflects the latest persisted row, never a stale RTK cache
+  // entry left over from before the most recent save (e.g. after a fresh
+  // employeeImage URL was written).
+  const { data, isLoading } = useGetEmployeeQuery(id, {
+    refetchOnMountOrArgChange: true,
+  });
   const [updateEmployee, { isLoading: saving }] = useUpdateEmployeeMutation();
   const e = data?.employee;
 
@@ -1086,8 +1136,30 @@ function EditEmployeeSheet({ id, onClose }: { id: string; onClose: () => void })
           submitLabel="Save changes"
           submitting={saving}
           onCancel={onClose}
-          onSubmit={async (payload) => {
+          onSubmit={async (payload, extras) => {
             try {
+              // If HR replaced the photo during edit, upload the new file and
+              // stamp its public URL onto the payload before saving so the
+              // avatar updates alongside the rest of the form.
+              if (extras?.facePhoto) {
+                const fd = new FormData();
+                fd.append("file", extras.facePhoto);
+                fd.append("type", "employee");
+                const up = await fetch("/api/upload", { method: "POST", body: fd });
+                const upJson = await up.json().catch(() => null);
+                if (up.ok && upJson?.success && upJson.imageUrl) {
+                  payload.employeeImage = upJson.imageUrl;
+                } else {
+                  toast({
+                    title: "Photo upload failed",
+                    description:
+                      upJson?.details ||
+                      upJson?.error ||
+                      `Server returned ${up.status}`,
+                    variant: "destructive",
+                  });
+                }
+              }
               await updateEmployee({ id, body: payload }).unwrap();
               toast({ title: "Employee updated" });
               onClose();
