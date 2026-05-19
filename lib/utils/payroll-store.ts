@@ -37,6 +37,10 @@ export interface SampleEmployee {
   // `false`, the engine skips OT for this employee regardless of what the
   // assigned profile says. Null/undefined/true defers to the profile.
   isOvertimeApplicable?: boolean | null;
+  // Per-employee OT hourly rate from Employee Master ("Overtime Rate" field).
+  // When > 0, overrides the calculated `perDay / 8` base rate for OT pay.
+  // Multipliers from the Pay Rule still apply on top.
+  overtimeRate?: number | null;
   matchKeys: string[];
   dateOfJoining: string | null;
   dateOfLeaving: string | null;
@@ -54,6 +58,13 @@ export interface SampleAttendance {
   // sources won't have them and leave both null.
   checkInAt?: string | null;
   checkOutAt?: string | null;
+  /** OT minutes already computed (and capped) by the punch service for
+   *  this row. Authoritative for opt-in orgs — the payroll calculator uses
+   *  this value directly instead of re-deriving from worked hours. */
+  overtimeMinutes?: number;
+  /** True when the employee actually toggled OT on for this row. Lets the
+   *  payroll calculator distinguish "did real OT" from "long workday". */
+  overtimeOptedIn?: boolean;
 }
 
 export interface SampleLeave {
@@ -87,6 +98,11 @@ export interface PayrollPolicy {
    *  the engine can detect short-leave days uniformly even when the
    *  classifier's internal constants drift. */
   fullDayMinHours?: number;
+  /** When true, OT minutes count only on rows the employee toggled OT on. */
+  overtimeRequiresOptIn?: boolean;
+  /** Labour-law daily cap (hours) the payroll engine clamps OT to. 0 / unset
+   *  disables the cap and matches the legacy behaviour. */
+  overtimeMaxHoursPerDay?: number;
 }
 
 const DEFAULT_POLICY: PayrollPolicy = {
@@ -96,6 +112,8 @@ const DEFAULT_POLICY: PayrollPolicy = {
   monthlyShortLeaveQuota: 0,
   shortLeaveHours: 2,
   fullDayMinHours: 8,
+  overtimeRequiresOptIn: true,
+  overtimeMaxHoursPerDay: 4,
 };
 
 // Salary structure + statutory config persisted via the configure wizard.
@@ -896,6 +914,13 @@ export async function getPayrollPolicy(organizationId: string): Promise<PayrollP
         fullDayMinHours: Number.isFinite(cfg.fullDayMinHours)
           ? Math.max(0, Number(cfg.fullDayMinHours))
           : 8,
+        overtimeRequiresOptIn:
+          cfg.overtimeRequiresOptIn === undefined
+            ? true
+            : !!cfg.overtimeRequiresOptIn,
+        overtimeMaxHoursPerDay: Number.isFinite(cfg.overtimeMaxHoursPerDay)
+          ? Math.max(0, Number(cfg.overtimeMaxHoursPerDay))
+          : 4,
       };
     }
   } catch (err) {
@@ -969,6 +994,13 @@ async function getNativeAttendanceForMonth(
         checkOutTime: outTime,
         checkInAt: checkInAt ? checkInAt.toISOString() : null,
         checkOutAt: checkOutAt ? checkOutAt.toISOString() : null,
+        // Authoritative OT minutes already capped + opt-in-gated by the
+        // punch service at check-out time. Payroll uses these directly so
+        // we don't double-count OT from raw worked hours.
+        overtimeMinutes: Number.isFinite((row as any).overtimeMinutes)
+          ? Number((row as any).overtimeMinutes)
+          : 0,
+        overtimeOptedIn: !!(row as any).overtimeOptedIn,
       };
       // Primary key: userId (always reliable — Attendance.userId is a FK).
       if (userId) {
@@ -1542,6 +1574,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
             givenSalary: true,
             bonusAmount: true,
             isOvertimeApplicable: true,
+            overTime: true,
             dateOfJoining: true,
             dateOfLeaving: true,
           },
@@ -1591,6 +1624,11 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         empBonusRaw != null
           ? Math.max(0, Number((empBonusRaw as any).toString?.() ?? empBonusRaw))
           : 0;
+      const empOtRateRaw = (u.employee as any)?.overTime;
+      const empOtRate =
+        empOtRateRaw != null
+          ? Math.max(0, Number((empOtRateRaw as any).toString?.() ?? empOtRateRaw))
+          : 0;
 
       const matchKeys: string[] = [userIdKey];
       if (emailKey) matchKeys.push(emailKey);
@@ -1608,6 +1646,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         // wasn't set on this employee yet — the engine defaults that to "OT
         // applies per pay rule" so older rows aren't accidentally disabled.
         isOvertimeApplicable: u.employee?.isOvertimeApplicable ?? null,
+        overtimeRate: empOtRate,
         matchKeys,
         dateOfJoining: u.employee?.dateOfJoining
           ? new Date(u.employee.dateOfJoining).toISOString().slice(0, 10)

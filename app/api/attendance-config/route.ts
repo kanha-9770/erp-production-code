@@ -148,6 +148,15 @@ export async function PUT(request: NextRequest) {
   if (msq !== undefined) patch.monthlyShortLeaveQuota = Math.max(0, Math.floor(msq));
   const slh = pickOptionalNumber(body.shortLeaveHours);
   if (slh !== undefined) patch.shortLeaveHours = Math.max(0, slh);
+  // Overtime opt-in settings.
+  const otb = pickOptionalNumber(body.overtimeStartBufferMinutes);
+  if (otb !== undefined)
+    patch.overtimeStartBufferMinutes = Math.max(0, Math.floor(otb));
+  const otm = pickOptionalNumber(body.overtimeMaxHoursPerDay);
+  if (otm !== undefined) patch.overtimeMaxHoursPerDay = Math.max(0, otm);
+  if (body.overtimeRequiresOptIn !== undefined) {
+    patch.overtimeRequiresOptIn = !!body.overtimeRequiresOptIn;
+  }
   const wo = pickWeeklyOff(body.weeklyOffDays);
   if (wo !== undefined) patch.weeklyOffDays = wo;
   const ac = pickOptionalNullableString(body.autoCheckoutAt);
