@@ -42,6 +42,9 @@ interface AttendanceConfig {
   monthlyHalfDayQuota: number;
   monthlyShortLeaveQuota: number;
   shortLeaveHours: number;
+  overtimeStartBufferMinutes: number;
+  overtimeMaxHoursPerDay: number;
+  overtimeRequiresOptIn: boolean;
   weeklyOffDays: number[];
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
@@ -86,6 +89,9 @@ export function AttendanceConfigForm() {
     monthlyHalfDayQuota: string;
     monthlyShortLeaveQuota: string;
     shortLeaveHours: string;
+    overtimeStartBufferMinutes: string;
+    overtimeMaxHoursPerDay: string;
+    overtimeRequiresOptIn: boolean;
     weeklyOffDays: number[];
     autoCheckoutEnabled: boolean;
     autoCheckoutAt: string;
@@ -138,6 +144,9 @@ export function AttendanceConfigForm() {
         monthlyHalfDayQuota: String(c.monthlyHalfDayQuota ?? 0),
         monthlyShortLeaveQuota: String(c.monthlyShortLeaveQuota ?? 0),
         shortLeaveHours: String(c.shortLeaveHours ?? 2),
+        overtimeStartBufferMinutes: String(c.overtimeStartBufferMinutes ?? 30),
+        overtimeMaxHoursPerDay: String(c.overtimeMaxHoursPerDay ?? 4),
+        overtimeRequiresOptIn: c.overtimeRequiresOptIn ?? true,
         weeklyOffDays: c.weeklyOffDays ?? [],
         autoCheckoutEnabled: !!c.autoCheckoutAt,
         autoCheckoutAt: c.autoCheckoutAt ?? "23:00",
@@ -242,6 +251,11 @@ export function AttendanceConfigForm() {
       Number(form.monthlyHalfDayQuota) !== (config.monthlyHalfDayQuota ?? 0) ||
       Number(form.monthlyShortLeaveQuota) !== (config.monthlyShortLeaveQuota ?? 0) ||
       Number(form.shortLeaveHours) !== (config.shortLeaveHours ?? 2) ||
+      Number(form.overtimeStartBufferMinutes) !==
+        (config.overtimeStartBufferMinutes ?? 30) ||
+      Number(form.overtimeMaxHoursPerDay) !==
+        (config.overtimeMaxHoursPerDay ?? 4) ||
+      form.overtimeRequiresOptIn !== (config.overtimeRequiresOptIn ?? true) ||
       JSON.stringify([...form.weeklyOffDays].sort()) !==
         JSON.stringify([...(config.weeklyOffDays ?? [])].sort()) ||
       form.autoCheckoutEnabled !== !!config.autoCheckoutAt ||
@@ -362,6 +376,17 @@ export function AttendanceConfigForm() {
       );
       const shortLeaveHours = Math.max(0, Number(form.shortLeaveHours) || 0);
 
+      // Overtime opt-in settings.
+      const overtimeStartBufferMinutes = Math.max(
+        0,
+        Math.floor(Number(form.overtimeStartBufferMinutes) || 0),
+      );
+      const overtimeMaxHoursPerDay = Math.max(
+        0,
+        Number(form.overtimeMaxHoursPerDay) || 0,
+      );
+      const overtimeRequiresOptIn = !!form.overtimeRequiresOptIn;
+
       const payload = {
         defaultShiftStart: form.defaultShiftStart,
         defaultShiftEnd: form.defaultShiftEnd,
@@ -373,6 +398,9 @@ export function AttendanceConfigForm() {
         monthlyHalfDayQuota,
         monthlyShortLeaveQuota,
         shortLeaveHours,
+        overtimeStartBufferMinutes,
+        overtimeMaxHoursPerDay,
+        overtimeRequiresOptIn,
         weeklyOffDays: form.weeklyOffDays,
         autoCheckoutAt: form.autoCheckoutEnabled ? form.autoCheckoutAt : null,
         geofenceMode: form.geofenceMode,
@@ -647,6 +675,65 @@ export function AttendanceConfigForm() {
                     updateForm("shortLeaveHours", e.target.value)
                   }
                 />
+              </Field>
+            </div>
+          </Section>
+
+          <Section
+            title="Overtime"
+            hint="Opt-in OT toggle on the widget, daily cap, and buffer after shift end"
+            className="lg:col-span-2"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <Field
+                label="Buffer after shift end (min)"
+                htmlFor="overtimeStartBufferMinutes"
+                hint="Minutes after the employee's shift end before the widget's Start Overtime toggle becomes available."
+              >
+                <Input
+                  id="overtimeStartBufferMinutes"
+                  type="number"
+                  min={0}
+                  step={5}
+                  value={form.overtimeStartBufferMinutes}
+                  onChange={(e) =>
+                    updateForm("overtimeStartBufferMinutes", e.target.value)
+                  }
+                />
+              </Field>
+              <Field
+                label="Max OT / day (hours)"
+                htmlFor="overtimeMaxHoursPerDay"
+                hint="Labour-law cap. Payroll never counts more than this many OT hours per day."
+              >
+                <Input
+                  id="overtimeMaxHoursPerDay"
+                  type="number"
+                  min={0}
+                  step={0.25}
+                  value={form.overtimeMaxHoursPerDay}
+                  onChange={(e) =>
+                    updateForm("overtimeMaxHoursPerDay", e.target.value)
+                  }
+                />
+              </Field>
+              <Field
+                label="Require opt-in"
+                htmlFor="overtimeRequiresOptIn"
+                hint="When ON, only rows where the employee actually toggled OT on count toward payroll OT."
+              >
+                <div className="flex items-center h-9">
+                  <Switch
+                    id="overtimeRequiresOptIn"
+                    checked={form.overtimeRequiresOptIn}
+                    onCheckedChange={(v) =>
+                      updateForm("overtimeRequiresOptIn", v)
+                    }
+                  />
+                  <span className="ml-2 text-xs text-gray-600">
+                    {form.overtimeRequiresOptIn ? "Opt-in only" : "Auto from hours"}
+                  </span>
+                </div>
               </Field>
             </div>
           </Section>

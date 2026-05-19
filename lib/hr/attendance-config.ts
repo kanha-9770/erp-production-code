@@ -34,6 +34,14 @@ export interface AttendanceConfig {
    *  (fullDay − workedHours) is within this window counts as a short leave
    *  rather than a half-day. */
   shortLeaveHours: number;
+  /** Minutes after shift-end before the widget's "Start Overtime" toggle
+   *  becomes available. e.g. shift 18:30 + 30 → OT button enabled at 19:00. */
+  overtimeStartBufferMinutes: number;
+  /** Labour-law daily cap on counted OT hours. */
+  overtimeMaxHoursPerDay: number;
+  /** When true, payroll counts OT only on rows where the employee toggled
+   *  OT on. False keeps the legacy "anything past overtimeAfterHours" path. */
+  overtimeRequiresOptIn: boolean;
   weeklyOffDays: number[]; // 0=Sun … 6=Sat
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
@@ -75,6 +83,9 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   monthlyHalfDayQuota: 0,
   monthlyShortLeaveQuota: 0,
   shortLeaveHours: 2,
+  overtimeStartBufferMinutes: 30,
+  overtimeMaxHoursPerDay: 4,
+  overtimeRequiresOptIn: true,
   weeklyOffDays: [0],
   autoCheckoutAt: null,
   geofenceMode: 'OFF',
@@ -205,6 +216,14 @@ export async function getAttendanceConfig(
       shortLeaveHours: Number.isFinite(row.shortLeaveHours)
         ? Math.max(0, Number(row.shortLeaveHours))
         : 2,
+      overtimeStartBufferMinutes: Number.isFinite(row.overtimeStartBufferMinutes)
+        ? Math.max(0, Math.floor(Number(row.overtimeStartBufferMinutes)))
+        : 30,
+      overtimeMaxHoursPerDay: Number.isFinite(row.overtimeMaxHoursPerDay)
+        ? Math.max(0, Number(row.overtimeMaxHoursPerDay))
+        : 4,
+      overtimeRequiresOptIn:
+        row.overtimeRequiresOptIn === undefined ? true : !!row.overtimeRequiresOptIn,
       weeklyOffDays: coerceWeeklyOff(row.weeklyOffDays),
       autoCheckoutAt: row.autoCheckoutAt ?? null,
       geofenceMode: coerceGeofenceMode(row.geofenceMode),
@@ -262,6 +281,9 @@ export interface AttendanceConfigUpdate {
   monthlyHalfDayQuota?: number;
   monthlyShortLeaveQuota?: number;
   shortLeaveHours?: number;
+  overtimeStartBufferMinutes?: number;
+  overtimeMaxHoursPerDay?: number;
+  overtimeRequiresOptIn?: boolean;
   weeklyOffDays?: number[];
   autoCheckoutAt?: string | null;
   geofenceMode?: GeofenceMode;

@@ -1777,7 +1777,7 @@ export function EmployeeForm({
           </Field>
           <Field
             label="Per Hour Salary"
-            hint="Auto-calculated: CTC ÷ (22 days × hours/day). Reference only — overtime uses the Pay Rule's hourly rate."
+            hint="Auto-calculated: CTC ÷ (22 days × hours/day). Reference only — overtime uses the 'Overtime Rate' field below (if set) × the Pay Rule's multiplier, otherwise (CTC/working-days)/8 × multiplier."
           >
             <Input
               type="number"

@@ -2067,6 +2067,16 @@ model Attendance {
   lateMinutes      Int       @default(0) @map("late_minutes")
   earlyOutMinutes  Int       @default(0) @map("early_out_minutes")
   overtimeMinutes  Int       @default(0) @map("overtime_minutes")
+  // Explicit overtime opt-in. The widget shows a "Start Overtime" toggle
+  // after shift-end + overtimeStartBufferMinutes. When the employee turns
+  // it on, the server stamps `overtimeOptedIn = true` + `overtimeStartedAt
+  // = now`. On check-out the punch service computes the OT duration from
+  // overtimeStartedAt → checkOutAt, capped by overtimeMaxHoursPerDay. When
+  // the org sets overtimeRequiresOptIn = false the legacy "anything past
+  // overtimeAfterHours is OT" path still applies; these two columns just
+  // stay null/false in that case.
+  overtimeOptedIn   Boolean   @default(false) @map("overtime_opted_in")
+  overtimeStartedAt DateTime? @map("overtime_started_at")
   isAutoCheckedOut Boolean   @default(false) @map("is_auto_checked_out")
   status           String? // PRESENT | HALF | ABSENT | ON_LEAVE | HOLIDAY | WEEKLY_OFF | REGULARIZED
   idempotencyKey   String?   @unique @map("idempotency_key")
@@ -2135,6 +2145,21 @@ model AttendanceConfiguration {
   monthlyHalfDayQuota    Int   @default(0) @map("monthly_half_day_quota")
   monthlyShortLeaveQuota Int   @default(0) @map("monthly_short_leave_quota")
   shortLeaveHours        Float @default(2) @map("short_leave_hours")
+
+  // Overtime: explicit opt-in flow.
+  //   overtimeStartBufferMinutes — minutes between the employee's shift
+  //     end and the moment the "Start Overtime" toggle becomes available
+  //     on the widget. Example: shift ends 18:30, buffer 30 → OT button
+  //     enabled at 19:00.
+  //   overtimeMaxHoursPerDay — labour-law daily cap. Even if the employee
+  //     leaves the toggle on past this limit, payroll counts no more than
+  //     this many OT hours for the day.
+  //   overtimeRequiresOptIn — when true, payroll counts OT minutes ONLY
+  //     for rows where the employee actually toggled OT on. False keeps
+  //     the legacy "anything past overtimeAfterHours is OT" behavior.
+  overtimeStartBufferMinutes Int     @default(30) @map("overtime_start_buffer_minutes")
+  overtimeMaxHoursPerDay     Float   @default(4)  @map("overtime_max_hours_per_day")
+  overtimeRequiresOptIn      Boolean @default(true) @map("overtime_requires_opt_in")
 
   // Working week: 0 = Sun … 6 = Sat. Listed days are WEEKLY-OFF.
   weeklyOffDays Json @default("[0]") @map("weekly_off_days")

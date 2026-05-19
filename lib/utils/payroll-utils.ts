@@ -260,6 +260,12 @@ export interface PayrollComputeInputs {
   // overtime for this employee even when the assigned Pay Rule has OT on.
   // null/undefined/true defers to the Pay Rule.
   isOvertimeApplicable?: boolean | null;
+  // Per-employee OT hourly rate from Employee Master ("Overtime Rate" field).
+  // When > 0, replaces the calculated `perDay / STANDARD_HOURS_PER_DAY` base
+  // for OT pay. Pay Rule multipliers (weekday / weekend / holiday) still apply
+  // on top, so a custom rate behaves like an override for the underlying hourly
+  // pay rate, not for the multipliers.
+  overtimeHourlyRate?: number | null;
 }
 
 export interface PayrollComputeResult {
@@ -466,6 +472,14 @@ export function computePayrollFromInputs(
   // isOvertimeApplicable toggle (from Employee Master → Salary &
   // Compensation) hard-overrides the Pay Rule when set to false.
   const employeeOtAllowed = inputs.isOvertimeApplicable !== false;
+  // Per-employee OT rate override. When the Employee Master "Overtime Rate"
+  // field is set to a positive value, it replaces the derived `hourlyRate`
+  // for OT pay. Pay Rule multipliers still apply, so the final per-hour rate
+  // is `employeeRate × multiplier`.
+  const otBaseRate =
+    inputs.overtimeHourlyRate != null && inputs.overtimeHourlyRate > 0
+      ? Number(inputs.overtimeHourlyRate)
+      : hourlyRate;
   let overtimePay = 0;
   let cappedOtHours = 0;
   if (employeeOtAllowed && ot.enabled && inputs.overtimeHours) {
@@ -474,9 +488,9 @@ export function computePayrollFromInputs(
     const wke = Math.min(Math.max(0, inputs.overtimeHours.weekend), remaining); remaining -= wke;
     const hol = Math.min(Math.max(0, inputs.overtimeHours.holiday), remaining); remaining -= hol;
     overtimePay =
-      wkd * hourlyRate * ot.rateMultiplier +
-      wke * hourlyRate * ot.weekendMultiplier +
-      hol * hourlyRate * ot.holidayMultiplier;
+      wkd * otBaseRate * ot.rateMultiplier +
+      wke * otBaseRate * ot.weekendMultiplier +
+      hol * otBaseRate * ot.holidayMultiplier;
     cappedOtHours = wkd + wke + hol;
   }
 
@@ -888,13 +902,44 @@ function calculateForEmployee(
     if (ot.enabled && c.hours > 0) {
       const isHoliday = holidaySet.has(dateStr);
       const isWeeklyOff = policy.weeklyOffDays.includes(weekday);
-      if (isHoliday) {
-        holidayOtHours += c.hours;
-      } else if (isWeeklyOff) {
-        weekendOtHours += c.hours;
+      // Authoritative OT path: the punch service already wrote the day's
+      // OT minutes (capped + opt-in gated) onto the Attendance row. When
+      // we have those, use them directly so payroll never double-counts.
+      const attRow = attByDate.get(dateStr);
+      const persistedOtMin =
+        typeof attRow?.overtimeMinutes === 'number'
+          ? attRow.overtimeMinutes
+          : null;
+      // Opt-in gating: if the org requires opt-in and this row wasn't
+      // toggled on, OT contributes zero — even if persisted minutes were
+      // somehow non-zero. Defensive.
+      const optInBlocks =
+        policy.overtimeRequiresOptIn &&
+        attRow != null &&
+        !attRow.overtimeOptedIn;
+
+      // Per-day cap. 0 / unset → no cap (matches the legacy behaviour).
+      const dailyCapHours = Math.max(0, policy.overtimeMaxHoursPerDay ?? 0);
+      const capHours = (n: number) =>
+        dailyCapHours > 0 ? Math.min(n, dailyCapHours) : n;
+
+      if (optInBlocks) {
+        // skip — no OT recognised
+      } else if (persistedOtMin !== null) {
+        const otHours = capHours(persistedOtMin / 60);
+        if (isHoliday) holidayOtHours += otHours;
+        else if (isWeeklyOff) weekendOtHours += otHours;
+        else weekdayOtHours += otHours;
       } else {
-        const excess = c.hours - ot.weekdayThresholdHours;
-        if (excess > 0) weekdayOtHours += excess;
+        // Legacy fall-back: derive from worked hours.
+        if (isHoliday) {
+          holidayOtHours += capHours(c.hours);
+        } else if (isWeeklyOff) {
+          weekendOtHours += capHours(c.hours);
+        } else {
+          const excess = c.hours - ot.weekdayThresholdHours;
+          if (excess > 0) weekdayOtHours += capHours(excess);
+        }
       }
     }
   }
@@ -953,6 +998,7 @@ function calculateForEmployee(
       // earnings line.
       employeeBonus: employee.bonusAmount ?? 0,
       isOvertimeApplicable: employee.isOvertimeApplicable ?? null,
+      overtimeHourlyRate: employee.overtimeRate ?? null,
     },
     policy,
     formulas,
