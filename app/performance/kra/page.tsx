@@ -9,8 +9,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Target, Plus, Search, Pencil, Trash2, TrendingUp, AlertTriangle,
   CheckCircle2, Calendar, User, Briefcase, Percent, Zap, Info,
-  ArrowRight, BarChart3, Flag, Layers
+  ArrowRight, BarChart3, Flag, Layers, AlertCircle, Save
 } from "lucide-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
@@ -46,6 +50,13 @@ type Period = "Q1" | "Q2" | "Q3" | "Q4" | "ANNUAL";
 interface Kra {
   id: string;
   employee: string;
+  // Employee identification fields (parallel to engagement module).
+  employeeId?: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  department?: string;
+  employeeEngagementTeamName?: string;
   objective: string;
   weight: number; // percentage
   target: string;
@@ -69,6 +80,18 @@ const PERIOD_OPTIONS = [
   { value: "Q1", label: "Q1" }, { value: "Q2", label: "Q2" },
   { value: "Q3", label: "Q3" }, { value: "Q4", label: "Q4" },
   { value: "ANNUAL", label: "Annual" },
+];
+
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
 ];
 
 const STORAGE_KEY = "performance-kra:v1";
@@ -116,7 +139,9 @@ const SEED: Kra[] = [
 ];
 
 const EMPTY: Kra = {
-  id: "", employee: "", objective: "", weight: 0, target: "", actual: "",
+  id: "", employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
+  department: "", employeeEngagementTeamName: "",
+  objective: "", weight: 0, target: "", actual: "",
   progress: 0, period: "Q1", year: new Date().getFullYear(), status: "DRAFT", notes: ""
 };
 
@@ -124,11 +149,17 @@ const EMPTY: Kra = {
 
 export default function KraPage() {
   const { toast } = useToast();
+  const { user } = useCurrentUser();
+  const { isAdmin } = usePermissions();
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+
   const [items, setItems] = useState<Kra[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  
-  const [filters, setFilters] = useState({ search: "", period: "", status: "" });
+
+  const [filters, setFilters] = useState({ search: "", period: "", status: "", department: "" });
   const [searchInput, setSearchInput] = useState("");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
@@ -153,25 +184,35 @@ export default function KraPage() {
 
   const filterFields: FilterField[] = useMemo(() => [
     { id: "employee", label: "Employee", type: "text" },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_OPTIONS },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
     { id: "objective", label: "Objective", type: "text" },
+    { id: "target", label: "Target Metric", type: "text" },
+    { id: "actual", label: "Actual Result", type: "text" },
     { id: "period", label: "Period", type: "select", options: PERIOD_OPTIONS },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
     { id: "weight", label: "Weight", type: "number" },
     { id: "progress", label: "Progress", type: "number" },
+    { id: "year", label: "Year", type: "number" },
   ], []);
 
   const filteredItems = useMemo(() => {
     let result = items;
     if (filters.search) {
       const q = filters.search.toLowerCase();
-      result = result.filter(k => 
-        k.employee.toLowerCase().includes(q) || 
-        k.id.toLowerCase().includes(q) || 
-        k.objective.toLowerCase().includes(q)
+      result = result.filter(k =>
+        k.employee.toLowerCase().includes(q) ||
+        k.id.toLowerCase().includes(q) ||
+        k.objective.toLowerCase().includes(q) ||
+        (k.employeeId?.toLowerCase().includes(q) ?? false)
       );
     }
     if (filters.period) result = result.filter(k => k.period === filters.period);
     if (filters.status) result = result.filter(k => k.status === filters.status);
+    if (filters.department) result = result.filter(k => k.department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [items, filters, conditions, filterFields]);
 
@@ -296,18 +337,19 @@ export default function KraPage() {
                    views.select(id);
                    const v = views.views.find(x => x.id === id);
                    if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
-                   else { setFilters({ search: "", period: "", status: "" }); setSearchInput(""); }
+                   else { setFilters({ search: "", period: "", status: "", department: "" }); setSearchInput(""); }
                 }}
                 onSave={(name) => views.save(name, filters)}
                 onDelete={views.remove}
-                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", period: "", status: "" }) !== JSON.stringify(filters)}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", period: "", status: "", department: "" }) !== JSON.stringify(filters)}
               />
             </div>
 
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Period" value={filters.period} onChange={(v) => setFilters(f => ({ ...f, period: v }))} options={PERIOD_OPTIONS} />
               <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
-              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", period: "", status: "" }); setSearchInput(""); }} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => setFilters(f => ({ ...f, department: v }))} options={DEPARTMENT_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", period: "", status: "", department: "" }); setSearchInput(""); }} />
             </div>
           </>
         }
@@ -323,23 +365,28 @@ export default function KraPage() {
           />
         }
         preview={selectedId ? (
-          <KraPreview 
-            id={selectedId} 
-            items={items} 
-            onEdit={(id) => { setEditingId(id); setFormOpen(true); }} 
-            onDelete={(id) => setDeletingId(id)} 
+          <KraPreview
+            id={selectedId}
+            items={items}
+            employees={employees}
+            isAdmin={isAdmin}
+            onEdit={(id) => { setEditingId(id); setFormOpen(true); }}
+            onDelete={(id) => setDeletingId(id)}
           />
         ) : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} items={items} /> : null}
       />
 
       <Sheet open={formOpen} onOpenChange={setFormOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle className="uppercase tracking-tight font-black">{editingId ? 'Edit KRA' : 'Define New KRA'}</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2 uppercase tracking-tight font-black">
+              KRA <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <KraForm
             initial={editingId ? items.find(i => i.id === editingId) : undefined}
+            currentEmployee={currentEmployee}
             onCancel={() => setFormOpen(false)}
             onSubmit={handleSave}
           />
@@ -373,7 +420,7 @@ function PreviewHeader({ id, items }: { id: string, items: Kra[] }) {
   );
 }
 
-function KraPreview({ id, items, onEdit, onDelete }: { id: string, items: Kra[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function KraPreview({ id, items, employees, isAdmin, onEdit, onDelete }: { id: string, items: Kra[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const k = items.find(x => x.id === id);
   if (!k) return null;
 
@@ -395,6 +442,8 @@ function KraPreview({ id, items, onEdit, onDelete }: { id: string, items: Kra[],
           <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(k.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <SubmitterDetails employeeId={k.employeeId ?? ""} employees={employees} isAdmin={isAdmin} />
 
       <Card className="p-6 border-0 bg-slate-900 text-white space-y-4 shadow-2xl relative overflow-hidden">
          <div className="flex justify-between items-center relative z-10">
@@ -444,82 +493,241 @@ function KraPreview({ id, items, onEdit, onDelete }: { id: string, items: Kra[],
   );
 }
 
-function KraForm({ initial, onCancel, onSubmit }: { initial?: Kra, onCancel: () => void, onSubmit: (data: Kra) => void }) {
-  const [formData, setFormData] = useState<Kra>(initial || { ...EMPTY });
+function KraForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: Kra;
+  currentEmployee?: any;
+  onCancel: () => void;
+  onSubmit: (data: Kra) => void;
+}) {
+  const [formData, setFormData] = useState<Kra>(initial || {
+    ...EMPTY,
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
+    employee: [currentEmployee?.firstName, currentEmployee?.lastName].filter(Boolean).join(" "),
+  });
+
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId?.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName?.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName?.trim() ? "Last Name is required" : "",
+    objective: !formData.objective.trim() ? "Objective is required" : "",
+    target: !formData.target.trim() ? "Target is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    onSubmit({
+      ...formData,
+      // Keep the legacy `employee` string in sync with the split name fields so
+      // existing table cells / previews that read it continue to work.
+      employee: [formData.firstName, formData.middleName, formData.lastName].filter(Boolean).join(" ").trim() || formData.employee,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Employee Name</Label>
-        <Input value={formData.employee} onChange={e => setFormData({ ...formData, employee: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. John Doe" />
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        {/* Section 1: Employee */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Employee</h3>
+              <p className="text-xs text-muted-foreground">Identifies the goal owner</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId || ""}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName || ""}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Middle Name">
+              <Input value={formData.middleName || ""} onChange={e => setFormData({ ...formData, middleName: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName || ""}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department || ""} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName || ""}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+              />
+            </FieldWrapper>
+          </div>
+        </Card>
+
+        {/* Section 2: Objective */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">2</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Objective</h3>
+              <p className="text-xs text-muted-foreground">Goal, target, actual, and weight</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div className="md:col-span-2">
+              <FieldWrapper label="Strategic Objective" required error={showErr("objective") ? errors.objective : ""}>
+                <Textarea
+                  value={formData.objective}
+                  onChange={e => setFormData({ ...formData, objective: e.target.value })}
+                  placeholder="e.g. Increase enterprise conversion rate..."
+                  className={`min-h-[100px] ${showErr("objective") ? "border-red-500" : ""}`}
+                />
+              </FieldWrapper>
+            </div>
+
+            <FieldWrapper label="Target Metric" required error={showErr("target") ? errors.target : ""}>
+              <Input
+                value={formData.target}
+                onChange={e => setFormData({ ...formData, target: e.target.value })}
+                placeholder="e.g. 15% increase"
+                className={showErr("target") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Actual Result">
+              <Input
+                value={formData.actual}
+                onChange={e => setFormData({ ...formData, actual: e.target.value })}
+                placeholder="e.g. 12% achieved"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Objective Weight (%)">
+              <Input
+                type="number"
+                value={formData.weight}
+                onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Review Period">
+              <Select value={formData.period} onValueChange={v => setFormData({ ...formData, period: v as Period })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PERIOD_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Target Year">
+              <Input
+                type="number"
+                value={formData.year}
+                onChange={e => setFormData({ ...formData, year: Number(e.target.value) })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Lifecycle Status">
+              <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as KraStatus })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label={`Progress (${formData.progress}%)`}>
+                <Input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={formData.progress}
+                  onChange={e => setFormData({ ...formData, progress: Number(e.target.value) })}
+                />
+              </FieldWrapper>
+            </div>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Strategic Notes">
+                <Textarea
+                  value={formData.notes}
+                  onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Context, blockers, or evidence..."
+                  className="min-h-[80px]"
+                />
+              </FieldWrapper>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Strategic Objective</Label>
-        <Textarea value={formData.objective} onChange={e => setFormData({ ...formData, objective: e.target.value })} className="min-h-[80px] rounded-2xl border-slate-200" placeholder="e.g. Increase enterprise conversion rate..." />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Target Metric</Label>
-          <Input value={formData.target} onChange={e => setFormData({ ...formData, target: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. 15% increase" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Actual Result</Label>
-          <Input value={formData.actual} onChange={e => setFormData({ ...formData, actual: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. 12% achieved" />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Objective Weight (%)</Label>
-          <Input type="number" value={formData.weight} onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Period</Label>
-          <Select value={formData.period} onValueChange={v => setFormData({ ...formData, period: v as Period })}>
-            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-            <SelectContent>{PERIOD_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Target Year</Label>
-          <Input type="number" value={formData.year} onChange={e => setFormData({ ...formData, year: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
-        </div>
-      </div>
-
-      <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4 shadow-2xl">
-         <div className="flex items-center justify-between">
-            <Label className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Live Progress Completion</Label>
-            <span className="text-2xl font-black text-blue-400">{formData.progress}%</span>
-         </div>
-         <Input 
-           type="range" min="0" max="100" 
-           value={formData.progress} 
-           onChange={e => setFormData({ ...formData, progress: Number(e.target.value) })}
-           className="h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-400 w-full"
-         />
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Strategic Notes</Label>
-        <Textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="min-h-[80px] rounded-2xl border-slate-200" placeholder="Context, blockers, or evidence..." />
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Lifecycle Status</Label>
-        <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as KraStatus })}>
-          <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-          <SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex justify-end gap-3 pt-6 border-t">
-        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Cancel</Button>
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           {initial ? 'Update Objective' : 'Commit Goal'}
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Update Objective" : "Commit Goal"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }

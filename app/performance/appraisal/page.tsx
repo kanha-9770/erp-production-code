@@ -9,8 +9,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   TrendingUp, Plus, Search, Pencil, Trash2, Star, StarHalf,
   CheckCircle2, Clock, Eye, Calendar, User, UserCheck, MessageSquare,
-  Award, TrendingDown, ClipboardCheck, ArrowRight
+  Award, TrendingDown, ClipboardCheck, ArrowRight, AlertCircle, Save, Info
 } from "lucide-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
@@ -46,7 +50,15 @@ type Cycle = "Q1" | "Q2" | "Q3" | "Q4" | "MID_YEAR" | "ANNUAL";
 interface Appraisal {
   id: string;
   employee: string;
+  // Employee identification (parallel to engagement module).
+  employeeId?: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  department?: string;
+  employeeEngagementTeamName?: string;
   reviewer: string;
+  reviewerId?: string;
   cycle: Cycle;
   year: number;
   rating: number; // 0-5
@@ -71,6 +83,18 @@ const CYCLE_OPTIONS = [
   { value: "Q4", label: "Q4" },
   { value: "MID_YEAR", label: "Mid-year" },
   { value: "ANNUAL", label: "Annual" },
+];
+
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
 ];
 
 const STORAGE_KEY = "performance-appraisal:v1";
@@ -105,7 +129,10 @@ const SEED: Appraisal[] = [
 ];
 
 const EMPTY: Appraisal = {
-  id: "", employee: "", reviewer: "", cycle: "ANNUAL", year: new Date().getFullYear(),
+  id: "", employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
+  department: "", employeeEngagementTeamName: "",
+  reviewer: "", reviewerId: "",
+  cycle: "ANNUAL", year: new Date().getFullYear(),
   rating: 0, strengths: "", improvements: "", comments: "", status: "PENDING", submittedAt: ""
 };
 
@@ -123,11 +150,17 @@ function StarRating({ rating }: { rating: number }) {
 
 export default function PerformanceAppraisalPage() {
   const { toast } = useToast();
+  const { user } = useCurrentUser();
+  const { isAdmin } = usePermissions();
+  const { data: empData } = useGetEmployeeListQuery();
+  const employees = empData?.employees ?? [];
+  const currentEmployee = employees.find(e => e.userId === user?.id);
+
   const [items, setItems] = useState<Appraisal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  
-  const [filters, setFilters] = useState({ search: "", cycle: "", status: "" });
+
+  const [filters, setFilters] = useState({ search: "", cycle: "", status: "", department: "" });
   const [searchInput, setSearchInput] = useState("");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
@@ -152,24 +185,36 @@ export default function PerformanceAppraisalPage() {
 
   const filterFields: FilterField[] = useMemo(() => [
     { id: "employee", label: "Employee", type: "text" },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_OPTIONS },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
     { id: "reviewer", label: "Reviewer", type: "text" },
     { id: "cycle", label: "Cycle", type: "select", options: CYCLE_OPTIONS },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
     { id: "rating", label: "Rating", type: "number" },
+    { id: "year", label: "Year", type: "number" },
+    { id: "strengths", label: "Strengths", type: "text" },
+    { id: "improvements", label: "Growth Areas", type: "text" },
+    { id: "comments", label: "Comments", type: "text" },
+    { id: "submittedAt", label: "Submitted At", type: "date" },
   ], []);
 
   const filteredItems = useMemo(() => {
     let result = items;
     if (filters.search) {
       const q = filters.search.toLowerCase();
-      result = result.filter(a => 
-        a.employee.toLowerCase().includes(q) || 
-        a.id.toLowerCase().includes(q) || 
-        a.reviewer.toLowerCase().includes(q)
+      result = result.filter(a =>
+        a.employee.toLowerCase().includes(q) ||
+        a.id.toLowerCase().includes(q) ||
+        a.reviewer.toLowerCase().includes(q) ||
+        (a.employeeId?.toLowerCase().includes(q) ?? false)
       );
     }
     if (filters.cycle) result = result.filter(a => a.cycle === filters.cycle);
     if (filters.status) result = result.filter(a => a.status === filters.status);
+    if (filters.department) result = result.filter(a => a.department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [items, filters, conditions, filterFields]);
 
@@ -286,18 +331,19 @@ export default function PerformanceAppraisalPage() {
                    views.select(id);
                    const v = views.views.find(x => x.id === id);
                    if (v) { setFilters(v.filters); setSearchInput(v.filters.search); }
-                   else { setFilters({ search: "", cycle: "", status: "" }); setSearchInput(""); }
+                   else { setFilters({ search: "", cycle: "", status: "", department: "" }); setSearchInput(""); }
                 }}
                 onSave={(name) => views.save(name, filters)}
                 onDelete={views.remove}
-                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", cycle: "", status: "" }) !== JSON.stringify(filters)}
+                isDirty={JSON.stringify(views.views.find(v => v.id === views.activeId)?.filters ?? { search: "", cycle: "", status: "", department: "" }) !== JSON.stringify(filters)}
               />
             </div>
 
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Cycle" value={filters.cycle} onChange={(v) => setFilters(f => ({ ...f, cycle: v }))} options={CYCLE_OPTIONS} />
               <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
-              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", cycle: "", status: "" }); setSearchInput(""); }} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => setFilters(f => ({ ...f, department: v }))} options={DEPARTMENT_OPTIONS} />
+              <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", cycle: "", status: "", department: "" }); setSearchInput(""); }} />
             </div>
           </>
         }
@@ -313,23 +359,28 @@ export default function PerformanceAppraisalPage() {
           />
         }
         preview={selectedId ? (
-          <AppraisalPreview 
-            id={selectedId} 
-            items={items} 
-            onEdit={(id) => { setEditingId(id); setFormOpen(true); }} 
-            onDelete={(id) => setDeletingId(id)} 
+          <AppraisalPreview
+            id={selectedId}
+            items={items}
+            employees={employees}
+            isAdmin={isAdmin}
+            onEdit={(id) => { setEditingId(id); setFormOpen(true); }}
+            onDelete={(id) => setDeletingId(id)}
           />
         ) : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} items={items} /> : null}
       />
 
       <Sheet open={formOpen} onOpenChange={setFormOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle className="uppercase tracking-tight font-black">{editingId ? 'Edit Review' : 'New Performance Review'}</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2 uppercase tracking-tight font-black">
+              Performance Appraisal <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <AppraisalForm
             initial={editingId ? items.find(i => i.id === editingId) : undefined}
+            currentEmployee={currentEmployee}
             onCancel={() => setFormOpen(false)}
             onSubmit={handleSave}
           />
@@ -363,7 +414,7 @@ function PreviewHeader({ id, items }: { id: string, items: Appraisal[] }) {
   );
 }
 
-function AppraisalPreview({ id, items, onEdit, onDelete }: { id: string, items: Appraisal[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function AppraisalPreview({ id, items, employees, isAdmin, onEdit, onDelete }: { id: string, items: Appraisal[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const a = items.find(x => x.id === id);
   if (!a) return null;
 
@@ -385,6 +436,8 @@ function AppraisalPreview({ id, items, onEdit, onDelete }: { id: string, items: 
           <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(a.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <SubmitterDetails employeeId={a.employeeId ?? ""} employees={employees} isAdmin={isAdmin} submissionDate={a.submittedAt} />
 
       <div className="grid grid-cols-2 gap-4">
          <Card className="p-5 border-0 bg-slate-50 flex flex-col justify-between overflow-hidden relative">
@@ -429,85 +482,257 @@ function Section({ icon: Icon, title, content, color, bg }: { icon: any, title: 
    );
 }
 
-function AppraisalForm({ initial, onCancel, onSubmit }: { initial?: Appraisal, onCancel: () => void, onSubmit: (data: Appraisal) => void }) {
-  const [formData, setFormData] = useState<Appraisal>(initial || { ...EMPTY });
+function AppraisalForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: Appraisal;
+  currentEmployee?: any;
+  onCancel: () => void;
+  onSubmit: (data: Appraisal) => void;
+}) {
+  const [formData, setFormData] = useState<Appraisal>(initial || {
+    ...EMPTY,
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
+    employee: [currentEmployee?.firstName, currentEmployee?.lastName].filter(Boolean).join(" "),
+  });
+
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId?.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName?.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName?.trim() ? "Last Name is required" : "",
+    reviewer: !formData.reviewer.trim() ? "Reviewer is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    onSubmit({
+      ...formData,
+      employee: [formData.firstName, formData.middleName, formData.lastName].filter(Boolean).join(" ").trim() || formData.employee,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Employee Name</Label>
-          <Input value={formData.employee} onChange={e => setFormData({ ...formData, employee: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. John Doe" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Primary Reviewer</Label>
-          <Input value={formData.reviewer} onChange={e => setFormData({ ...formData, reviewer: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. Manager Name" />
-        </div>
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        {/* Section 1: Employee */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Employee</h3>
+              <p className="text-xs text-muted-foreground">Person being reviewed</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId || ""}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName || ""}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Middle Name">
+              <Input value={formData.middleName || ""} onChange={e => setFormData({ ...formData, middleName: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName || ""}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department || ""} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName || ""}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+              />
+            </FieldWrapper>
+          </div>
+        </Card>
+
+        {/* Section 2: Review Cycle */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">2</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Review Cycle</h3>
+              <p className="text-xs text-muted-foreground">Reviewer, cycle, rating</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Primary Reviewer" required error={showErr("reviewer") ? errors.reviewer : ""}>
+              <Input
+                value={formData.reviewer}
+                onChange={e => setFormData({ ...formData, reviewer: e.target.value })}
+                placeholder="e.g. Manager Name"
+                className={showErr("reviewer") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Reviewer ID">
+              <Input
+                value={formData.reviewerId || ""}
+                onChange={e => setFormData({ ...formData, reviewerId: e.target.value })}
+                placeholder="e.g. EMP-0099"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Review Cycle">
+              <Select value={formData.cycle} onValueChange={v => setFormData({ ...formData, cycle: v as Cycle })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CYCLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Review Year">
+              <Input
+                type="number"
+                value={formData.year}
+                onChange={e => setFormData({ ...formData, year: Number(e.target.value) })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Current Status">
+              <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as AppraisalStatus })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Submitted At">
+              <Input
+                type="date"
+                value={formData.submittedAt}
+                onChange={e => setFormData({ ...formData, submittedAt: e.target.value })}
+              />
+            </FieldWrapper>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label={`Performance Rating (${formData.rating.toFixed(1)} / 5.0)`}>
+                <Input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={0.5}
+                  value={formData.rating}
+                  onChange={e => setFormData({ ...formData, rating: Number(e.target.value) })}
+                />
+              </FieldWrapper>
+            </div>
+          </div>
+        </Card>
+
+        {/* Section 3: Review Feedback */}
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">3</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Review Feedback</h3>
+              <p className="text-xs text-muted-foreground">Strengths, growth areas, comments</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4">
+            <FieldWrapper label="Core Strengths & Achievements">
+              <Textarea
+                value={formData.strengths}
+                onChange={e => setFormData({ ...formData, strengths: e.target.value })}
+                placeholder="Highlight key wins..."
+                className="min-h-[100px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Opportunities for Growth">
+              <Textarea
+                value={formData.improvements}
+                onChange={e => setFormData({ ...formData, improvements: e.target.value })}
+                placeholder="Identify focus areas..."
+                className="min-h-[100px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Reviewer's Final Summary">
+              <Textarea
+                value={formData.comments}
+                onChange={e => setFormData({ ...formData, comments: e.target.value })}
+                placeholder="Promotion / L&D notes..."
+                className="min-h-[100px]"
+              />
+            </FieldWrapper>
+          </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Cycle</Label>
-          <Select value={formData.cycle} onValueChange={v => setFormData({ ...formData, cycle: v as Cycle })}>
-            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-            <SelectContent>{CYCLE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Review Year</Label>
-          <Input type="number" value={formData.year} onChange={e => setFormData({ ...formData, year: Number(e.target.value) })} className="h-12 border-slate-200 font-bold" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Current Status</Label>
-          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as AppraisalStatus })}>
-            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-            <SelectContent>{STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="p-6 bg-slate-900 rounded-3xl text-white space-y-4 shadow-2xl">
-         <div className="flex items-center justify-between">
-            <Label className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Performance Rating Score</Label>
-            <span className="text-2xl font-black text-amber-400">{formData.rating.toFixed(1)} <span className="text-xs text-slate-600">/ 5.0</span></span>
-         </div>
-         <Input 
-           type="range" min="0" max="5" step="0.5" 
-           value={formData.rating} 
-           onChange={e => setFormData({ ...formData, rating: Number(e.target.value) })}
-           className="h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-400 w-full"
-         />
-         <div className="flex justify-between text-[9px] font-bold text-slate-600 uppercase tracking-widest">
-            <span>Critical</span>
-            <span>Needs Impr.</span>
-            <span>Satisfactory</span>
-            <span>Good</span>
-            <span>Excellent</span>
-            <span>Exceptional</span>
-         </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Core Strengths & Achievements</Label>
-          <Textarea value={formData.strengths} onChange={e => setFormData({ ...formData, strengths: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Highlight key wins..." />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Opportunities for Growth</Label>
-          <Textarea value={formData.improvements} onChange={e => setFormData({ ...formData, improvements: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Identify focus areas..." />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Reviewer's Final Summary</Label>
-          <Textarea value={formData.comments} onChange={e => setFormData({ ...formData, comments: e.target.value })} className="min-h-[100px] rounded-2xl border-slate-200" placeholder="Promotion / L&D notes..." />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-3 pt-6 border-t">
-        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Discard</Button>
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           {initial ? 'Save Review' : 'Authorize Appraisal'}
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Save Review" : "Authorize Appraisal"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }
