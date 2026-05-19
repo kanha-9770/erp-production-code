@@ -268,6 +268,10 @@ export const WalletHandlers = {
       };
 
       const projections: DealProjection[] = [];
+      // Surfaced so the UI (and the agent themselves) can see which deals
+      // couldn't be previewed and why — previously a bare catch swallowed
+      // every error and made it impossible to debug a missing card.
+      const skipped: Array<{ id: string; code: string | null; reason: string }> = [];
       let totalEstimatedShare = 0;
       let pendingAreaForMe = new Prisma.Decimal(0);
 
@@ -287,9 +291,16 @@ export const WalletHandlers = {
             const uid = s.beneficiaryUserId ?? s.userId ?? null;
             if (uid === auth.id) myShare += Number(s.amount);
           }
-        } catch {
-          // Calc failed (e.g., agent profile missing, no rule). Skip — we
-          // don't want a single bad deal to wipe the whole projection.
+        } catch (e: any) {
+          // Calc failed (e.g., agent profile missing, area = 0, unknown
+          // unit, no active rule). Don't let one bad deal wipe the whole
+          // projection — record it so the wallet can show a "couldn't
+          // preview N deals" notice and admins can fix the bad data.
+          const reason = e?.message || "Unknown error";
+          console.warn(
+            `[FinanceHandlers] pending-posting calc failed for txn ${d.id}: ${reason}`,
+          );
+          skipped.push({ id: d.id, code: d.code, reason });
           continue;
         }
 
@@ -364,6 +375,7 @@ export const WalletHandlers = {
           cumulativeAreaAfter,
           engine: useSlab ? "SLAB" : "LEGACY",
           deals: projections,
+          skipped,
         },
       });
     }, "getMyPendingPosting");

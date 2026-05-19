@@ -41,6 +41,24 @@ function decFrom(v: Prisma.Decimal | number | string | null | undefined): Prisma
   return new Prisma.Decimal(v);
 }
 
+// Override-ladder lookup with "last-positive cascade". If the entry at index
+// `i` is missing or zero, walk backwards through the ladder for the deepest
+// preceding positive entry and reuse that. Returns ZERO only when the entire
+// ladder is empty / all zeros (= admin opted out of overrides).
+//
+// Why: before this, an L3 upline received nothing when the ladder was
+// [5, 3] because `ladder[2] = undefined`. Seniors on real orgs were never
+// seeing commissions because the ladder hadn't been padded out to L10.
+function ladderPercentAt(ladder: Prisma.Decimal[], i: number): Prisma.Decimal {
+  const here = ladder[i];
+  if (here && here.gt(ZERO)) return here;
+  for (let j = Math.min(i - 1, ladder.length - 1); j >= 0; j--) {
+    const v = ladder[j];
+    if (v && v.gt(ZERO)) return v;
+  }
+  return ZERO;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Rule resolution
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,12 +324,15 @@ export async function calculateCommission(
   for (let i = 0; i < upline.length; i++) {
     const hop = upline[i];
     // Per-level percent — rule's ladder by default; agent's rank ladder when
-    // useRankOverrides is on. Falls back to 0 if the array is shorter than
-    // the depth.
+    // useRankOverrides is on. Falls back to the deepest preceding positive
+    // entry (ladder cascade) so admins can configure L1=5%, L2=3% and have
+    // L3+ inherit 3% without having to fill the ladder out to 10. An
+    // entirely-zero ladder still means "no overrides" — we only cascade
+    // when at least one positive value exists.
     const ladder = rule.useRankOverrides
       ? hop.rankOverridePercents
       : rule.overridePercents;
-    const pctAtLevel = ladder[i] ?? ZERO;
+    const pctAtLevel = ladderPercentAt(ladder, i);
     if (pctAtLevel.equals(ZERO)) continue;
 
     const overrideAmt = pct(base, pctAtLevel);
@@ -379,6 +400,16 @@ export async function closeTransaction(
   opts: { mode?: "close-and-post" | "post-only" } = {},
 ) {
   const mode = opts.mode ?? "close-and-post";
+
+  // Take an exclusive row lock on the transaction up front. Without this,
+  // two admins double-clicking "Post commissions" both pass the
+  // `existingSplits === 0` check on the same READ COMMITTED snapshot and
+  // each write a full set of splits + ledger entries — agents end up paid
+  // twice. Lock blocks the second caller until the first commits;
+  // then `existingSplits` is no longer zero and the second call throws
+  // the friendly "already posted" error instead of silently double-paying.
+  await tx.$queryRaw`SELECT id FROM re_transactions WHERE id = ${transactionId} FOR UPDATE`;
+
   const transaction = await tx.transaction.findUniqueOrThrow({
     where: { id: transactionId },
     include: { property: true },
@@ -762,14 +793,38 @@ export async function releaseDueCommissions(
     },
   });
 
+  // Need each ledger entry's createdAt — the hold clock should start when the
+  // money was actually credited, not when the deal closed. Otherwise an admin
+  // who posts commissions weeks after the agent closed accidentally waives
+  // the cooling-off period (an entry created today would auto-release
+  // immediately because closedAt is > 7d old). Fetch in one batch keyed by id
+  // to keep the per-split loop cheap. CommissionSplit has no Prisma relation
+  // back to LedgerEntry — only a String FK — so we do this lookup manually.
+  const ledgerIds = candidates
+    .map((s) => s.ledgerEntryId)
+    .filter((id): id is string => !!id);
+  const ledgerEntries = ledgerIds.length
+    ? await tx.ledgerEntry.findMany({
+        where: { id: { in: ledgerIds } },
+        select: { id: true, createdAt: true },
+      })
+    : [];
+  const ledgerById = new Map<string, Date>(
+    ledgerEntries.map((e) => [e.id, e.createdAt]),
+  );
+
   const now = Date.now();
   let released = 0;
 
   for (const split of candidates) {
     const holdDays = split.rule?.holdPeriodDays ?? 7;
-    const closedAt = split.transaction?.closedAt;
-    if (!closedAt) continue;
-    const elapsed = (now - closedAt.getTime()) / 86400000;
+    // Prefer ledger-entry createdAt; fall back to transaction.closedAt if the
+    // ledger row vanished for any reason (preserves legacy behaviour).
+    const holdStart =
+      (split.ledgerEntryId ? ledgerById.get(split.ledgerEntryId) : undefined) ??
+      split.transaction?.closedAt;
+    if (!holdStart) continue;
+    const elapsed = (now - holdStart.getTime()) / 86400000;
     if (elapsed < holdDays) continue;
 
     // BR-5 — beneficiary must be COMPLIANT.
