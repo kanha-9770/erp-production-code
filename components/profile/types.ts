@@ -71,6 +71,7 @@ export type ProfileTabId =
   | "overview"
   | "personal"
   | "employment"
+  | "salary"
   | "notifications"
   | "preferences"
   | "security"
