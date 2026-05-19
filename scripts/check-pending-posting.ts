@@ -7,7 +7,7 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import {
   calculateSlabCommission,
-  getAgentCumulativeArea,
+  getPostedCumulativeArea,
   resolveActivePlan,
   toSquareYards,
 } from "../lib/real-estate/slab-engine";
@@ -84,9 +84,7 @@ async function main() {
       select: { id: true },
     });
     if (profile) {
-      curArea = await getAgentCumulativeArea(p, orgId, profile.id, plan.id, {
-        slabs: plan.slabs,
-      });
+      curArea = await getPostedCumulativeArea(p, orgId, profile.id, plan.id);
     }
   } catch (e) {}
 

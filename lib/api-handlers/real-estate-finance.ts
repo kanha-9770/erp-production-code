@@ -21,7 +21,7 @@ import {
 } from "@/lib/real-estate/commission-engine";
 import {
   calculateSlabCommission,
-  getAgentCumulativeArea,
+  getPostedCumulativeArea,
   getSlabProgress,
   resolveActivePlan,
   toSquareYards,
@@ -350,12 +350,11 @@ export const WalletHandlers = {
             select: { id: true },
           });
           if (profile) {
-            const cur = await getAgentCumulativeArea(
+            const cur = await getPostedCumulativeArea(
               prisma,
               auth.organizationId,
               profile.id,
               plan.id,
-              { slabs: plan.slabs },
             );
             cumulativeAreaBefore = Number(cur);
             cumulativeAreaAfter = Number(cur.plus(pendingAreaForMe));

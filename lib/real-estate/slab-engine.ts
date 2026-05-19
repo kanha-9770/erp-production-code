@@ -80,7 +80,20 @@ export interface SlabCalculationResult {
   planId: string;
   planVersion: number;
   dealArea: Prisma.Decimal;
+  /**
+   * Effective cumulative area used for slab lookup = posted ledger total +
+   * the agent's other CLOSED-unposted transactions' areas. The current
+   * transaction's dealArea is NOT included here (it is added on top to pick
+   * the slab "after" this deal).
+   */
   sellerCumulativeAreaBefore: Prisma.Decimal;
+  /**
+   * Posted-only cumulative area (sum of dealAreas already in agentAreaLedger
+   * for this agent + plan). Used by the ledger writer so the running total
+   * stored on each new ledger row reflects actual posted history — not the
+   * inflated "effective with pending" number used to choose the slab.
+   */
+  sellerPostedBefore: Prisma.Decimal;
   sellerRate: Prisma.Decimal;
   directIncome: Prisma.Decimal;
   overrideTotal: Prisma.Decimal;
@@ -167,12 +180,16 @@ export function lookupSlabRate(
 // Agent area ledger — cumulative area per agent
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getAgentCumulativeArea(
+/**
+ * Posted-only cumulative — the running total stored on the most recent
+ * area-ledger row. Reflects deals whose commissions the admin has actually
+ * posted (splits + ledger row written). Used for ledger writes + audit.
+ */
+export async function getPostedCumulativeArea(
   tx: Tx,
   organizationId: string,
   agentId: string,
   planId: string,
-  plan: { slabs: ResolvedPlan["slabs"] },
 ): Promise<Prisma.Decimal> {
   const last = await (tx as any).agentAreaLedger.findFirst({
     where: { organizationId, agentId, planId, isReversed: false },
@@ -180,6 +197,76 @@ export async function getAgentCumulativeArea(
     select: { cumulativeArea: true },
   });
   return last ? dec(last.cumulativeArea) : ZERO;
+}
+
+/**
+ * Sum of dealAreas (in sqyd) from this agent's CLOSED-unposted transactions.
+ *
+ * "Unposted" = no CommissionSplit rows yet — the admin hasn't run "Post
+ * commissions" for this deal. We treat these as committed sales for slab
+ * purposes so an agent who has three closed-unposted 100-sqyd deals lands
+ * on the slab(300) rate when the admin posts them, not slab(100) per deal.
+ *
+ * Excludes the transaction currently being calculated — its dealArea is added
+ * separately by the caller to determine the post-deal slab.
+ */
+export async function getAgentPendingArea(
+  tx: Tx,
+  organizationId: string,
+  agentId: string,
+  excludeTransactionId?: string,
+): Promise<Prisma.Decimal> {
+  const profile = await (tx as any).agentProfile.findUnique({
+    where: { id: agentId },
+    select: { userId: true },
+  });
+  if (!profile) return ZERO;
+
+  const pending = await (tx as any).transaction.findMany({
+    where: {
+      organizationId,
+      status: "CLOSED",
+      commissionSplits: { none: {} },
+      OR: [
+        { sellingAgentId: profile.userId },
+        { sellingAgentId: null, listingAgentId: profile.userId },
+      ],
+      ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}),
+    },
+    select: { property: { select: { area: true, areaUnit: true } } },
+  });
+
+  let total = ZERO;
+  for (const t of pending) {
+    if (!t.property?.area) continue;
+    total = total.plus(toSquareYards(dec(t.property.area), t.property.areaUnit));
+  }
+  return total;
+}
+
+/**
+ * Effective cumulative area for slab lookup = posted + pending closed-unposted.
+ *
+ * Why both: the area-ledger row is only written when the admin posts a deal,
+ * but a deal the agent has already CLOSED (with proof) is committed — the
+ * agent has earned the volume even though the cash hasn't been credited yet.
+ * Counting closed-unposted deals here means each new pending deal lifts the
+ * slab the agent (and every pending deal) lands on, instead of each pending
+ * deal being computed in isolation against a stale ledger snapshot.
+ */
+export async function getAgentCumulativeArea(
+  tx: Tx,
+  organizationId: string,
+  agentId: string,
+  planId: string,
+  _plan: { slabs: ResolvedPlan["slabs"] },
+  opts: { excludeTransactionId?: string } = {},
+): Promise<Prisma.Decimal> {
+  const [posted, pending] = await Promise.all([
+    getPostedCumulativeArea(tx, organizationId, agentId, planId),
+    getAgentPendingArea(tx, organizationId, agentId, opts.excludeTransactionId),
+  ]);
+  return posted.plus(pending);
 }
 
 /**
@@ -199,12 +286,65 @@ async function getEffectiveCumulativeArea(
   organizationId: string,
   agentId: string,
   planId: string,
+  opts: { excludeTransactionId?: string } = {},
 ): Promise<Prisma.Decimal> {
-  const [personal, team] = await Promise.all([
-    getAgentCumulativeArea(tx, organizationId, agentId, planId, { slabs: [] }),
+  const [personal, team, teamPending] = await Promise.all([
+    getAgentCumulativeArea(tx, organizationId, agentId, planId, { slabs: [] }, opts),
     getTeamAreaTotals(tx, organizationId, agentId),
+    getTeamPendingArea(tx, organizationId, agentId, opts.excludeTransactionId),
   ]);
-  return personal.plus(new Prisma.Decimal(team.area));
+  return personal.plus(new Prisma.Decimal(team.area)).plus(teamPending);
+}
+
+/**
+ * Sum of dealAreas (sqyd) from CLOSED-unposted transactions sold by any
+ * agent in the recursive downline of `agentId`. Mirrors getTeamAreaTotals
+ * but for the pending-side of the cumulative — so an upline's slab also
+ * reflects downline production that's been committed but not yet posted.
+ */
+export async function getTeamPendingArea(
+  tx: Tx,
+  organizationId: string,
+  agentId: string,
+  excludeTransactionId?: string,
+): Promise<Prisma.Decimal> {
+  const rows: Array<{ user_id: string | null }> = await (tx as any).$queryRaw(Prisma.sql`
+    WITH RECURSIVE downline AS (
+      SELECT id, user_id
+        FROM re_agent_profiles
+       WHERE parent_id = ${agentId}
+         AND organization_id = ${organizationId}
+      UNION
+      SELECT child.id, child.user_id
+        FROM re_agent_profiles child
+        JOIN downline d ON child.parent_id = d.id
+       WHERE child.organization_id = ${organizationId}
+    )
+    SELECT user_id FROM downline;
+  `);
+  const userIds = rows.map((r) => r.user_id).filter((u): u is string => Boolean(u));
+  if (userIds.length === 0) return ZERO;
+
+  const pending = await (tx as any).transaction.findMany({
+    where: {
+      organizationId,
+      status: "CLOSED",
+      commissionSplits: { none: {} },
+      OR: [
+        { sellingAgentId: { in: userIds } },
+        { sellingAgentId: null, listingAgentId: { in: userIds } },
+      ],
+      ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}),
+    },
+    select: { property: { select: { area: true, areaUnit: true } } },
+  });
+
+  let total = ZERO;
+  for (const t of pending) {
+    if (!t.property?.area) continue;
+    total = total.plus(toSquareYards(dec(t.property.area), t.property.areaUnit));
+  }
+  return total;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +365,7 @@ async function walkUplineWithRates(
   plan: ResolvedPlan,
   maxDepth: number,
   dealArea: Prisma.Decimal,
+  excludeTransactionId?: string,
 ): Promise<UplineNode[]> {
   const startAgent = await (tx as any).agentProfile.findUnique({
     where: { userId: startUserId },
@@ -255,7 +396,7 @@ async function walkUplineWithRates(
       // (the just-closing deal isn't in the ledger yet, but it's downline
       // production for this upline so it counts toward their effective slab).
       const effective = (
-        await getEffectiveCumulativeArea(tx, organizationId, node.id, plan.id)
+        await getEffectiveCumulativeArea(tx, organizationId, node.id, plan.id, { excludeTransactionId })
       ).plus(dealArea);
       const rate = lookupSlabRate(plan, effective);
       out.push({ agentId: node.id, userId: node.userId, cumulativeArea: effective, slabRate: rate });
@@ -330,18 +471,33 @@ export async function calculateSlabCommission(
   // missed the threshold by 1 sq.yd" sting) but a single deal can push a
   // beginner straight onto a high slab. The override math below diffs against
   // this same post-deal rate, so the upline differential stays consistent.
+  // sellerPostedBefore — the agent's posted-only running total (from ledger).
+  // Used later when we write the new ledger row so the stored cumulative tracks
+  // actual posted history.
+  const sellerPostedBefore = await getPostedCumulativeArea(
+    tx, txn.organizationId, sellerAgent.id, plan.id,
+  );
+  // sellerCumAreaBefore — effective cumulative (posted + this agent's OTHER
+  // closed-unposted areas). Drives slab determination so every closed-unposted
+  // deal lands on the slab matching the agent's running pending total.
   const sellerCumAreaBefore = await getAgentCumulativeArea(
     tx, txn.organizationId, sellerAgent.id, plan.id, plan,
+    { excludeTransactionId: transactionId },
   );
   const sellerTeamBefore = await getTeamAreaTotals(
     tx, txn.organizationId, sellerAgent.id,
   );
-  // Effective = (personal_before + dealArea) + sellerDownlineArea.
+  const sellerTeamPendingBefore = await getTeamPendingArea(
+    tx, txn.organizationId, sellerAgent.id, transactionId,
+  );
+  // Effective = (personal_posted + personal_pending_others + dealArea) +
+  //             (team_posted + team_pending_others).
   // The seller's own deal isn't in the ledger yet so we add dealArea manually;
   // the team CTE excludes the seller themselves so no double-count.
   const sellerEffectiveAfter = sellerCumAreaBefore
     .plus(dealArea)
-    .plus(new Prisma.Decimal(sellerTeamBefore.area));
+    .plus(new Prisma.Decimal(sellerTeamBefore.area))
+    .plus(sellerTeamPendingBefore);
   const sellerRate = lookupSlabRate(plan, sellerEffectiveAfter);
   const directIncome = mul(dealArea, sellerRate);
 
@@ -366,7 +522,7 @@ export async function calculateSlabCommission(
     : 0;
   const upline = maxDepth
     ? await walkUplineWithRates(
-        tx, txn.organizationId, sellerUserId, plan, maxDepth, dealArea,
+        tx, txn.organizationId, sellerUserId, plan, maxDepth, dealArea, transactionId,
       )
     : [];
 
@@ -461,6 +617,7 @@ export async function calculateSlabCommission(
     planVersion: plan.version,
     dealArea,
     sellerCumulativeAreaBefore: sellerCumAreaBefore,
+    sellerPostedBefore,
     sellerRate,
     directIncome,
     overrideTotal,
@@ -607,9 +764,16 @@ export async function closeTransactionSlab(
       data: { ledgerEntryId: entry.id },
     });
 
-    // Area ledger entry — only for DIRECT splits (the seller)
+    // Area ledger entry — only for DIRECT splits (the seller).
+    //
+    // cumulativeArea must reflect POSTED history (sum of already-posted ledger
+    // areas + this deal). It must NOT include the agent's other still-pending
+    // closed-unposted areas — those go through their own ledger rows when the
+    // admin posts each one. We use sellerPostedBefore (posted-only running
+    // total before this deal) rather than sellerCumulativeAreaBefore (which
+    // includes pending and is only used for slab determination).
     if (split.role === "DIRECT" && split.agentId) {
-      const newCumArea = calc.sellerCumulativeAreaBefore.plus(calc.dealArea);
+      const newCumArea = calc.sellerPostedBefore.plus(calc.dealArea);
       await (tx as any).agentAreaLedger.create({
         data: {
           organizationId: txn.organizationId,
@@ -677,6 +841,7 @@ export async function closeTransactionSlab(
         planVersion: plan.version,
         dealArea: calc.dealArea.toString(),
         sellerCumulativeAreaBefore: calc.sellerCumulativeAreaBefore.toString(),
+        sellerPostedBefore: calc.sellerPostedBefore.toString(),
         sellerRate: calc.sellerRate.toString(),
         listingAgentId: txn.listingAgentId,
         sellingAgentId: txn.sellingAgentId,
