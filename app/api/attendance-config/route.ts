@@ -140,6 +140,14 @@ export async function PUT(request: NextRequest) {
   if (ot !== undefined) patch.overtimeAfterHours = ot;
   const bm = pickOptionalNumber(body.breakMinutes);
   if (bm !== undefined) patch.breakMinutes = bm;
+  // Monthly allowances: how many half-days / short leaves the company
+  // forgives before payroll docks pay, plus the short-leave window length.
+  const mhq = pickOptionalNumber(body.monthlyHalfDayQuota);
+  if (mhq !== undefined) patch.monthlyHalfDayQuota = Math.max(0, Math.floor(mhq));
+  const msq = pickOptionalNumber(body.monthlyShortLeaveQuota);
+  if (msq !== undefined) patch.monthlyShortLeaveQuota = Math.max(0, Math.floor(msq));
+  const slh = pickOptionalNumber(body.shortLeaveHours);
+  if (slh !== undefined) patch.shortLeaveHours = Math.max(0, slh);
   const wo = pickWeeklyOff(body.weeklyOffDays);
   if (wo !== undefined) patch.weeklyOffDays = wo;
   const ac = pickOptionalNullableString(body.autoCheckoutAt);

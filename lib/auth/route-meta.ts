@@ -1,9 +1,43 @@
 import { prisma } from "@/lib/prisma";
+import { isUserAdmin } from "@/lib/api-helpers";
+import { resolveRouteAccess } from "@/lib/route-permissions";
 
 export interface RouteMetaResult {
   deniedRoutes: string[];
   allowedRoutes: string[];
   allowedModuleIds: string[];
+}
+
+/**
+ * Server-side counterpart to `useRouteAccess.isPermitted` — whitelist mode:
+ * returns true ONLY when the path is explicitly granted (admin always wins).
+ *
+ * Used by static-page API routes (e.g. /api/attendance/team) so a user that
+ * has been given role-level access via Settings → Permission can hit the
+ * endpoint without being admin AND without being on the attendance-approver
+ * role list. Open-by-default would let everyone hit admin endpoints; the
+ * admin-or-explicit-grant gate is the safe middle ground.
+ */
+export async function userHasRouteAccess(
+  userId: string,
+  organizationId: string | null,
+  path: string,
+): Promise<boolean> {
+  if (!userId) return false;
+  if (await isUserAdmin(userId, organizationId)) return true;
+  if (!organizationId) return false;
+
+  // Resolve every role assigned to this user — same source the login flow
+  // uses when it computes auth-meta. Kept in lockstep with computeRouteMeta
+  // so the server gate cannot disagree with the client UI.
+  const roleRows = await prisma.userUnitAssignment.findMany({
+    where: { userId, user: { organizationId } },
+    select: { roleId: true },
+  });
+  const roleIds = Array.from(new Set(roleRows.map((r) => r.roleId)));
+
+  const meta = await computeRouteMeta(userId, organizationId, roleIds);
+  return resolveRouteAccess(path, meta.allowedRoutes, meta.deniedRoutes) === true;
 }
 
 /**

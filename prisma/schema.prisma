@@ -2120,6 +2120,22 @@ model AttendanceConfiguration {
   overtimeAfterHours Float  @default(9) @map("overtime_after_hours")
   breakMinutes       Int    @default(60) @map("break_minutes")
 
+  // Monthly "free allowances" the company offers — within these counts an
+  // employee can take half-days / short leaves without losing pay. Excess
+  // gets deducted by the payroll engine.
+  //   monthlyHalfDayQuota  — # of half-day occurrences forgiven per month.
+  //                          Beyond this, each half-day costs 0.5 day pay.
+  //   monthlyShortLeaveQuota — # of short-leave occurrences forgiven per
+  //                            month. Beyond this, each costs the deficit
+  //                            hours in pay.
+  //   shortLeaveHours      — duration of one short-leave window. A day
+  //                          where the deficit (fullDay − workedHours) is
+  //                          within this window counts as a short leave
+  //                          instead of a half-day.
+  monthlyHalfDayQuota    Int   @default(0) @map("monthly_half_day_quota")
+  monthlyShortLeaveQuota Int   @default(0) @map("monthly_short_leave_quota")
+  shortLeaveHours        Float @default(2) @map("short_leave_hours")
+
   // Working week: 0 = Sun … 6 = Sat. Listed days are WEEKLY-OFF.
   weeklyOffDays Json @default("[0]") @map("weekly_off_days")
 

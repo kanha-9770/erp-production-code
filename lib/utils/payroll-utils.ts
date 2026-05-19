@@ -830,6 +830,18 @@ function calculateForEmployee(
   let weekendOtHours = 0;
   let holidayOtHours = 0;
 
+  // Short-leave window: days whose worked-hours deficit (fullDay - worked)
+  // falls within [0, shortLeaveHours]. Tracked per-day as we iterate so
+  // payroll can apply the company's free short-leave quota afterwards.
+  const fullDayHours =
+    policy.fullDayMinHours && policy.fullDayMinHours > 0
+      ? policy.fullDayMinHours
+      : 8;
+  const shortLeaveWindow = policy.shortLeaveHours ?? 0;
+  // Track each short-leave day's deficit so beyond the free quota we can
+  // dock pay proportionally (`deficit / fullDay`).
+  const shortLeaveDeficits: number[] = [];
+
   for (const dateStr of days) {
     const weekday = new Date(`${dateStr}T00:00:00`).getDay();
     const c = classifyDay(
@@ -856,6 +868,23 @@ function calculateForEmployee(
     totalLOP += c.unpaidLeaveLOP + c.absent;
     totalHours += c.hours;
 
+    // Short-leave detection: only on plain working days where the worker
+    // showed up (present/half) AND their hours fell short of a full day by
+    // an amount within the configured short-leave window. Excludes holidays
+    // / weekly offs / leave days — those are already paid by policy.
+    if (
+      shortLeaveWindow > 0 &&
+      c.hours > 0 &&
+      (c.present > 0 || c.half > 0) &&
+      !holidaySet.has(dateStr) &&
+      !policy.weeklyOffDays.includes(weekday)
+    ) {
+      const deficit = fullDayHours - c.hours;
+      if (deficit > 0 && deficit <= shortLeaveWindow) {
+        shortLeaveDeficits.push(deficit);
+      }
+    }
+
     if (ot.enabled && c.hours > 0) {
       const isHoliday = holidaySet.has(dateStr);
       const isWeeklyOff = policy.weeklyOffDays.includes(weekday);
@@ -873,12 +902,37 @@ function calculateForEmployee(
   // Days that count toward the salary. Each present day = 1, each half-day
   // contributes 0.5, paid leave/holiday/weekly off contribute their face
   // value. Out-of-service days are excluded entirely (pro-rata for joiners).
-  breakdown.payableDays =
+  let payable =
     breakdown.presentDays +
     breakdown.halfDays * 0.5 +
     breakdown.paidLeaveDays +
     breakdown.holidayDays +
     breakdown.weeklyOffDays;
+
+  // ── Monthly allowances (configured in Attendance Configuration) ──────
+  // Forgive up to `monthlyHalfDayQuota` half-days per month — each forgiven
+  // half-day adds the missing 0.5 back to payableDays.
+  const halfDayQuota = Math.max(0, policy.monthlyHalfDayQuota ?? 0);
+  const halfDaysForgiven = Math.min(breakdown.halfDays, halfDayQuota);
+  payable += halfDaysForgiven * 0.5;
+
+  // Short-leave handling. The company's `monthlyShortLeaveQuota` is the
+  // number of short-leave occurrences forgiven without docking pay. The
+  // detected occurrences are already counted as full/half by the classifier,
+  // so within the quota we don't change anything. BEYOND the quota, every
+  // extra short-leave day docks the day's deficit (in fractional days) from
+  // payable — the employee misses (deficit/fullDay) of a day's pay.
+  const slQuota = Math.max(0, policy.monthlyShortLeaveQuota ?? 0);
+  const excessShortLeaves = shortLeaveDeficits.slice(slQuota);
+  if (excessShortLeaves.length > 0 && fullDayHours > 0) {
+    const dockedDays = excessShortLeaves.reduce(
+      (acc, d) => acc + d / fullDayHours,
+      0,
+    );
+    payable -= dockedDays;
+  }
+
+  breakdown.payableDays = Math.max(0, payable);
 
   // Profile-level base salary override wins over the employee record's own
   // salary — that's the point of per-employee profile selection (e.g. moving

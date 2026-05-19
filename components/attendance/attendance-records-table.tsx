@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Camera, MapPin, Edit3, AlertTriangle } from "lucide-react";
+import { MapPin, Edit3, AlertTriangle } from "lucide-react";
 import {
   formatDateLong,
   formatHM,
@@ -194,15 +194,28 @@ export function AttendanceRecordsTable({
                 </TableCell>
                 <TableCell>
                   {hasPhoto ? (
-                    <div className="flex items-center gap-1 text-emerald-700">
-                      <Camera className="h-3.5 w-3.5" />
-                      <span className="text-xs">
-                        {r.checkInPhoto && r.checkOutPhoto
-                          ? "in / out"
-                          : r.checkInPhoto
-                            ? "in"
-                            : "out"}
-                      </span>
+                    <div
+                      className="flex items-center gap-1"
+                      // Stop the click from bubbling to the row's onSelect —
+                      // clicking the photo should open the full-size preview
+                      // (via the row click) but tapping the thumb itself
+                      // shouldn't trigger any link the cell may carry.
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {r.checkInPhoto && (
+                        <PhotoThumb
+                          src={r.checkInPhoto}
+                          alt={`Check-in selfie for ${r.userName ?? r.userEmail ?? "user"}`}
+                          title="Check-in proof"
+                        />
+                      )}
+                      {r.checkOutPhoto && (
+                        <PhotoThumb
+                          src={r.checkOutPhoto}
+                          alt={`Check-out selfie for ${r.userName ?? r.userEmail ?? "user"}`}
+                          title="Check-out proof"
+                        />
+                      )}
                     </div>
                   ) : (
                     <span className="text-xs text-gray-400">—</span>
@@ -262,5 +275,53 @@ export function AttendanceRecordsTable({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+/**
+ * Compact photo thumbnail for the Proof column. 28×28 rounded avatar that
+ * pops a large preview on hover/focus. We use a native <img> rather than
+ * next/image because the photo URLs are admin-uploaded blobs from our own
+ * uploader — they don't need the optimisation pipeline and skipping it
+ * avoids the "remotePatterns not configured" runtime warning that next
+ * /image throws for arbitrary hosts.
+ */
+function PhotoThumb({
+  src,
+  alt,
+  title,
+}: {
+  src: string;
+  alt: string;
+  title: string;
+}) {
+  return (
+    <span className="group relative inline-block">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="h-7 w-7 rounded-full object-cover border border-gray-200 hover:ring-2 hover:ring-blue-400 transition-shadow"
+      />
+      {/* Hover preview — absolute-positioned so it doesn't reflow the row
+          and pointer-events-none so it never blocks the cell click. */}
+      <span
+        className="pointer-events-none absolute z-30 top-full left-1/2 -translate-x-1/2 mt-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+        aria-hidden
+      >
+        <span className="block rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt=""
+            className="block h-40 w-40 object-cover rounded-md"
+          />
+          <span className="block text-[10px] text-center text-gray-500 mt-1">
+            {title}
+          </span>
+        </span>
+      </span>
+    </span>
   );
 }

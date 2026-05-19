@@ -25,6 +25,15 @@ export interface AttendanceConfig {
   fullDayMinHours: number;
   overtimeAfterHours: number;
   breakMinutes: number;
+  /** # of half-day occurrences the company forgives each month. Beyond this
+   *  count, every half-day still costs 0.5 day pay. 0 = no allowance. */
+  monthlyHalfDayQuota: number;
+  /** # of short-leave occurrences the company forgives each month. */
+  monthlyShortLeaveQuota: number;
+  /** Duration of one short-leave window in hours. A day whose deficit
+   *  (fullDay − workedHours) is within this window counts as a short leave
+   *  rather than a half-day. */
+  shortLeaveHours: number;
   weeklyOffDays: number[]; // 0=Sun … 6=Sat
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
@@ -63,6 +72,9 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   fullDayMinHours: 8,
   overtimeAfterHours: 9,
   breakMinutes: 60,
+  monthlyHalfDayQuota: 0,
+  monthlyShortLeaveQuota: 0,
+  shortLeaveHours: 2,
   weeklyOffDays: [0],
   autoCheckoutAt: null,
   geofenceMode: 'OFF',
@@ -184,6 +196,15 @@ export async function getAttendanceConfig(
       fullDayMinHours: Number(row.fullDayMinHours ?? 8),
       overtimeAfterHours: Number(row.overtimeAfterHours ?? 9),
       breakMinutes: row.breakMinutes ?? 60,
+      monthlyHalfDayQuota: Number.isFinite(row.monthlyHalfDayQuota)
+        ? Math.max(0, Math.floor(Number(row.monthlyHalfDayQuota)))
+        : 0,
+      monthlyShortLeaveQuota: Number.isFinite(row.monthlyShortLeaveQuota)
+        ? Math.max(0, Math.floor(Number(row.monthlyShortLeaveQuota)))
+        : 0,
+      shortLeaveHours: Number.isFinite(row.shortLeaveHours)
+        ? Math.max(0, Number(row.shortLeaveHours))
+        : 2,
       weeklyOffDays: coerceWeeklyOff(row.weeklyOffDays),
       autoCheckoutAt: row.autoCheckoutAt ?? null,
       geofenceMode: coerceGeofenceMode(row.geofenceMode),
@@ -238,6 +259,9 @@ export interface AttendanceConfigUpdate {
   fullDayMinHours?: number;
   overtimeAfterHours?: number;
   breakMinutes?: number;
+  monthlyHalfDayQuota?: number;
+  monthlyShortLeaveQuota?: number;
+  shortLeaveHours?: number;
   weeklyOffDays?: number[];
   autoCheckoutAt?: string | null;
   geofenceMode?: GeofenceMode;

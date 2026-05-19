@@ -183,8 +183,12 @@ function buildAnchorChildrenMap(args: {
   anchors: AnchorRecord[];
   isAdmin: boolean;
   canAccess: (path: string) => boolean;
+  /** Whitelist check — true ONLY when the path was explicitly granted to
+   *  this user/role. Used to override the `adminOnly` hint so a non-admin
+   *  with an explicit grant still sees the page. */
+  isPermitted: (path: string) => boolean;
 }): Map<string, any[]> {
-  const { anchors, isAdmin, canAccess } = args;
+  const { anchors, isAdmin, canAccess, isPermitted } = args;
   const byPath = new Map<string, StaticPage>();
   for (const p of STATIC_PAGES) byPath.set(p.path, p);
 
@@ -199,7 +203,11 @@ function buildAnchorChildrenMap(args: {
   for (const a of ordered) {
     const meta = byPath.get(a.path);
     if (!meta) continue; // anchor references a path that's no longer in the registry
-    if (meta.adminOnly && !isAdmin) continue;
+    // adminOnly is a *hint*, not a hard lock — if the admin has granted this
+    // page to a role via Settings → Permission → Route Permissions, the
+    // role's members must see it in their sidebar. Without this branch, the
+    // hard `!isAdmin` skip would silently swallow the explicit grant.
+    if (meta.adminOnly && !isAdmin && !isPermitted(meta.path)) continue;
     if (!canAccess(meta.path)) continue;
 
     const node = {
@@ -306,7 +314,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const isAdmin = userData?.user?.isAdmin ?? false;
 
-  const { canAccess } = useRouteAccess();
+  const { canAccess, isPermitted } = useRouteAccess();
 
   const canManageModules = canAccess("/admin/modules");
 
@@ -677,6 +685,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       anchors: staticAnchors,
       isAdmin,
       canAccess,
+      isPermitted,
     });
 
     const injectAnchorLeaves = (items: ModuleNode[]): ModuleNode[] =>
@@ -727,7 +736,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     const sorted = sortModules(roots as ModuleNode[]);
     const withAnchors = injectAnchorLeaves(sorted);
     return filterForRebmAgent(filterByPermission(withAnchors));
-  }, [modules, isAdmin, checkPermission, canAccess, staticAnchors, isRebmOnlyAgent]);
+  }, [modules, isAdmin, checkPermission, canAccess, isPermitted, staticAnchors, isRebmOnlyAgent]);
 
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;
