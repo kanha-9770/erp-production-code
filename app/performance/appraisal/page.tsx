@@ -317,7 +317,11 @@ export default function PerformanceAppraisalPage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="performance-appraisal" columns={columns} />
+              <ManageColumnsButton
+                tableId="performance-appraisal"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1.5" /> Start Appraisal
               </Button>

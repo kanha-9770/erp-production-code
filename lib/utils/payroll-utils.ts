@@ -112,8 +112,8 @@ function parseTimeToMinutes(raw: string): number | null {
  */
 export function calculateWorkingHours(checkInTime: string, checkOutTime?: string): number {
   if (!checkInTime && !checkOutTime) return 0;
-  if (!checkOutTime) return DEFAULT_DAY_HOURS;
-  if (!checkInTime) return DEFAULT_DAY_HOURS;
+  if (!checkOutTime) return 0;
+  if (!checkInTime) return 0;
   const inMin = parseTimeToMinutes(checkInTime);
   const outMin = parseTimeToMinutes(checkOutTime);
   if (inMin === null || outMin === null) return 0;
@@ -140,9 +140,9 @@ function workedHoursFromAttendance(att: {
   if (Number.isFinite(inAt) && Number.isFinite(outAt) && outAt >= inAt) {
     return (outAt - inAt) / 3_600_000;
   }
-  // Only check-in ISO present → assume full day worked.
+  // Only check-in ISO present → assume 0 hours worked instead of full day.
   if (Number.isFinite(inAt) && !Number.isFinite(outAt)) {
-    return DEFAULT_DAY_HOURS;
+    return 0;
   }
   // Fall back to the HH:mm strings.
   return calculateWorkingHours(att.checkInTime, att.checkOutTime || undefined);
@@ -458,7 +458,7 @@ export function computePayrollFromInputs(
   const earnedFuel = monthlyFuel * proRationFactor;
   const earnedBooks = monthlyBooks * proRationFactor;
   const earnedUniform = monthlyUniform * proRationFactor;
-  const earnedEmployeeBonus = monthlyEmployeeBonus * proRationFactor;
+  const earnedEmployeeBonus = monthlyEmployeeBonus;
   const earnedSpecial = monthlySpecial * proRationFactor;
 
   // Overtime pay capped at maxOvertimeHoursPerMonth across buckets in
@@ -686,23 +686,27 @@ function classifyDay(
     if (hasIn || hasOut) {
       const hours = workedHoursFromAttendance(att);
       z.hours = hours;
-      // Forgot-to-checkout: assume a full day so the user isn't penalised
-      // for an admin / scheduler oversight. The auto-checkout job (when
-      // configured) overwrites this later anyway.
+      // Forgot-to-checkout: grace period until midnight.
       if (hasIn && !hasOut) {
-        z.present = 1;
-        if (hours <= 0) z.hours = DEFAULT_DAY_HOURS;
+        const todayStr = ymd(new Date());
+        if (dateStr >= todayStr) {
+          z.present = 1;
+          z.hours = DEFAULT_DAY_HOURS;
+        } else {
+          z.absent = 1;
+          z.hours = 0;
+        }
       } else if (hours <= 0) {
         // Both timestamps but zero/negative diff — almost certainly a
         // mis-punch or duplicate within the same minute. Treat as a
         // half-day so the employee isn't paid for zero work but the row
         // still acknowledges they attempted to clock in.
-        z.half = 0.5;
+        z.half = 1;
       } else if (hours < HALF_DAY_MIN_HOURS) {
-        z.half = 0.5;
+        z.half = 1;
       } else if (hours < STANDARD_HOURS_PER_DAY * 0.85) {
         // 4–6.8h logged → still half-day to discourage gaming the clock.
-        z.half = 0.5;
+        z.half = 1;
       } else {
         z.present = 1;
       }

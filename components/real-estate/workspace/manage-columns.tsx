@@ -49,9 +49,10 @@ interface ManageColumnsButtonProps<T> {
   triggerLabel?: string;
   /**
    * Presentation style. "popover" (default) renders the compact list used
-   * by the real-estate / employee-engagement tables; "dialog" renders the
-   * full-screen modal with a 2-column card grid that matches the dynamic
-   * form-builder's Manage Columns UI.
+   * by Real-Estate tables (Properties / Transactions / Leads / Agents).
+   * "dialog" opens the full-screen modal with search + section grouping —
+   * opted into by HR/Performance/Employee-Engagement tables which have
+   * many more columns to browse.
    */
   variant?: "popover" | "dialog";
 }

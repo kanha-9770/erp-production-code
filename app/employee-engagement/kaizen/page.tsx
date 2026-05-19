@@ -309,7 +309,11 @@ export default function KaizenPage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="kaizens" columns={columns} />
+              <ManageColumnsButton
+                tableId="kaizens"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => setCreateOpen(true)}>
                 <Plus className="h-4 w-4 mr-1.5" /> New Kaizen
               </Button>

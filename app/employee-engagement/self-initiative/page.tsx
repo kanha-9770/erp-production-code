@@ -256,7 +256,11 @@ export default function SelfInitiativePage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="self-initiatives" columns={columns} />
+              <ManageColumnsButton
+                tableId="self-initiatives"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setCreateOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1.5" /> New Initiative
               </Button>

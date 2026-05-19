@@ -323,7 +323,11 @@ export default function KraPage() {
                 />
               </div>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
-              <ManageColumnsButton tableId="performance-kra" columns={columns} />
+              <ManageColumnsButton
+                tableId="performance-kra"
+                columns={columns}
+                variant="dialog"
+              />
               <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
                 <Plus className="h-4 w-4 mr-1.5" /> New KRA
               </Button>
