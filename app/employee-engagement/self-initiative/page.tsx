@@ -6,8 +6,9 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  Lightbulb, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
-  CheckCircle2, Type, FileText, Tag, UserCircle, Clock, Save
+  Lightbulb, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
+  CheckCircle2, Type, FileText, Tag, UserCircle, Clock, Save,
+  AlertCircle, Info
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -39,6 +40,7 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 
 interface SelfInitiative {
   id: string;
@@ -69,13 +71,26 @@ const CATEGORY_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
+const DEPARTMENT_FILTER_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
 interface Filters {
   search: string;
   status: string;
   category: string;
+  department: string;
 }
 
-const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
+const EMPTY_FILTERS: Filters = { search: "", status: "", category: "", department: "" };
 
 export default function SelfInitiativePage() {
   const { user } = useCurrentUser();
@@ -134,11 +149,17 @@ export default function SelfInitiativePage() {
   };
 
   const filterFields: FilterField[] = useMemo(() => [
-    { id: "title", label: "Title", type: "text" },
-    { id: "description", label: "Description", type: "text" },
+    { id: "title", label: "Define Initiative", type: "text" },
+    { id: "description", label: "Initiative Benefits", type: "text" },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
-    { id: "category", label: "Category", type: "select", options: CATEGORY_OPTIONS },
+    { id: "category", label: "Self Initiative Category", type: "select", options: CATEGORY_OPTIONS },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_FILTER_OPTIONS },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
     { id: "startDate", label: "Start Date", type: "date" },
+    { id: "endDate", label: "End Date", type: "date" },
   ], []);
 
   const items = useMemo(() => {
@@ -149,6 +170,7 @@ export default function SelfInitiativePage() {
     }
     if (filters.status) result = result.filter(i => i.status === filters.status);
     if (filters.category) result = result.filter(i => i.category === filters.category);
+    if (filters.department) result = result.filter(i => (i as any).department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [initiatives, filters, conditions, filterFields]);
 
@@ -259,6 +281,7 @@ export default function SelfInitiativePage() {
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
               <FilterChips label="Category" value={filters.category} onChange={(v) => updateFilter("category", v)} options={CATEGORY_OPTIONS} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
@@ -274,17 +297,20 @@ export default function SelfInitiativePage() {
             onRowClick={(i) => setSelectedId(i.id)}
           />
         }
-        preview={selectedId ? <InitiativePreview id={selectedId} initiatives={initiatives} onEdit={(id) => { setEditingId(id); setCreateOpen(true); }} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <InitiativePreview id={selectedId} initiatives={initiatives} employees={employees} isAdmin={isAdmin} onEdit={(id) => { setEditingId(id); setCreateOpen(true); }} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} initiatives={initiatives} /> : null}
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle>{editingId ? 'Edit Initiative' : 'New Initiative'}</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Self Initiative <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <InitiativeForm
             initial={editingId ? initiatives.find(i => i.id === editingId) : undefined}
+            currentEmployee={currentEmployee}
             onCancel={() => { setCreateOpen(false); setEditingId(null); }}
             onSubmit={async (data) => {
               try {
@@ -334,7 +360,7 @@ function PreviewHeader({ id, initiatives }: { id: string, initiatives: SelfIniti
   );
 }
 
-function InitiativePreview({ id, initiatives, onEdit, onDelete }: { id: string, initiatives: SelfInitiative[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function InitiativePreview({ id, initiatives, employees, isAdmin, onEdit, onDelete }: { id: string, initiatives: SelfInitiative[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const i = initiatives.find(x => x.id === id);
   if (!i) return null;
 
@@ -351,6 +377,8 @@ function InitiativePreview({ id, initiatives, onEdit, onDelete }: { id: string, 
         </div>
       </div>
 
+      <SubmitterDetails employeeId={i.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={i.createdAt} />
+
       <Card className="p-5 border-0 bg-slate-50 space-y-4 shadow-sm">
         <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Description</h3>
         <p className="text-sm font-medium leading-relaxed text-slate-700">{i.description}</p>
@@ -366,63 +394,224 @@ function InitiativePreview({ id, initiatives, onEdit, onDelete }: { id: string, 
   );
 }
 
-function InitiativeForm({ initial, onCancel, onSubmit }: { initial?: SelfInitiative, onCancel: () => void, onSubmit: (data: any) => void }) {
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
+function InitiativeForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: SelfInitiative,
+  currentEmployee?: any,
+  onCancel: () => void,
+  onSubmit: (data: any) => void
+}) {
   const [formData, setFormData] = useState({
-    title: initial?.title || "",
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
+    selfInitiativeCategory: initial?.category || "",
+    defineInitiative: initial?.title || "",
+    initiativeBenefits: initial?.description || "",
     description: initial?.description || "",
     startDate: initial?.startDate || "",
     endDate: initial?.endDate || "",
     status: initial?.status || "planning",
-    category: initial?.category || "learning",
+    employeeEngagementPoints: 0,
   });
 
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName.trim() ? "Last Name is required" : "",
+    selfInitiativeCategory: !formData.selfInitiativeCategory ? "Self Initiative Category is required" : "",
+    defineInitiative: !formData.defineInitiative.trim() ? "Define Initiative is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    // Map UI sections back onto the persisted Initiative schema:
+    //   defineInitiative → title, initiativeBenefits → description.
+    onSubmit({
+      title: formData.defineInitiative,
+      description: formData.initiativeBenefits || formData.description || formData.defineInitiative,
+      startDate: formData.startDate || new Date().toISOString().slice(0, 10),
+      endDate: formData.endDate || new Date().toISOString().slice(0, 10),
+      category: formData.selfInitiativeCategory,
+      status: formData.status,
+      employeeId: formData.employeeId,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      department: formData.department,
+      employeeEngagementTeamName: formData.employeeEngagementTeamName,
+      employeeEngagementPoints: formData.employeeEngagementPoints,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
+
   return (
-    <div className="p-6 space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Initiative Title</Label>
-          <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="h-12 border-slate-200" placeholder="e.g. Master React Query" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category</Label>
-          <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
-            <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Self Initiative</h3>
+              <p className="text-xs text-muted-foreground">Initiative and benefits</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Self Initiative Category" required error={showErr("selfInitiativeCategory") ? errors.selfInitiativeCategory : ""}>
+              <Select
+                value={formData.selfInitiativeCategory}
+                onValueChange={v => setFormData({ ...formData, selfInitiativeCategory: v })}
+              >
+                <SelectTrigger className={showErr("selfInitiativeCategory") ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Define Initiative" required error={showErr("defineInitiative") ? errors.defineInitiative : ""}>
+              <Textarea
+                value={formData.defineInitiative}
+                onChange={e => setFormData({ ...formData, defineInitiative: e.target.value })}
+                placeholder="Describe initiative"
+                className={`min-h-[110px] ${showErr("defineInitiative") ? "border-red-500" : ""}`}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Initiative Benefits">
+              <Textarea
+                value={formData.initiativeBenefits}
+                onChange={e => setFormData({ ...formData, initiativeBenefits: e.target.value })}
+                placeholder="Expected benefits"
+                className="min-h-[110px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Start Date">
+              <Input type="date" value={formData.startDate} onChange={e => setFormData({ ...formData, startDate: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="End Date">
+              <Input type="date" value={formData.endDate} onChange={e => setFormData({ ...formData, endDate: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Current Status">
+              <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Points">
+              <Input
+                type="number"
+                min={0}
+                value={formData.employeeEngagementPoints}
+                onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+              />
+            </FieldWrapper>
+          </div>
+        </Card>
       </div>
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Description & Scope</Label>
-        <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="min-h-[120px] rounded-2xl border-slate-200" />
-      </div>
-      <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Date</Label>
-          <Input type="date" value={formData.startDate} onChange={e => setFormData({ ...formData, startDate: e.target.value })} className="h-12 border-slate-200" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">End Date</Label>
-          <Input type="date" value={formData.endDate} onChange={e => setFormData({ ...formData, endDate: e.target.value })} className="h-12 border-slate-200" />
-        </div>
-      </div>
-      <div className="space-y-2">
-        <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current Status</Label>
-        <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
-          <SelectTrigger className="h-12 border-slate-200"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="uppercase font-bold text-[11px]">{o.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex justify-end gap-3 pt-6 border-t">
-        <Button variant="ghost" onClick={onCancel} className="font-bold uppercase text-[10px] tracking-widest">Discard</Button>
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           {initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-           {initial ? 'Update Initiative' : 'Create Initiative'}
+
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Update Initiative" : "Create Initiative"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }

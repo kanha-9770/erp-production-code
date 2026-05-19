@@ -9,9 +9,10 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  MessageSquare, Plus, Search, Mail, Phone, Calendar, 
+  MessageSquare, Plus, Search, Mail, Phone, Calendar,
   Briefcase, Pencil, ExternalLink, Trash2, UserCircle,
-  Tag, Type, FileText, CheckCircle2, Clock, List
+  Tag, Type, FileText, CheckCircle2, Clock, List,
+  AlertCircle, Info, Save, Paperclip, Upload
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -43,6 +44,7 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
 } from "@/components/ui/sheet";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 
 interface EmployeeSuggestion {
   id: string;
@@ -75,13 +77,26 @@ const CATEGORY_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
+const DEPARTMENT_FILTER_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
 interface Filters {
   search: string;
   status: string;
   category: string;
+  department: string;
 }
 
-const EMPTY_FILTERS: Filters = { search: "", status: "", category: "" };
+const EMPTY_FILTERS: Filters = { search: "", status: "", category: "", department: "" };
 
 export default function EmployeeSuggestionPage() {
   const { user } = useCurrentUser();
@@ -147,6 +162,14 @@ export default function EmployeeSuggestionPage() {
     { id: "suggestion", label: "Suggestion", type: "text" },
     { id: "category", label: "Category", type: "select", options: CATEGORY_OPTIONS },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_FILTER_OPTIONS },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "middleName", label: "Middle Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
+    { id: "benefits", label: "Benefits", type: "text" },
+    { id: "suggestionGivenBy", label: "Suggestion Given By", type: "text" },
     { id: "submissionDate", label: "Date", type: "date" },
   ], []);
 
@@ -158,6 +181,7 @@ export default function EmployeeSuggestionPage() {
     }
     if (filters.status) result = result.filter(s => s.status === filters.status);
     if (filters.category) result = result.filter(s => s.category === filters.category);
+    if (filters.department) result = result.filter(s => (s as any).department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [suggestions, filters, conditions, filterFields]);
 
@@ -269,6 +293,7 @@ export default function EmployeeSuggestionPage() {
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
               <FilterChips label="Category" value={filters.category} onChange={(v) => updateFilter("category", v)} options={CATEGORY_OPTIONS} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
@@ -284,16 +309,19 @@ export default function EmployeeSuggestionPage() {
             onRowClick={(s) => setSelectedId(s.id)}
           />
         }
-        preview={selectedId ? <SuggestionPreview id={selectedId} suggestions={suggestions} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <SuggestionPreview id={selectedId} suggestions={suggestions} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} suggestions={suggestions} /> : null}
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle>New Suggestion</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Employee Suggestion <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <SuggestionForm
+            currentEmployee={currentEmployee}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -317,10 +345,16 @@ export default function EmployeeSuggestionPage() {
       </Sheet>
 
       <Sheet open={!!editingId} onOpenChange={(o) => !o && setEditingId(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Employee Suggestion <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
+          </SheetHeader>
           {editingId && (
             <SuggestionForm
               initial={suggestions.find(s => s.id === editingId)}
+              currentEmployee={currentEmployee}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -358,7 +392,7 @@ function PreviewHeader({ id, suggestions }: { id: string, suggestions: EmployeeS
   );
 }
 
-function SuggestionPreview({ id, suggestions, onEdit, onDelete }: { id: string, suggestions: EmployeeSuggestion[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function SuggestionPreview({ id, suggestions, employees, isAdmin, onEdit, onDelete }: { id: string, suggestions: EmployeeSuggestion[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const s = suggestions.find(x => x.id === id);
   if (!s) return null;
 
@@ -374,6 +408,8 @@ function SuggestionPreview({ id, suggestions, onEdit, onDelete }: { id: string, 
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(s.id)}><Trash2 className="h-4 h-4" /></Button>
         </div>
       </div>
+
+      <SubmitterDetails employeeId={s.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={s.submissionDate} />
 
       <Card className="p-4 space-y-3">
         <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Suggestion</h3>
@@ -395,39 +431,254 @@ function SuggestionPreview({ id, suggestions, onEdit, onDelete }: { id: string, 
   );
 }
 
-function SuggestionForm({ initial, onCancel, onSubmit }: { initial?: EmployeeSuggestion, onCancel: () => void, onSubmit: (data: any) => void }) {
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
+function SuggestionForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: EmployeeSuggestion,
+  currentEmployee?: any,
+  onCancel: () => void,
+  onSubmit: (data: any) => void
+}) {
   const [formData, setFormData] = useState({
-    title: initial?.title || "",
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    middleName: "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
     suggestion: initial?.suggestion || "",
+    benefits: "",
+    suggestionGivenBy: "",
+    media: "",
+    title: initial?.title || "",
     category: initial?.category || "general",
     status: initial?.status || "submitted",
     feedback: initial?.feedback || "",
   });
 
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName.trim() ? "Last Name is required" : "",
+    suggestion: !formData.suggestion.trim() ? "Suggestion is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    // Persisted Suggestion fields: title, suggestion, category, status, feedback.
+    // First 80 chars of the suggestion become the title fallback when blank.
+    onSubmit({
+      title: formData.title.trim() || formData.suggestion.slice(0, 80),
+      suggestion: formData.suggestion,
+      category: formData.category,
+      status: formData.status,
+      feedback: formData.feedback,
+      employeeId: formData.employeeId,
+      firstName: formData.firstName,
+      middleName: formData.middleName,
+      lastName: formData.lastName,
+      department: formData.department,
+      employeeEngagementTeamName: formData.employeeEngagementTeamName,
+      benefits: formData.benefits,
+      suggestionGivenBy: formData.suggestionGivenBy,
+      media: formData.media,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="space-y-2">
-        <Label>Title</Label>
-        <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Suggestion title" />
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Suggestion</h3>
+              <p className="text-xs text-muted-foreground">Suggestion details and benefits</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Middle Name">
+              <Input value={formData.middleName} onChange={e => setFormData({ ...formData, middleName: e.target.value })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Suggestion" required error={showErr("suggestion") ? errors.suggestion : ""}>
+              <Textarea
+                value={formData.suggestion}
+                onChange={e => setFormData({ ...formData, suggestion: e.target.value })}
+                placeholder="Your suggestion"
+                className={`min-h-[110px] ${showErr("suggestion") ? "border-red-500" : ""}`}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Benefits">
+              <Textarea
+                value={formData.benefits}
+                onChange={e => setFormData({ ...formData, benefits: e.target.value })}
+                placeholder="Expected benefits"
+                className="min-h-[110px]"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Suggestion Given By">
+              <Input
+                value={formData.suggestionGivenBy}
+                onChange={e => setFormData({ ...formData, suggestionGivenBy: e.target.value })}
+                placeholder="Full name"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Media">
+              <FileFieldStub value={formData.media} onChange={v => setFormData({ ...formData, media: v })} />
+            </FieldWrapper>
+
+            <FieldWrapper label="Category">
+              <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Status">
+              <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+          </div>
+        </Card>
       </div>
-      <div className="space-y-2">
-        <Label>Category</Label>
-        <Select value={formData.category} onValueChange={v => setFormData({ ...formData, category: v })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
-        <Label>Description</Label>
-        <Textarea value={formData.suggestion} onChange={e => setFormData({ ...formData, suggestion: e.target.value })} className="min-h-[120px]" />
-      </div>
-      <div className="flex justify-end gap-3 pt-4">
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           Save Suggestion
+
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Update Suggestion" : "Save Suggestion"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FileFieldStub({ value, onChange, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="flex items-stretch border rounded-md overflow-hidden">
+      <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
+        <Paperclip className="h-3.5 w-3.5" />
+      </div>
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder || "Choose files..."}
+        className="border-0 rounded-none focus-visible:ring-0"
+      />
+      <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload file">
+        <Upload className="h-3.5 w-3.5" />
+        <span className="sr-only">Upload file</span>
+        <input
+          type="file"
+          aria-label="Upload file"
+          title="Upload file"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) onChange(f.name);
+          }}
+        />
+      </label>
     </div>
   );
 }

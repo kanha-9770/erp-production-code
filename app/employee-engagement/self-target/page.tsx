@@ -6,8 +6,9 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  Target, Plus, Search, Calendar, Briefcase, Pencil, Trash2, 
-  CheckCircle2, Type, FileText, Zap, UserCircle, Clock
+  Target, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
+  CheckCircle2, Type, FileText, Zap, UserCircle, Clock,
+  AlertCircle, Info, Save
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -39,6 +40,7 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
+import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 
 interface SelfTarget {
   id: string;
@@ -58,12 +60,41 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "Completed" },
 ];
 
+const TARGET_MONTH_FILTER_OPTIONS = [
+  { value: "january", label: "January" },
+  { value: "february", label: "February" },
+  { value: "march", label: "March" },
+  { value: "april", label: "April" },
+  { value: "may", label: "May" },
+  { value: "june", label: "June" },
+  { value: "july", label: "July" },
+  { value: "august", label: "August" },
+  { value: "september", label: "September" },
+  { value: "october", label: "October" },
+  { value: "november", label: "November" },
+  { value: "december", label: "December" },
+];
+
+const DEPARTMENT_FILTER_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
 interface Filters {
   search: string;
   status: string;
+  targetMonth: string;
+  department: string;
 }
 
-const EMPTY_FILTERS: Filters = { search: "", status: "" };
+const EMPTY_FILTERS: Filters = { search: "", status: "", targetMonth: "", department: "" };
 
 export default function SelfTargetPage() {
   const { user } = useCurrentUser();
@@ -122,9 +153,15 @@ export default function SelfTargetPage() {
   };
 
   const filterFields: FilterField[] = useMemo(() => [
-    { id: "title", label: "Title", type: "text" },
+    { id: "title", label: "Target", type: "text" },
     { id: "description", label: "Description", type: "text" },
     { id: "status", label: "Status", type: "select", options: STATUS_OPTIONS },
+    { id: "targetMonth", label: "Target Month", type: "select", options: TARGET_MONTH_FILTER_OPTIONS },
+    { id: "department", label: "Department", type: "select", options: DEPARTMENT_FILTER_OPTIONS },
+    { id: "employeeId", label: "Employee ID", type: "text" },
+    { id: "firstName", label: "First Name", type: "text" },
+    { id: "lastName", label: "Last Name", type: "text" },
+    { id: "employeeEngagementTeamName", label: "Team Name", type: "text" },
     { id: "targetDate", label: "Target Date", type: "date" },
   ], []);
 
@@ -135,6 +172,8 @@ export default function SelfTargetPage() {
       result = result.filter(t => t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
     }
     if (filters.status) result = result.filter(t => t.status === filters.status);
+    if (filters.targetMonth) result = result.filter(t => (t as any).targetMonth === filters.targetMonth);
+    if (filters.department) result = result.filter(t => (t as any).department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [targets, filters, conditions, filterFields]);
 
@@ -252,6 +291,8 @@ export default function SelfTargetPage() {
 
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
               <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <FilterChips label="Target Month" value={filters.targetMonth} onChange={(v) => updateFilter("targetMonth", v)} options={TARGET_MONTH_FILTER_OPTIONS} />
+              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
@@ -267,16 +308,19 @@ export default function SelfTargetPage() {
             onRowClick={(t) => setSelectedId(t.id)}
           />
         }
-        preview={selectedId ? <TargetPreview id={selectedId} targets={targets} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <TargetPreview id={selectedId} targets={targets} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} targets={targets} /> : null}
       />
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
-          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10">
-            <SheetTitle>New Target</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Self Target <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
           </SheetHeader>
           <TargetForm
+            currentEmployee={currentEmployee}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -300,10 +344,16 @@ export default function SelfTargetPage() {
       </Sheet>
 
       <Sheet open={!!editingId} onOpenChange={(o) => !o && setEditingId(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0">
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto p-0 flex flex-col">
+          <SheetHeader className="px-6 py-4 border-b sticky top-0 bg-background z-10 flex-row items-center justify-between space-y-0">
+            <SheetTitle className="flex items-center gap-2">
+              Self Target <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </SheetTitle>
+          </SheetHeader>
           {editingId && (
             <TargetForm
               initial={targets.find(t => t.id === editingId)}
+              currentEmployee={currentEmployee}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -341,7 +391,7 @@ function PreviewHeader({ id, targets }: { id: string, targets: SelfTarget[] }) {
   );
 }
 
-function TargetPreview({ id, targets, onEdit, onDelete }: { id: string, targets: SelfTarget[], onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function TargetPreview({ id, targets, employees, isAdmin, onEdit, onDelete }: { id: string, targets: SelfTarget[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const t = targets.find(x => x.id === id);
   if (!t) return null;
 
@@ -362,6 +412,8 @@ function TargetPreview({ id, targets, onEdit, onDelete }: { id: string, targets:
         </div>
       </div>
 
+      <SubmitterDetails employeeId={t.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={t.createdAt} />
+
       <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
           <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${t.progress}%` }} />
       </div>
@@ -379,51 +431,238 @@ function TargetPreview({ id, targets, onEdit, onDelete }: { id: string, targets:
   );
 }
 
-function TargetForm({ initial, onCancel, onSubmit }: { initial?: SelfTarget, onCancel: () => void, onSubmit: (data: any) => void }) {
+const DEPARTMENT_OPTIONS = [
+  { value: "HR", label: "HR" },
+  { value: "Engineering", label: "Engineering" },
+  { value: "Production", label: "Production" },
+  { value: "Quality", label: "Quality" },
+  { value: "Maintenance", label: "Maintenance" },
+  { value: "Sales", label: "Sales" },
+  { value: "Finance", label: "Finance" },
+  { value: "Admin", label: "Admin" },
+  { value: "Other", label: "Other" },
+];
+
+const TARGET_MONTH_OPTIONS = [
+  { value: "january", label: "January" },
+  { value: "february", label: "February" },
+  { value: "march", label: "March" },
+  { value: "april", label: "April" },
+  { value: "may", label: "May" },
+  { value: "june", label: "June" },
+  { value: "july", label: "July" },
+  { value: "august", label: "August" },
+  { value: "september", label: "September" },
+  { value: "october", label: "October" },
+  { value: "november", label: "November" },
+  { value: "december", label: "December" },
+];
+
+function TargetForm({ initial, currentEmployee, onCancel, onSubmit }: {
+  initial?: SelfTarget,
+  currentEmployee?: any,
+  onCancel: () => void,
+  onSubmit: (data: any) => void
+}) {
   const [formData, setFormData] = useState({
-    title: initial?.title || "",
+    employeeId: currentEmployee?.id || "",
+    firstName: currentEmployee?.firstName || "",
+    lastName: currentEmployee?.lastName || "",
+    department: currentEmployee?.department || "",
+    employeeEngagementTeamName: currentEmployee?.employeeEngagementTeamName || "",
+    targetMonth: "",
+    target: initial?.title || "",
     description: initial?.description || "",
     targetDate: initial?.targetDate || "",
     status: initial?.status || "not-started",
     progress: initial?.progress || 0,
+    employeeEngagementPoints: 0,
   });
 
+  const [touched, setTouched] = useState(false);
+
+  const errors = {
+    employeeId: !formData.employeeId.trim() ? "Employee ID is required" : "",
+    firstName: !formData.firstName.trim() ? "First Name is required" : "",
+    lastName: !formData.lastName.trim() ? "Last Name is required" : "",
+    targetMonth: !formData.targetMonth ? "Target Month is required" : "",
+    target: !formData.target.trim() ? "Target is required" : "",
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+
+  const handleSubmit = () => {
+    setTouched(true);
+    if (hasErrors) return;
+    // Map sectioned fields onto persisted Target schema: target → title.
+    onSubmit({
+      title: formData.target,
+      description: formData.description || formData.target,
+      targetDate: formData.targetDate || new Date().toISOString().slice(0, 10),
+      status: formData.status,
+      progress: formData.progress,
+      employeeId: formData.employeeId,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      department: formData.department,
+      employeeEngagementTeamName: formData.employeeEngagementTeamName,
+      targetMonth: formData.targetMonth,
+      employeeEngagementPoints: formData.employeeEngagementPoints,
+    });
+  };
+
+  const showErr = (field: keyof typeof errors) => touched && errors[field];
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Title</Label>
-          <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Target title" />
-        </div>
-        <div className="space-y-2">
-          <Label>Target Date</Label>
-          <Input type="date" value={formData.targetDate} onChange={e => setFormData({ ...formData, targetDate: e.target.value })} />
-        </div>
+    <>
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-slate-50/40">
+        <Card className="p-5 space-y-5 bg-white">
+          <div className="flex items-start gap-3 pb-4 border-b">
+            <div className="h-8 w-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
+            <div className="space-y-0.5">
+              <h3 className="font-semibold text-sm">Self Target</h3>
+              <p className="text-xs text-muted-foreground">Monthly self-defined target</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
+              <Input
+                value={formData.employeeId}
+                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
+                placeholder="e.g. EMP-0001"
+                className={showErr("employeeId") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
+              <Input
+                value={formData.firstName}
+                onChange={e => setFormData({ ...formData, firstName: e.target.value })}
+                className={showErr("firstName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
+              <Input
+                value={formData.lastName}
+                onChange={e => setFormData({ ...formData, lastName: e.target.value })}
+                className={showErr("lastName") ? "border-red-500" : ""}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Department">
+              <Select value={formData.department} onValueChange={v => setFormData({ ...formData, department: v })}>
+                <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENT_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Team Name">
+              <Input
+                value={formData.employeeEngagementTeamName}
+                onChange={e => setFormData({ ...formData, employeeEngagementTeamName: e.target.value })}
+                placeholder="Team name"
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Target Month" required error={showErr("targetMonth") ? errors.targetMonth : ""}>
+              <Select value={formData.targetMonth} onValueChange={v => setFormData({ ...formData, targetMonth: v })}>
+                <SelectTrigger className={showErr("targetMonth") ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TARGET_MONTH_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <FieldWrapper label="Target" required error={showErr("target") ? errors.target : ""}>
+              <Textarea
+                value={formData.target}
+                onChange={e => setFormData({ ...formData, target: e.target.value })}
+                placeholder="Target details"
+                className={`min-h-[110px] ${showErr("target") ? "border-red-500" : ""}`}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Employee Engagement Points">
+              <Input
+                type="number"
+                min={0}
+                value={formData.employeeEngagementPoints}
+                onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Target Date">
+              <Input
+                type="date"
+                value={formData.targetDate}
+                onChange={e => setFormData({ ...formData, targetDate: e.target.value })}
+              />
+            </FieldWrapper>
+
+            <FieldWrapper label="Status">
+              <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FieldWrapper>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label={`Progress (${formData.progress}%)`}>
+                <Input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={formData.progress}
+                  onChange={e => setFormData({ ...formData, progress: parseInt(e.target.value) || 0 })}
+                />
+              </FieldWrapper>
+            </div>
+          </div>
+        </Card>
       </div>
-      <div className="space-y-2">
-        <Label>Description</Label>
-        <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="min-h-[100px]" />
-      </div>
-      <div className="grid grid-cols-2 gap-4 items-end">
-        <div className="space-y-2">
-          <Label>Status</Label>
-          <Select value={formData.status} onValueChange={v => setFormData({ ...formData, status: v as any })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label>Progress ({formData.progress}%)</Label>
-          <Input type="range" min="0" max="100" value={formData.progress} onChange={e => setFormData({ ...formData, progress: parseInt(e.target.value) })} />
-        </div>
-      </div>
-      <div className="flex justify-end gap-3 pt-4">
-        <Button onClick={() => onSubmit(formData)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 rounded-xl shadow-lg transition-all active:scale-95">
-           {initial ? 'Update Target' : 'Create Target'}
+
+      <div className="border-t bg-background px-6 py-3 flex items-center justify-end gap-3 sticky bottom-0">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={touched && hasErrors}
+          className={`text-white font-semibold ${touched && hasErrors ? "bg-blue-300 hover:bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
+        >
+          {touched && hasErrors ? (
+            <><AlertCircle className="h-4 w-4 mr-2" /> Fix Errors</>
+          ) : (
+            <>{initial ? <Save className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />} {initial ? "Update Target" : "Create Target"}</>
+          )}
         </Button>
       </div>
+    </>
+  );
+}
+
+function FieldWrapper({ label, required, error, children }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      {children}
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }
