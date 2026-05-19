@@ -185,47 +185,71 @@ export default function EmployeeSuggestionPage() {
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [suggestions, filters, conditions, filterFields]);
 
-  const columns: ColumnDef<EmployeeSuggestion>[] = useMemo(() => [
-    {
-      id: "title",
-      header: "Suggestion",
-      width: 300,
-      pinned: true,
-      cell: (s) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate uppercase">{s.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{s.suggestion}</div>
-        </div>
-      ),
-    },
-    {
-      id: "category",
-      header: "Category",
-      width: 150,
-      cell: (s) => <Badge variant="outline" className="capitalize">{s.category.replace('-', ' ')}</Badge>,
-    },
-    {
-      id: "status",
-      header: "Status",
-      width: 150,
-      cell: (s) => {
-        const colors: Record<string, string> = {
-          submitted: "bg-blue-100 text-blue-800",
-          "under-review": "bg-yellow-100 text-yellow-800",
-          accepted: "bg-green-100 text-green-800",
-          implemented: "bg-green-100 text-green-800",
-          rejected: "bg-red-100 text-red-800",
-        };
-        return <Badge variant="outline" className={`${colors[s.status]} text-[10px]`}>{s.status.replace('-', ' ')}</Badge>;
+  const columns: ColumnDef<EmployeeSuggestion>[] = useMemo(() => {
+    const text = (s: EmployeeSuggestion, key: string) => {
+      const v = (s as any)[key];
+      return v === null || v === undefined || v === "" ? "—" : String(v);
+    };
+    const plain = (s: EmployeeSuggestion, key: string) => <span className="text-xs truncate">{text(s, key)}</span>;
+
+    return [
+      {
+        id: "title",
+        header: "Suggestion",
+        width: 300,
+        pinned: true,
+        cell: (s) => (
+          <div className="min-w-0">
+            <div className="font-medium truncate uppercase">{s.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{s.suggestion}</div>
+          </div>
+        ),
       },
-    },
-    {
-      id: "date",
-      header: "Date",
-      width: 130,
-      cell: (s) => <span className="text-xs text-muted-foreground">{new Date(s.submissionDate).toLocaleDateString()}</span>,
-    },
-  ], []);
+      {
+        id: "category",
+        header: "Category",
+        width: 150,
+        group: "Overview",
+        cell: (s) => <Badge variant="outline" className="capitalize">{s.category.replace('-', ' ')}</Badge>,
+      },
+      {
+        id: "status",
+        header: "Status",
+        width: 150,
+        group: "Overview",
+        cell: (s) => {
+          const colors: Record<string, string> = {
+            submitted: "bg-blue-100 text-blue-800",
+            "under-review": "bg-yellow-100 text-yellow-800",
+            accepted: "bg-green-100 text-green-800",
+            implemented: "bg-green-100 text-green-800",
+            rejected: "bg-red-100 text-red-800",
+          };
+          return <Badge variant="outline" className={`${colors[s.status]} text-[10px]`}>{s.status.replace('-', ' ')}</Badge>;
+        },
+      },
+      {
+        id: "date",
+        header: "Date",
+        width: 130,
+        group: "Overview",
+        cell: (s) => <span className="text-xs text-muted-foreground">{new Date(s.submissionDate).toLocaleDateString()}</span>,
+      },
+
+      // ── Suggestion form fields ────────────────────────────────────────
+      { id: "employeeId", header: "Employee ID", width: 140, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "employeeId") },
+      { id: "firstName", header: "First Name", width: 140, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "firstName") },
+      { id: "middleName", header: "Middle Name", width: 140, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "middleName") },
+      { id: "lastName", header: "Last Name", width: 140, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "lastName") },
+      { id: "department", header: "Department", width: 140, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "department") },
+      { id: "employeeEngagementTeamName", header: "Employee Engagement Team Name", width: 200, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "employeeEngagementTeamName") },
+      { id: "suggestion", header: "Suggestion (Full)", width: 280, group: "Suggestion", defaultHidden: true, cell: (s) => <span className="text-xs truncate">{s.suggestion || "—"}</span> },
+      { id: "benefits", header: "Benefits", width: 240, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "benefits") },
+      { id: "suggestionGivenBy", header: "Suggestion Given By", width: 180, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "suggestionGivenBy") },
+      { id: "media", header: "Media", width: 160, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "media") },
+      { id: "feedback", header: "Feedback", width: 240, group: "Suggestion", defaultHidden: true, cell: (s) => <span className="text-xs truncate">{s.feedback || "—"}</span> },
+    ];
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this suggestion?")) return;

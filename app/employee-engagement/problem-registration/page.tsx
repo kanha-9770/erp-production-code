@@ -187,54 +187,78 @@ export default function ProblemRegistrationPage() {
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [problems, filters, conditions, filterFields]);
 
-  const columns: ColumnDef<ProblemRegistration>[] = useMemo(() => [
-    {
-      id: "title",
-      header: "Problem",
-      width: 300,
-      pinned: true,
-      cell: (p) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate uppercase">{p.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{p.description}</div>
-        </div>
-      ),
-    },
-    {
-      id: "severity",
-      header: "Severity",
-      width: 130,
-      cell: (p) => {
-        const colors: Record<string, string> = {
-          low: "bg-green-100 text-green-800",
-          medium: "bg-yellow-100 text-yellow-800",
-          high: "bg-orange-100 text-orange-800",
-          critical: "bg-red-100 text-red-800",
-        };
-        return <Badge variant="outline" className={`${colors[p.severity]} text-[10px]`}>{p.severity.toUpperCase()}</Badge>;
+  const columns: ColumnDef<ProblemRegistration>[] = useMemo(() => {
+    const text = (p: ProblemRegistration, key: string) => {
+      const v = (p as any)[key];
+      return v === null || v === undefined || v === "" ? "—" : String(v);
+    };
+    const plain = (p: ProblemRegistration, key: string) => <span className="text-xs truncate">{text(p, key)}</span>;
+
+    return [
+      {
+        id: "title",
+        header: "Problem",
+        width: 300,
+        pinned: true,
+        cell: (p) => (
+          <div className="min-w-0">
+            <div className="font-medium truncate uppercase">{p.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{p.description}</div>
+          </div>
+        ),
       },
-    },
-    {
-      id: "status",
-      header: "Status",
-      width: 130,
-      cell: (p) => {
-        const colors: Record<string, string> = {
-          open: "bg-blue-100 text-blue-800",
-          "in-review": "bg-yellow-100 text-yellow-800",
-          resolved: "bg-green-100 text-green-800",
-          closed: "bg-gray-100 text-gray-800",
-        };
-        return <Badge variant="outline" className={`${colors[p.status]} text-[10px]`}>{p.status.toUpperCase()}</Badge>;
+      {
+        id: "severity",
+        header: "Severity",
+        width: 130,
+        group: "Overview",
+        cell: (p) => {
+          const colors: Record<string, string> = {
+            low: "bg-green-100 text-green-800",
+            medium: "bg-yellow-100 text-yellow-800",
+            high: "bg-orange-100 text-orange-800",
+            critical: "bg-red-100 text-red-800",
+          };
+          return <Badge variant="outline" className={`${colors[p.severity]} text-[10px]`}>{p.severity.toUpperCase()}</Badge>;
+        },
       },
-    },
-    {
-      id: "date",
-      header: "Registered",
-      width: 130,
-      cell: (p) => <span className="text-xs text-muted-foreground">{new Date(p.registrationDate).toLocaleDateString()}</span>,
-    },
-  ], []);
+      {
+        id: "status",
+        header: "Status",
+        width: 130,
+        group: "Overview",
+        cell: (p) => {
+          const colors: Record<string, string> = {
+            open: "bg-blue-100 text-blue-800",
+            "in-review": "bg-yellow-100 text-yellow-800",
+            resolved: "bg-green-100 text-green-800",
+            closed: "bg-gray-100 text-gray-800",
+          };
+          return <Badge variant="outline" className={`${colors[p.status]} text-[10px]`}>{p.status.toUpperCase()}</Badge>;
+        },
+      },
+      {
+        id: "date",
+        header: "Registered",
+        width: 130,
+        group: "Overview",
+        cell: (p) => <span className="text-xs text-muted-foreground">{new Date(p.registrationDate).toLocaleDateString()}</span>,
+      },
+
+      // ── Problem Info form fields ──────────────────────────────────────
+      { id: "employeeId", header: "Employee ID", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "employeeId") },
+      { id: "firstName", header: "First Name", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "firstName") },
+      { id: "middleName", header: "Middle Name", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "middleName") },
+      { id: "lastName", header: "Last Name", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "lastName") },
+      { id: "department", header: "Department", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "department") },
+      { id: "employeeEngagementTeamName", header: "Employee Engagement Team Name", width: 200, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "employeeEngagementTeamName") },
+      { id: "description", header: "Description", width: 240, group: "Problem Info", defaultHidden: true, cell: (p) => <span className="text-xs truncate">{p.description || "—"}</span> },
+      { id: "category", header: "Category", width: 140, group: "Problem Info", defaultHidden: true, cell: (p) => <span className="text-xs truncate">{p.category || "—"}</span> },
+      { id: "proposedSolution", header: "Proposed Solution", width: 240, group: "Problem Info", defaultHidden: true, cell: (p) => <span className="text-xs truncate">{p.proposedSolution || "—"}</span> },
+      { id: "media", header: "Media", width: 160, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "media") },
+      { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Problem Info", defaultHidden: true, align: "right", cell: (p) => plain(p, "employeeEngagementPoints") },
+    ];
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this problem record?")) return;
