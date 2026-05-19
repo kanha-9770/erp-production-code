@@ -34,11 +34,13 @@ import {
   LogOut,
   ChevronRight,
   Building2,
+  Wallet,
 } from "lucide-react"
 import { useGetUserQuery, useLogoutMutation } from "@/lib/api/auth"
 import OverviewTab from "@/components/profile/OverviewTab"
 import PersonalTab from "@/components/profile/PersonalTab"
 import EmploymentTab from "@/components/profile/EmploymentTab"
+import SalaryTab from "@/components/profile/SalaryTab"
 import NotificationsTab from "@/components/profile/NotificationsTab"
 import PreferencesTab from "@/components/profile/PreferencesTab"
 import SecurityTab from "@/components/profile/SecurityTab"
@@ -75,6 +77,12 @@ const TABS: Array<TabDef> = [
     label: "Employment",
     icon: <Briefcase className="h-4 w-4" />,
     description: "Org, role, HR record",
+  },
+  {
+    id: "salary",
+    label: "Salary",
+    icon: <Wallet className="h-4 w-4" />,
+    description: "Monthly pay & slips",
   },
   {
     id: "notifications",
@@ -274,6 +282,7 @@ export default function ProfilePage() {
               {tab === "overview" && <OverviewTab user={user} onJumpTab={switchTab} />}
               {tab === "personal" && <PersonalTab user={user} />}
               {tab === "employment" && <EmploymentTab user={user} />}
+              {tab === "salary" && <SalaryTab user={user} />}
               {tab === "notifications" && <NotificationsTab />}
               {tab === "preferences" && <PreferencesTab />}
               {tab === "security" && <SecurityTab />}

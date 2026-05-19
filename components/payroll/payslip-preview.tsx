@@ -58,6 +58,10 @@ interface PayrollRecord {
     lwf: number;
     nps: number;
   };
+  breakdown?: {
+    daysInMonth: number;
+    payableDays: number;
+  };
   netSalary: number;
   status: 'pending' | 'processed';
 }
@@ -229,7 +233,11 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
               </div>
               <div>
                 <p className="text-xs text-muted-foreground font-semibold uppercase">Working Days</p>
-                <p className="text-foreground font-medium">{payroll.workingDays}</p>
+                <p className="text-foreground font-medium">
+                  {payroll.breakdown 
+                    ? `${payroll.breakdown.payableDays} of ${payroll.breakdown.daysInMonth}` 
+                    : payroll.workingDays}
+                </p>
               </div>
             </div>
 
@@ -243,15 +251,7 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
                     <span className="text-foreground font-medium">₹{fmt(value)}</span>
                   </div>
                 ))}
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Working Hours</span>
-                  <span className="text-foreground font-medium">
-                    {payroll.workingHours.toFixed(1)} hrs
-                    {payroll.overtimeHours && payroll.overtimeHours > 0 ? (
-                      <span className="text-xs text-muted-foreground"> (incl. {payroll.overtimeHours.toFixed(1)} OT)</span>
-                    ) : null}
-                  </span>
-                </div>
+
                 <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
                   <span className="font-semibold text-foreground">Gross Salary</span>
                   <span className="font-bold text-primary">₹{fmt(displayGrossSalary)}</span>

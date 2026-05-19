@@ -177,54 +177,76 @@ export default function SelfTargetPage() {
     return applyAdvancedFilters(result, conditions, filterFields);
   }, [targets, filters, conditions, filterFields]);
 
-  const columns: ColumnDef<SelfTarget>[] = useMemo(() => [
-    {
-      id: "title",
-      header: "Goal / Target",
-      width: 300,
-      pinned: true,
-      cell: (t) => (
-        <div className="min-w-0">
-          <div className="font-medium truncate uppercase">{t.title}</div>
-          <div className="text-[11px] text-muted-foreground truncate">{t.description}</div>
-        </div>
-      ),
-    },
-    {
-      id: "progress",
-      header: "Progress",
-      width: 150,
-      cell: (t) => (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[10px] font-bold">
-            <span>{t.progress}%</span>
+  const columns: ColumnDef<SelfTarget>[] = useMemo(() => {
+    const text = (t: SelfTarget, key: string) => {
+      const v = (t as any)[key];
+      return v === null || v === undefined || v === "" ? "—" : String(v);
+    };
+    const plain = (t: SelfTarget, key: string) => <span className="text-xs truncate">{text(t, key)}</span>;
+
+    return [
+      {
+        id: "title",
+        header: "Goal / Target",
+        width: 300,
+        pinned: true,
+        cell: (t) => (
+          <div className="min-w-0">
+            <div className="font-medium truncate uppercase">{t.title}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{t.description}</div>
           </div>
-          <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-             <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${t.progress}%` }} />
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      width: 130,
-      cell: (t) => {
-        const colors: Record<string, string> = {
-          "not-started": "bg-gray-100 text-gray-800",
-          "in-progress": "bg-blue-100 text-blue-800",
-          completed: "bg-green-100 text-green-800",
-        };
-        return <Badge variant="outline" className={`${colors[t.status]} text-[10px]`}>{t.status.toUpperCase()}</Badge>;
+        ),
       },
-    },
-    {
-      id: "date",
-      header: "Target Date",
-      width: 130,
-      cell: (t) => <span className="text-xs text-muted-foreground">{new Date(t.targetDate).toLocaleDateString()}</span>,
-    },
-  ], []);
+      {
+        id: "progress",
+        header: "Progress",
+        width: 150,
+        group: "Overview",
+        cell: (t) => (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-bold">
+              <span>{t.progress}%</span>
+            </div>
+            <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+               <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${t.progress}%` }} />
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "status",
+        header: "Status",
+        width: 130,
+        group: "Overview",
+        cell: (t) => {
+          const colors: Record<string, string> = {
+            "not-started": "bg-gray-100 text-gray-800",
+            "in-progress": "bg-blue-100 text-blue-800",
+            completed: "bg-green-100 text-green-800",
+          };
+          return <Badge variant="outline" className={`${colors[t.status]} text-[10px]`}>{t.status.toUpperCase()}</Badge>;
+        },
+      },
+      {
+        id: "date",
+        header: "Target Date",
+        width: 130,
+        group: "Overview",
+        cell: (t) => <span className="text-xs text-muted-foreground">{new Date(t.targetDate).toLocaleDateString()}</span>,
+      },
+
+      // ── Self Target form fields ───────────────────────────────────────
+      { id: "employeeId", header: "Employee ID", width: 140, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "employeeId") },
+      { id: "firstName", header: "First Name", width: 140, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "firstName") },
+      { id: "lastName", header: "Last Name", width: 140, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "lastName") },
+      { id: "department", header: "Department", width: 140, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "department") },
+      { id: "employeeEngagementTeamName", header: "Employee Engagement Team Name", width: 200, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "employeeEngagementTeamName") },
+      { id: "targetMonth", header: "Target Month", width: 130, group: "Self Target", defaultHidden: true, cell: (t) => plain(t, "targetMonth") },
+      { id: "target", header: "Target", width: 240, group: "Self Target", defaultHidden: true, cell: (t) => <span className="text-xs truncate">{t.title || "—"}</span> },
+      { id: "description", header: "Description", width: 240, group: "Self Target", defaultHidden: true, cell: (t) => <span className="text-xs truncate">{t.description || "—"}</span> },
+      { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Self Target", defaultHidden: true, align: "right", cell: (t) => plain(t, "employeeEngagementPoints") },
+    ];
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this target?")) return;

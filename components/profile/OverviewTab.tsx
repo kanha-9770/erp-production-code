@@ -17,7 +17,7 @@
  * Pure read-only; mutations live on the per-section tabs.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +44,8 @@ import {
   Hash,
   IdCard,
   ListChecks,
+  Wallet,
+  ReceiptText,
 } from "lucide-react"
 import type { ProfileUser, ProfileTabId } from "./types"
 import { getProfileCompleteness, formatDate } from "./profile-utils"
@@ -66,6 +68,7 @@ export default function OverviewTab({ user, onJumpTab }: OverviewTabProps) {
           <EmploymentCard user={user} onJumpTab={onJumpTab} />
         </div>
       </div>
+      <SalarySummaryCard onJumpTab={onJumpTab} />
       <RecentActivityCard onJumpTab={onJumpTab} />
     </div>
   )
@@ -738,6 +741,202 @@ function RecentActivityCard({
               )
             })}
           </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Salary summary — last 3 payslips with totals, "View all" jumps to the
+// dedicated Salary tab.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SalaryRecord {
+  id: string
+  month: number
+  year: number
+  grossSalary: number
+  deductions: number
+  netSalary: number
+  status: string
+  paidAt: string | null
+}
+
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+function SalarySummaryCard({
+  onJumpTab,
+}: {
+  onJumpTab: (tab: ProfileTabId) => void
+}) {
+  const [state, setState] = useState<{
+    loading: boolean
+    records: SalaryRecord[]
+    noEmployee: boolean
+    error: string | null
+  }>({ loading: true, records: [], noEmployee: false, error: null })
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/profile/salary", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return
+        if (!j.success) {
+          setState({
+            loading: false,
+            records: [],
+            noEmployee: false,
+            error: j.error ?? "Failed to load",
+          })
+          return
+        }
+        setState({
+          loading: false,
+          records: (j.records ?? []) as SalaryRecord[],
+          noEmployee: j.reason === "no-employee-record",
+          error: null,
+        })
+      })
+      .catch((e: Error) => {
+        if (cancelled) return
+        setState({ loading: false, records: [], noEmployee: false, error: e.message })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const fmt = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }),
+    [],
+  )
+
+  const latest = state.records[0]
+  const recent = state.records.slice(0, 3)
+  const ytd = state.records
+    .filter((r) => r.year === new Date().getFullYear())
+    .reduce((s, r) => s + r.netSalary, 0)
+
+  return (
+    <Card className="border-border/70 shadow-sm">
+      <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-primary" />
+            Salary records
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Your most recent monthly pay slips.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onJumpTab("salary")}
+          className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-0.5 shrink-0"
+        >
+          View all
+          <ArrowUpRight className="h-3 w-3" />
+        </button>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {state.loading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-12" />
+            ))}
+          </div>
+        ) : state.error ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            Couldn&apos;t load salary records.
+          </p>
+        ) : state.noEmployee ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            No HR record linked yet. Salary records will appear here once your
+            admin attaches one.
+          </p>
+        ) : recent.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            No payroll records yet for your account.
+          </p>
+        ) : (
+          <>
+            {/* Summary band */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Latest net pay
+                </div>
+                <div className="text-base font-bold tabular-nums tracking-tight mt-0.5">
+                  {latest ? fmt.format(latest.netSalary) : "—"}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {latest
+                    ? `${MONTHS_SHORT[latest.month - 1] ?? latest.month} ${latest.year}`
+                    : ""}
+                </div>
+              </div>
+              <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Earned this year
+                </div>
+                <div className="text-base font-bold tabular-nums tracking-tight mt-0.5">
+                  {fmt.format(ytd)}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {state.records.length} slip
+                  {state.records.length === 1 ? "" : "s"} on file
+                </div>
+              </div>
+            </div>
+
+            <ul className="divide-y border rounded-lg overflow-hidden">
+              {recent.map((r) => {
+                const paid = r.status === "paid"
+                return (
+                  <li
+                    key={r.id}
+                    className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors"
+                  >
+                    <span className="h-7 w-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                      <ReceiptText className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {MONTHS_SHORT[r.month - 1] ?? r.month} {r.year}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        Gross {fmt.format(r.grossSalary)} · Deductions{" "}
+                        {fmt.format(r.deductions)}
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        "hidden sm:inline-flex text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md tabular-nums",
+                        paid
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                      )}
+                    >
+                      {r.status}
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 shrink-0">
+                      {fmt.format(r.netSalary)}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </>
         )}
       </CardContent>
     </Card>
