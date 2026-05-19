@@ -32,8 +32,23 @@ interface PayrollRecord {
     conveyance: number;
     medical: number;
     lta: number;
+    food?: number;
+    telephone?: number;
+    education?: number;
+    fuel?: number;
+    books?: number;
+    uniform?: number;
     specialAllowance: number;
     overtime: number;
+    employeeBonus?: number;
+  };
+  bonusAccrual?: {
+    statutory: number;
+    performance: number;
+    festival: number;
+    joining: number;
+    retention: number;
+    total: number;
   };
   deductionsDetail?: {
     pf: number;
@@ -60,6 +75,14 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
 
   const totalDeductions = payroll.deductions.pf + payroll.deductions.tax + payroll.deductions.insurance + payroll.deductions.other;
   const fmt = (n: number) => n.toLocaleString('en-IN');
+  
+  // The Employee Master Bonus is explicitly hidden from the Payslip per
+  // user request. We must subtract it from the printed Gross and Net totals
+  // so the math still perfectly balances on the document.
+  const hiddenBonus = payroll.earnings?.employeeBonus ?? 0;
+  const displayGrossSalary = payroll.grossSalary - hiddenBonus;
+  const displayNetSalary = payroll.netSalary - hiddenBonus;
+
   // Earnings rows from the engine breakdown. We render only non-zero lines so
   // a payslip that doesn't use HRA/DA/LTA stays clean. Falls back to a single
   // "Basic Salary" row when the breakdown is absent (legacy records).
@@ -71,8 +94,21 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
         ['Conveyance', payroll.earnings.conveyance],
         ['Medical', payroll.earnings.medical],
         ['LTA', payroll.earnings.lta],
+        ['Food / Meal', payroll.earnings.food ?? 0],
+        ['Telephone / Internet', payroll.earnings.telephone ?? 0],
+        ['Children\'s Education', payroll.earnings.education ?? 0],
+        ['Fuel / Car', payroll.earnings.fuel ?? 0],
+        ['Books & Periodicals', payroll.earnings.books ?? 0],
+        ['Uniform', payroll.earnings.uniform ?? 0],
         ['Special Allowance', payroll.earnings.specialAllowance],
         ['Overtime', payroll.earnings.overtime],
+        ...(payroll.bonusAccrual ? [
+          ['Statutory Bonus', payroll.bonusAccrual.statutory],
+          ['Performance Bonus', payroll.bonusAccrual.performance],
+          ['Festival Bonus', payroll.bonusAccrual.festival],
+          ['Joining Bonus', payroll.bonusAccrual.joining],
+          ['Retention Bonus', payroll.bonusAccrual.retention],
+        ] : []),
       ] as Array<[string, number]>).filter(([, v]) => v > 0)
     : [['Basic Salary', payroll.baseSalary]];
   // Deduction rows from the engine breakdown. Same hide-zero treatment. The
@@ -218,7 +254,7 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
                 </div>
                 <div className="flex justify-between text-sm border-t border-border pt-2 mt-2">
                   <span className="font-semibold text-foreground">Gross Salary</span>
-                  <span className="font-bold text-primary">₹{fmt(payroll.grossSalary)}</span>
+                  <span className="font-bold text-primary">₹{fmt(displayGrossSalary)}</span>
                 </div>
               </div>
             </div>
@@ -248,7 +284,7 @@ export default function PayslipPreview({ payroll, processingMonth = new Date().t
             <div className="py-4 bg-muted p-4 rounded-lg">
               <div className="flex justify-between items-center">
                 <span className="text-lg font-bold text-foreground">NET SALARY</span>
-                <span className="text-2xl font-bold text-primary">₹{payroll.netSalary.toLocaleString()}</span>
+                <span className="text-2xl font-bold text-primary">₹{displayNetSalary.toLocaleString()}</span>
               </div>
             </div>
 

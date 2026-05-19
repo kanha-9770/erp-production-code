@@ -1819,67 +1819,87 @@ export default function PayrollPage() {
                       record was produced by the per-day classifier. Older
                       cached records have no breakdown so we don't surface
                       half-built data. */}
-                  {selected.breakdown && (
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
-                        Attendance Breakdown
-                      </p>
-                      <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
-                        <Row
-                          label="Present"
-                          value={fmtDays(selected.breakdown.presentDays)}
-                          sub="full-day check-ins"
-                        />
-                        <Row
-                          label="Half-day"
-                          value={fmtDays(selected.breakdown.halfDays)}
-                          sub="partial attendance"
-                        />
-                        <Row
-                          label="Paid Leave"
-                          value={fmtDays(selected.breakdown.paidLeaveDays)}
-                          sub={
-                            (() => {
-                              // Filter to only paid types for the sub-line.
-                              // Best-effort: we list the names tracked by the
-                              // calculator that contributed any days.
-                              const types = Object.entries(selected.breakdown!.leaveByType ?? {})
-                                .filter(([, v]) => v > 0)
-                                .map(([k]) => k);
-                              return types.length > 0 ? types.join(', ') : 'no leaves applied';
-                            })()
-                          }
-                        />
-                        <Row
-                          label="Holidays"
-                          value={fmtDays(selected.breakdown.holidayDays)}
-                          sub="company calendar"
-                        />
-                        <Row
-                          label="Weekly Off"
-                          value={fmtDays(selected.breakdown.weeklyOffDays)}
-                          sub="paid as per policy"
-                        />
-                        <Row
-                          label="Unpaid Leave (LOP)"
-                          value={fmtDays(selected.breakdown.unpaidLeaveDays)}
-                          sub="leave without pay"
-                        />
-                        <Row
-                          label="Absent (LOP)"
-                          value={fmtDays(selected.breakdown.absentDays)}
-                          sub="no record on file"
-                        />
-                        {selected.breakdown.outOfServiceDays > 0 && (
+                  {selected.breakdown && (() => {
+                    const bd = selected.breakdown;
+                    // Calculate the daily rate to show monetary value per attendance category.
+                    // The daily rate applies to all "inside-CTC" components.
+                    const proRatedGross = selected.grossSalary - (selected.earnings?.employeeBonus ?? 0) - (selected.earnings?.overtime ?? 0);
+                    const dailyRate = bd.payableDays > 0 ? proRatedGross / bd.payableDays : 0;
+                    
+                    const val = (days: number, multiplier = 1) => {
+                      if (days === 0) return fmtDays(0);
+                      // Only paid categories get a monetary value.
+                      const rupees = Math.round(dailyRate * days * multiplier);
+                      return `${fmtDays(days)} (₹${formatINR(rupees)})`;
+                    };
+
+                    const valUnpaid = (days: number) => {
+                      if (days === 0) return fmtDays(0);
+                      return `${fmtDays(days)} (₹0)`;
+                    };
+
+                    return (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-500 mb-2">
+                          Attendance Breakdown
+                        </p>
+                        <div className="rounded-md border border-black/10 divide-y divide-black/5 bg-white">
                           <Row
-                            label="Out of Service"
-                            value={fmtDays(selected.breakdown.outOfServiceDays)}
-                            sub="before joining / after exit"
+                            label="Present"
+                            value={val(bd.presentDays)}
+                            sub="full-day check-ins"
                           />
-                        )}
+                          <Row
+                            label="Half-day"
+                            value={val(bd.halfDays, 0.5)}
+                            sub="partial attendance"
+                          />
+                          <Row
+                            label="Paid Leave"
+                            value={val(bd.paidLeaveDays)}
+                            sub={
+                              (() => {
+                                // Filter to only paid types for the sub-line.
+                                // Best-effort: we list the names tracked by the
+                                // calculator that contributed any days.
+                                const types = Object.entries(bd.leaveByType ?? {})
+                                  .filter(([, v]) => v > 0)
+                                  .map(([k]) => k);
+                                return types.length > 0 ? types.join(', ') : 'no leaves applied';
+                              })()
+                            }
+                          />
+                          <Row
+                            label="Holidays"
+                            value={val(bd.holidayDays)}
+                            sub="company calendar"
+                          />
+                          <Row
+                            label="Weekly Off"
+                            value={val(bd.weeklyOffDays)}
+                            sub="paid as per policy"
+                          />
+                          <Row
+                            label="Unpaid Leave (LOP)"
+                            value={valUnpaid(bd.unpaidLeaveDays)}
+                            sub="leave without pay"
+                          />
+                          <Row
+                            label="Absent (LOP)"
+                            value={valUnpaid(bd.absentDays)}
+                            sub="no record on file"
+                          />
+                          {bd.outOfServiceDays > 0 && (
+                            <Row
+                              label="Out of Service"
+                              value={valUnpaid(bd.outOfServiceDays)}
+                              sub="before joining / after exit"
+                            />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {(() => {
                     // Render only the deductions actually applied by the
