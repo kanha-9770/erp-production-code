@@ -25,6 +25,23 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react"
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { ProfileUser } from "./types"
 
 interface SalaryRecord {
@@ -96,13 +113,89 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
   const records = state.data?.records ?? []
   const noEmployee = state.data?.reason === "no-employee-record"
 
-  const summary = useMemo(() => {
-    const total = records.reduce((s, r) => s + r.netSalary, 0)
-    const totalGross = records.reduce((s, r) => s + r.grossSalary, 0)
-    const totalDeductions = records.reduce((s, r) => s + r.deductions, 0)
-    const paidCount = records.filter((r) => r.status === "paid").length
-    return { total, totalGross, totalDeductions, paidCount }
+  const years = useMemo(
+    () => Array.from(new Set(records.map((r) => r.year))).sort((a, b) => b - a),
+    [records]
+  )
+
+  const latestRecord = useMemo(() => {
+    if (records.length === 0) return null;
+    return records.reduce((latest, current) => {
+      const latestVal = latest.year * 12 + latest.month;
+      const currentVal = current.year * 12 + current.month;
+      return currentVal > latestVal ? current : latest;
+    });
   }, [records])
+
+  const [selectedYear, setSelectedYear] = useState<string>("")
+  const [selectedMonth, setSelectedMonth] = useState<string>("")
+
+  // Set default to latest month
+  useEffect(() => {
+    if (latestRecord && !selectedYear && !selectedMonth) {
+      setSelectedYear(latestRecord.year.toString())
+      setSelectedMonth(latestRecord.month.toString())
+    }
+  }, [latestRecord, selectedYear, selectedMonth])
+
+  const filteredRecords = useMemo(() => {
+    let res = records
+    const y = selectedYear || latestRecord?.year.toString()
+    const m = selectedMonth || latestRecord?.month.toString()
+    
+    if (y && y !== "all") {
+      res = res.filter(r => r.year.toString() === y)
+    }
+    if (y !== "all" && m && m !== "all") {
+      res = res.filter(r => r.month.toString() === m)
+    }
+    return res
+  }, [records, selectedYear, selectedMonth, latestRecord])
+
+  const availableMonthsForYear = useMemo(() => {
+    const y = selectedYear || latestRecord?.year.toString()
+    if (!y || y === "all") return []
+    const monthsInYear = records.filter(r => r.year.toString() === y).map(r => r.month)
+    return Array.from(new Set(monthsInYear)).sort((a, b) => a - b)
+  }, [records, selectedYear, latestRecord])
+
+  const periodLabel = useMemo(() => {
+    const y = selectedYear || latestRecord?.year.toString()
+    const m = selectedMonth || latestRecord?.month.toString()
+    if (!y || y === "all") return ""
+    if (m && m !== "all") {
+      return `in ${MONTHS[Number(m) - 1]} ${y}`
+    }
+    return `in ${y}`
+  }, [selectedYear, selectedMonth, latestRecord])
+
+  const summary = useMemo(() => {
+    const total = filteredRecords.reduce((s, r) => s + r.netSalary, 0)
+    const totalGross = filteredRecords.reduce((s, r) => s + r.grossSalary, 0)
+    const totalDeductions = filteredRecords.reduce((s, r) => s + r.deductions, 0)
+    const paidCount = filteredRecords.filter((r) => r.status === "paid").length
+    const totalLoss = filteredRecords.reduce((s, r) => {
+      const allowances = r.allowances as any
+      const ot = Number(allowances?.earnings?.overtime || 0)
+      return s + Math.max(0, r.baseSalary - (r.grossSalary - ot))
+    }, 0)
+    return { total, totalGross, totalDeductions, paidCount, totalLoss }
+  }, [filteredRecords])
+
+  const chartData = useMemo(() => {
+    // Reverse so chronological order (assuming records are descending)
+    return [...filteredRecords].reverse().map((r) => {
+      const allowances = r.allowances as any
+      const ot = Number(allowances?.earnings?.overtime || 0)
+      const loss = Math.max(0, r.baseSalary - (r.grossSalary - ot))
+      return {
+        name: `${MONTHS[r.month - 1]?.substring(0, 3)} '${r.year.toString().slice(-2)}`,
+        lossAmount: loss,
+        month: r.month,
+        year: r.year,
+      }
+    })
+  }, [filteredRecords])
 
   // Currency formatter — INR is the default since the underlying ERP is
   // India-oriented. We pull symbol from organization preferences via a
@@ -176,13 +269,60 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
         fmt={fmt}
       />
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-xl font-bold tracking-tight">Salary Dashboard</h2>
+        {years.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground mr-1">Period:</span>
+            <Select 
+              value={selectedYear || latestRecord?.year.toString() || "all"} 
+              onValueChange={(val) => {
+                setSelectedYear(val)
+                setSelectedMonth("all")
+              }}
+            >
+              <SelectTrigger className="w-[110px] h-9">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                {years.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>
+                    Year {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {(selectedYear || latestRecord?.year.toString()) !== "all" && (
+              <Select 
+                value={selectedMonth || latestRecord?.month.toString() || "all"} 
+                onValueChange={setSelectedMonth}
+              >
+                <SelectTrigger className="w-[130px] h-9">
+                  <SelectValue placeholder="Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Months</SelectItem>
+                  {availableMonthsForYear.map((m) => (
+                    <SelectItem key={m} value={m.toString()}>
+                      {MONTHS[m - 1]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <StatTile
           icon={<Banknote className="h-4 w-4" />}
           label="Total paid"
           value={fmt.format(summary.total)}
           tone="success"
-          caption={`${records.length} record${records.length === 1 ? "" : "s"}`}
+          caption={`${filteredRecords.length} record${filteredRecords.length === 1 ? "" : "s"} ${periodLabel}`}
         />
         <StatTile
           icon={<TrendingUp className="h-4 w-4" />}
@@ -199,11 +339,18 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
           caption="PF, tax, other"
         />
         <StatTile
+          icon={<AlertCircle className="h-4 w-4" />}
+          label="Loss of Pay"
+          value={fmt.format(summary.totalLoss)}
+          tone="danger"
+          caption="Due to absences"
+        />
+        <StatTile
           icon={<CheckCircle2 className="h-4 w-4" />}
           label="Slips paid"
-          value={`${summary.paidCount} / ${records.length}`}
+          value={`${summary.paidCount} / ${filteredRecords.length}`}
           tone={
-            summary.paidCount === records.length && records.length > 0
+            summary.paidCount === filteredRecords.length && filteredRecords.length > 0
               ? "success"
               : "info"
           }
@@ -212,25 +359,27 @@ export default function SalaryTab({ user }: { user: ProfileUser }) {
       </div>
 
       <Card>
-        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
+        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0 border-b">
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               <ReceiptText className="h-4 w-4 text-primary" />
               Salary records
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Monthly payroll slips from your organization.
+              {(selectedYear || latestRecord?.year.toString()) === "all"
+                ? "All monthly payroll slips."
+                : `Monthly payroll slip${filteredRecords.length === 1 ? "" : "s"} ${periodLabel}.`}
             </p>
           </div>
           <Badge
             variant="outline"
-            className="text-[10px] tabular-nums shrink-0 font-mono"
+            className="text-[10px] tabular-nums shrink-0 font-mono bg-muted"
           >
-            {records.length}
+            {filteredRecords.length}
           </Badge>
         </CardHeader>
         <CardContent className="p-0">
-          <SalaryTable records={records} fmt={fmt} />
+          <SalaryTable records={filteredRecords} fmt={fmt} />
         </CardContent>
       </Card>
     </div>
@@ -250,7 +399,7 @@ function CompensationSnapshot({
 }) {
   if (!employee) return null
   return (
-    <Card className="border-border/70 shadow-sm overflow-hidden">
+    <Card className="border-border/70 shadow-sm overflow-hidden bg-card">
       <div
         aria-hidden
         className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500"
@@ -261,7 +410,7 @@ function CompensationSnapshot({
             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Compensation on file
             </div>
-            <div className="text-base sm:text-lg font-semibold tracking-tight">
+            <div className="text-base sm:text-lg font-semibold tracking-tight text-foreground">
               {employee.name}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -273,7 +422,7 @@ function CompensationSnapshot({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Total salary
               </div>
-              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5">
+              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground">
                 {fmt.format(employee.totalSalary)}
               </div>
             </div>
@@ -281,7 +430,7 @@ function CompensationSnapshot({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Given salary
               </div>
-              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5">
+              <div className="text-lg font-bold tabular-nums tracking-tight mt-0.5 text-foreground">
                 {fmt.format(employee.givenSalary)}
               </div>
             </div>
@@ -326,15 +475,15 @@ function StatTile({
   caption: string
 }) {
   return (
-    <Card className="border-border/70 shadow-sm">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-3">
+    <Card className="border-border/50 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+      <CardContent className="p-5 relative z-10">
+        <div className="flex items-center justify-between mb-4">
           <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             {label}
           </span>
           <span
             className={cn(
-              "h-8 w-8 rounded-lg flex items-center justify-center ring-1",
+              "h-9 w-9 rounded-xl flex items-center justify-center ring-1 shadow-sm",
               TONE_RING[tone],
             )}
             aria-hidden
@@ -344,13 +493,13 @@ function StatTile({
         </div>
         <div
           className={cn(
-            "text-xl sm:text-2xl font-bold tabular-nums tracking-tight leading-none",
+            "text-2xl sm:text-3xl font-bold tabular-nums tracking-tight leading-none mb-1",
             TONE_TEXT[tone],
           )}
         >
           {value}
         </div>
-        <div className="text-[11px] text-muted-foreground truncate mt-2">
+        <div className="text-xs text-muted-foreground truncate">
           {caption}
         </div>
       </CardContent>
