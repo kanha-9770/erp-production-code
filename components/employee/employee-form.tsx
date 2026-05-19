@@ -44,6 +44,52 @@ import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
  * twice still returns the same form. We hit it lazily (on Customize click)
  * rather than on mount so a user who never customizes incurs zero cost.
  */
+// ── Auto-fill helpers ──────────────────────────────────────────────────────
+// Both are pure functions kept at module scope so the form's useEffects can
+// depend on them without re-creating per render.
+
+/** Parse `HH:mm` → minutes-since-midnight. Returns null for any malformed
+ *  input so the caller can decide whether to skip the derivation. */
+function parseHHmmStrict(s: string): number | null {
+  if (!s) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/** Hours between two HH:mm timestamps; overnight wrap is treated as +24h so
+ *  a 22:00 → 06:00 shift correctly reads as 8h. Rounded to 2 decimals. */
+export function diffWorkingHours(
+  inTime: string,
+  outTime: string,
+): number | null {
+  const inMin = parseHHmmStrict(inTime);
+  const outMin = parseHHmmStrict(outTime);
+  if (inMin == null || outMin == null) return null;
+  let diff = outMin - inMin;
+  if (diff < 0) diff += 24 * 60;
+  return Math.round((diff / 60) * 100) / 100;
+}
+
+/** Increment-month policy: joins on day 1–9 → same month, day 10+ → next
+ *  month (Dec wraps to Jan). Returns the 1-based month number or null when
+ *  the date is malformed / missing. */
+export function incrementMonthFromJoining(yyyymmdd: string): number | null {
+  if (!yyyymmdd) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(yyyymmdd);
+  if (!m) return null;
+  const monthOneBased = Number(m[2]);
+  const day = Number(m[3]);
+  if (monthOneBased < 1 || monthOneBased > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  if (day <= 9) return monthOneBased;
+  return monthOneBased === 12 ? 1 : monthOneBased + 1;
+}
+
 async function ensureEmployeeBuilderHref(): Promise<{ href: string; created: boolean }> {
   const res = await fetch("/api/forms/ensure-employee-form", {
     method: "POST",
@@ -756,7 +802,59 @@ export function EmployeeForm({
 
   useEffect(() => {
     if (initial) setValues(fromEmployee(initial));
+    // Reset the auto-derive refs so the new initial values are captured
+    // on the next pass instead of getting overwritten by a stale source.
+    lastShiftSourceRef.current = null;
+    lastJoinSourceRef.current = null;
   }, [initial]);
+
+  // ── Auto-derived fields ───────────────────────────────────────────────
+  // Two HR rules wired as side effects (not on every render):
+  //   1. Total Working Hours = outTime - inTime (handles overnight wrap).
+  //   2. Increment Month = joinMonth if joined on day 1–9, else next month.
+  //
+  // Both use a ref-based "skip first run" guard so a previously-saved
+  // override on an existing employee isn't clobbered the moment the form
+  // mounts. Only ACTUAL changes to the source field trigger a recompute.
+  const lastShiftSourceRef = useRef<{ inTime: string; outTime: string } | null>(null);
+  const lastJoinSourceRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const inTime = values.inTime;
+    const outTime = values.outTime;
+    if (lastShiftSourceRef.current === null) {
+      lastShiftSourceRef.current = { inTime, outTime };
+      return;
+    }
+    if (
+      lastShiftSourceRef.current.inTime === inTime &&
+      lastShiftSourceRef.current.outTime === outTime
+    ) {
+      return;
+    }
+    lastShiftSourceRef.current = { inTime, outTime };
+    if (!inTime || !outTime) return;
+    const hours = diffWorkingHours(inTime, outTime);
+    if (hours == null) return;
+    set("totalWorkingHours", String(hours));
+    // `set` is stable enough — it closes over setValues; we intentionally
+    // exclude it from deps to avoid the lint dance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.inTime, values.outTime]);
+
+  useEffect(() => {
+    const join = values.dateOfJoining;
+    if (lastJoinSourceRef.current === null) {
+      lastJoinSourceRef.current = join;
+      return;
+    }
+    if (lastJoinSourceRef.current === join) return;
+    lastJoinSourceRef.current = join;
+    const month = incrementMonthFromJoining(join);
+    if (month == null) return;
+    set("incrementMonth", String(month));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.dateOfJoining]);
 
   const openCustomizeBuilder = async () => {
     setOpeningBuilder(true);
