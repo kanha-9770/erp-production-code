@@ -12,6 +12,7 @@ import {
   serializeInitiative,
   INITIATIVE_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { nextDisplayId } from '@/lib/hr/engagement-display-id';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,7 @@ interface CreateBody {
   endDate?: string;
   category?: string;
   status?: string;
+  referenceImage?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -71,16 +73,19 @@ export async function POST(request: NextRequest) {
 
   const status = body.status && ALLOWED_STATUS.has(body.status) ? body.status : 'planning';
 
+  const displayId = await nextDisplayId('Initiative', authUser.organizationId);
   const created = await (prisma as any).engagementInitiative.create({
     data: {
       organizationId: authUser.organizationId,
       userId: authUser.id,
+      displayId,
       title: body.title.trim().slice(0, 200),
       description: body.description.trim().slice(0, 5000),
       startDate: body.startDate,
       endDate: body.endDate,
       category: body.category.trim().slice(0, 80),
       status,
+      referenceImage: (body.referenceImage ?? '').toString().slice(0, 6_000_000) || null,
     },
     include: INITIATIVE_INCLUDE,
   });

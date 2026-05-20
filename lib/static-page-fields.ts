@@ -275,6 +275,32 @@ const LEAVE_REQUEST_FIELDS: StaticField[] = [
   { coreKey: "originalEndDate", label: "Original End Date", type: "date" },
 ];
 
+// Attendance — fields exposed to workflow rules on the Attendance module.
+// Triggered by /api/attendance/punch and /api/attendance/overtime. The
+// overtimeOptedIn flag lets admins build a rule that notifies HR / Admin
+// whenever an employee toggles overtime on for the day.
+const ATTENDANCE_FIELDS: StaticField[] = [
+  { coreKey: "userId", label: "Employee User ID", type: "text" },
+  { coreKey: "employeeName", label: "Employee Name", type: "text" },
+  { coreKey: "department", label: "Department", type: "text" },
+  { coreKey: "designation", label: "Designation", type: "text" },
+  { coreKey: "date", label: "Attendance Date", type: "date" },
+  { coreKey: "checkedIn", label: "Checked In", type: "checkbox" },
+  { coreKey: "checkedOut", label: "Checked Out", type: "checkbox" },
+  { coreKey: "checkInAt", label: "Check-in Time", type: "date" },
+  { coreKey: "checkOutAt", label: "Check-out Time", type: "date" },
+  { coreKey: "lateMinutes", label: "Late Minutes", type: "number" },
+  { coreKey: "earlyOutMinutes", label: "Early-out Minutes", type: "number" },
+  { coreKey: "workedMinutes", label: "Worked Minutes", type: "number" },
+  { coreKey: "overtimeMinutes", label: "Overtime Minutes", type: "number" },
+  { coreKey: "overtimeOptedIn", label: "Overtime Opted In", type: "checkbox" },
+  { coreKey: "overtimeStartedAt", label: "Overtime Started At", type: "date" },
+  { coreKey: "isAutoCheckedOut", label: "Auto-Checked Out", type: "checkbox" },
+  { coreKey: "isHoliday", label: "Is Holiday", type: "checkbox" },
+  { coreKey: "isWeeklyOff", label: "Is Weekly Off", type: "checkbox" },
+  { coreKey: "isOnLeave", label: "Is On Leave", type: "checkbox" },
+];
+
 const PAYROLL_RECORD_FIELDS: StaticField[] = [
   { coreKey: "employeeId", label: "Employee ID", type: "text" },
   { coreKey: "employeeName", label: "Employee Name", type: "text" },
@@ -389,6 +415,19 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:leave-request",
     formName: "Leave Request (static)",
     fields: LEAVE_REQUEST_FIELDS,
+  },
+  {
+    moduleName: "Attendance",
+    aliases: [
+      "Attendances",
+      "My Attendance",
+      "Team Attendance",
+      "Attendance Records",
+      "Attendance Record",
+    ],
+    formId: "static:attendance",
+    formName: "Attendance (static)",
+    fields: ATTENDANCE_FIELDS,
   },
 ];
 

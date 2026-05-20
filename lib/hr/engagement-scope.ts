@@ -1,61 +1,54 @@
 /**
  * Engagement scope helper — produces the Prisma `where` fragment every
- * engagement read query needs to enforce team isolation.
- *
- * Rules (also enforced client-side via useEngagementVisibility):
- *   - Admin or HR     → see ALL records in the org.
- *   - Team member     → see records whose author currently belongs to the
- *                       same engagement team.
- *   - Unassigned user → see only the records they themselves authored.
- *
- * Every per-module API route calls `buildScopedWhere(authUser)` and spreads
- * the result into its own `where`. The caller's own additional filters
- * (search text, status chips, etc.) layer on top with AND semantics.
+ * engagement read query needs.
  */
 
-import { canSeeAllEngagementData, getUserTeamId } from './engagement-team-service';
+import { prisma } from '@/lib/prisma';
+import { isUserAdmin } from '@/lib/api-helpers';
 
 export interface ScopedWhere {
   organizationId: string;
-  // Either an OR list (team membership) or a direct userId filter (own-only).
-  // Both can also be absent when the caller sees everything in the org.
   userId?: string | { in: string[] };
-  user?: { employee: { engagementTeamId: string } };
+  user?: { employee: { engagementTeamId: string | null } };
 }
 
 /**
- * Returns the Prisma `where` slice for an engagement-table query. Caller
- * must spread, never directly merge — Prisma's TypeScript will flag any
- * conflict at compile time.
+ * Returns the Prisma `where` slice for an engagement-table query.
  *
  * @param userId           the requesting user's id
- * @param organizationId   the requesting user's org (required for safety)
+ * @param organizationId   the requesting user's org
  */
 export async function buildScopedWhere(
   userId: string,
   organizationId: string,
 ): Promise<ScopedWhere> {
   if (!organizationId) {
-    // Defence-in-depth — every route already gates on this, but if a future
-    // caller forgets we still won't leak across orgs.
     return { organizationId: '__none__', userId: '__none__' };
   }
 
-  const seeAll = await canSeeAllEngagementData(userId, organizationId);
-  if (seeAll) {
+  const userRecord = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { employee: { select: { engagementTeamId: true, department: true } } },
+  });
+
+  const dept = userRecord?.employee?.department?.toLowerCase() || '';
+  const isHR = dept.includes('hr') || dept.includes('human resource');
+  const isAdmin = await isUserAdmin(userId, organizationId);
+
+  // Admins and HR see all submissions across the organisation
+  if (isAdmin || isHR) {
     return { organizationId };
   }
 
-  const teamId = await getUserTeamId(userId);
+  // Regular users see submissions from their own team
+  const teamId = userRecord?.employee?.engagementTeamId;
   if (teamId) {
-    // Join through user.employee.engagementTeamId. Prisma understands the
-    // nested filter and emits the right join.
     return {
       organizationId,
       user: { employee: { engagementTeamId: teamId } },
     };
   }
 
-  // Unassigned → only own records.
+  // Fallback: if not on a team, they only see their own
   return { organizationId, userId };
 }

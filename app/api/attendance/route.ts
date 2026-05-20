@@ -72,12 +72,11 @@ export async function POST(request: NextRequest) {
     }
 
     const today = getToday();
-    const currentTime = new Date().toLocaleTimeString('en-US', { 
-      hour12: true, 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit' 
-    });
+    // HH:mm (24-hour, server-local). Matches `formatHHmm()` used by the
+    // new punch endpoint so both writers store the same shape of string
+    // in Attendance.checkInTime / checkOutTime.
+    const nowLocal = new Date();
+    const currentTime = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`;
 
     let record;
 

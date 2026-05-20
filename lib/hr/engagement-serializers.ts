@@ -40,6 +40,9 @@ function employeeIdOf(r: any): string {
 
 export interface KaizenWire {
   id: string;
+  // Human-readable identifier (e.g. "NK-001"). Falls back to the cuid
+  // for legacy rows that pre-date the displayId column.
+  displayId: string;
   title: string;
   description: string;
   currentState: string;
@@ -47,16 +50,27 @@ export interface KaizenWire {
   benefits: string;
   status: 'idea' | 'approved' | 'in-implementation' | 'implemented';
   submissionDate: string;
+  endDate: string | null;
   votes: number;
   hasVoted: boolean;
   employeeId: string;
   userId: string;
+  // `referenceImage` is the legacy single-image field; new submissions
+  // store `beforeMedia`/`afterMedia` independently and fall back to
+  // `referenceImage` when those are null.
+  referenceImage: string | null;
+  beforeMedia: string | null;
+  afterMedia: string | null;
 }
 
 export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
   const voted: string[] = Array.isArray(r.votedByUserIds) ? r.votedByUserIds : [];
+  // Older rows only have `referenceImage`. Promote it into `beforeMedia`
+  // so callers can render media uniformly without knowing the history.
+  const beforeMedia = r.beforeMedia ?? r.referenceImage ?? null;
   return {
     id: r.id,
+    displayId: r.displayId ?? r.id,
     title: r.title,
     description: r.description ?? '',
     currentState: r.currentState ?? '',
@@ -64,10 +78,14 @@ export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
     benefits: r.benefits ?? '',
     status: r.status as KaizenWire['status'],
     submissionDate: ymdFromDate(r.createdAt),
+    endDate: r.endDate ?? null,
     votes: r.votes ?? 0,
     hasVoted: voted.includes(viewerUserId),
     employeeId: employeeIdOf(r),
     userId: r.userId,
+    referenceImage: r.referenceImage ?? null,
+    beforeMedia,
+    afterMedia: r.afterMedia ?? null,
   };
 }
 
@@ -77,27 +95,33 @@ export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
 
 export interface SuggestionWire {
   id: string;
+  displayId: string;
   title: string;
   suggestion: string;
   category: string;
   status: 'submitted' | 'under-review' | 'accepted' | 'rejected' | 'implemented';
   submissionDate: string;
+  endDate: string | null;
   feedback: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeSuggestion(r: any): SuggestionWire {
   return {
     id: r.id,
+    displayId: r.displayId ?? r.id,
     title: r.title,
     suggestion: r.suggestion ?? '',
     category: r.category ?? '',
     status: r.status as SuggestionWire['status'],
     submissionDate: ymdFromDate(r.createdAt),
+    endDate: r.endDate ?? null,
     feedback: r.feedback ?? '',
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -107,29 +131,35 @@ export function serializeSuggestion(r: any): SuggestionWire {
 
 export interface ProblemWire {
   id: string;
+  displayId: string;
   title: string;
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   category: string;
   registrationDate: string;
+  endDate: string | null;
   status: 'open' | 'in-review' | 'resolved' | 'closed';
   proposedSolution: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeProblem(r: any): ProblemWire {
   return {
     id: r.id,
+    displayId: r.displayId ?? r.id,
     title: r.title,
     description: r.description ?? '',
     severity: r.severity as ProblemWire['severity'],
     category: r.category ?? '',
     registrationDate: ymdFromDate(r.createdAt),
+    endDate: r.endDate ?? null,
     status: r.status as ProblemWire['status'],
     proposedSolution: r.proposedSolution ?? '',
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -139,6 +169,7 @@ export function serializeProblem(r: any): ProblemWire {
 
 export interface InitiativeWire {
   id: string;
+  displayId: string;
   title: string;
   description: string;
   startDate: string;
@@ -148,11 +179,13 @@ export interface InitiativeWire {
   createdAt: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeInitiative(r: any): InitiativeWire {
   return {
     id: r.id,
+    displayId: r.displayId ?? r.id,
     title: r.title,
     description: r.description ?? '',
     startDate: r.startDate ?? '',
@@ -162,6 +195,7 @@ export function serializeInitiative(r: any): InitiativeWire {
     createdAt: isoOrEmpty(r.createdAt),
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -171,26 +205,32 @@ export function serializeInitiative(r: any): InitiativeWire {
 
 export interface TargetWire {
   id: string;
+  displayId: string;
   title: string;
   description: string;
   targetDate: string;
+  endDate: string | null;
   status: 'not-started' | 'in-progress' | 'completed';
   progress: number;
   createdAt: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeTarget(r: any): TargetWire {
   return {
     id: r.id,
+    displayId: r.displayId ?? r.id,
     title: r.title,
     description: r.description ?? '',
     targetDate: r.targetDate ?? '',
+    endDate: r.endDate ?? null,
     status: r.status as TargetWire['status'],
     progress: typeof r.progress === 'number' ? r.progress : 0,
     createdAt: isoOrEmpty(r.createdAt),
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }

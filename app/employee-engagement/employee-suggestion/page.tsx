@@ -444,6 +444,13 @@ function SuggestionPreview({ id, suggestions, employees, isAdmin, onEdit, onDele
         <p className="text-sm leading-relaxed">{s.suggestion}</p>
       </Card>
 
+      {s.referenceImage && (
+        <Card className="p-4 space-y-3 border-l-4 border-l-purple-500 bg-purple-50/50">
+          <h3 className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider">Reference Media</h3>
+          <p className="text-sm text-purple-900 truncate">{s.referenceImage}</p>
+        </Card>
+      )}
+
       {s.feedback && (
         <Card className="p-4 space-y-3 border-l-4 border-l-blue-500 bg-blue-50/50">
           <h3 className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider">Feedback</h3>

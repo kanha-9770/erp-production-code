@@ -41,6 +41,15 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  COMPANY_STATUS_OPTIONS,
+  BENEFIT_OPTIONS,
+  STANDARD_UPDATED_OPTIONS,
+  getStatusMeta,
+  encodeBenefits,
+  decodeBenefits,
+} from "@/lib/constants/engagement";
 
 interface Kaizen {
   id: string;
@@ -49,19 +58,16 @@ interface Kaizen {
   currentState: string;
   proposedState: string;
   benefits: string;
-  status: 'idea' | 'approved' | 'in-implementation' | 'implemented';
+  // Status uses the company's 5-state workflow from the status sheet, plus
+  // legacy values for rows created before that palette was introduced.
+  status: string;
   submissionDate: string;
   votes: number;
   hasVoted: boolean;
   employeeId: string;
 }
 
-const STATUS_OPTIONS = [
-  { value: "idea", label: "Initial Idea" },
-  { value: "approved", label: "Approved" },
-  { value: "in-implementation", label: "In Implementation" },
-  { value: "implemented", label: "Implemented" },
-];
+const STATUS_OPTIONS = COMPANY_STATUS_OPTIONS;
 
 const KAIZEN_AREA_FILTER_OPTIONS = [
   { value: "safety", label: "Safety" },
@@ -210,6 +216,25 @@ export default function KaizenPage() {
     };
     const plain = (k: Kaizen, key: string) => <span className="text-xs truncate">{text(k, key)}</span>;
 
+    // Media columns render a small image thumbnail when the stored value
+    // is a URL or `data:` URL, instead of dumping the long string.
+    const mediaCell = (k: Kaizen, key: string) => {
+      const v = (k as any)[key] as string | null | undefined;
+      if (!v) return <span className="text-xs text-muted-foreground">—</span>;
+      const isImg = v.startsWith("data:image/") || v.startsWith("http://") || v.startsWith("https://") || v.startsWith("/");
+      if (!isImg) {
+        return <span className="text-xs truncate font-mono" title={v}>{v.length > 24 ? v.slice(0, 24) + "…" : v}</span>;
+      }
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={v}
+          alt={key}
+          className="h-10 w-16 rounded border bg-white object-cover"
+        />
+      );
+    };
+
     return [
       {
         id: "title",
@@ -226,16 +251,15 @@ export default function KaizenPage() {
       {
         id: "status",
         header: "Status",
-        width: 150,
+        width: 200,
         group: "Overview",
         cell: (k) => {
-          const colors: Record<string, string> = {
-            idea: "bg-gray-100 text-gray-800",
-            approved: "bg-blue-100 text-blue-800",
-            "in-implementation": "bg-yellow-100 text-yellow-800",
-            implemented: "bg-green-100 text-green-800",
-          };
-          return <Badge variant="outline" className={`${colors[k.status]} text-[10px]`}>{k.status.replace('-', ' ').toUpperCase()}</Badge>;
+          const meta = getStatusMeta(k.status);
+          return (
+            <Badge variant="outline" className={`${meta.className} text-[10px] uppercase`}>
+              {meta.label}
+            </Badge>
+          );
         },
       },
       {
@@ -271,8 +295,8 @@ export default function KaizenPage() {
 
       // ── Section 2: Problem & Analysis ─────────────────────────────────
       { id: "description", header: "Problem", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.description || "—"}</span> },
-      { id: "beforeMedia", header: "Before Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => plain(k, "beforeMedia") },
-      { id: "afterMedia", header: "After Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => plain(k, "afterMedia") },
+      { id: "beforeMedia", header: "Before Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "beforeMedia") },
+      { id: "afterMedia", header: "After Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "afterMedia") },
       { id: "currentState", header: "Why Analysis", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.currentState || "—"}</span> },
 
       // ── Section 3: Result & Benefits ──────────────────────────────────
@@ -412,6 +436,7 @@ export default function KaizenPage() {
           </SheetHeader>
           <KaizenForm
             currentEmployee={currentEmployee}
+            isAdmin={isAdmin}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -445,6 +470,7 @@ export default function KaizenPage() {
             <KaizenForm
               initial={kaizens.find(k => k.id === editingId)}
               currentEmployee={currentEmployee}
+              isAdmin={isAdmin}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -474,9 +500,10 @@ export default function KaizenPage() {
 function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
+  const meta = getStatusMeta(k.status);
   return (
     <div className="flex items-center gap-2">
-      <Badge variant="outline" className="text-[10px] uppercase">{k.status}</Badge>
+      <Badge variant="outline" className={`text-[10px] uppercase ${meta.className}`}>{meta.label}</Badge>
       <span className="font-semibold text-sm truncate uppercase">{k.title}</span>
     </div>
   );
@@ -485,16 +512,62 @@ function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
 function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
+  const decoded = decodeBenefits(k.benefits);
+  const benefitLabels = decoded.checked
+    .map((v) => BENEFIT_OPTIONS.find((o) => o.value === v)?.label)
+    .filter(Boolean) as string[];
+  const standardLabels = decoded.standards
+    .map((v) => STANDARD_UPDATED_OPTIONS.find((o) => o.value === v)?.label)
+    .filter(Boolean) as string[];
+  const statusMeta = getStatusMeta(k.status);
+
+  // Media slots — laid out in the same order as the Kaizen form's
+  // "Problem & Analysis" section (Before Media → After Media). Older
+  // rows only have `referenceImage` populated, so we promote it into
+  // the Before slot when `beforeMedia` is missing.
+  const refImg = (k as any).referenceImage as string | null | undefined;
+  const beforeMedia = ((k as any).beforeMedia ?? refImg) as string | null | undefined;
+  const afterMedia = (k as any).afterMedia as string | null | undefined;
+  const isImg = (s: string | null | undefined): s is string =>
+    !!s && (
+      s.startsWith("data:image/") ||
+      s.startsWith("http://") ||
+      s.startsWith("https://") ||
+      s.startsWith("/")
+    );
+  const mediaSlots = [
+    { label: "Before Media", value: beforeMedia ?? null },
+    { label: "After Media", value: afterMedia ?? null },
+  ];
+  const hasAnyMedia = mediaSlots.some((m) => !!m.value);
+
+  // Surface the full Kaizen record. Anything we don't render explicitly
+  // above falls into the "All Submitted Fields" block at the bottom so the
+  // admin always sees the complete row.
+  const KNOWN_KEYS = new Set([
+    "id", "title", "description", "currentState", "proposedState",
+    "benefits", "status", "submissionDate", "votes", "hasVoted",
+    "employeeId", "userId", "referenceImage", "beforeMedia", "afterMedia",
+  ]);
+  const extraEntries = Object.entries(k as Record<string, unknown>).filter(
+    ([key]) => !KNOWN_KEYS.has(key),
+  );
 
   return (
     <div className="p-5 space-y-6">
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-bold uppercase">{k.title}</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant={k.hasVoted ? 'default' : 'outline'} size="sm" className="h-7 gap-1.5" onClick={() => onVote(k.id)}>
               <ThumbsUp className="h-3.5 w-3.5" /> {k.votes}
             </Button>
+            <Badge variant="outline" className={`text-[10px] uppercase ${statusMeta.className}`}>
+              {statusMeta.label}
+            </Badge>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              {k.id.substring(0, 8).toUpperCase()}
+            </span>
           </div>
         </div>
         <div className="flex gap-2">
@@ -507,28 +580,148 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVo
 
       <Card className="p-4 space-y-3">
         <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Description</h3>
-        <p className="text-sm leading-relaxed">{k.description}</p>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">{k.description || "—"}</p>
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="p-4 space-y-3 bg-amber-50/30 border-amber-100">
           <h3 className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1.5"><Layout className="h-3 w-3" /> Current State</h3>
-          <p className="text-xs">{k.currentState}</p>
+          <p className="text-xs whitespace-pre-wrap">{k.currentState || "—"}</p>
         </Card>
         <Card className="p-4 space-y-3 bg-blue-50/30 border-blue-100">
           <h3 className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider flex items-center gap-1.5"><Lightbulb className="h-3 w-3" /> Proposed State</h3>
-          <p className="text-xs">{k.proposedState}</p>
+          <p className="text-xs whitespace-pre-wrap">{k.proposedState || "—"}</p>
         </Card>
       </div>
 
+      {hasAnyMedia && (
+        <Card className="p-4 space-y-3 border-l-4 border-l-purple-500 bg-purple-50/50">
+          <h3 className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
+            <Layout className="h-3 w-3" /> Submitted Media
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {mediaSlots.map((m) => (
+              <div key={m.label} className="rounded-md border bg-white p-2 space-y-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {m.label}
+                </div>
+                {!m.value ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground italic px-1 py-3">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    Not provided
+                  </div>
+                ) : isImg(m.value) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.value}
+                    alt={`${m.label} for ${k.title}`}
+                    className="max-h-[320px] w-full rounded border bg-white object-contain"
+                  />
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-purple-900">
+                    <Paperclip className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span className="font-mono text-xs truncate" title={m.value}>{m.value}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-4 space-y-3 border-l-4 border-l-green-500 bg-green-50/50">
         <h3 className="text-[11px] font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1.5"><Zap className="h-3 w-3" /> Benefits</h3>
-        <p className="text-sm">{k.benefits}</p>
+        {benefitLabels.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {benefitLabels.map((b) => (
+              <Badge key={b} variant="outline" className="bg-white text-[10px]">{b}</Badge>
+            ))}
+          </div>
+        )}
+        {decoded.freeText && <p className="text-sm whitespace-pre-wrap">{decoded.freeText}</p>}
+        {benefitLabels.length === 0 && !decoded.freeText && (
+          <p className="text-sm text-muted-foreground italic">No benefits recorded.</p>
+        )}
       </Card>
 
-      <div className="grid grid-cols-2 gap-4 text-sm pt-4 border-t">
-        <Fact label="Submitted On" value={new Date(k.submissionDate).toLocaleDateString()} icon={Calendar} />
-        <Fact label="Status" value={k.status.toUpperCase()} icon={CheckCircle2} />
+      {standardLabels.length > 0 && (
+        <Card className="p-4 space-y-2">
+          <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Standard Updated</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {standardLabels.map((s) => (
+              <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* All submitted fields — every key from the Kaizen record laid out
+          as label / value pairs. Long-form fields render full-width; ids
+          and small scalars share two columns. Anything not covered by the
+          structured sections above still shows here so the admin sees the
+          complete record. */}
+      <Card className="p-4 space-y-3">
+        <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <FileText className="h-3 w-3" /> All Submitted Fields
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 text-xs">
+          <FieldRow label="Submission ID" value={k.id} mono />
+          <FieldRow label="Status" value={statusMeta.label} />
+          <FieldRow label="Submitted On" value={new Date(k.submissionDate).toLocaleString()} />
+          <FieldRow label="Votes" value={String(k.votes)} />
+          <FieldRow label="Employee ID" value={k.employeeId || "—"} mono />
+          <FieldRow label="User ID" value={(k as any).userId || "—"} mono />
+          <FieldRow label="Has Voted (by you)" value={k.hasVoted ? "Yes" : "No"} />
+          <FieldRow label="Before Media" value={summarizeMedia(beforeMedia)} mono />
+          <FieldRow label="After Media" value={summarizeMedia(afterMedia)} mono />
+          <FieldRow label="Reference Image (legacy)" value={summarizeMedia(refImg)} mono />
+          <FieldRow label="Raw Benefits" value={k.benefits || "—"} wide />
+          {extraEntries.map(([key, value]) => (
+            <FieldRow
+              key={key}
+              label={key}
+              value={value === null || value === undefined
+                ? "—"
+                : typeof value === "object"
+                  ? JSON.stringify(value)
+                  : String(value)}
+              wide={typeof value === "string" && value.length > 40}
+            />
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Compact label for media stored as data URLs / URLs — the full payload
+// can be hundreds of KB and isn't useful in the field-dump section
+// (the actual image is rendered above in "Submitted Media").
+function summarizeMedia(value: string | null | undefined): string {
+  if (!value) return "—";
+  if (value.startsWith("data:image/")) {
+    const kb = Math.round((value.length * 3) / 4 / 1024);
+    return `Image attached (~${kb} KB)`;
+  }
+  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/")) {
+    return value;
+  }
+  return value;
+}
+
+function FieldRow({ label, value, mono = false, wide = false }: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  wide?: boolean;
+}) {
+  return (
+    <div className={wide ? "md:col-span-2" : ""}>
+      <div className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+        {label}
+      </div>
+      <div className={`text-xs break-words ${mono ? "font-mono" : ""}`} title={value}>
+        {value}
       </div>
     </div>
   );
@@ -557,12 +750,19 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
+function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSubmit }: {
   initial?: Kaizen,
   currentEmployee?: any,
+  // Points-related fields ("Employee Engagement Points", final "Status")
+  // are filled by Admin / HR. Regular employees see them but as read-only.
+  isAdmin?: boolean,
   onCancel: () => void,
   onSubmit: (data: any) => void
 }) {
+  // Decode the `benefits` column back into checkbox state + free-text on
+  // edit so the form round-trips cleanly.
+  const decodedInitial = decodeBenefits(initial?.benefits);
+
   const [formData, setFormData] = useState({
     // Section 1: Kaizen Info
     employeeId: currentEmployee?.id || "",
@@ -576,18 +776,41 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
     theme: initial?.title || "",
     // Section 2: Problem & Analysis
     problem: initial?.description || "",
-    beforeMedia: "",
-    afterMedia: "",
+    // Pre-fill media from the existing record so editing preserves it.
+    // `referenceImage` is the legacy single-slot column; promote it into
+    // beforeMedia when the new field isn't populated.
+    beforeMedia: (initial as any)?.beforeMedia || (initial as any)?.referenceImage || "",
+    afterMedia: (initial as any)?.afterMedia || "",
     whyAnalysis: initial?.currentState || "",
     // Section 3: Result & Benefits
     result: initial?.proposedState || "",
-    benefits: initial?.benefits || "",
+    benefits: decodedInitial.freeText,
+    benefitChecks: decodedInitial.checked,
+    standardsUpdated: decodedInitial.standards,
     employeeContributor: "",
     signature: "",
     selfie: "",
     employeeEngagementPoints: 0,
-    status: initial?.status || "idea",
+    status: initial?.status || "trial-phase",
   });
+
+  const toggleBenefit = (value: string) => {
+    setFormData((f) => ({
+      ...f,
+      benefitChecks: f.benefitChecks.includes(value)
+        ? f.benefitChecks.filter((v) => v !== value)
+        : [...f.benefitChecks, value],
+    }));
+  };
+
+  const toggleStandard = (value: string) => {
+    setFormData((f) => ({
+      ...f,
+      standardsUpdated: f.standardsUpdated.includes(value)
+        ? f.standardsUpdated.filter((v) => v !== value)
+        : [...f.standardsUpdated, value],
+    }));
+  };
 
   const [touched, setTouched] = useState(false);
 
@@ -614,7 +837,10 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
       description: formData.problem,
       currentState: formData.whyAnalysis,
       proposedState: formData.result,
-      benefits: formData.benefits,
+      // The `benefits` column carries the checkbox selections, the standards-
+      // updated selections, and the free-text addendum. See encodeBenefits
+      // for the wire format — decoded again by decodeBenefits on edit.
+      benefits: encodeBenefits(formData.benefitChecks, formData.benefits, formData.standardsUpdated),
       status: formData.status,
       employeeId: formData.employeeId,
       firstName: formData.firstName,
@@ -793,14 +1019,64 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Benefits">
-              <Textarea
-                value={formData.benefits}
-                onChange={e => setFormData({ ...formData, benefits: e.target.value })}
-                placeholder="Benefits delivered"
-                className="min-h-[100px]"
-              />
-            </FieldWrapper>
+            <div className="md:col-span-2">
+              <FieldWrapper label="Standard Updated" hint="Mention reference no. of document updated">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-md border p-3 bg-slate-50/50">
+                  {STANDARD_UPDATED_OPTIONS.map((opt) => {
+                    const checked = formData.standardsUpdated.includes(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors ${
+                          checked ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-100"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleStandard(opt.value)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </FieldWrapper>
+            </div>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Benefits (please tick)">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 rounded-md border p-3 bg-slate-50/50">
+                  {BENEFIT_OPTIONS.map((opt) => {
+                    const checked = formData.benefitChecks.includes(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors ${
+                          checked ? "bg-green-50 ring-1 ring-green-200" : "hover:bg-slate-100"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleBenefit(opt.value)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </FieldWrapper>
+            </div>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Benefits — Additional Notes" hint="Quantify if possible (e.g. 30% time savings)">
+                <Textarea
+                  value={formData.benefits}
+                  onChange={e => setFormData({ ...formData, benefits: e.target.value })}
+                  placeholder="Describe the benefit delivered…"
+                  className="min-h-[80px]"
+                />
+              </FieldWrapper>
+            </div>
 
             <FieldWrapper label="Employee Contributor">
               <Input
@@ -825,12 +1101,19 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Employee Engagement Points">
+            <FieldWrapper
+              label="Employee Engagement Points"
+              hint={isAdmin ? "Admin / HR only" : "Filled by Admin / HR (read-only for you)"}
+            >
               <Input
                 type="number"
                 min={0}
                 value={formData.employeeEngagementPoints}
                 onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+                readOnly={!isAdmin}
+                disabled={!isAdmin}
+                className={!isAdmin ? "bg-muted/40 cursor-not-allowed" : ""}
+                aria-readonly={!isAdmin}
               />
             </FieldWrapper>
 
@@ -889,36 +1172,105 @@ function FieldWrapper({ label, required, error, hint, children }: {
   );
 }
 
+// Image upload widget for the Kaizen "Before / After Media" slots.
+// Reads the selected file into a base64 `data:` URL and stores it via
+// `onChange` — the same string flows through to the API and is rendered
+// as <img> by the dashboard detail dialog (see employee-awards-view.tsx
+// → MediaSlot). A live preview is shown so the user knows the upload
+// worked.
 function FileFieldStub({ value, onChange, placeholder }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const [error, setError] = useState<string | null>(null);
+  // 4MB raw file → ~5.4MB base64. Keeps us under the API's 6MB cap with
+  // headroom for JSON overhead.
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const isDataUrl = value.startsWith("data:image/");
+  const isExternalUrl = value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/");
+  const hasPreview = isDataUrl || isExternalUrl;
+  // Display label for non-image stored values (e.g. legacy filenames).
+  const filenameLabel = !hasPreview && value ? value : "";
+
+  const handleFile = (f: File) => {
+    setError(null);
+    if (!f.type.startsWith("image/")) {
+      setError("Only image files are supported.");
+      return;
+    }
+    if (f.size > MAX_BYTES) {
+      setError(`Image is too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max 4 MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (result) onChange(result);
+    };
+    reader.onerror = () => setError("Could not read file.");
+    reader.readAsDataURL(f);
+  };
+
   return (
-    <div className="flex items-stretch border rounded-md overflow-hidden">
-      <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
-        <Paperclip className="h-3.5 w-3.5" />
+    <div className="space-y-2">
+      <div className="flex items-stretch border rounded-md overflow-hidden">
+        <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
+          <Paperclip className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 px-3 py-2 text-xs text-muted-foreground truncate flex items-center min-w-0">
+          {hasPreview ? (
+            <span className="text-foreground font-medium truncate">Image attached</span>
+          ) : filenameLabel ? (
+            <span className="text-foreground truncate" title={filenameLabel}>{filenameLabel}</span>
+          ) : (
+            <span>{placeholder || "Choose an image…"}</span>
+          )}
+        </div>
+        {value && (
+          <button
+            type="button"
+            onClick={() => { onChange(""); setError(null); }}
+            className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 hover:bg-slate-100"
+            title="Remove image"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span className="sr-only">Remove image</span>
+          </button>
+        )}
+        <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload image">
+          <Upload className="h-3.5 w-3.5" />
+          <span className="sr-only">Upload image</span>
+          <input
+            type="file"
+            accept="image/*"
+            aria-label="Upload image"
+            title="Upload image"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              // Reset so picking the same file again still fires onChange.
+              e.target.value = "";
+            }}
+          />
+        </label>
       </div>
-      <Input
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder || "Choose files..."}
-        className="border-0 rounded-none focus-visible:ring-0"
-      />
-      <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload file">
-        <Upload className="h-3.5 w-3.5" />
-        <span className="sr-only">Upload file</span>
-        <input
-          type="file"
-          aria-label="Upload file"
-          title="Upload file"
-          className="hidden"
-          onChange={e => {
-            const f = e.target.files?.[0];
-            if (f) onChange(f.name);
-          }}
+
+      {hasPreview && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={value}
+          alt="Upload preview"
+          className="max-h-32 rounded border bg-white object-contain"
         />
-      </label>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -239,6 +239,7 @@ model User {
   functions           CrmFunction[]            @relation("CrmFunctionCreator")
   functionExecutions  FunctionExecution[]      @relation("FunctionExecutionActor")
   notifications       Notification[]           @relation("NotificationRecipient")
+  pushSubscriptions   PushSubscription[]       @relation("UserPushSubscriptions")
   agentProfile        AgentProfile?
   reWallet            Wallet?
   staffingPlans       StaffingPlan[]           @relation("StaffingPlanCreator")
@@ -334,6 +335,7 @@ model Organization {
   functionExecutions FunctionExecution[]
   functionBindings  FunctionBinding[]
   notifications     Notification[]
+  pushSubscriptions PushSubscription[]
   staffingPlans     StaffingPlan[]
   jobOpenings       JobOpening[]
   jobApplications   JobApplication[]
@@ -1477,10 +1479,17 @@ model Employee {
 
 model EngagementKaizen {
   id              String   @id @default(cuid())
+  // Human-readable per-organization identifier (e.g. "NK-001"). Generated
+  // server-side on create and shown everywhere the cuid was previously
+  // displayed. Nullable so older rows survive until backfilled.
+  displayId       String?  @map("display_id")
   organizationId  String   @map("organization_id")
   userId          String   @map("user_id")
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title           String
+  // Optional completion / implementation deadline in YYYY-MM-DD format,
+  // consistent with the other engagement tables' date handling.
+  endDate         String?  @map("end_date")
   description     String   @db.Text
   currentState    String   @db.Text @map("current_state")
   proposedState   String   @db.Text @map("proposed_state")
@@ -1488,9 +1497,18 @@ model EngagementKaizen {
   status          String   @default("idea") // idea | approved | in-implementation | implemented
   votes           Int      @default(0)
   votedByUserIds  String[] @default([]) @map("voted_by_user_ids")
+  // `referenceImage` is kept for backward compatibility. New submissions
+  // populate `beforeMedia` and `afterMedia` separately so the detail
+  // dialog can show them side-by-side in form order. All three are
+  // `@db.Text` because the upload UI stores files as base64 `data:` URLs,
+  // which can easily exceed the 255-char default for `varchar`.
+  referenceImage  String?  @db.Text @map("reference_image")
+  beforeMedia     String?  @db.Text @map("before_media")
+  afterMedia      String?  @db.Text @map("after_media")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  @@unique([organizationId, displayId])
   @@index([organizationId])
   @@index([userId])
   @@index([status])
@@ -1499,6 +1517,7 @@ model EngagementKaizen {
 
 model EngagementSuggestion {
   id              String   @id @default(cuid())
+  displayId       String?  @map("display_id") // ES-001 etc.
   organizationId  String   @map("organization_id")
   userId          String   @map("user_id")
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1507,9 +1526,12 @@ model EngagementSuggestion {
   category        String
   status          String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
   feedback        String?  @db.Text
+  referenceImage  String?  @db.Text @map("reference_image")
+  endDate         String?  @map("end_date") // optional follow-up deadline
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  @@unique([organizationId, displayId])
   @@index([organizationId])
   @@index([userId])
   @@index([status])
@@ -1518,6 +1540,7 @@ model EngagementSuggestion {
 
 model EngagementProblem {
   id                String   @id @default(cuid())
+  displayId         String?  @map("display_id") // PR-001 etc.
   organizationId    String   @map("organization_id")
   userId            String   @map("user_id")
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1527,9 +1550,12 @@ model EngagementProblem {
   category          String
   status            String   @default("open")   // open | in-review | resolved | closed
   proposedSolution  String   @db.Text @map("proposed_solution")
+  referenceImage    String?  @db.Text @map("reference_image")
+  endDate           String?  @map("end_date") // expected resolution date
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
+  @@unique([organizationId, displayId])
   @@index([organizationId])
   @@index([userId])
   @@index([status])
@@ -1539,6 +1565,7 @@ model EngagementProblem {
 
 model EngagementInitiative {
   id              String   @id @default(cuid())
+  displayId       String?  @map("display_id") // SI-001 etc.
   organizationId  String   @map("organization_id")
   userId          String   @map("user_id")
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1549,9 +1576,11 @@ model EngagementInitiative {
   endDate         String   @map("end_date")
   status          String   @default("planning") // planning | in-progress | completed | on-hold
   category        String
+  referenceImage  String?  @db.Text @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  @@unique([organizationId, displayId])
   @@index([organizationId])
   @@index([userId])
   @@index([status])
@@ -1560,21 +1589,61 @@ model EngagementInitiative {
 
 model EngagementTarget {
   id              String   @id @default(cuid())
+  displayId       String?  @map("display_id") // ST-001 etc.
   organizationId  String   @map("organization_id")
   userId          String   @map("user_id")
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title           String
   description     String   @db.Text
   targetDate      String   @map("target_date")
+  // Optional completion deadline distinct from `targetDate` (which is
+  // the milestone date the employee committed to).
+  endDate         String?  @map("end_date")
   status          String   @default("not-started") // not-started | in-progress | completed
   progress        Int      @default(0) // 0–100, percent
+  referenceImage  String?  @db.Text @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  @@unique([organizationId, displayId])
   @@index([organizationId])
   @@index([userId])
   @@index([status])
   @@map("engagement_targets")
+}
+
+// Admin / HR award + review for a single engagement submission. Keyed by
+// (submissionId, moduleType) so the same id space across the five
+// engagement tables doesn't collide. `points` is constrained to 1..12
+// at the API layer (kept as plain Int here so old rows survive a future
+// range change). `reviewStatus` is a free-form string mirroring the
+// other engagement tables' status convention.
+model EngagementAward {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  submissionId   String   @map("submission_id")
+  moduleType     String   @map("module_type") // Kaizen | Suggestion | Problem | Initiative | Target
+  // 1..12, validated server-side. Nullable so a row can carry just a
+  // review without a points award (and vice-versa).
+  points         Int?
+  // Optional discretionary bonus on top of the regular `points` award —
+  // 0..100, validated server-side. Independent of the review decision so
+  // admin can spotlight an outstanding contribution without affecting
+  // the merit-based 1..12 grading.
+  bonusPoints    Int?     @map("bonus_points")
+  bonusReason    String?  @db.Text @map("bonus_reason")
+  reviewStatus   String?  @map("review_status") // approved | rejected | needs-info | pending
+  reviewerId     String?  @map("reviewer_id")
+  reviewerName   String?  @map("reviewer_name")
+  reviewedAt     DateTime? @map("reviewed_at")
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([submissionId, moduleType])
+  @@index([organizationId])
+  @@index([submissionId])
+  @@map("engagement_awards")
 }
 
 // Engagement Team — groups employees for the Employee Engagement module
@@ -2970,6 +3039,28 @@ model Notification {
   @@index([organizationId, createdAt])
   @@index([ruleId])
   @@map("notifications")
+}
+
+// Web Push subscriptions. One row per browser/device a user has granted
+// notification permission on, so a single user with the site open on phone
+// + laptop has two rows and both get pushed. `endpoint` is unique because
+// FCM/APNs/Mozilla's autopush each return a stable per-subscription URL.
+model PushSubscription {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpoint       String       @unique
+  p256dh         String
+  auth           String
+  userAgent      String?      @map("user_agent")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  lastUsedAt     DateTime?    @map("last_used_at")
+
+  @@index([userId])
+  @@index([organizationId])
+  @@map("push_subscriptions")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

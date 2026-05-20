@@ -18,6 +18,7 @@ import { attachApiNames } from "@/lib/functions/apiName"
 import { DatabaseService } from "@/lib/database/database-service"
 import { sendWorkflowEmail } from "@/lib/email"
 import { decryptStoredSmtpPass } from "@/lib/workflow/email-secrets"
+import { sendPushToUsers } from "@/lib/push/server"
 
 export type WorkflowAction = "Create" | "Edit" | "Create or Edit" | "Delete"
 
@@ -201,6 +202,18 @@ function getRecordFieldValue(
 
   if (Object.prototype.hasOwnProperty.call(recordData, fieldId)) {
     return unwrap((recordData as any)[fieldId])
+  }
+
+  // Static-page field IDs are synthesized as `static:<formId>:<coreKey>`. The
+  // recordData from a static-route `fireWorkflow` call is keyed by the
+  // coreKey alone (e.g. `userId`, `employeeName`), so strip the prefix and
+  // retry against the bare key before falling through to nested lookups.
+  if (fieldId.startsWith("static:")) {
+    const parts = fieldId.split(":")
+    const coreKey = parts[parts.length - 1]
+    if (coreKey && Object.prototype.hasOwnProperty.call(recordData, coreKey)) {
+      return unwrap((recordData as any)[coreKey])
+    }
   }
 
   // 1) Sections + per-section subforms
@@ -674,6 +687,21 @@ export async function triggerWorkflowsForRecord(input: TriggerInput): Promise<vo
             console.log(
               `[workflow] rule "${rule.name}" system notification dispatched — ${writeResult?.count ?? recipientIds.length} row(s) for ${recipientIds.length} recipient(s)`
             )
+            // Web Push fan-out. Fire-and-forget so the in-app notification
+            // row already saved isn't held hostage by FCM/APNs latency. The
+            // helper handles missing VAPID config and stale subscriptions
+            // internally — we just hand it the recipient set and payload.
+            void sendPushToUsers(recipientIds, {
+              title,
+              body: body || undefined,
+              url: link || undefined,
+              tag: `rule:${rule.id}`,
+            }).catch((err) => {
+              console.warn(
+                `[workflow] rule "${rule.name}" web push fan-out failed:`,
+                err?.message || err,
+              )
+            })
           } catch (err: any) {
             console.error(
               `[workflow] rule "${rule.name}" system notification failed:`,

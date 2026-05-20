@@ -30,6 +30,8 @@ interface PatchBody {
   proposedState?: string;
   benefits?: string;
   status?: string;
+  beforeMedia?: string;
+  afterMedia?: string;
   // Vote toggle: when true, the current viewer is added/removed from the
   // votedByUserIds set and `votes` is recalculated.
   vote?: boolean;
@@ -107,6 +109,19 @@ export async function PATCH(
   if (body.status !== undefined) {
     if (!ALLOWED_STATUS.has(body.status)) return err('Invalid status');
     patch.status = body.status;
+  }
+  // Media columns hold base64 `data:` URLs from the upload widget — keep
+  // the cap aligned with the create-route limit (~6MB each).
+  const MEDIA_MAX = 6_000_000;
+  if (body.beforeMedia !== undefined) {
+    const v = body.beforeMedia.toString().slice(0, MEDIA_MAX) || null;
+    patch.beforeMedia = v;
+    // Keep the legacy column in sync so older readers still find the
+    // primary image even after an edit.
+    patch.referenceImage = v;
+  }
+  if (body.afterMedia !== undefined) {
+    patch.afterMedia = body.afterMedia.toString().slice(0, MEDIA_MAX) || null;
   }
 
   const updated = await (prisma as any).engagementKaizen.update({

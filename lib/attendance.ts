@@ -22,20 +22,27 @@ export interface AttendanceStatus {
   todayRecord?: AttendanceRecord;
 }
 
-// Get today's date in YYYY-MM-DD format
-export const getToday = (): string => {
-  return new Date().toISOString().split("T")[0];
+// Get today's date in YYYY-MM-DD format.
+// Uses server-local components (not UTC) so this stays aligned with
+// `todayKey()` in lib/hr/attendance-service.ts — both helpers index the
+// same Attendance.date column and must agree, otherwise the legacy and
+// new punch endpoints write/read different rows between 00:00 UTC and
+// the server's local-midnight rollover.
+export const getToday = (now: Date = new Date()): string => {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
-// Get current time in HH:MM:SS AM/PM format
-const getCurrentTime = (): string => {
-  const now = new Date();
-  return now.toLocaleTimeString('en-US', { 
-    hour12: true, 
-    hour: '2-digit', 
-    minute: '2-digit', 
-    second: '2-digit'       
-  });
+// Get current time in HH:mm (24-hour) format.
+// Matches `formatHHmm()` in lib/hr/attendance-service.ts so the legacy
+// endpoint and the new punch endpoint produce the same shape of string
+// in Attendance.checkInTime / checkOutTime.
+const getCurrentTime = (now: Date = new Date()): string => {
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
 };
 
 // Fetch all attendance records for a user
