@@ -1,20 +1,20 @@
 "use client";
 
 /**
- * useEngagementVisibility — pulls the caller's engagement-team scope so the
- * 5 engagement pages (Kaizen, Suggestion, Problem Registration,
- * Self-Initiative, Self-Target) can decide what records to show:
+ * useEngagementVisibility — engagement submissions are visible to every
+ * authenticated employee in the organisation (cross-team), so the hook now
+ * returns a permissive `seeAll = true` immediately. Kept as a hook (rather
+ * than a constant) so call sites and the `loading` contract don't have to
+ * change.
  *
- *   - seeAll:        true → render every record (Admin / HR).
- *   - myTeamId:      caller's team id, or null when unassigned.
- *   - myEmployeeId:  caller's own employee id (fallback bucket for
- *                    unassigned users who should still see their own work).
+ * Reviewing / awarding points is still Admin / HR-only — that's gated by
+ * the dashboard's `canReview` flag and the awards API, not here.
  *
- * Wraps a single GET on /api/engagement-teams/me. Centralised here so all
- * five pages share the same filtering contract.
+ * IMPORTANT: returns a *stable* singleton reference. The five engagement
+ * pages put `visibility` in a useEffect / useCallback dependency array — a
+ * fresh object literal every render would trigger an infinite re-fetch
+ * loop in loadKaizens / loadSuggestions / etc.
  */
-
-import { useEffect, useState } from "react";
 
 export interface EngagementVisibility {
   seeAll: boolean;
@@ -23,66 +23,31 @@ export interface EngagementVisibility {
   loading: boolean;
 }
 
-const INITIAL: EngagementVisibility = {
-  seeAll: false,
+const SINGLETON: EngagementVisibility = Object.freeze({
+  seeAll: true,
   myTeamId: null,
   myEmployeeId: null,
-  loading: true,
-};
+  loading: false,
+});
 
 export function useEngagementVisibility(): EngagementVisibility {
-  const [state, setState] = useState<EngagementVisibility>(INITIAL);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/engagement-teams/me", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        const json = await res.json();
-        if (!cancelled && res.ok && json?.success) {
-          setState({
-            seeAll: !!json.seeAll,
-            myTeamId: json.myTeamId ?? null,
-            myEmployeeId: json.myEmployeeId ?? null,
-            loading: false,
-          });
-          return;
-        }
-      } catch {
-        // Soft-fail: stay non-admin, no team, so the page falls back to
-        // "show only my own records" which is the safest default.
-      }
-      if (!cancelled) {
-        setState({ seeAll: false, myTeamId: null, myEmployeeId: null, loading: false });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
+  return SINGLETON;
 }
 
+// Stable no-op predicate — same identity on every call, so call sites that
+// embed it in `useMemo`/`useCallback` deps don't churn.
+const ALLOW_ALL = () => true;
+
 /**
- * Filter predicate for engagement records. Use after both employees and
- * visibility have loaded.
- *
- *   - seeAll → keep everything.
- *   - has team → keep records whose author is on the same team.
- *   - no team → keep only the caller's own records.
+ * Filter predicate for engagement records. With org-wide visibility this is
+ * a no-op — kept exported so existing call sites (`rows.filter(allow)`)
+ * compile without change.
  */
 export function makeEngagementFilter<T extends { employeeId: string }>(
-  vis: EngagementVisibility,
-  employeeIdToTeamId: Map<string, string | null>,
+  _vis: EngagementVisibility,
+  _employeeIdToTeamId: Map<string, string | null>,
 ): (record: T) => boolean {
-  if (vis.seeAll) return () => true;
-  if (vis.myTeamId) {
-    return (r) => employeeIdToTeamId.get(r.employeeId) === vis.myTeamId;
-  }
-  // Unassigned → see only own
-  return (r) => r.employeeId === vis.myEmployeeId;
+  void _vis;
+  void _employeeIdToTeamId;
+  return ALLOW_ALL;
 }

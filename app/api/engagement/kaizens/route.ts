@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
       proposedState: (body.proposedState ?? '').toString().slice(0, 5000),
       benefits: (body.benefits ?? '').toString().slice(0, 5000),
       status,
+      referenceImage: ((body as any).beforeMedia || (body as any).referenceImage || '').toString().slice(0, 1000) || null,
     },
     include: KAIZEN_INCLUDE,
   });

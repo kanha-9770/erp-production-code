@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
       suggestion: body.suggestion.trim().slice(0, 5000),
       category: body.category.trim().slice(0, 80),
       status,
+      referenceImage: ((body as any).media || (body as any).referenceImage || '').toString().slice(0, 1000) || null,
     },
     include: SUGGESTION_INCLUDE,
   });

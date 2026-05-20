@@ -41,6 +41,15 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  COMPANY_STATUS_OPTIONS,
+  BENEFIT_OPTIONS,
+  STANDARD_UPDATED_OPTIONS,
+  getStatusMeta,
+  encodeBenefits,
+  decodeBenefits,
+} from "@/lib/constants/engagement";
 
 interface Kaizen {
   id: string;
@@ -49,19 +58,16 @@ interface Kaizen {
   currentState: string;
   proposedState: string;
   benefits: string;
-  status: 'idea' | 'approved' | 'in-implementation' | 'implemented';
+  // Status uses the company's 5-state workflow from the status sheet, plus
+  // legacy values for rows created before that palette was introduced.
+  status: string;
   submissionDate: string;
   votes: number;
   hasVoted: boolean;
   employeeId: string;
 }
 
-const STATUS_OPTIONS = [
-  { value: "idea", label: "Initial Idea" },
-  { value: "approved", label: "Approved" },
-  { value: "in-implementation", label: "In Implementation" },
-  { value: "implemented", label: "Implemented" },
-];
+const STATUS_OPTIONS = COMPANY_STATUS_OPTIONS;
 
 const KAIZEN_AREA_FILTER_OPTIONS = [
   { value: "safety", label: "Safety" },
@@ -226,16 +232,15 @@ export default function KaizenPage() {
       {
         id: "status",
         header: "Status",
-        width: 150,
+        width: 200,
         group: "Overview",
         cell: (k) => {
-          const colors: Record<string, string> = {
-            idea: "bg-gray-100 text-gray-800",
-            approved: "bg-blue-100 text-blue-800",
-            "in-implementation": "bg-yellow-100 text-yellow-800",
-            implemented: "bg-green-100 text-green-800",
-          };
-          return <Badge variant="outline" className={`${colors[k.status]} text-[10px]`}>{k.status.replace('-', ' ').toUpperCase()}</Badge>;
+          const meta = getStatusMeta(k.status);
+          return (
+            <Badge variant="outline" className={`${meta.className} text-[10px] uppercase`}>
+              {meta.label}
+            </Badge>
+          );
         },
       },
       {
@@ -474,9 +479,10 @@ export default function KaizenPage() {
 function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
+  const meta = getStatusMeta(k.status);
   return (
     <div className="flex items-center gap-2">
-      <Badge variant="outline" className="text-[10px] uppercase">{k.status}</Badge>
+      <Badge variant="outline" className={`text-[10px] uppercase ${meta.className}`}>{meta.label}</Badge>
       <span className="font-semibold text-sm truncate uppercase">{k.title}</span>
     </div>
   );
@@ -485,6 +491,14 @@ function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
 function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
+  const decoded = decodeBenefits(k.benefits);
+  const benefitLabels = decoded.checked
+    .map((v) => BENEFIT_OPTIONS.find((o) => o.value === v)?.label)
+    .filter(Boolean) as string[];
+  const standardLabels = decoded.standards
+    .map((v) => STANDARD_UPDATED_OPTIONS.find((o) => o.value === v)?.label)
+    .filter(Boolean) as string[];
+  const statusMeta = getStatusMeta(k.status);
 
   return (
     <div className="p-5 space-y-6">
@@ -521,14 +535,44 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVo
         </Card>
       </div>
 
+      {k.referenceImage && (
+        <Card className="p-4 space-y-3 border-l-4 border-l-purple-500 bg-purple-50/50">
+          <h3 className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider flex items-center gap-1.5"><Layout className="h-3 w-3" /> Reference Media</h3>
+          <div className="flex items-center gap-2 text-sm text-purple-900">
+            <span className="font-medium truncate">{k.referenceImage}</span>
+          </div>
+        </Card>
+      )}
+
       <Card className="p-4 space-y-3 border-l-4 border-l-green-500 bg-green-50/50">
         <h3 className="text-[11px] font-semibold text-green-700 uppercase tracking-wider flex items-center gap-1.5"><Zap className="h-3 w-3" /> Benefits</h3>
-        <p className="text-sm">{k.benefits}</p>
+        {benefitLabels.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {benefitLabels.map((b) => (
+              <Badge key={b} variant="outline" className="bg-white text-[10px]">{b}</Badge>
+            ))}
+          </div>
+        )}
+        {decoded.freeText && <p className="text-sm">{decoded.freeText}</p>}
+        {benefitLabels.length === 0 && !decoded.freeText && (
+          <p className="text-sm text-muted-foreground italic">No benefits recorded.</p>
+        )}
       </Card>
+
+      {standardLabels.length > 0 && (
+        <Card className="p-4 space-y-2">
+          <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Standard Updated</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {standardLabels.map((s) => (
+              <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-4 text-sm pt-4 border-t">
         <Fact label="Submitted On" value={new Date(k.submissionDate).toLocaleDateString()} icon={Calendar} />
-        <Fact label="Status" value={k.status.toUpperCase()} icon={CheckCircle2} />
+        <Fact label="Status" value={statusMeta.label} icon={CheckCircle2} />
       </div>
     </div>
   );
@@ -563,6 +607,10 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
   onCancel: () => void,
   onSubmit: (data: any) => void
 }) {
+  // Decode the `benefits` column back into checkbox state + free-text on
+  // edit so the form round-trips cleanly.
+  const decodedInitial = decodeBenefits(initial?.benefits);
+
   const [formData, setFormData] = useState({
     // Section 1: Kaizen Info
     employeeId: currentEmployee?.id || "",
@@ -581,13 +629,33 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
     whyAnalysis: initial?.currentState || "",
     // Section 3: Result & Benefits
     result: initial?.proposedState || "",
-    benefits: initial?.benefits || "",
+    benefits: decodedInitial.freeText,
+    benefitChecks: decodedInitial.checked,
+    standardsUpdated: decodedInitial.standards,
     employeeContributor: "",
     signature: "",
     selfie: "",
     employeeEngagementPoints: 0,
-    status: initial?.status || "idea",
+    status: initial?.status || "trial-phase",
   });
+
+  const toggleBenefit = (value: string) => {
+    setFormData((f) => ({
+      ...f,
+      benefitChecks: f.benefitChecks.includes(value)
+        ? f.benefitChecks.filter((v) => v !== value)
+        : [...f.benefitChecks, value],
+    }));
+  };
+
+  const toggleStandard = (value: string) => {
+    setFormData((f) => ({
+      ...f,
+      standardsUpdated: f.standardsUpdated.includes(value)
+        ? f.standardsUpdated.filter((v) => v !== value)
+        : [...f.standardsUpdated, value],
+    }));
+  };
 
   const [touched, setTouched] = useState(false);
 
@@ -614,7 +682,10 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
       description: formData.problem,
       currentState: formData.whyAnalysis,
       proposedState: formData.result,
-      benefits: formData.benefits,
+      // The `benefits` column carries the checkbox selections, the standards-
+      // updated selections, and the free-text addendum. See encodeBenefits
+      // for the wire format — decoded again by decodeBenefits on edit.
+      benefits: encodeBenefits(formData.benefitChecks, formData.benefits, formData.standardsUpdated),
       status: formData.status,
       employeeId: formData.employeeId,
       firstName: formData.firstName,
@@ -793,14 +864,64 @@ function KaizenForm({ initial, currentEmployee, onCancel, onSubmit }: {
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Benefits">
-              <Textarea
-                value={formData.benefits}
-                onChange={e => setFormData({ ...formData, benefits: e.target.value })}
-                placeholder="Benefits delivered"
-                className="min-h-[100px]"
-              />
-            </FieldWrapper>
+            <div className="md:col-span-2">
+              <FieldWrapper label="Standard Updated" hint="Mention reference no. of document updated">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-md border p-3 bg-slate-50/50">
+                  {STANDARD_UPDATED_OPTIONS.map((opt) => {
+                    const checked = formData.standardsUpdated.includes(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors ${
+                          checked ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-100"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleStandard(opt.value)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </FieldWrapper>
+            </div>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Benefits (please tick)">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 rounded-md border p-3 bg-slate-50/50">
+                  {BENEFIT_OPTIONS.map((opt) => {
+                    const checked = formData.benefitChecks.includes(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors ${
+                          checked ? "bg-green-50 ring-1 ring-green-200" : "hover:bg-slate-100"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleBenefit(opt.value)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </FieldWrapper>
+            </div>
+
+            <div className="md:col-span-2">
+              <FieldWrapper label="Benefits — Additional Notes" hint="Quantify if possible (e.g. 30% time savings)">
+                <Textarea
+                  value={formData.benefits}
+                  onChange={e => setFormData({ ...formData, benefits: e.target.value })}
+                  placeholder="Describe the benefit delivered…"
+                  className="min-h-[80px]"
+                />
+              </FieldWrapper>
+            </div>
 
             <FieldWrapper label="Employee Contributor">
               <Input

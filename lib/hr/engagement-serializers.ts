@@ -51,6 +51,7 @@ export interface KaizenWire {
   hasVoted: boolean;
   employeeId: string;
   userId: string;
+  referenceImage: string | null;
 }
 
 export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
@@ -68,6 +69,7 @@ export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
     hasVoted: voted.includes(viewerUserId),
     employeeId: employeeIdOf(r),
     userId: r.userId,
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -85,6 +87,7 @@ export interface SuggestionWire {
   feedback: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeSuggestion(r: any): SuggestionWire {
@@ -98,6 +101,7 @@ export function serializeSuggestion(r: any): SuggestionWire {
     feedback: r.feedback ?? '',
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -116,6 +120,7 @@ export interface ProblemWire {
   proposedSolution: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeProblem(r: any): ProblemWire {
@@ -130,6 +135,7 @@ export function serializeProblem(r: any): ProblemWire {
     proposedSolution: r.proposedSolution ?? '',
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -148,6 +154,7 @@ export interface InitiativeWire {
   createdAt: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeInitiative(r: any): InitiativeWire {
@@ -162,6 +169,7 @@ export function serializeInitiative(r: any): InitiativeWire {
     createdAt: isoOrEmpty(r.createdAt),
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }
 
@@ -179,6 +187,7 @@ export interface TargetWire {
   createdAt: string;
   userId: string;
   employeeId: string;
+  referenceImage: string | null;
 }
 
 export function serializeTarget(r: any): TargetWire {
@@ -192,5 +201,6 @@ export function serializeTarget(r: any): TargetWire {
     createdAt: isoOrEmpty(r.createdAt),
     userId: r.userId,
     employeeId: employeeIdOf(r),
+    referenceImage: r.referenceImage ?? null,
   };
 }

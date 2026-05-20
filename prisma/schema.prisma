@@ -1482,6 +1482,7 @@ model EngagementKaizen {
   status          String   @default("idea") // idea | approved | in-implementation | implemented
   votes           Int      @default(0)
   votedByUserIds  String[] @default([]) @map("voted_by_user_ids")
+  referenceImage  String?  @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -1501,6 +1502,7 @@ model EngagementSuggestion {
   category        String
   status          String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
   feedback        String?  @db.Text
+  referenceImage  String?  @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -1521,6 +1523,7 @@ model EngagementProblem {
   category          String
   status            String   @default("open")   // open | in-review | resolved | closed
   proposedSolution  String   @db.Text @map("proposed_solution")
+  referenceImage    String?  @map("reference_image")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -1543,6 +1546,7 @@ model EngagementInitiative {
   endDate         String   @map("end_date")
   status          String   @default("planning") // planning | in-progress | completed | on-hold
   category        String
+  referenceImage  String?  @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -1562,6 +1566,7 @@ model EngagementTarget {
   targetDate      String   @map("target_date")
   status          String   @default("not-started") // not-started | in-progress | completed
   progress        Int      @default(0) // 0–100, percent
+  referenceImage  String?  @map("reference_image")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -1569,6 +1574,34 @@ model EngagementTarget {
   @@index([userId])
   @@index([status])
   @@map("engagement_targets")
+}
+
+// Admin / HR award + review for a single engagement submission. Keyed by
+// (submissionId, moduleType) so the same id space across the five
+// engagement tables doesn't collide. `points` is constrained to 1..12
+// at the API layer (kept as plain Int here so old rows survive a future
+// range change). `reviewStatus` is a free-form string mirroring the
+// other engagement tables' status convention.
+model EngagementAward {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  submissionId   String   @map("submission_id")
+  moduleType     String   @map("module_type") // Kaizen | Suggestion | Problem | Initiative | Target
+  // 1..12, validated server-side. Nullable so a row can carry just a
+  // review without a points award (and vice-versa).
+  points         Int?
+  reviewStatus   String?  @map("review_status") // approved | rejected | needs-info | pending
+  reviewerId     String?  @map("reviewer_id")
+  reviewerName   String?  @map("reviewer_name")
+  reviewedAt     DateTime? @map("reviewed_at")
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([submissionId, moduleType])
+  @@index([organizationId])
+  @@index([submissionId])
+  @@map("engagement_awards")
 }
 
 // Engagement Team — groups employees for the Employee Engagement module
