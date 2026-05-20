@@ -67,8 +67,14 @@ export default async function EmployeeEngagementDashboard() {
       ? emp.employeeName.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
       : "U";
 
+    const PREFIX: Record<string, string> = {
+      Kaizen: "NK", Suggestion: "ES", Problem: "PR", Initiative: "SI", Target: "ST",
+    };
     return {
       id: item.id,
+      // Falls back to a cuid prefix if the row pre-dates the displayId
+      // column. New rows always carry the canonical "NK-001" style id.
+      displayId: item.displayId || `${PREFIX[type] ?? "X"}-${item.id.substring(0, 6).toUpperCase()}`,
       moduleType: type,
       title: item.title,
       category: item.category || (type === 'Kaizen' ? 'Process Improvement' : type === 'Target' ? 'Goal' : 'General'),
@@ -78,6 +84,24 @@ export default async function EmployeeEngagementDashboard() {
       employeeName: emp.employeeName || item.user?.email || "Unknown User",
       department: emp.department || "N/A",
       avatar: avatarStr,
+      // Module-specific long-form fields — consumed by the paper-form
+      // View dialog. Undefined keys are harmless to the dashboard table.
+      description: item.description,
+      currentState: item.currentState,
+      proposedState: item.proposedState,
+      benefits: item.benefits,
+      suggestion: item.suggestion,
+      feedback: item.feedback,
+      severity: item.severity,
+      proposedSolution: item.proposedSolution,
+      startDate: item.startDate,
+      endDate: item.endDate ?? null,
+      targetDate: item.targetDate,
+      progress: item.progress,
+      votes: item.votes,
+      beforeMedia: item.beforeMedia ?? null,
+      afterMedia: item.afterMedia ?? null,
+      referenceImage: item.referenceImage ?? null,
     };
   };
 

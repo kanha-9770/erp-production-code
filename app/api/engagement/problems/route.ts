@@ -12,6 +12,7 @@ import {
   serializeProblem,
   PROBLEM_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { nextDisplayId } from '@/lib/hr/engagement-display-id';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,8 @@ interface CreateBody {
   category?: string;
   status?: string;
   proposedSolution?: string;
+  endDate?: string;
+  referenceImage?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -69,16 +72,20 @@ export async function POST(request: NextRequest) {
   const severity = body.severity && ALLOWED_SEVERITY.has(body.severity) ? body.severity : 'medium';
   const status = body.status && ALLOWED_STATUS.has(body.status) ? body.status : 'open';
 
+  const displayId = await nextDisplayId('Problem', authUser.organizationId);
   const created = await (prisma as any).engagementProblem.create({
     data: {
       organizationId: authUser.organizationId,
       userId: authUser.id,
+      displayId,
       title: body.title.trim().slice(0, 200),
       description: body.description.trim().slice(0, 5000),
       severity,
       category: body.category.trim().slice(0, 80),
       status,
       proposedSolution: (body.proposedSolution ?? '').toString().slice(0, 5000),
+      endDate: (body.endDate ?? '').toString().slice(0, 20) || null,
+      referenceImage: (body.referenceImage ?? '').toString().slice(0, 6_000_000) || null,
     },
     include: PROBLEM_INCLUDE,
   });

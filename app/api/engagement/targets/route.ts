@@ -12,6 +12,7 @@ import {
   serializeTarget,
   TARGET_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { nextDisplayId } from '@/lib/hr/engagement-display-id';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
@@ -52,8 +53,10 @@ interface CreateBody {
   title?: string;
   description?: string;
   targetDate?: string;
+  endDate?: string;
   status?: string;
   progress?: number;
+  referenceImage?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -73,15 +76,19 @@ export async function POST(request: NextRequest) {
 
   const status = body.status && ALLOWED_STATUS.has(body.status) ? body.status : 'not-started';
 
+  const displayId = await nextDisplayId('Target', authUser.organizationId);
   const created = await (prisma as any).engagementTarget.create({
     data: {
       organizationId: authUser.organizationId,
       userId: authUser.id,
+      displayId,
       title: body.title.trim().slice(0, 200),
       description: body.description.trim().slice(0, 5000),
       targetDate: body.targetDate,
+      endDate: (body.endDate ?? '').toString().slice(0, 20) || null,
       status,
       progress: clampProgress(body.progress ?? 0),
+      referenceImage: (body.referenceImage ?? '').toString().slice(0, 6_000_000) || null,
     },
     include: TARGET_INCLUDE,
   });

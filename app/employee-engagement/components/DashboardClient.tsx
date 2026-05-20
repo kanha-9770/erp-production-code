@@ -8,12 +8,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { format, subMonths, isAfter, startOfMonth, startOfQuarter, startOfYear } from "date-fns";
-import { Target, Lightbulb, AlertCircle, TrendingUp, MessageSquare, Filter, Search, Calendar as CalendarIcon, Clock, Award, Save, RotateCcw, ShieldCheck, CheckCircle2, XCircle, HelpCircle, FileText, Printer, Download, Lock } from "lucide-react";
+import { format, subMonths, isAfter, startOfMonth, startOfQuarter, startOfYear, startOfDay, startOfWeek, subDays, endOfDay } from "date-fns";
+import { Target, Lightbulb, AlertCircle, TrendingUp, MessageSquare, Filter, Search, Calendar as CalendarIcon, Clock, Award, Save, RotateCcw, ShieldCheck, CheckCircle2, XCircle, HelpCircle, FileText, Printer, Download, Lock, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { getStatusMeta } from "@/lib/constants/engagement";
+import SubmissionPaperView, { type SubmissionPaperData } from "./SubmissionPaperView";
 
 const POINTS_MIN = 1;
 const POINTS_MAX = 12;
@@ -63,6 +64,7 @@ function SummaryStat({
 
 type EngagementItem = {
   id: string;
+  displayId: string;
   moduleType: "Kaizen" | "Suggestion" | "Problem" | "Initiative" | "Target";
   title: string;
   category: string;
@@ -72,6 +74,25 @@ type EngagementItem = {
   employeeName: string;
   department: string;
   avatar: string;
+  // Optional long-form fields, populated by the parent server page so the
+  // paper-form View dialog can render without a follow-up fetch. Each
+  // field is module-specific — `undefined` means "not applicable here".
+  description?: string;
+  currentState?: string;
+  proposedState?: string;
+  benefits?: string;
+  suggestion?: string;
+  feedback?: string | null;
+  severity?: string;
+  proposedSolution?: string;
+  startDate?: string;
+  endDate?: string | null;
+  targetDate?: string;
+  progress?: number;
+  votes?: number;
+  beforeMedia?: string | null;
+  afterMedia?: string | null;
+  referenceImage?: string | null;
 };
 
 const MODULE_ICONS: Record<string, React.ElementType> = {
@@ -118,14 +139,49 @@ export default function DashboardClient({
   canReview?: boolean;
   currentUserName?: string;
 }) {
-  const [timeFilter, setTimeFilter] = useState<"all" | "monthly" | "quarterly" | "annually">("monthly");
+  // Time-duration presets + an explicit custom range. The Award Points
+  // table, Employee Points Summary and Review chips below all read from
+  // `filteredData`, so changing this filter cascades to every section.
+  type TimeFilter =
+    | "all"
+    | "today"
+    | "week"
+    | "last7"
+    | "last30"
+    | "last90"
+    | "monthly"
+    | "quarterly"
+    | "annually"
+    | "custom";
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("monthly");
+  // YYYY-MM-DD strings for the <input type="date"> controls. Only used
+  // when `timeFilter === "custom"`. Empty string = unbounded on that side.
+  const [customFrom, setCustomFrom] = useState<string>("");
+  const [customTo, setCustomTo] = useState<string>("");
   const [moduleFilter, setModuleFilter] = useState<"All" | "Kaizen" | "Suggestion" | "Problem" | "Initiative" | "Target">("All");
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Card-local controls for the Award Points table. These let the
+  // reviewer pinpoint who submitted first when several submissions share
+  // a date — without disturbing the page-level Time / Module filters.
+  type AwardSortBy = "earliest" | "latest" | "employee" | "module";
+  const [awardSortBy, setAwardSortBy] = useState<AwardSortBy>("earliest");
+  const [awardDate, setAwardDate] = useState<string>("");       // YYYY-MM-DD or ""
+  const [awardTimeFrom, setAwardTimeFrom] = useState<string>(""); // HH:MM or ""
+  const [awardTimeTo, setAwardTimeTo] = useState<string>("");     // HH:MM or ""
+  // Paginate the Award Points table so reviewers see at most 8 rows at a
+  // time — large dashboards become unscrollable otherwise.
+  const AWARD_PAGE_SIZE = 8;
+  const [awardPage, setAwardPage] = useState(0);
 
   // Admin/HR-entered points per submission. Keyed by submission id.
   // Persisted across reloads via localStorage. The aggregated total per
   // employee is what flows into the Employee table summary card below.
   const [pointsBySubmission, setPointsBySubmission] = useState<Record<string, number>>({});
+  // Discretionary bonus points layered on top of `points`. Same key
+  // space, different scale (0..100). Reason is optional and stored on
+  // the same EngagementAward row.
+  const [bonusBySubmission, setBonusBySubmission] = useState<Record<string, { points: number; reason: string | null }>>({});
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
 
   // Admin/HR review log per submission. Same persistence approach as
@@ -134,6 +190,11 @@ export default function DashboardClient({
   const [reviewDialogFor, setReviewDialogFor] = useState<EngagementItem | null>(null);
   const [reviewDialogStatus, setReviewDialogStatus] = useState<ReviewStatus>("approved");
   const [reviewDialogNotes, setReviewDialogNotes] = useState("");
+
+  // Paper-form view dialog (read-only) opened from the "View" button on
+  // each row of the Award Points table. Shows the submission rendered
+  // like the printed Nessco form.
+  const [viewDialogFor, setViewDialogFor] = useState<EngagementItem | null>(null);
 
   // Report generator — independent of the page-level Time filter so admin
   // can review the current month while generating last quarter's report.
@@ -155,16 +216,22 @@ export default function DashboardClient({
         const data = await res.json();
         if (cancelled || !data?.success) return;
         const ptsNext: Record<string, number> = {};
+        const bonusNext: Record<string, { points: number; reason: string | null }> = {};
         const revNext: Record<string, ReviewEntry> = {};
         for (const a of data.awards as Array<{
           submissionId: string;
           points: number | null;
+          bonusPoints: number | null;
+          bonusReason: string | null;
           reviewStatus: string | null;
           reviewerName: string | null;
           reviewedAt: string | null;
           notes: string | null;
         }>) {
           if (typeof a.points === "number") ptsNext[a.submissionId] = a.points;
+          if (typeof a.bonusPoints === "number" && a.bonusPoints > 0) {
+            bonusNext[a.submissionId] = { points: a.bonusPoints, reason: a.bonusReason ?? null };
+          }
           if (a.reviewStatus && a.reviewedAt) {
             revNext[a.submissionId] = {
               status: a.reviewStatus as ReviewStatus,
@@ -175,6 +242,7 @@ export default function DashboardClient({
           }
         }
         setPointsBySubmission(ptsNext);
+        setBonusBySubmission(bonusNext);
         setReviewBySubmission(revNext);
       } catch {
         /* ignore — UI just shows no awards */
@@ -194,6 +262,8 @@ export default function DashboardClient({
     submissionId: string,
     body: {
       points?: number | null;
+      bonusPoints?: number | null;
+      bonusReason?: string | null;
       reviewStatus?: ReviewStatus | null;
       notes?: string | null;
     },
@@ -287,27 +357,85 @@ export default function DashboardClient({
     if (!ok) persistPoints(prev);
   };
 
-  const resetAllPoints = async () => {
-    if (!confirm("Clear all admin-awarded points? This cannot be undone.")) return;
-    const ids = Object.keys(pointsBySubmission);
-    persistPoints({});
-    await Promise.all(ids.map((id) => postAward(id, { points: null })));
+  // Bonus points — separate scale (0..100). Empty input clears the bonus.
+  const BONUS_MIN = 0;
+  const BONUS_MAX = 100;
+  const setBonus = async (submissionId: string, raw: string) => {
+    if (raw === "") {
+      const prev = bonusBySubmission;
+      const next = { ...prev };
+      delete next[submissionId];
+      setBonusBySubmission(next);
+      const ok = await postAward(submissionId, { bonusPoints: null });
+      if (!ok) setBonusBySubmission(prev);
+      return;
+    }
+    const n = Math.floor(Number(raw));
+    if (!Number.isFinite(n)) return;
+    const clamped = Math.max(BONUS_MIN, Math.min(BONUS_MAX, n));
+    const prev = bonusBySubmission;
+    const existingReason = prev[submissionId]?.reason ?? null;
+    if (clamped === 0) {
+      const next = { ...prev };
+      delete next[submissionId];
+      setBonusBySubmission(next);
+      const ok = await postAward(submissionId, { bonusPoints: null });
+      if (!ok) setBonusBySubmission(prev);
+      return;
+    }
+    setBonusBySubmission({ ...prev, [submissionId]: { points: clamped, reason: existingReason } });
+    setSavedFlash(submissionId);
+    setTimeout(() => setSavedFlash((s) => (s === submissionId ? null : s)), 800);
+    const ok = await postAward(submissionId, { bonusPoints: clamped });
+    if (!ok) setBonusBySubmission(prev);
   };
 
   const filteredData = useMemo(() => {
     let data = [...initialData];
 
-    // Filter by Time
+    // Filter by Time. Each branch resolves to a [from, to) window; we
+    // then keep submissions whose createdAt sits inside it. "all" skips
+    // the window altogether.
     const now = new Date();
-    if (timeFilter === "monthly") {
-      const start = startOfMonth(now);
-      data = data.filter(d => new Date(d.createdAt) >= start);
+    let from: Date | null = null;
+    let to: Date | null = null;
+    if (timeFilter === "today") {
+      from = startOfDay(now);
+      to = endOfDay(now);
+    } else if (timeFilter === "week") {
+      from = startOfWeek(now, { weekStartsOn: 1 });
+    } else if (timeFilter === "last7") {
+      from = startOfDay(subDays(now, 6)); // include today + previous 6 days
+    } else if (timeFilter === "last30") {
+      from = startOfDay(subDays(now, 29));
+    } else if (timeFilter === "last90") {
+      from = startOfDay(subDays(now, 89));
+    } else if (timeFilter === "monthly") {
+      from = startOfMonth(now);
     } else if (timeFilter === "quarterly") {
-      const start = startOfQuarter(now);
-      data = data.filter(d => new Date(d.createdAt) >= start);
+      from = startOfQuarter(now);
     } else if (timeFilter === "annually") {
-      const start = startOfYear(now);
-      data = data.filter(d => new Date(d.createdAt) >= start);
+      from = startOfYear(now);
+    } else if (timeFilter === "custom") {
+      // Parse the YYYY-MM-DD inputs as local midnight. End date is
+      // inclusive — we extend it to the end of that day so users don't
+      // have to pick "tomorrow" to include today.
+      if (customFrom) {
+        const f = new Date(customFrom);
+        if (!isNaN(f.getTime())) from = startOfDay(f);
+      }
+      if (customTo) {
+        const t = new Date(customTo);
+        if (!isNaN(t.getTime())) to = endOfDay(t);
+      }
+    }
+    if (from || to) {
+      const fromMs = from ? from.getTime() : -Infinity;
+      const toMs = to ? to.getTime() : Infinity;
+      data = data.filter((d) => {
+        const t = new Date(d.createdAt).getTime();
+        return t >= fromMs && t <= toMs;
+      });
     }
 
     // Filter by Module
@@ -327,7 +455,7 @@ export default function DashboardClient({
     }
 
     return data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [initialData, timeFilter, moduleFilter, searchTerm]);
+  }, [initialData, timeFilter, customFrom, customTo, moduleFilter, searchTerm]);
 
   const moduleCounts = useMemo(() => {
     return filteredData.reduce((acc, item) => {
@@ -335,6 +463,77 @@ export default function DashboardClient({
       return acc;
     }, {} as Record<string, number>);
   }, [filteredData]);
+
+  // Rows shown specifically inside the Award Points card. Applies the
+  // card-local date / time-of-day / sort controls on top of the page
+  // filter so admin can answer "who submitted first?" quickly.
+  const awardTableData = useMemo(() => {
+    let rows = [...filteredData];
+
+    // Same-day filter — match calendar date of createdAt against the
+    // YYYY-MM-DD picker value (local time).
+    if (awardDate) {
+      rows = rows.filter((d) => {
+        const dt = new Date(d.createdAt);
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, "0");
+        const day = String(dt.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}` === awardDate;
+      });
+    }
+
+    // Time-of-day window — minutes since midnight. Both ends inclusive.
+    // Either bound can be omitted to leave that side open.
+    const toMinutes = (hhmm: string): number | null => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+      if (!m) return null;
+      const h = Number(m[1]);
+      const mm = Number(m[2]);
+      if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+      return h * 60 + mm;
+    };
+    const fromMin = toMinutes(awardTimeFrom);
+    const toMin = toMinutes(awardTimeTo);
+    if (fromMin !== null || toMin !== null) {
+      rows = rows.filter((d) => {
+        const dt = new Date(d.createdAt);
+        const tod = dt.getHours() * 60 + dt.getMinutes();
+        if (fromMin !== null && tod < fromMin) return false;
+        if (toMin !== null && tod > toMin) return false;
+        return true;
+      });
+    }
+
+    rows.sort((a, b) => {
+      if (awardSortBy === "earliest") {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      if (awardSortBy === "latest") {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+      if (awardSortBy === "employee") {
+        return a.employeeName.localeCompare(b.employeeName) ||
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      // module
+      return a.moduleType.localeCompare(b.moduleType) ||
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    return rows;
+  }, [filteredData, awardDate, awardTimeFrom, awardTimeTo, awardSortBy]);
+
+  // Reset to the first page whenever the underlying filter / sort
+  // changes, so reviewers don't get stranded on an empty page.
+  React.useEffect(() => {
+    setAwardPage(0);
+  }, [awardDate, awardTimeFrom, awardTimeTo, awardSortBy, moduleFilter, timeFilter, customFrom, customTo, searchTerm]);
+
+  const awardPageCount = Math.max(1, Math.ceil(awardTableData.length / AWARD_PAGE_SIZE));
+  const awardPageSafe = Math.min(awardPage, awardPageCount - 1);
+  const awardPageStart = awardPageSafe * AWARD_PAGE_SIZE;
+  const awardPageEnd = Math.min(awardPageStart + AWARD_PAGE_SIZE, awardTableData.length);
+  const awardPageData = awardTableData.slice(awardPageStart, awardPageEnd);
 
   // Per-employee point totals, derived from the filtered submissions and
   // the admin-awarded points map. This is the value that "reflects in the
@@ -351,6 +550,7 @@ export default function DashboardClient({
         submissions: number;
         scoredSubmissions: number;
         totalPoints: number;
+        bonusPoints: number;
       }
     >();
     for (const item of filteredData) {
@@ -364,6 +564,7 @@ export default function DashboardClient({
           submissions: 0,
           scoredSubmissions: 0,
           totalPoints: 0,
+          bonusPoints: 0,
         };
         map.set(item.employeeId, entry);
       }
@@ -373,9 +574,17 @@ export default function DashboardClient({
         entry.scoredSubmissions += 1;
         entry.totalPoints += pts;
       }
+      const b = bonusBySubmission[item.id];
+      if (b && b.points > 0) {
+        entry.bonusPoints += b.points;
+      }
     }
-    return Array.from(map.values()).sort((a, b) => b.totalPoints - a.totalPoints);
-  }, [filteredData, pointsBySubmission]);
+    // Rank by combined total (regular + bonus) so spotlight bonuses are
+    // reflected in the leaderboard.
+    return Array.from(map.values()).sort(
+      (a, b) => (b.totalPoints + b.bonusPoints) - (a.totalPoints + a.bonusPoints),
+    );
+  }, [filteredData, pointsBySubmission, bonusBySubmission]);
 
   const scoredCount = Object.keys(pointsBySubmission).length;
   const pendingScoreCount = filteredData.filter((d) => !(d.id in pointsBySubmission)).length;
@@ -571,17 +780,57 @@ export default function DashboardClient({
           </Select>
 
           <Select value={timeFilter} onValueChange={(v: any) => setTimeFilter(v)}>
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[180px]">
               <CalendarIcon className="w-4 h-4 mr-2" />
               <SelectValue placeholder="Time Period" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="last7">Last 7 Days</SelectItem>
+              <SelectItem value="last30">Last 30 Days</SelectItem>
+              <SelectItem value="last90">Last 90 Days</SelectItem>
               <SelectItem value="monthly">This Month</SelectItem>
               <SelectItem value="quarterly">This Quarter</SelectItem>
               <SelectItem value="annually">This Year</SelectItem>
               <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="custom">Custom Range…</SelectItem>
             </SelectContent>
           </Select>
+
+          {timeFilter === "custom" && (
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
+              <Input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="h-8 w-[140px] border-0 bg-transparent p-1 text-xs focus-visible:ring-0"
+                aria-label="From date"
+                max={customTo || undefined}
+              />
+              <span className="text-xs text-muted-foreground">to</span>
+              <Input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="h-8 w-[140px] border-0 bg-transparent p-1 text-xs focus-visible:ring-0"
+                aria-label="To date"
+                min={customFrom || undefined}
+              />
+              {(customFrom || customTo) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setCustomFrom(""); setCustomTo(""); }}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  title="Clear date range"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -677,27 +926,122 @@ export default function DashboardClient({
                 Employee Points table below (visible on the employee&apos;s side).
               </CardDescription>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex flex-col items-end text-right">
-                <span className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Scored / Pending
-                </span>
-                <span className="text-sm font-bold">
-                  <span className="text-primary">{scoredCount}</span>
-                  <span className="text-muted-foreground"> / {pendingScoreCount}</span>
-                </span>
-              </div>
+            <div className="flex flex-col items-end text-right">
+              <span className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">
+                Scored / Pending
+              </span>
+              <span className="text-sm font-bold">
+                <span className="text-primary">{scoredCount}</span>
+                <span className="text-muted-foreground"> / {pendingScoreCount}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Card-local filters — independent of the page-level Time filter.
+              Sort defaults to "Earliest First" so the reviewer can see at a
+              glance which employee submitted first when several land on the
+              same day. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Select value={awardSortBy} onValueChange={(v: AwardSortBy) => setAwardSortBy(v)}>
+              <SelectTrigger className="h-9 w-[200px]">
+                <Clock className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="earliest">Earliest First (Who submitted first)</SelectItem>
+                <SelectItem value="latest">Latest First</SelectItem>
+                <SelectItem value="employee">Employee Name (A → Z)</SelectItem>
+                <SelectItem value="module">Module Type</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1.5">
+              <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                type="date"
+                value={awardDate}
+                onChange={(e) => setAwardDate(e.target.value)}
+                className="h-7 w-[140px] border-0 bg-transparent p-0 text-xs focus-visible:ring-0"
+                aria-label="Filter by submission date"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1.5">
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                type="time"
+                value={awardTimeFrom}
+                onChange={(e) => setAwardTimeFrom(e.target.value)}
+                className="h-7 w-[90px] border-0 bg-transparent p-0 text-xs focus-visible:ring-0"
+                aria-label="From time of day"
+              />
+              <span className="text-xs text-muted-foreground">to</span>
+              <Input
+                type="time"
+                value={awardTimeTo}
+                onChange={(e) => setAwardTimeTo(e.target.value)}
+                className="h-7 w-[90px] border-0 bg-transparent p-0 text-xs focus-visible:ring-0"
+                aria-label="To time of day"
+              />
+            </div>
+
+            {(awardDate || awardTimeFrom || awardTimeTo || awardSortBy !== "earliest") && (
               <Button
-                variant="outline"
+                type="button"
+                variant="ghost"
                 size="sm"
-                onClick={resetAllPoints}
-                disabled={scoredCount === 0 || !canReview}
-                className="text-xs"
-                title={canReview ? "" : "Admin / HR only"}
+                className="h-9 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setAwardDate("");
+                  setAwardTimeFrom("");
+                  setAwardTimeTo("");
+                  setAwardSortBy("earliest");
+                }}
               >
                 <RotateCcw className="h-3 w-3 mr-1" />
-                Reset All
+                Clear filters
               </Button>
+            )}
+
+            <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                Showing{" "}
+                <b className="text-foreground tabular-nums">
+                  {awardTableData.length === 0 ? 0 : awardPageStart + 1}
+                  {awardTableData.length > 0 && awardPageEnd > awardPageStart + 1 ? `–${awardPageEnd}` : ""}
+                </b>{" "}
+                of <b className="text-foreground tabular-nums">{awardTableData.length}</b>
+                {filteredData.length !== awardTableData.length && (
+                  <> (filtered from {filteredData.length})</>
+                )}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={() => setAwardPage((p) => Math.max(0, p - 1))}
+                  disabled={awardPageSafe <= 0}
+                  aria-label="Previous page"
+                >
+                  ‹
+                </Button>
+                <span className="tabular-nums px-1">
+                  Page {awardPageSafe + 1} / {awardPageCount}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={() => setAwardPage((p) => Math.min(awardPageCount - 1, p + 1))}
+                  disabled={awardPageSafe >= awardPageCount - 1}
+                  aria-label="Next page"
+                >
+                  ›
+                </Button>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -724,10 +1068,17 @@ export default function DashboardClient({
                       Points (1–12)
                     </div>
                   </TableHead>
+                  <TableHead className="text-center w-[150px]">
+                    <div className="flex items-center justify-center gap-1">
+                      <Award className="h-3.5 w-3.5 text-amber-600" />
+                      Bonus (0–{BONUS_MAX})
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-center w-[90px]">View</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.map((item) => {
+                {awardPageData.map((item) => {
                   const Icon = MODULE_ICONS[item.moduleType] || Target;
                   const awarded = pointsBySubmission[item.id];
                   const isScored = typeof awarded === "number";
@@ -738,7 +1089,7 @@ export default function DashboardClient({
                   return (
                     <TableRow key={item.id} className="hover:bg-muted/50 transition-colors">
                       <TableCell className="font-mono text-xs text-muted-foreground">
-                        {item.id.substring(0, 8).toUpperCase()}
+                        {item.displayId || item.id.substring(0, 8).toUpperCase()}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <div className="flex flex-col">
@@ -849,12 +1200,52 @@ export default function DashboardClient({
                           )}
                         </div>
                       </TableCell>
+                      <TableCell className="text-center">
+                        {(() => {
+                          const bonus = bonusBySubmission[item.id];
+                          const hasBonus = !!bonus && bonus.points > 0;
+                          return (
+                            <div className="flex items-center justify-center gap-1.5">
+                              <Input
+                                type="number"
+                                min={BONUS_MIN}
+                                max={BONUS_MAX}
+                                step={1}
+                                value={hasBonus ? bonus.points : ""}
+                                disabled={!canReview}
+                                onChange={(e) => setBonus(item.id, e.target.value)}
+                                placeholder={canReview ? "—" : "🔒"}
+                                className={`h-8 w-16 text-center text-sm font-semibold tabular-nums ${
+                                  hasBonus ? "border-amber-300 bg-amber-50" : ""
+                                }`}
+                                aria-label={`Bonus points for submission ${item.id}`}
+                                title={canReview ? (bonus?.reason ?? "Bonus points (0–100)") : "Admin / HR only"}
+                              />
+                              <span className="text-[10px] text-muted-foreground w-3.5">
+                                /{BONUS_MAX}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => setViewDialogFor(item)}
+                          title="View full submission in paper-form layout"
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          View
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
-                {filteredData.length === 0 && (
+                {awardTableData.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                       No submissions found matching your filters.
                     </TableCell>
                   </TableRow>
@@ -891,7 +1282,9 @@ export default function DashboardClient({
                 <TableHead>Department</TableHead>
                 <TableHead className="text-center">Submissions</TableHead>
                 <TableHead className="text-center">Scored</TableHead>
-                <TableHead className="text-right pr-6">Total Points</TableHead>
+                <TableHead className="text-right">Points</TableHead>
+                <TableHead className="text-right">Bonus</TableHead>
+                <TableHead className="text-right pr-6">Grand Total</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -918,17 +1311,31 @@ export default function DashboardClient({
                       {e.scoredSubmissions} / {e.submissions}
                     </span>
                   </TableCell>
+                  <TableCell className="text-right">
+                    <span className="inline-flex items-center gap-1 font-semibold text-primary tabular-nums">
+                      {e.totalPoints}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {e.bonusPoints > 0 ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-amber-700 tabular-nums">
+                        +{e.bonusPoints}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right pr-6">
                     <span className="inline-flex items-center gap-1 font-bold text-primary tabular-nums">
                       <Award className="h-3.5 w-3.5" />
-                      {e.totalPoints}
+                      {e.totalPoints + e.bonusPoints}
                     </span>
                   </TableCell>
                 </TableRow>
               ))}
               {employeePoints.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                     No employees in the current view.
                   </TableCell>
                 </TableRow>
@@ -1139,7 +1546,7 @@ export default function DashboardClient({
             <DialogDescription>
               {reviewDialogFor ? (
                 <>
-                  <span className="font-mono text-xs">{reviewDialogFor.id.substring(0, 8).toUpperCase()}</span>
+                  <span className="font-mono text-xs">{reviewDialogFor.displayId || reviewDialogFor.id.substring(0, 8).toUpperCase()}</span>
                   {" · "}
                   {reviewDialogFor.moduleType} — {reviewDialogFor.title}
                 </>
@@ -1210,6 +1617,79 @@ export default function DashboardClient({
               </Button>
             </div>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Paper-form View dialog ────────────────────────────────────── */}
+      <Dialog
+        open={!!viewDialogFor}
+        onOpenChange={(o) => { if (!o) setViewDialogFor(null); }}
+      >
+        <DialogContent className="!max-w-[min(1400px,96vw)] w-[96vw] max-h-[92vh] overflow-y-auto p-0">
+          {viewDialogFor && (() => {
+            const it = viewDialogFor;
+            const award = reviewBySubmission[it.id];
+            const pts = pointsBySubmission[it.id];
+            const bonus = bonusBySubmission[it.id];
+            const data: SubmissionPaperData = {
+              module: it.moduleType,
+              displayId: it.displayId || it.id.substring(0, 8).toUpperCase(),
+              title: it.title,
+              status: it.status,
+              category: it.category,
+              createdAt: it.createdAt,
+              endDate: it.endDate ?? null,
+              employee: {
+                employeeId: it.employeeId,
+                name: it.employeeName,
+                department: it.department,
+                teamName: null,
+              },
+              description: it.description,
+              currentState: it.currentState,
+              proposedState: it.proposedState,
+              benefits: it.benefits,
+              suggestion: it.suggestion,
+              feedback: it.feedback ?? null,
+              severity: it.severity,
+              proposedSolution: it.proposedSolution,
+              startDate: it.startDate,
+              targetDate: it.targetDate,
+              progress: it.progress,
+              votes: it.votes,
+              beforeMedia: it.beforeMedia ?? null,
+              afterMedia: it.afterMedia ?? null,
+              referenceImage: it.referenceImage ?? null,
+              points: typeof pts === "number" ? pts : null,
+              bonusPoints: bonus?.points ?? null,
+              bonusReason: bonus?.reason ?? null,
+              reviewStatus: award?.status ?? null,
+              reviewerName: award?.reviewer ?? null,
+            };
+            return (
+              <>
+                <DialogHeader className="px-6 pt-6 pb-3 border-b">
+                  <DialogTitle className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-primary" />
+                    Submission View — {data.displayId}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Read-only paper-form rendering of {it.moduleType.toLowerCase()} submission for {it.employeeName}.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="p-6">
+                  <SubmissionPaperView data={data} />
+                </div>
+                <DialogFooter className="px-6 py-3 border-t">
+                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                    <Printer className="h-3.5 w-3.5 mr-1" />
+                    Print
+                  </Button>
+                  <Button size="sm" onClick={() => setViewDialogFor(null)}>Close</Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

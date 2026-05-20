@@ -13,6 +13,7 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { buildScopedWhere } from '@/lib/hr/engagement-scope';
 import { serializeKaizen, KAIZEN_INCLUDE } from '@/lib/hr/engagement-serializers';
+import { nextDisplayId } from '@/lib/hr/engagement-display-id';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,7 @@ interface CreateBody {
   proposedState?: string;
   benefits?: string;
   status?: string;
+  endDate?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -70,17 +72,37 @@ export async function POST(request: NextRequest) {
 
   const status = body.status && ALLOWED_STATUS.has(body.status) ? body.status : 'idea';
 
+  // Form sends `beforeMedia` and `afterMedia` as separate slots — typically
+  // base64 `data:` URLs from the upload widget, so we allow up to ~6MB
+  // each (after that the request itself usually exceeds Next's body limit).
+  // Keep populating the legacy `referenceImage` column from beforeMedia so
+  // historical readers still find something; new code reads the explicit
+  // beforeMedia/afterMedia fields instead.
+  const MEDIA_MAX = 6_000_000;
+  const beforeMedia = ((body as any).beforeMedia ?? '').toString().slice(0, MEDIA_MAX) || null;
+  const afterMedia = ((body as any).afterMedia ?? '').toString().slice(0, MEDIA_MAX) || null;
+  const referenceImage = (
+    beforeMedia ||
+    ((body as any).referenceImage ?? '').toString().slice(0, MEDIA_MAX)
+  ) || null;
+
+  const displayId = await nextDisplayId('Kaizen', authUser.organizationId);
+
   const created = await (prisma as any).engagementKaizen.create({
     data: {
       organizationId: authUser.organizationId,
       userId: authUser.id,
+      displayId,
       title: body.title.trim().slice(0, 200),
       description: body.description.trim().slice(0, 5000),
       currentState: (body.currentState ?? '').toString().slice(0, 5000),
       proposedState: (body.proposedState ?? '').toString().slice(0, 5000),
       benefits: (body.benefits ?? '').toString().slice(0, 5000),
       status,
-      referenceImage: ((body as any).beforeMedia || (body as any).referenceImage || '').toString().slice(0, 1000) || null,
+      endDate: (body.endDate ?? '').toString().slice(0, 20) || null,
+      referenceImage,
+      beforeMedia,
+      afterMedia,
     },
     include: KAIZEN_INCLUDE,
   });

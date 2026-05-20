@@ -7,9 +7,34 @@ import { Target, Lightbulb, AlertCircle, TrendingUp, MessageSquare, ChevronLeft,
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import EmployeeAwardsView, { type EmployeeSubmission } from "./employee-awards-view";
+import { getValidatedSession } from "@/lib/auth/session";
+import { isUserAdmin } from "@/lib/api-helpers";
 
 export default async function EmployeeContributionDetail({ params }: { params: { employeeId: string } }) {
   const employeeId = params.employeeId;
+
+  // Reviewer (Admin / HR) resolution — only Admin / HR may award points
+  // and post reviews from the profile page. Standard employees still see
+  // the read-only contribution history for their own profile.
+  const session = await getValidatedSession();
+  const currentUserId = session?.user?.id ?? null;
+  let canReview = false;
+  let currentUserName = "Reviewer";
+  if (currentUserId) {
+    const me = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: {
+        email: true,
+        organizationId: true,
+        employee: { select: { employeeName: true, department: true } },
+      },
+    });
+    canReview = await isUserAdmin(currentUserId, me?.organizationId ?? null);
+    const dept = me?.employee?.department?.toLowerCase() ?? "";
+    if (dept.includes("hr") || dept.includes("human resource")) canReview = true;
+    currentUserName =
+      me?.employee?.employeeName || me?.email || session?.user?.email || "Reviewer";
+  }
 
   const allUsers = await prisma.user.findMany({
     where: { employee: { isNot: null } },
@@ -95,7 +120,7 @@ export default async function EmployeeContributionDetail({ params }: { params: {
             <Avatar className="h-20 w-20 border-4 border-background shadow-sm -mt-10 mb-3 bg-background">
               <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xl">{avatarStr}</AvatarFallback>
             </Avatar>
-            
+
             <h3 className="text-xl font-semibold">{emp.employeeName}</h3>
             <p className="text-muted-foreground text-sm">{emp.department} • {emp.id}</p>
 
@@ -111,7 +136,7 @@ export default async function EmployeeContributionDetail({ params }: { params: {
                 </div>
                 <span className="text-lg font-bold text-primary">{totalSubmissions.toLocaleString()}</span>
               </div>
-              
+
               <div className="flex items-center justify-between p-3 bg-muted/30 rounded-md border">
                 <div className="flex items-center gap-2">
                   <Trophy className="h-4 w-4 text-muted-foreground" />
@@ -260,46 +285,97 @@ export default async function EmployeeContributionDetail({ params }: { params: {
           Lives in a client component so it can read the points + reviews
           the reviewer recorded on the admin dashboard. */}
       <EmployeeAwardsView
+        canReview={canReview}
+        currentUserName={currentUserName}
+        employee={{
+          employeeId: emp.id,
+          name: emp.employeeName || "—",
+          department: emp.department || "—",
+          teamName: null,
+        }}
         submissions={[
           ...targetUser.engagementKaizens.map((s): EmployeeSubmission => ({
             id: s.id,
+            displayId: (s as any).displayId || `NK-${s.id.substring(0, 6).toUpperCase()}`,
+            endDate: (s as any).endDate ?? null,
             type: "Kaizen",
             title: s.title,
             category: "Process Improvement",
             status: s.status,
             createdAt: s.createdAt.toISOString(),
+            referenceImage: s.referenceImage ?? null,
+            beforeMedia: (s as any).beforeMedia ?? s.referenceImage ?? null,
+            afterMedia: (s as any).afterMedia ?? null,
+            details: {
+              description: s.description,
+              currentState: s.currentState,
+              proposedState: s.proposedState,
+              benefits: s.benefits,
+              votes: s.votes,
+            },
           })),
           ...targetUser.engagementSuggestions.map((s): EmployeeSubmission => ({
             id: s.id,
+            displayId: (s as any).displayId || `ES-${s.id.substring(0, 6).toUpperCase()}`,
+            endDate: (s as any).endDate ?? null,
             type: "Suggestion",
             title: s.title,
             category: s.category || "General",
             status: s.status,
             createdAt: s.createdAt.toISOString(),
+            referenceImage: s.referenceImage ?? null,
+            details: {
+              suggestion: s.suggestion,
+              feedback: s.feedback ?? null,
+            },
           })),
           ...targetUser.engagementProblems.map((s): EmployeeSubmission => ({
             id: s.id,
+            displayId: (s as any).displayId || `PR-${s.id.substring(0, 6).toUpperCase()}`,
+            endDate: (s as any).endDate ?? null,
             type: "Problem",
             title: s.title,
             category: s.category || "Safety",
             status: s.status,
             createdAt: s.createdAt.toISOString(),
+            referenceImage: s.referenceImage ?? null,
+            details: {
+              description: s.description,
+              severity: s.severity,
+              proposedSolution: s.proposedSolution,
+            },
           })),
           ...targetUser.engagementInitiatives.map((s): EmployeeSubmission => ({
             id: s.id,
+            displayId: (s as any).displayId || `SI-${s.id.substring(0, 6).toUpperCase()}`,
+            endDate: s.endDate ?? null,
             type: "Initiative",
             title: s.title,
             category: s.category || "General",
             status: s.status,
             createdAt: s.createdAt.toISOString(),
+            referenceImage: s.referenceImage ?? null,
+            details: {
+              description: s.description,
+              startDate: s.startDate,
+              endDate: s.endDate,
+            },
           })),
           ...targetUser.engagementTargets.map((s): EmployeeSubmission => ({
             id: s.id,
+            displayId: (s as any).displayId || `ST-${s.id.substring(0, 6).toUpperCase()}`,
+            endDate: (s as any).endDate ?? null,
             type: "Target",
             title: s.title,
             category: "Goal",
             status: s.status,
             createdAt: s.createdAt.toISOString(),
+            referenceImage: s.referenceImage ?? null,
+            details: {
+              description: s.description,
+              targetDate: s.targetDate,
+              progress: s.progress,
+            },
           })),
         ]}
       />

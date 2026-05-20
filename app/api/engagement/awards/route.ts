@@ -47,6 +47,10 @@ const ALLOWED_REVIEW_STATUS = new Set([
 
 const POINTS_MIN = 1;
 const POINTS_MAX = 12;
+// Discretionary bonus points are a separate scale — usable for spot
+// awards, milestone recognition, etc. 0 clears any existing bonus.
+const BONUS_MIN = 0;
+const BONUS_MAX = 100;
 
 async function isReviewer(
   userId: string,
@@ -100,6 +104,8 @@ interface UpsertBody {
   submissionId?: string;
   moduleType?: string;
   points?: number | null;
+  bonusPoints?: number | null;
+  bonusReason?: string | null;
   reviewStatus?: string | null;
   notes?: string | null;
 }
@@ -159,6 +165,24 @@ export async function POST(request: NextRequest) {
   else if (body.notes === undefined) notesValue = undefined;
   else return err("'notes' must be a string or null");
 
+  let bonusPointsValue: number | null | undefined;
+  if (body.bonusPoints === null) {
+    bonusPointsValue = null;
+  } else if (typeof body.bonusPoints === 'number' && Number.isFinite(body.bonusPoints)) {
+    bonusPointsValue = Math.max(BONUS_MIN, Math.min(BONUS_MAX, Math.floor(body.bonusPoints)));
+  } else if (body.bonusPoints === undefined) {
+    bonusPointsValue = undefined;
+  } else {
+    return err("'bonusPoints' must be a number 0..100, null, or omitted");
+  }
+
+  let bonusReasonValue: string | null | undefined;
+  if (body.bonusReason === null) bonusReasonValue = null;
+  else if (typeof body.bonusReason === 'string')
+    bonusReasonValue = body.bonusReason.trim().slice(0, 5000) || null;
+  else if (body.bonusReason === undefined) bonusReasonValue = undefined;
+  else return err("'bonusReason' must be a string or null");
+
   // Only stamp reviewer/reviewedAt when the review side changes.
   const reviewerStampUpdate =
     statusValue !== undefined || notesValue !== undefined
@@ -171,6 +195,8 @@ export async function POST(request: NextRequest) {
 
   const data = {
     ...(pointsValue !== undefined ? { points: pointsValue } : {}),
+    ...(bonusPointsValue !== undefined ? { bonusPoints: bonusPointsValue } : {}),
+    ...(bonusReasonValue !== undefined ? { bonusReason: bonusReasonValue } : {}),
     ...(statusValue !== undefined ? { reviewStatus: statusValue } : {}),
     ...(notesValue !== undefined ? { notes: notesValue } : {}),
     ...reviewerStampUpdate,
@@ -185,6 +211,8 @@ export async function POST(request: NextRequest) {
       submissionId,
       moduleType,
       points: pointsValue ?? null,
+      bonusPoints: bonusPointsValue ?? null,
+      bonusReason: bonusReasonValue ?? null,
       reviewStatus: statusValue ?? null,
       notes: notesValue ?? null,
       reviewerId: statusValue !== undefined || notesValue !== undefined ? authUser.id : null,

@@ -12,6 +12,7 @@ import {
   serializeSuggestion,
   SUGGESTION_INCLUDE,
 } from '@/lib/hr/engagement-serializers';
+import { nextDisplayId } from '@/lib/hr/engagement-display-id';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,7 @@ interface CreateBody {
   suggestion?: string;
   category?: string;
   status?: string;
+  endDate?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -71,15 +73,18 @@ export async function POST(request: NextRequest) {
 
   const status = body.status && ALLOWED_STATUS.has(body.status) ? body.status : 'submitted';
 
+  const displayId = await nextDisplayId('Suggestion', authUser.organizationId);
   const created = await (prisma as any).engagementSuggestion.create({
     data: {
       organizationId: authUser.organizationId,
       userId: authUser.id,
+      displayId,
       title: body.title.trim().slice(0, 200),
       suggestion: body.suggestion.trim().slice(0, 5000),
       category: body.category.trim().slice(0, 80),
       status,
-      referenceImage: ((body as any).media || (body as any).referenceImage || '').toString().slice(0, 1000) || null,
+      endDate: (body.endDate ?? '').toString().slice(0, 20) || null,
+      referenceImage: ((body as any).media || (body as any).referenceImage || '').toString().slice(0, 6_000_000) || null,
     },
     include: SUGGESTION_INCLUDE,
   });
