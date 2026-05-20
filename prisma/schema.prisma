@@ -239,6 +239,7 @@ model User {
   functions           CrmFunction[]            @relation("CrmFunctionCreator")
   functionExecutions  FunctionExecution[]      @relation("FunctionExecutionActor")
   notifications       Notification[]           @relation("NotificationRecipient")
+  pushSubscriptions   PushSubscription[]       @relation("UserPushSubscriptions")
   agentProfile        AgentProfile?
   reWallet            Wallet?
   staffingPlans       StaffingPlan[]           @relation("StaffingPlanCreator")
@@ -328,6 +329,7 @@ model Organization {
   functionExecutions FunctionExecution[]
   functionBindings  FunctionBinding[]
   notifications     Notification[]
+  pushSubscriptions PushSubscription[]
   staffingPlans     StaffingPlan[]
   jobOpenings       JobOpening[]
   jobApplications   JobApplication[]
@@ -3031,6 +3033,28 @@ model Notification {
   @@index([organizationId, createdAt])
   @@index([ruleId])
   @@map("notifications")
+}
+
+// Web Push subscriptions. One row per browser/device a user has granted
+// notification permission on, so a single user with the site open on phone
+// + laptop has two rows and both get pushed. `endpoint` is unique because
+// FCM/APNs/Mozilla's autopush each return a stable per-subscription URL.
+model PushSubscription {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  user           User         @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpoint       String       @unique
+  p256dh         String
+  auth           String
+  userAgent      String?      @map("user_agent")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  lastUsedAt     DateTime?    @map("last_used_at")
+
+  @@index([userId])
+  @@index([organizationId])
+  @@map("push_subscriptions")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

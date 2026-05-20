@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { Bell, Check, CheckCheck } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Bell, BellRing, Check, CheckCheck } from "lucide-react"
+import { requestPushPermission } from "@/components/push/push-init"
 import {
   Popover,
   PopoverContent,
@@ -121,16 +122,19 @@ export function NotificationBell({ collapsed = false }: NotificationBellProps) {
         >
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
             <span className="text-sm font-semibold">Notifications</span>
-            <button
-              type="button"
-              onClick={handleMarkAll}
-              disabled={unread === 0}
-              className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Mark all as read"
-            >
-              <CheckCheck className="w-3 h-3" />
-              Mark all read
-            </button>
+            <div className="flex items-center gap-2">
+              <PushEnableButton />
+              <button
+                type="button"
+                onClick={handleMarkAll}
+                disabled={unread === 0}
+                className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Mark all as read"
+              >
+                <CheckCheck className="w-3 h-3" />
+                Mark all read
+              </button>
+            </div>
           </div>
 
           <div className="overflow-y-auto flex-1">
@@ -322,3 +326,71 @@ export function NotificationBell({ collapsed = false }: NotificationBellProps) {
 }
 
 export default NotificationBell
+
+/**
+ * Small button inside the bell popover header that lets the user enable
+ * native push notifications. State is read straight from `Notification`
+ * (no React store needed) because the browser is the source of truth and
+ * permission only changes via user action.
+ */
+function PushEnableButton() {
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default")
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+      setPermission("unsupported")
+      return
+    }
+    setPermission(Notification.permission)
+  }, [])
+
+  if (permission === "unsupported") return null
+  if (permission === "granted") {
+    // Subtle "all set" indicator — clicking would be a no-op so we render
+    // a static icon instead of a button to avoid drawing attention to it.
+    return (
+      <span
+        className="text-[11px] text-emerald-600 inline-flex items-center gap-1"
+        title="Push notifications enabled"
+      >
+        <BellRing className="w-3 h-3" />
+        On
+      </span>
+    )
+  }
+  if (permission === "denied") {
+    // Can't re-prompt — the user has to go into site settings. Linkify-ish
+    // hint via the title attribute so we don't add another modal.
+    return (
+      <span
+        className="text-[11px] text-muted-foreground inline-flex items-center gap-1"
+        title="Push blocked. Enable it in your browser's site settings."
+      >
+        <BellRing className="w-3 h-3" />
+        Blocked
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          const next = await requestPushPermission()
+          setPermission(next)
+        } finally {
+          setBusy(false)
+        }
+      }}
+      className="text-[11px] text-primary hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+      title="Get OS-level notifications even when this site is closed"
+    >
+      <BellRing className="w-3 h-3" />
+      {busy ? "Enabling…" : "Enable push"}
+    </button>
+  )
+}
