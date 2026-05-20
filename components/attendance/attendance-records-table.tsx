@@ -10,6 +10,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { MapPin, Edit3, AlertTriangle } from "lucide-react";
 import {
   formatDateLong,
@@ -280,11 +285,14 @@ export function AttendanceRecordsTable({
 
 /**
  * Compact photo thumbnail for the Proof column. 28×28 rounded avatar that
- * pops a large preview on hover/focus. We use a native <img> rather than
- * next/image because the photo URLs are admin-uploaded blobs from our own
- * uploader — they don't need the optimisation pipeline and skipping it
- * avoids the "remotePatterns not configured" runtime warning that next
- * /image throws for arbitrary hosts.
+ * pops a larger preview on hover/focus via a Radix HoverCard. The card is
+ * portaled to <body>, so it escapes the table's `overflow-x-auto` clip and
+ * auto-flips when the row is near the viewport edge.
+ *
+ * Native <img> (not next/image) because the photo URLs are admin-uploaded
+ * blobs from our own uploader — they don't need the optimisation pipeline
+ * and skipping it avoids next/image's "remotePatterns not configured"
+ * runtime warning for arbitrary hosts.
  */
 function PhotoThumb({
   src,
@@ -296,32 +304,40 @@ function PhotoThumb({
   title: string;
 }) {
   return (
-    <span className="group relative inline-block">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={alt}
-        loading="lazy"
-        className="h-7 w-7 rounded-full object-cover border border-gray-200 hover:ring-2 hover:ring-blue-400 transition-shadow"
-      />
-      {/* Hover preview — absolute-positioned so it doesn't reflow the row
-          and pointer-events-none so it never blocks the cell click. */}
-      <span
-        className="pointer-events-none absolute z-30 top-full left-1/2 -translate-x-1/2 mt-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
-        aria-hidden
-      >
-        <span className="block rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+    <HoverCard openDelay={120} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          aria-label={alt}
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
-            alt=""
-            className="block h-40 w-40 object-cover rounded-md"
+            alt={alt}
+            loading="lazy"
+            className="h-7 w-7 rounded-full object-cover border border-gray-200 hover:ring-2 hover:ring-blue-400 transition-shadow"
           />
-          <span className="block text-[10px] text-center text-gray-500 mt-1">
-            {title}
-          </span>
-        </span>
-      </span>
-    </span>
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="top"
+        align="center"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-auto p-2 rounded-lg border border-gray-200 bg-white shadow-xl"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt=""
+          className="block h-48 w-48 object-cover rounded-md"
+        />
+        <div className="mt-1.5 text-center text-[11px] font-medium text-gray-600">
+          {title}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }

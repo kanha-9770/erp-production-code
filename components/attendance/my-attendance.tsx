@@ -112,10 +112,10 @@ export function MyAttendance() {
               size="sm"
               onClick={() => {
                 setTo(today);
-                setFrom(shiftDays(today, -29));
+                setFrom(shiftDays(today, -14));
               }}
             >
-              30 days
+              15 days
             </Button>
             <Button
               variant="outline"
