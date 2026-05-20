@@ -17,6 +17,7 @@ import {
   AttendanceError,
   setOvertimeOptIn,
 } from '@/lib/hr/attendance-service';
+import { fireWorkflow } from '@/lib/workflow/static-triggers';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,24 @@ export async function POST(request: NextRequest) {
       organizationId: authUser.organizationId ?? null,
       optIn: body.optIn,
     });
+    // Fire-and-forget workflow trigger. Rules built on the "Attendance" module
+    // with a condition on `overtimeOptedIn` will pick this up — typical use
+    // case is notifying HR/Admin when an employee starts overtime.
+    if (authUser.organizationId) {
+      fireWorkflow({
+        moduleName: 'Attendance',
+        action: 'Edit',
+        organizationId: authUser.organizationId,
+        userId: authUser.id,
+        recordData: {
+          userId: authUser.id,
+          date: status.date,
+          overtimeOptedIn: body.optIn,
+          overtimeStartedAt: status.overtime?.startedAt ?? null,
+          checkedIn: status.checkedIn,
+        },
+      });
+    }
     return NextResponse.json({ success: true, status }, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof AttendanceError) {

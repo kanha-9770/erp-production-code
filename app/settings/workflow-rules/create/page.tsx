@@ -2085,8 +2085,8 @@ export default function CreateWorkflowRulePage() {
                                 <SelectValue placeholder="Field" />
                               </SelectTrigger>
                               <SelectContent>
-                                {formFields.length > 0 ? (
-                                  formFields.map((f) => (
+                                {moduleFields.length > 0 ? (
+                                  moduleFields.map((f) => (
                                     <SelectItem key={f.id} value={f.label} className="text-xs">
                                       {f.label}
                                     </SelectItem>
