@@ -6,6 +6,7 @@ import { ConditionalLayout } from "@/components/layout/ConditionalLayout";
 import { ReduxProvider } from "@/lib/providers/StoreProvider";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
+import PushInit from "@/components/push/push-init";
 const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "ERP System",
@@ -58,6 +59,7 @@ export default function RootLayout({
         >
           <ReduxProvider>
             <ConditionalLayout>{children}</ConditionalLayout>
+            <PushInit />
             <Toaster />
           </ReduxProvider>
         </ThemeProvider>
