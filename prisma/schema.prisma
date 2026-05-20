@@ -310,6 +310,12 @@ model Organization {
   // fields, currency form fields, etc. Only org admins/owners can
   // change it (PUT /api/organization/settings).
   currency          String             @default("USD")
+  // Top-level ERP modules this org has opted into ("hr", "real_estate",
+  // "inventory", "asset_management"). Drives sidebar visibility and
+  // middleware route gating. See lib/erp-modules.ts for the catalog.
+  // Empty array means no business modules are active (settings/profile
+  // remain reachable so admins can configure).
+  selectedModules   String[]           @default([]) @map("selected_modules")
   ownerId           String?            @unique @map("owner_id")
   owner             User?              @relation("Owner", fields: [ownerId], references: [id], onDelete: SetNull)
   users             User[]             @relation("UserOrganization")
