@@ -50,6 +50,8 @@ export type SubmissionPaperData = {
   points?: number | null;
   bonusPoints?: number | null;
   bonusReason?: string | null;
+  remark?: string | null;
+  isBestKaizen?: boolean | null;
   reviewStatus?: string | null;
   reviewerName?: string | null;
 };
@@ -349,6 +351,22 @@ export default function SubmissionPaperView({ data }: { data: SubmissionPaperDat
         />
         <Cell label="Reviewed By" value={data.reviewerName || "—"} colSpan={3} />
 
+        {data.module === "Kaizen" && (
+          <Cell
+            label="Best Kaizen"
+            value={
+              data.isBestKaizen ? (
+                <span className="font-bold text-amber-700">★ YES</span>
+              ) : (
+                "No"
+              )
+            }
+            colSpan={12}
+            align="center"
+            bg={data.isBestKaizen ? "slate" : "white"}
+          />
+        )}
+        {data.remark && <Cell label="Reviewer Remark" value={data.remark} colSpan={12} />}
         {data.bonusReason && (
           <Cell label="Bonus Reason" value={data.bonusReason} colSpan={12} />
         )}

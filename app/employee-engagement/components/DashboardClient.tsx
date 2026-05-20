@@ -182,6 +182,11 @@ export default function DashboardClient({
   // space, different scale (0..100). Reason is optional and stored on
   // the same EngagementAward row.
   const [bonusBySubmission, setBonusBySubmission] = useState<Record<string, { points: number; reason: string | null }>>({});
+  // Inline reviewer remark per submission. Separate from review notes
+  // which are tied to the formal review-decision dialog.
+  const [remarkBySubmission, setRemarkBySubmission] = useState<Record<string, string>>({});
+  // Spotlight flag for Kaizen submissions (only set on Kaizen rows).
+  const [bestKaizenBySubmission, setBestKaizenBySubmission] = useState<Record<string, boolean>>({});
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
 
   // Admin/HR review log per submission. Same persistence approach as
@@ -217,12 +222,16 @@ export default function DashboardClient({
         if (cancelled || !data?.success) return;
         const ptsNext: Record<string, number> = {};
         const bonusNext: Record<string, { points: number; reason: string | null }> = {};
+        const remarkNext: Record<string, string> = {};
+        const bestNext: Record<string, boolean> = {};
         const revNext: Record<string, ReviewEntry> = {};
         for (const a of data.awards as Array<{
           submissionId: string;
           points: number | null;
           bonusPoints: number | null;
           bonusReason: string | null;
+          remark: string | null;
+          isBestKaizen: boolean | null;
           reviewStatus: string | null;
           reviewerName: string | null;
           reviewedAt: string | null;
@@ -232,6 +241,10 @@ export default function DashboardClient({
           if (typeof a.bonusPoints === "number" && a.bonusPoints > 0) {
             bonusNext[a.submissionId] = { points: a.bonusPoints, reason: a.bonusReason ?? null };
           }
+          if (typeof a.remark === "string" && a.remark.trim()) {
+            remarkNext[a.submissionId] = a.remark;
+          }
+          if (a.isBestKaizen) bestNext[a.submissionId] = true;
           if (a.reviewStatus && a.reviewedAt) {
             revNext[a.submissionId] = {
               status: a.reviewStatus as ReviewStatus,
@@ -243,6 +256,8 @@ export default function DashboardClient({
         }
         setPointsBySubmission(ptsNext);
         setBonusBySubmission(bonusNext);
+        setRemarkBySubmission(remarkNext);
+        setBestKaizenBySubmission(bestNext);
         setReviewBySubmission(revNext);
       } catch {
         /* ignore — UI just shows no awards */
@@ -264,6 +279,8 @@ export default function DashboardClient({
       points?: number | null;
       bonusPoints?: number | null;
       bonusReason?: string | null;
+      remark?: string | null;
+      isBestKaizen?: boolean | null;
       reviewStatus?: ReviewStatus | null;
       notes?: string | null;
     },
@@ -388,6 +405,39 @@ export default function DashboardClient({
     setTimeout(() => setSavedFlash((s) => (s === submissionId ? null : s)), 800);
     const ok = await postAward(submissionId, { bonusPoints: clamped });
     if (!ok) setBonusBySubmission(prev);
+  };
+
+  // Inline remark editor — debounced via blur so we don't post on every
+  // keystroke. The local map updates immediately for responsiveness.
+  const onRemarkChange = (submissionId: string, raw: string) => {
+    setRemarkBySubmission((prev) => {
+      const next = { ...prev };
+      if (raw.trim() === "") delete next[submissionId];
+      else next[submissionId] = raw;
+      return next;
+    });
+  };
+  const flushRemark = async (submissionId: string) => {
+    const value = remarkBySubmission[submissionId] ?? "";
+    const prev = remarkBySubmission;
+    setSavedFlash(submissionId);
+    setTimeout(() => setSavedFlash((s) => (s === submissionId ? null : s)), 800);
+    const ok = await postAward(submissionId, { remark: value.trim() || null });
+    if (!ok) setRemarkBySubmission(prev);
+  };
+
+  // Best-Kaizen toggle. Only meaningful for Kaizen rows — UI hides the
+  // control elsewhere, but the API also nulls it out defensively.
+  const toggleBestKaizen = async (submissionId: string, next: boolean) => {
+    const prev = bestKaizenBySubmission;
+    setBestKaizenBySubmission((p) => {
+      const out = { ...p };
+      if (next) out[submissionId] = true;
+      else delete out[submissionId];
+      return out;
+    });
+    const ok = await postAward(submissionId, { isBestKaizen: next });
+    if (!ok) setBestKaizenBySubmission(prev);
   };
 
   const filteredData = useMemo(() => {
@@ -1074,6 +1124,8 @@ export default function DashboardClient({
                       Bonus (0–{BONUS_MAX})
                     </div>
                   </TableHead>
+                  <TableHead className="w-[220px]">Remark</TableHead>
+                  <TableHead className="text-center w-[110px]">Best Kaizen</TableHead>
                   <TableHead className="text-center w-[90px]">View</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1228,6 +1280,47 @@ export default function DashboardClient({
                           );
                         })()}
                       </TableCell>
+                      <TableCell>
+                        <Input
+                          type="text"
+                          value={remarkBySubmission[item.id] ?? ""}
+                          onChange={(e) => onRemarkChange(item.id, e.target.value)}
+                          onBlur={() => flushRemark(item.id)}
+                          disabled={!canReview}
+                          placeholder={canReview ? "Add remark…" : "🔒"}
+                          className="h-8 text-xs"
+                          aria-label={`Remark for submission ${item.id}`}
+                          title={canReview ? "" : "Admin / HR only"}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {item.moduleType === "Kaizen" ? (
+                          <Select
+                            value={bestKaizenBySubmission[item.id] ? "yes" : "no"}
+                            onValueChange={(v) => toggleBestKaizen(item.id, v === "yes")}
+                            disabled={!canReview}
+                          >
+                            <SelectTrigger
+                              className={`h-8 w-[90px] text-xs ${
+                                bestKaizenBySubmission[item.id]
+                                  ? "border-amber-300 bg-amber-50 text-amber-800 font-semibold"
+                                  : ""
+                              }`}
+                              title={canReview ? "Mark this Kaizen as the best" : "Admin / HR only"}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="no">No</SelectItem>
+                              <SelectItem value="yes">Yes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground" title="Best Kaizen flag applies only to Kaizen submissions">
+                            —
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-center">
                         <Button
                           variant="outline"
@@ -1245,7 +1338,7 @@ export default function DashboardClient({
                 })}
                 {awardTableData.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
                       No submissions found matching your filters.
                     </TableCell>
                   </TableRow>
@@ -1663,6 +1756,8 @@ export default function DashboardClient({
               points: typeof pts === "number" ? pts : null,
               bonusPoints: bonus?.points ?? null,
               bonusReason: bonus?.reason ?? null,
+              remark: remarkBySubmission[it.id] ?? null,
+              isBestKaizen: !!bestKaizenBySubmission[it.id],
               reviewStatus: award?.status ?? null,
               reviewerName: award?.reviewer ?? null,
             };

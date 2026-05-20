@@ -67,6 +67,8 @@ type AwardRow = {
   points: number | null;
   bonusPoints: number | null;
   bonusReason: string | null;
+  remark: string | null;
+  isBestKaizen: boolean | null;
   reviewStatus: string | null;
   reviewerName: string | null;
   reviewedAt: string | null;
@@ -162,6 +164,8 @@ export default function EmployeeAwardsView({
 }) {
   const [myPoints, setMyPoints] = React.useState<Record<string, number>>({});
   const [myBonus, setMyBonus] = React.useState<Record<string, { points: number; reason: string | null }>>({});
+  const [myRemarks, setMyRemarks] = React.useState<Record<string, string>>({});
+  const [myBestKaizen, setMyBestKaizen] = React.useState<Record<string, boolean>>({});
   const [myReviews, setMyReviews] = React.useState<Record<string, ReviewEntry>>({});
   const [hydrated, setHydrated] = React.useState(false);
 
@@ -200,12 +204,18 @@ export default function EmployeeAwardsView({
         if (cancelled || !data?.success) return;
         const ptsNext: Record<string, number> = {};
         const bonusNext: Record<string, { points: number; reason: string | null }> = {};
+        const remarkNext: Record<string, string> = {};
+        const bestNext: Record<string, boolean> = {};
         const revNext: Record<string, ReviewEntry> = {};
         for (const a of data.awards as AwardRow[]) {
           if (typeof a.points === "number") ptsNext[a.submissionId] = a.points;
           if (typeof a.bonusPoints === "number" && a.bonusPoints > 0) {
             bonusNext[a.submissionId] = { points: a.bonusPoints, reason: a.bonusReason ?? null };
           }
+          if (typeof a.remark === "string" && a.remark.trim()) {
+            remarkNext[a.submissionId] = a.remark;
+          }
+          if (a.isBestKaizen) bestNext[a.submissionId] = true;
           if (a.reviewStatus && a.reviewedAt) {
             revNext[a.submissionId] = {
               status: a.reviewStatus as ReviewStatus,
@@ -217,6 +227,8 @@ export default function EmployeeAwardsView({
         }
         setMyPoints(ptsNext);
         setMyBonus(bonusNext);
+        setMyRemarks(remarkNext);
+        setMyBestKaizen(bestNext);
         setMyReviews(revNext);
       } catch {
         /* ignore — show empty state */
@@ -637,6 +649,8 @@ export default function EmployeeAwardsView({
                   points: typeof myPoints[detailFor.id] === "number" ? myPoints[detailFor.id] : null,
                   bonusPoints: myBonus[detailFor.id]?.points ?? null,
                   bonusReason: myBonus[detailFor.id]?.reason ?? null,
+                  remark: myRemarks[detailFor.id] ?? null,
+                  isBestKaizen: !!myBestKaizen[detailFor.id],
                   reviewStatus: myReviews[detailFor.id]?.status ?? null,
                   reviewerName: myReviews[detailFor.id]?.reviewer ?? null,
                 };

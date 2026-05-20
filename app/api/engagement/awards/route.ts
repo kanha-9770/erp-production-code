@@ -108,6 +108,10 @@ interface UpsertBody {
   bonusReason?: string | null;
   reviewStatus?: string | null;
   notes?: string | null;
+  // Inline reviewer remark (separate from review notes).
+  remark?: string | null;
+  // Best-Kaizen spotlight (only meaningful when moduleType === "Kaizen").
+  isBestKaizen?: boolean | null;
 }
 
 export async function POST(request: NextRequest) {
@@ -183,6 +187,21 @@ export async function POST(request: NextRequest) {
   else if (body.bonusReason === undefined) bonusReasonValue = undefined;
   else return err("'bonusReason' must be a string or null");
 
+  let remarkValue: string | null | undefined;
+  if (body.remark === null) remarkValue = null;
+  else if (typeof body.remark === 'string')
+    remarkValue = body.remark.trim().slice(0, 5000) || null;
+  else if (body.remark === undefined) remarkValue = undefined;
+  else return err("'remark' must be a string or null");
+
+  let bestKaizenValue: boolean | null | undefined;
+  if (body.isBestKaizen === null) bestKaizenValue = null;
+  else if (typeof body.isBestKaizen === 'boolean') bestKaizenValue = body.isBestKaizen;
+  else if (body.isBestKaizen === undefined) bestKaizenValue = undefined;
+  else return err("'isBestKaizen' must be a boolean or null");
+  // Spotlight is Kaizen-only — silently coerce others to null.
+  if (bestKaizenValue && moduleType !== 'Kaizen') bestKaizenValue = null;
+
   // Only stamp reviewer/reviewedAt when the review side changes.
   const reviewerStampUpdate =
     statusValue !== undefined || notesValue !== undefined
@@ -197,6 +216,8 @@ export async function POST(request: NextRequest) {
     ...(pointsValue !== undefined ? { points: pointsValue } : {}),
     ...(bonusPointsValue !== undefined ? { bonusPoints: bonusPointsValue } : {}),
     ...(bonusReasonValue !== undefined ? { bonusReason: bonusReasonValue } : {}),
+    ...(remarkValue !== undefined ? { remark: remarkValue } : {}),
+    ...(bestKaizenValue !== undefined ? { isBestKaizen: bestKaizenValue } : {}),
     ...(statusValue !== undefined ? { reviewStatus: statusValue } : {}),
     ...(notesValue !== undefined ? { notes: notesValue } : {}),
     ...reviewerStampUpdate,
@@ -213,6 +234,8 @@ export async function POST(request: NextRequest) {
       points: pointsValue ?? null,
       bonusPoints: bonusPointsValue ?? null,
       bonusReason: bonusReasonValue ?? null,
+      remark: remarkValue ?? null,
+      isBestKaizen: bestKaizenValue ?? null,
       reviewStatus: statusValue ?? null,
       notes: notesValue ?? null,
       reviewerId: statusValue !== undefined || notesValue !== undefined ? authUser.id : null,

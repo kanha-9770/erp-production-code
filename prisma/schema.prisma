@@ -1626,6 +1626,13 @@ model EngagementAward {
   // the merit-based 1..12 grading.
   bonusPoints    Int?     @map("bonus_points")
   bonusReason    String?  @db.Text @map("bonus_reason")
+  // Short inline remark shown in the dashboard's Award Points table —
+  // separate from the review `notes` which are tied to the formal
+  // review-decision dialog.
+  remark         String?  @db.Text
+  // Spotlight flag for Kaizen submissions only (other modules ignore
+  // it). Lets admin tag a "Best Kaizen of the period".
+  isBestKaizen   Boolean? @map("is_best_kaizen")
   reviewStatus   String?  @map("review_status") // approved | rejected | needs-info | pending
   reviewerId     String?  @map("reviewer_id")
   reviewerName   String?  @map("reviewer_name")
