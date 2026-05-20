@@ -17,6 +17,7 @@ async function buildAuthMeta(token: string) {
     where: { id: userId },
     select: {
       organizationId: true,
+      organization: { select: { selectedModules: true } },
       unitAssignments: {
         select: {
           role: { select: { id: true, name: true, isAdmin: true } },
@@ -26,6 +27,10 @@ async function buildAuthMeta(token: string) {
   });
 
   if (!user) return null;
+
+  const selectedModules: string[] = Array.isArray(user.organization?.selectedModules)
+    ? (user.organization!.selectedModules as string[])
+    : [];
 
   const isAdmin =
     user.unitAssignments?.some(
@@ -44,6 +49,7 @@ async function buildAuthMeta(token: string) {
       deniedRoutes: [] as string[],
       allowedRoutes: [] as string[],
       allowedModuleIds: [] as string[],
+      selectedModules,
     };
   }
 
@@ -58,6 +64,7 @@ async function buildAuthMeta(token: string) {
     deniedRoutes,
     allowedRoutes,
     allowedModuleIds,
+    selectedModules,
   };
 }
 
@@ -72,6 +79,7 @@ function setAuthMetaCookie(
     deniedRoutes: string[];
     allowedRoutes: string[];
     allowedModuleIds: string[];
+    selectedModules: string[];
   }
 ) {
   response.cookies.set("auth-meta", JSON.stringify(meta), {
@@ -152,6 +160,7 @@ export async function POST(request: NextRequest) {
         deniedRoutes: meta.deniedRoutes,
         allowedRoutes: meta.allowedRoutes,
         allowedModuleIds: meta.allowedModuleIds,
+        selectedModules: meta.selectedModules,
       },
     });
     setAuthMetaCookie(response, meta);

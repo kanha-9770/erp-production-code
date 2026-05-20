@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { patternToRegex, resolveRouteAccess } from "@/lib/route-permissions";
+import { isPathBlockedByModules } from "@/lib/erp-modules";
 
 /**
  * Detect if a path segment looks like a Prisma CUID (module ID).
@@ -84,6 +85,7 @@ export function middleware(request: NextRequest) {
     deniedRoutes?: string[];
     allowedRoutes?: string[];
     allowedModuleIds?: string[];
+    selectedModules?: string[];
   };
 
   try {
@@ -109,6 +111,20 @@ export function middleware(request: NextRequest) {
     const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);
+  }
+
+  // ── 4c. ERP module gate ───────────────────────────────────────────────────
+  // Block requests to URL prefixes owned by modules the org has NOT opted
+  // into. Admins are subject to this gate too — the only way to access a
+  // disabled module's pages is to re-enable it in Settings → Modules.
+  // `selectedModules` is undefined on cookies issued before this feature
+  // shipped; in that case we skip gating so legacy sessions still work.
+  if (Array.isArray(authMeta.selectedModules)) {
+    if (isPathBlockedByModules(pathname, authMeta.selectedModules)) {
+      const url = new URL("/", request.url);
+      url.searchParams.set("moduleDisabled", "1");
+      return NextResponse.redirect(url);
+    }
   }
 
   // ── 5. Admin bypasses everything ───────────────────────────────────────────

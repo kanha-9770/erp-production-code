@@ -1,6 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import {
+  sanitizeSelectedModules,
+  DEFAULT_NEW_ORG_MODULES,
+} from "@/lib/erp-modules"
+import { ensureErpModuleSidebar } from "@/lib/erp-modules-seed"
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,11 +34,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Organization name must be at least 2 characters" }, { status: 400 })
     }
 
+    // Module selection — opted-in feature set. Unknown ids are dropped.
+    // If the caller passes nothing (or an empty/invalid value) we fall back
+    // to a sensible default so the org isn't created with a totally blank
+    // sidebar.
+    const requestedModules = sanitizeSelectedModules(body.selectedModules)
+    const selectedModules =
+      requestedModules.length > 0 ? requestedModules : [...DEFAULT_NEW_ORG_MODULES]
+
     const result = await prisma.$transaction(async (tx) => {
       // Create the organization
       const organization = await tx.organization.create({
         data: {
           name: name.trim(),
+          selectedModules,
         },
       })
 
@@ -75,6 +89,11 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      // Seed FormModules + group anchors for the picked ERP modules so the
+      // sidebar is populated out of the box. Without this the new org sees
+      // an empty sidebar even though selectedModules is set.
+      await ensureErpModuleSidebar(tx, organization.id, selectedModules)
+
       return {
         organization,
         rootUnit,
@@ -88,6 +107,7 @@ export async function POST(request: NextRequest) {
       organization: {
         id: result.organization.id,
         name: result.organization.name,
+        selectedModules: result.organization.selectedModules,
       },
     })
   } catch (error: any) {

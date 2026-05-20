@@ -329,6 +329,7 @@ export async function POST(request: NextRequest) {
       where: { id: user.id },
       select: {
         organizationId: true,
+        organization: { select: { selectedModules: true } },
         unitAssignments: {
           select: {
             role: { select: { id: true, name: true, isAdmin: true } },
@@ -347,6 +348,11 @@ export async function POST(request: NextRequest) {
     const { deniedRoutes, allowedRoutes, allowedModuleIds } = isAdmin
       ? { deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] }
       : await computeRouteMeta(user.id, userWithRoles?.organizationId ?? null, roleIds)
+
+    // ERP modules the org has opted into — drives sidebar/middleware gating.
+    const selectedModules: string[] = Array.isArray(userWithRoles?.organization?.selectedModules)
+      ? (userWithRoles!.organization!.selectedModules as string[])
+      : []
 
     const response = NextResponse.json({
       success: true,
@@ -372,7 +378,7 @@ export async function POST(request: NextRequest) {
     // Set auth-meta cookie for lightweight middleware permission checks
     response.cookies.set(
       "auth-meta",
-      JSON.stringify({ v: 2, ts: Date.now(), isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
+      JSON.stringify({ v: 2, ts: Date.now(), isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds, selectedModules }),
       {
         httpOnly: false, // Client-side RoutePermissionGuard needs to read this
         secure: process.env.NODE_ENV === "production",

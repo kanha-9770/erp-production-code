@@ -80,6 +80,7 @@ import { useOptimisticModules } from "@/hooks/useOptimisticModules";
 import { usePermissionContext } from "@/context/PermissionContext";
 import { useRouteAccess } from "@/hooks/use-route-access";
 import { STATIC_PAGES, type StaticPage } from "@/lib/static-pages";
+import { getEnabledGroups } from "@/lib/erp-modules";
 
 interface FormModule {
   id: string;
@@ -187,10 +188,19 @@ function buildAnchorChildrenMap(args: {
    *  this user/role. Used to override the `adminOnly` hint so a non-admin
    *  with an explicit grant still sees the page. */
   isPermitted: (path: string) => boolean;
+  /** Static-page groups the org has opted into. Pages outside this set are
+   *  hidden from the sidebar regardless of anchors or route permissions. */
+  enabledGroups: Set<string>;
 }): Map<string, any[]> {
-  const { anchors, isAdmin, canAccess, isPermitted } = args;
+  const { anchors, isAdmin, canAccess, isPermitted, enabledGroups } = args;
   const byPath = new Map<string, StaticPage>();
-  for (const p of STATIC_PAGES) byPath.set(p.path, p);
+  for (const p of STATIC_PAGES) {
+    // Skip pages whose group is not part of any selected ERP module —
+    // this is how disabling "Real Estate" removes /real-estate/* from the
+    // sidebar without touching anchor or permission records.
+    if (!enabledGroups.has(p.group)) continue;
+    byPath.set(p.path, p);
+  }
 
   const result = new Map<string, any[]>();
   // Stable order: respect the admin-configured sortOrder when set, otherwise
@@ -681,11 +691,29 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     // Done BEFORE filtering so the per-leaf canAccess gate can keep a host
     // module visible (via the "any child has access" branch) even when the
     // user has no VIEW permission on the module itself.
+    //
+    // `enabledGroups` is derived from the org's selectedModules; if the org
+    // hasn't opted into a module's page-group, the corresponding pages are
+    // dropped before anchors are evaluated. Missing/undefined data is
+    // treated as "everything enabled" so legacy orgs without the field
+    // backfilled don't lose access.
+    const orgSelectedModules: string[] = Array.isArray(
+      (userData?.user?.organization as any)?.selectedModules
+    )
+      ? ((userData!.user!.organization as any).selectedModules as string[])
+      : [];
+    const hasModuleSelectionData = !!(userData?.user?.organization as any)
+      ?.selectedModules;
+    const enabledGroups: Set<string> = hasModuleSelectionData
+      ? (getEnabledGroups(orgSelectedModules) as unknown as Set<string>)
+      : new Set(STATIC_PAGES.map((p) => p.group));
+
     const anchorChildrenByModule = buildAnchorChildrenMap({
       anchors: staticAnchors,
       isAdmin,
       canAccess,
       isPermitted,
+      enabledGroups,
     });
 
     const injectAnchorLeaves = (items: ModuleNode[]): ModuleNode[] =>

@@ -65,6 +65,11 @@ export async function GET(request: NextRequest) {
           ? {
               id: session.user.organization.id,
               name: session.user.organization.name,
+              selectedModules: Array.isArray(
+                (session.user.organization as any).selectedModules
+              )
+                ? ((session.user.organization as any).selectedModules as string[])
+                : [],
             }
           : null,
         allowedRoutes,

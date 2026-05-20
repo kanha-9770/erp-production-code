@@ -620,6 +620,14 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'shield',
   },
   {
+    path: '/settings/erp-modules',
+    label: 'ERP Modules',
+    group: 'Settings',
+    description: 'Enable / disable HR, Real Estate, Inventory, Assets',
+    adminOnly: true,
+    icon: 'boxes',
+  },
+  {
     path: '/settings/profiles',
     label: 'User Profiles',
     group: 'Settings',
