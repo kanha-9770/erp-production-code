@@ -269,11 +269,6 @@ export default function EmployeeAwardsView({
     [submissions]
   );
 
-  const reviewedSubs = React.useMemo(
-    () => sorted.filter((s) => myReviews[s.id]?.notes),
-    [sorted, myReviews]
-  );
-
   const openDetail = (sub: EmployeeSubmission) => {
     setDetailFor(sub);
     const existingReview = myReviews[sub.id];
@@ -560,57 +555,6 @@ export default function EmployeeAwardsView({
           </div>
         </CardContent>
       </Card>
-
-      {/* ── Reviewer feedback notes (only if reviewer left a comment) ──── */}
-      {reviewedSubs.length > 0 && (
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-              <MessageSquare className="h-5 w-5 text-muted-foreground" />
-              Reviewer Feedback
-            </CardTitle>
-            <CardDescription>
-              Comments left by your reviewer on individual submissions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6 space-y-4">
-            {reviewedSubs.map((sub) => {
-              const r = myReviews[sub.id]!;
-              const meta = REVIEW_META[r.status];
-              const RIcon = meta.icon;
-              return (
-                <div
-                  key={sub.id}
-                  className="border rounded-md p-4 space-y-2 bg-muted/20"
-                >
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">
-                          {sub.type}
-                        </Badge>
-                        <span className="text-sm font-semibold">{sub.title}</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        Submitted {fmtDate(sub.createdAt)} ·
-                        Reviewed by <b>{r.reviewer}</b> on{" "}
-                        {fmtDateTime(r.reviewedAt)}
-                      </p>
-                    </div>
-                    <Badge variant={meta.badge} className="gap-1">
-                      <RIcon className="h-3 w-3" />
-                      {meta.label}
-                    </Badge>
-                  </div>
-                  <blockquote className="text-sm border-l-2 border-primary/40 pl-3 py-1 text-muted-foreground italic">
-                    “{r.notes}”
-                  </blockquote>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
 
       {/* ── Submission detail dialog (full form + image + scoring) ─────── */}
       <Dialog open={!!detailFor} onOpenChange={(o) => { if (!o) closeDetail(); }}>

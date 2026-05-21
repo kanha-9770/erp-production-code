@@ -99,45 +99,43 @@ export default async function EmployeeContributionDetail({ params }: { params: {
         </div>
       </div>
 
-      <div className="max-w-md">
-        {/* Profile Card */}
-        <Card className="shadow-sm h-fit overflow-hidden">
-          <div className="h-24 bg-muted/50 border-b" />
-          <CardContent className="pt-0 flex flex-col items-center text-center relative">
-            <Avatar className="h-20 w-20 border-4 border-background shadow-sm -mt-10 mb-3 bg-background">
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xl">{avatarStr}</AvatarFallback>
-            </Avatar>
-
-            <h3 className="text-xl font-semibold">{emp.employeeName}</h3>
-            <p className="text-muted-foreground text-sm">{emp.department} • {emp.id}</p>
-
-            <div className="mt-4 mb-6">
-              {renderRankBadge()}
+      {/* Profile header card */}
+      <Card className="shadow-sm overflow-hidden">
+        <CardContent className="p-5 sm:p-6">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            {/* Identity */}
+            <div className="flex items-center gap-4">
+              <Avatar className="h-16 w-16 border shadow-sm bg-background shrink-0">
+                <AvatarFallback className="bg-primary/10 text-primary font-semibold text-lg">{avatarStr}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 space-y-1">
+                <h3 className="text-xl font-semibold leading-tight truncate">{emp.employeeName}</h3>
+                <p className="text-muted-foreground text-sm truncate">{emp.department} • {emp.id}</p>
+                <div className="pt-1">{renderRankBadge()}</div>
+              </div>
             </div>
 
-            <div className="w-full space-y-3">
-              <div className="flex items-center justify-between p-3 bg-primary/5 rounded-md border border-primary/10">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-primary" />
-                  <span className="font-medium text-sm">Total Submissions</span>
+            {/* Stat tiles */}
+            <div className="grid grid-cols-2 gap-3 sm:w-auto">
+              <div className="flex items-center gap-3 rounded-lg border border-primary/10 bg-primary/5 px-4 py-3 min-w-[150px]">
+                <Activity className="h-5 w-5 text-primary shrink-0" />
+                <div className="leading-tight">
+                  <div className="text-xl font-bold text-primary tabular-nums">{totalSubmissions.toLocaleString()}</div>
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Total Submissions</div>
                 </div>
-                <span className="text-lg font-bold text-primary">{totalSubmissions.toLocaleString()}</span>
               </div>
 
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-md border">
-                <div className="flex items-center gap-2">
-                  <Trophy className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium text-sm">Company Rank</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-lg font-bold text-foreground">#{rank}</span>
-                  <span className="text-xs text-muted-foreground block">of {totalEmployees}</span>
+              <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 min-w-[150px]">
+                <Trophy className="h-5 w-5 text-muted-foreground shrink-0" />
+                <div className="leading-tight">
+                  <div className="text-xl font-bold text-foreground tabular-nums">#{rank}</div>
+                  <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Rank · of {totalEmployees}</div>
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Awards from Admin / HR + decorated submission history.
           Lives in a client component so it can read the points + reviews
