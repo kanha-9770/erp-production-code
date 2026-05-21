@@ -8,7 +8,7 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   ThumbsUp, CheckCircle2, Lightbulb, Zap, Type, FileText, Layout,
-  ArrowRight, Save, X, UserCircle, AlertCircle, Info, Paperclip, Upload
+  ArrowRight, Save, X, UserCircle, AlertCircle, Info, Paperclip, Upload, Camera
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -117,6 +117,11 @@ export default function KaizenPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Admin/HR review decision per Kaizen (submissionId → status). Lets the
+  // employee see whether their submission was Approved / Rejected / etc.
+  // Sourced from /api/engagement/awards (org-scoped, read-only here).
+  const [reviewByKaizen, setReviewByKaizen] = useState<Record<string, { status: string; reviewer: string | null; points: number | null }>>({});
+
   const { data: empData } = useGetEmployeeListQuery();
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
@@ -164,6 +169,30 @@ export default function KaizenPage() {
       loadKaizens();
     }
   }, [user?.id, isAdmin, employees.length, visibility, loadKaizens]);
+
+  // Pull the admin/HR review decisions so the Approved/Rejected badge can
+  // be shown next to each Kaizen.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/engagement/awards", { cache: "no-store", credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data?.success) return;
+        const next: Record<string, { status: string; reviewer: string | null; points: number | null }> = {};
+        for (const a of data.awards as Array<{ submissionId: string; moduleType: string; reviewStatus: string | null; reviewerName: string | null; points: number | null }>) {
+          if (a.moduleType === "Kaizen" && a.reviewStatus) {
+            next[a.submissionId] = { status: a.reviewStatus, reviewer: a.reviewerName ?? null, points: a.points ?? null };
+          }
+        }
+        setReviewByKaizen(next);
+      } catch {
+        /* ignore — badge just won't show */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, kaizens.length]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((f) => ({ ...f, [key]: value }));
@@ -263,6 +292,28 @@ export default function KaizenPage() {
         },
       },
       {
+        id: "review",
+        header: "Review",
+        width: 150,
+        group: "Overview",
+        cell: (k) => {
+          const r = reviewByKaizen[k.id];
+          if (!r) return <span className="text-[10px] text-muted-foreground italic">Awaiting</span>;
+          const map: Record<string, string> = {
+            approved: "bg-emerald-100 text-emerald-700 border-emerald-200",
+            rejected: "bg-rose-100 text-rose-700 border-rose-200",
+            "needs-info": "bg-blue-100 text-blue-700 border-blue-200",
+            pending: "bg-amber-100 text-amber-700 border-amber-200",
+          };
+          const label = r.status === "rejected" ? "Not Approved" : r.status === "needs-info" ? "Needs Info" : r.status === "pending" ? "Pending" : "Approved";
+          return (
+            <Badge variant="outline" className={`text-[10px] uppercase border ${map[r.status] ?? ""}`}>
+              {label}
+            </Badge>
+          );
+        },
+      },
+      {
         id: "votes",
         header: "Votes",
         width: 100,
@@ -307,7 +358,7 @@ export default function KaizenPage() {
       { id: "selfie", header: "Selfie", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "selfie") },
       { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Result & Benefits", defaultHidden: true, align: "right", cell: (k) => plain(k, "employeeEngagementPoints") },
     ];
-  }, []);
+  }, [reviewByKaizen]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this kaizen?")) return;
@@ -423,7 +474,7 @@ export default function KaizenPage() {
             onRowClick={(k) => setSelectedId(k.id)}
           />
         }
-        preview={selectedId ? <KaizenPreview id={selectedId} kaizens={kaizens} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} onVote={handleVote} /> : null}
+        preview={selectedId ? <KaizenPreview id={selectedId} kaizens={kaizens} employees={employees} isAdmin={isAdmin} review={reviewByKaizen[selectedId]} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} onVote={handleVote} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} kaizens={kaizens} /> : null}
       />
 
@@ -509,7 +560,7 @@ function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
   );
 }
 
-function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
+function KaizenPreview({ id, kaizens, employees, isAdmin, review, onEdit, onDelete, onVote }: { id: string, kaizens: Kaizen[], employees: any[], isAdmin: boolean, review?: { status: string; reviewer: string | null; points: number | null }, onEdit: (id: string) => void, onDelete: (id: string) => void, onVote: (id: string) => void }) {
   const k = kaizens.find(x => x.id === id);
   if (!k) return null;
   const decoded = decodeBenefits(k.benefits);
@@ -575,6 +626,38 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, onEdit, onDelete, onVo
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(k.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      {/* Admin / HR review decision — visible to the employee. */}
+      {(() => {
+        const meta = (() => {
+          switch (review?.status) {
+            case "approved": return { label: "Approved", cls: "bg-emerald-50 border-emerald-200 text-emerald-800", icon: CheckCircle2 };
+            case "rejected": return { label: "Not Approved", cls: "bg-rose-50 border-rose-200 text-rose-800", icon: X };
+            case "needs-info": return { label: "Needs Info", cls: "bg-blue-50 border-blue-200 text-blue-800", icon: Info };
+            case "pending": return { label: "Pending Review", cls: "bg-amber-50 border-amber-200 text-amber-800", icon: Info };
+            default: return null;
+          }
+        })();
+        if (!meta) {
+          return (
+            <div className="flex items-center gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+              <Info className="h-4 w-4" /> Awaiting review by Admin / HR.
+            </div>
+          );
+        }
+        const RIcon = meta.icon;
+        return (
+          <div className={`flex items-center justify-between gap-3 rounded-md border p-3 ${meta.cls}`}>
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <RIcon className="h-4 w-4" /> {meta.label}
+              {review?.reviewer && <span className="font-normal opacity-80">· by {review.reviewer}</span>}
+            </span>
+            {typeof review?.points === "number" && (
+              <span className="text-sm font-bold">{review.points} pts</span>
+            )}
+          </div>
+        );
+      })()}
 
       <SubmitterDetails employeeId={k.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={k.submissionDate} />
 
@@ -974,17 +1057,19 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSub
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Before Media">
+            <FieldWrapper label="Before Media" hint="Take a photo or upload">
               <FileFieldStub
                 value={formData.beforeMedia}
                 onChange={v => setFormData({ ...formData, beforeMedia: v })}
+                capture="environment"
               />
             </FieldWrapper>
 
-            <FieldWrapper label="After Media">
+            <FieldWrapper label="After Media" hint="Take a photo or upload">
               <FileFieldStub
                 value={formData.afterMedia}
                 onChange={v => setFormData({ ...formData, afterMedia: v })}
+                capture="environment"
               />
             </FieldWrapper>
 
@@ -1086,18 +1171,20 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSub
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Signature" hint="Signature">
+            <FieldWrapper label="Signature" hint="Capture or upload signature">
               <FileFieldStub
                 value={formData.signature}
                 onChange={v => setFormData({ ...formData, signature: v })}
                 placeholder="Upload signature..."
+                capture="environment"
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Selfie" hint="Selfie of contributor">
+            <FieldWrapper label="Selfie" hint="Take a selfie or upload one">
               <FileFieldStub
                 value={formData.selfie}
                 onChange={v => setFormData({ ...formData, selfie: v })}
+                capture="user"
               />
             </FieldWrapper>
 
@@ -1178,10 +1265,15 @@ function FieldWrapper({ label, required, error, hint, children }: {
 // as <img> by the dashboard detail dialog (see employee-awards-view.tsx
 // → MediaSlot). A live preview is shown so the user knows the upload
 // worked.
-function FileFieldStub({ value, onChange, placeholder }: {
+function FileFieldStub({ value, onChange, placeholder, capture }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  // When set, adds a dedicated "Camera" button whose file input carries
+  // the HTML `capture` attribute — mobile/tablet browsers open the
+  // device camera directly instead of the file picker. "user" = front
+  // camera (for selfies), "environment" = rear camera (for site photos).
+  capture?: "user" | "environment";
 }) {
   const [error, setError] = useState<string | null>(null);
   // 4MB raw file → ~5.4MB base64. Keeps us under the API's 6MB cap with
@@ -1237,6 +1329,25 @@ function FileFieldStub({ value, onChange, placeholder }: {
             <X className="h-3.5 w-3.5" />
             <span className="sr-only">Remove image</span>
           </button>
+        )}
+        {capture && (
+          <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Take a photo with the camera">
+            <Camera className="h-3.5 w-3.5" />
+            <span className="sr-only">Take a photo</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture={capture}
+              aria-label="Take a photo"
+              title="Take a photo"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
         )}
         <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload image">
           <Upload className="h-3.5 w-3.5" />

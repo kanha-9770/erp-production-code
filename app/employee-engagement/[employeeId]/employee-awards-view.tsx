@@ -27,9 +27,12 @@ import {
   ImageOff,
   Save,
   Lock,
+  Download,
+  Printer,
 } from "lucide-react";
 import { getStatusMeta } from "@/lib/constants/engagement";
 import SubmissionPaperView, {
+  downloadPaperView,
   type SubmissionPaperData,
 } from "@/app/employee-engagement/components/SubmissionPaperView";
 
@@ -178,7 +181,10 @@ export default function EmployeeAwardsView({
   const [detailPoints, setDetailPoints] = React.useState<string>("");
   const [detailBonus, setDetailBonus] = React.useState<string>("");
   const [detailBonusReason, setDetailBonusReason] = React.useState<string>("");
+  const [detailRemark, setDetailRemark] = React.useState<string>("");
   const [saving, setSaving] = React.useState(false);
+  // Captures the rendered paper form for the "Download" full-page export.
+  const paperRef = React.useRef<HTMLDivElement>(null);
 
   // Fetch only the awards for THIS employee's submissions. The API
   // already scopes by organization so passing the id list is enough
@@ -278,6 +284,7 @@ export default function EmployeeAwardsView({
     const existingBonus = myBonus[sub.id];
     setDetailBonus(existingBonus ? String(existingBonus.points) : "");
     setDetailBonusReason(existingBonus?.reason ?? "");
+    setDetailRemark(myRemarks[sub.id] ?? "");
   };
 
   const closeDetail = () => {
@@ -287,6 +294,7 @@ export default function EmployeeAwardsView({
     setDetailPoints("");
     setDetailBonus("");
     setDetailBonusReason("");
+    setDetailRemark("");
   };
 
   // Submit review + points from the detail dialog. Mirrors the
@@ -297,6 +305,7 @@ export default function EmployeeAwardsView({
 
     const trimmedNotes = detailNotes.trim();
     const trimmedBonusReason = detailBonusReason.trim();
+    const trimmedRemark = detailRemark.trim();
     let pointsValue: number | null | undefined = undefined;
     if (detailPoints === "") {
       pointsValue = null;
@@ -326,6 +335,7 @@ export default function EmployeeAwardsView({
           points: pointsValue,
           bonusPoints: bonusValue,
           bonusReason: trimmedBonusReason || null,
+          remark: trimmedRemark || null,
           reviewStatus: detailStatus,
           notes: trimmedNotes || null,
         }),
@@ -360,6 +370,10 @@ export default function EmployeeAwardsView({
         delete nextBonus[detailFor.id];
       }
       setMyBonus(nextBonus);
+      const nextRemarks = { ...myRemarks };
+      if (trimmedRemark) nextRemarks[detailFor.id] = trimmedRemark;
+      else delete nextRemarks[detailFor.id];
+      setMyRemarks(nextRemarks);
       setDetailFor(null);
     } catch {
       alert("Network error saving award.");
@@ -649,12 +663,19 @@ export default function EmployeeAwardsView({
                   points: typeof myPoints[detailFor.id] === "number" ? myPoints[detailFor.id] : null,
                   bonusPoints: myBonus[detailFor.id]?.points ?? null,
                   bonusReason: myBonus[detailFor.id]?.reason ?? null,
-                  remark: myRemarks[detailFor.id] ?? null,
+                  // Use the live draft so the paper form (and the
+                  // Print/Download capture) reflect what the reviewer is
+                  // typing, even before they hit Save.
+                  remark: (canReview ? detailRemark : myRemarks[detailFor.id]) || null,
                   isBestKaizen: !!myBestKaizen[detailFor.id],
                   reviewStatus: myReviews[detailFor.id]?.status ?? null,
                   reviewerName: myReviews[detailFor.id]?.reviewer ?? null,
                 };
-                return <SubmissionPaperView data={paper} />;
+                return (
+                  <div ref={paperRef}>
+                    <SubmissionPaperView data={paper} />
+                  </div>
+                );
               })()}
 
               {/* Reviewer scoring panel — visible only to Admin / HR */}
@@ -792,7 +813,54 @@ export default function EmployeeAwardsView({
                 )}
               </div>
 
+              {/* ── Remark (by Admin / HR) — shows on the form above + in
+                  the Print / Download output ── */}
+              <div className="mt-2 border-t pt-4 space-y-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                  Remark (by Admin / HR)
+                </h4>
+                <Textarea
+                  value={detailRemark}
+                  onChange={(e) => setDetailRemark(e.target.value)}
+                  placeholder={canReview ? "Write a remark — appears on the form above and in the downloaded page…" : "Admin / HR only"}
+                  className="min-h-[70px]"
+                  disabled={!canReview || saving}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Click <b>Save Decision &amp; Points</b> to store the remark; it then prints / downloads with the form.
+                </p>
+              </div>
+
               <DialogFooter className="gap-2 sm:gap-2 sm:justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    downloadPaperView(
+                      paperRef.current,
+                      `${detailFor.displayId || detailFor.id.substring(0, 8)}-${detailFor.type}`,
+                    )
+                  }
+                  disabled={saving}
+                >
+                  <Printer className="h-3.5 w-3.5 mr-1" />
+                  Print
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    downloadPaperView(
+                      paperRef.current,
+                      `${detailFor.displayId || detailFor.id.substring(0, 8)}-${detailFor.type}`,
+                    )
+                  }
+                  disabled={saving}
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  Download
+                </Button>
                 <Button variant="outline" size="sm" onClick={closeDetail} disabled={saving}>
                   Close
                 </Button>

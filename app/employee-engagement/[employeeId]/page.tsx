@@ -1,9 +1,9 @@
 import React from "react";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Target, Lightbulb, AlertCircle, TrendingUp, MessageSquare, ChevronLeft, Trophy, Crown, Medal, User, Briefcase, Mail, Phone, MapPin, Activity } from "lucide-react";
+import { ChevronLeft, Trophy, Crown, Medal, Activity } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import EmployeeAwardsView, { type EmployeeSubmission } from "./employee-awards-view";
@@ -71,25 +71,12 @@ export default async function EmployeeContributionDetail({ params }: { params: {
   const targetUser = allUsers.find(u => u.employee!.id === employeeId)!;
   const emp = targetUser.employee!;
 
-  const targets = targetUser.engagementTargets.length;
-  const initiatives = targetUser.engagementInitiatives.length;
-  const problems = targetUser.engagementProblems.length;
-  const kaizens = targetUser.engagementKaizens.length;
-  const suggestions = targetUser.engagementSuggestions.length;
-
   const totalSubmissions = leaderboard[rankIndex].submissions;
 
   const avatarStr = emp.employeeName
     ? emp.employeeName.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase()
     : "U";
 
-  const submodules = [
-    { title: "Self Target", icon: Target, count: targets, color: "bg-blue-600", textClass: "text-blue-600" },
-    { title: "Self Initiative", icon: Lightbulb, count: initiatives, color: "bg-emerald-600", textClass: "text-emerald-600" },
-    { title: "Kaizen", icon: TrendingUp, count: kaizens, color: "bg-purple-600", textClass: "text-purple-600" },
-    { title: "Employee Suggestion", icon: MessageSquare, count: suggestions, color: "bg-amber-600", textClass: "text-amber-600" },
-    { title: "Problem Reg.", icon: AlertCircle, count: problems, color: "bg-rose-600", textClass: "text-rose-600" },
-  ];
 
   const renderRankBadge = () => {
     if (rank === 1) return <div className="inline-flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 font-bold rounded-full border border-amber-200 text-sm"><Crown className="w-4 h-4" /> 1st Place</div>;
@@ -112,9 +99,9 @@ export default async function EmployeeContributionDetail({ params }: { params: {
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="max-w-md">
         {/* Profile Card */}
-        <Card className="col-span-1 shadow-sm h-fit overflow-hidden">
+        <Card className="shadow-sm h-fit overflow-hidden">
           <div className="h-24 bg-muted/50 border-b" />
           <CardContent className="pt-0 flex flex-col items-center text-center relative">
             <Avatar className="h-20 w-20 border-4 border-background shadow-sm -mt-10 mb-3 bg-background">
@@ -148,135 +135,6 @@ export default async function EmployeeContributionDetail({ params }: { params: {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Contribution Breakdown */}
-        <Card className="col-span-2 shadow-sm">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="text-lg font-semibold">Contribution Breakdown</CardTitle>
-            <CardDescription>Submissions across different engagement modules</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="space-y-6">
-              {submodules.map((module) => {
-                const percentage = totalSubmissions > 0 ? Math.round((module.count / totalSubmissions) * 100) : 0;
-                return (
-                  <div key={module.title} className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-3 font-medium">
-                        <module.icon className={`h-4 w-4 ${module.textClass}`} />
-                        <div className="flex flex-col">
-                          <span>{module.title}</span>
-                          <span className="text-xs text-muted-foreground font-normal">{module.count} submissions</span>
-                        </div>
-                      </div>
-                      <div className="text-right flex flex-col items-end">
-                        <span className="font-semibold text-base">{module.count.toLocaleString()}</span>
-                        <span className="text-xs text-muted-foreground">{percentage}% of total</span>
-                      </div>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                      <div
-                        className={`h-full ${module.color} transition-all duration-500 ease-out`}
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2 mt-6">
-        {/* Employment Details */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-muted-foreground" />
-              Employment Details
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 text-sm">
-              <div>
-                <dt className="text-muted-foreground mb-1">Designation</dt>
-                <dd className="font-medium">{emp.designation || "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Department</dt>
-                <dd className="font-medium">{emp.department || "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Branch</dt>
-                <dd className="font-medium">{emp.branch || "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Employment Type</dt>
-                <dd className="font-medium">{emp.employmentType || "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Status</dt>
-                <dd className="font-medium">
-                  {emp.status ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">{emp.status}</span>
-                  ) : "N/A"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Date of Joining</dt>
-                <dd className="font-medium">{emp.dateOfJoining ? new Date(emp.dateOfJoining).toLocaleDateString() : "N/A"}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-
-        {/* Contact & Personal Details */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <User className="h-5 w-5 text-muted-foreground" />
-              Contact & Personal Info
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 text-sm">
-              <div>
-                <dt className="text-muted-foreground mb-1">Email Address</dt>
-                <dd className="font-medium flex items-center gap-2">
-                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                  {emp.emailAddress1 || "N/A"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Phone Number</dt>
-                <dd className="font-medium flex items-center gap-2">
-                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                  {emp.personalContact || "N/A"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Location</dt>
-                <dd className="font-medium flex items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                  {emp.currentCity ? `${emp.currentCity}${emp.currentState ? `, ${emp.currentState}` : ''}` : "N/A"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Gender</dt>
-                <dd className="font-medium">{emp.gender || "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Date of Birth</dt>
-                <dd className="font-medium">{emp.dob ? new Date(emp.dob).toLocaleDateString() : "N/A"}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground mb-1">Blood Group</dt>
-                <dd className="font-medium">{emp.bloodGroup || "N/A"}</dd>
-              </div>
-            </dl>
           </CardContent>
         </Card>
       </div>

@@ -41,6 +41,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { useEngagementReviews, ReviewCell, ReviewBanner } from "@/app/employee-engagement/components/review-status";
 
 interface SelfInitiative {
   id: string;
@@ -99,6 +100,7 @@ export default function SelfInitiativePage() {
   const { toast } = useToast();
 
   const [initiatives, setInitiatives] = useState<SelfInitiative[]>([]);
+  const reviews = useEngagementReviews("Initiative", initiatives.length);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -217,6 +219,13 @@ export default function SelfInitiativePage() {
         },
       },
       {
+        id: "review",
+        header: "Review",
+        width: 140,
+        group: "Overview",
+        cell: (i) => <ReviewCell review={reviews[i.id]} />,
+      },
+      {
         id: "duration",
         header: "Duration",
         width: 200,
@@ -237,7 +246,7 @@ export default function SelfInitiativePage() {
       { id: "endDate", header: "End Date", width: 130, group: "Self Initiative", defaultHidden: true, cell: (i) => <span className="text-xs text-muted-foreground">{i.endDate ? new Date(i.endDate).toLocaleDateString() : "—"}</span> },
       { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Self Initiative", defaultHidden: true, align: "right", cell: (i) => plain(i, "employeeEngagementPoints") },
     ];
-  }, []);
+  }, [reviews]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this initiative?")) return;
@@ -325,7 +334,7 @@ export default function SelfInitiativePage() {
             onRowClick={(i) => setSelectedId(i.id)}
           />
         }
-        preview={selectedId ? <InitiativePreview id={selectedId} initiatives={initiatives} employees={employees} isAdmin={isAdmin} onEdit={(id) => { setEditingId(id); setCreateOpen(true); }} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <InitiativePreview id={selectedId} initiatives={initiatives} employees={employees} isAdmin={isAdmin} review={reviews[selectedId]} onEdit={(id) => { setEditingId(id); setCreateOpen(true); }} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} initiatives={initiatives} /> : null}
       />
 
@@ -388,7 +397,7 @@ function PreviewHeader({ id, initiatives }: { id: string, initiatives: SelfIniti
   );
 }
 
-function InitiativePreview({ id, initiatives, employees, isAdmin, onEdit, onDelete }: { id: string, initiatives: SelfInitiative[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function InitiativePreview({ id, initiatives, employees, isAdmin, review, onEdit, onDelete }: { id: string, initiatives: SelfInitiative[], employees: any[], isAdmin: boolean, review?: import("@/app/employee-engagement/components/review-status").EngagementReview, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const i = initiatives.find(x => x.id === id);
   if (!i) return null;
 
@@ -404,6 +413,8 @@ function InitiativePreview({ id, initiatives, employees, isAdmin, onEdit, onDele
           <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => onDelete(i.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <ReviewBanner review={review} />
 
       <SubmitterDetails employeeId={i.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={i.createdAt} />
 
