@@ -78,6 +78,86 @@ function isRenderable(src: string | null | undefined): src is string {
   return src.startsWith("data:image/") || src.startsWith("http://") || src.startsWith("https://") || src.startsWith("/");
 }
 
+/**
+ * Download the rendered paper form as a clean, full-page document.
+ *
+ * Opens a new window containing ONLY the form (not the surrounding
+ * dashboard), copies the current page's stylesheets so Tailwind classes
+ * resolve, fits it to a landscape A4 page, and triggers the browser's
+ * print dialog — where "Save as PDF" produces a proper single-form PDF.
+ * Dependency-free; works for every module because it captures whatever
+ * `node` was rendered.
+ */
+export function downloadPaperView(node: HTMLElement | null, filename: string) {
+  if (!node) return;
+  const win = window.open("", "_blank", "width=1280,height=900");
+  if (!win) {
+    alert("Couldn't open the download window. Please allow pop-ups for this site and try again.");
+    return;
+  }
+  const headStyles = Array.from(
+    document.querySelectorAll('style, link[rel="stylesheet"]'),
+  )
+    .map((el) => el.outerHTML)
+    .join("\n");
+
+  win.document.open();
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${filename}</title>
+${headStyles}
+<style>
+  @page { size: A4 landscape; margin: 8mm; }
+  html, body { background: #fff; margin: 0; padding: 0; }
+  /* fit-shell is scaled to exactly one page in JS; fit-inner holds the form. */
+  .fit-shell { overflow: hidden; }
+  .fit-inner { width: 1040px; }     /* render at a fixed width, then scale */
+  img { max-width: 100%; }
+  /* Don't let a single cell break across pages once it fits. */
+  .fit-inner > div { page-break-inside: avoid; break-inside: avoid; }
+</style>
+</head>
+<body>
+  <div class="fit-shell"><div class="fit-inner">${node.outerHTML}</div></div>
+</body>
+</html>`);
+  win.document.close();
+
+  // After content + images load, measure the form and scale it down so
+  // the whole thing fits one landscape A4 page (no second page).
+  const fitAndPrint = () => {
+    try {
+      const inner = win.document.querySelector(".fit-inner") as HTMLElement | null;
+      const shell = win.document.querySelector(".fit-shell") as HTMLElement | null;
+      if (inner && shell) {
+        // Printable area for A4 landscape at 96dpi with 8mm margins:
+        // (297-16)mm × (210-16)mm ≈ 1062px × 733px. Keep a small safety pad.
+        const PAGE_W = 1050;
+        const PAGE_H = 720;
+        const w = inner.scrollWidth || 1040;
+        const h = inner.scrollHeight || 1;
+        const scale = Math.min(1, PAGE_W / w, PAGE_H / h);
+        if (scale < 1) {
+          inner.style.transformOrigin = "top left";
+          inner.style.transform = `scale(${scale})`;
+          // Shrink the shell to the scaled box so the page sees one page.
+          shell.style.width = `${Math.ceil(w * scale)}px`;
+          shell.style.height = `${Math.ceil(h * scale)}px`;
+        }
+      }
+      win.focus();
+      win.print();
+    } catch {
+      /* user can still print manually */
+    }
+  };
+  // Wait for images (data URLs are instant; linked CSS needs a beat).
+  win.onload = () => setTimeout(fitAndPrint, 400);
+  setTimeout(fitAndPrint, 1000);
+}
+
 // Static col-span class table. Tailwind's JIT compiler needs the full
 // class name in the source — `col-span-${n}` would be purged. Twelve
 // values cover the 12-col paper grid exhaustively.
@@ -327,6 +407,31 @@ export default function SubmissionPaperView({ data }: { data: SubmissionPaperDat
         {/* ── Module-specific body ── */}
         <Rows data={data} />
 
+        {/* ── Admin / HR decision — prominent so it carries into the PDF ── */}
+        {(() => {
+          const map: Record<string, { label: string; cls: string }> = {
+            approved: { label: "APPROVED", cls: "text-emerald-700" },
+            rejected: { label: "NOT APPROVED", cls: "text-rose-700" },
+            "needs-info": { label: "NEEDS INFO", cls: "text-blue-700" },
+            pending: { label: "PENDING REVIEW", cls: "text-amber-700" },
+          };
+          const m = data.reviewStatus ? map[data.reviewStatus] : undefined;
+          return (
+            <Cell
+              label="Admin / HR Decision"
+              value={
+                m ? (
+                  <span className={`font-bold ${m.cls}`}>{m.label}</span>
+                ) : (
+                  <span className="text-slate-400 italic">Awaiting review</span>
+                )
+              }
+              colSpan={12}
+              bg="slate"
+            />
+          );
+        })()}
+
         {/* ── Footer strip: status / points / bonus / reviewer ── */}
         <Cell
           label="Status"
@@ -366,7 +471,14 @@ export default function SubmissionPaperView({ data }: { data: SubmissionPaperDat
             bg={data.isBestKaizen ? "slate" : "white"}
           />
         )}
-        {data.remark && <Cell label="Reviewer Remark" value={data.remark} colSpan={12} />}
+        {/* Admin / HR remark — always shown as a labeled section, even
+            when empty, so the form makes clear where the reviewer's
+            written remark goes. */}
+        <Cell
+          label="Remark (by Admin / HR)"
+          value={data.remark || <span className="text-slate-400 italic">No remark recorded</span>}
+          colSpan={12}
+        />
         {data.bonusReason && (
           <Cell label="Bonus Reason" value={data.bonusReason} colSpan={12} />
         )}

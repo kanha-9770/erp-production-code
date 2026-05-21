@@ -41,6 +41,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { useEngagementReviews, ReviewCell, ReviewBanner } from "@/app/employee-engagement/components/review-status";
 
 interface SelfTarget {
   id: string;
@@ -105,6 +106,8 @@ export default function SelfTargetPage() {
   const [targets, setTargets] = useState<SelfTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Admin/HR review decisions keyed by submission id (shown to employees).
+  const reviews = useEngagementReviews("Target", targets.length);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
@@ -228,6 +231,13 @@ export default function SelfTargetPage() {
         },
       },
       {
+        id: "review",
+        header: "Review",
+        width: 140,
+        group: "Overview",
+        cell: (t) => <ReviewCell review={reviews[t.id]} />,
+      },
+      {
         id: "date",
         header: "Target Date",
         width: 130,
@@ -246,7 +256,7 @@ export default function SelfTargetPage() {
       { id: "description", header: "Description", width: 240, group: "Self Target", defaultHidden: true, cell: (t) => <span className="text-xs truncate">{t.description || "—"}</span> },
       { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Self Target", defaultHidden: true, align: "right", cell: (t) => plain(t, "employeeEngagementPoints") },
     ];
-  }, []);
+  }, [reviews]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this target?")) return;
@@ -334,7 +344,7 @@ export default function SelfTargetPage() {
             onRowClick={(t) => setSelectedId(t.id)}
           />
         }
-        preview={selectedId ? <TargetPreview id={selectedId} targets={targets} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <TargetPreview id={selectedId} targets={targets} employees={employees} isAdmin={isAdmin} review={reviews[selectedId]} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} targets={targets} /> : null}
       />
 
@@ -417,7 +427,7 @@ function PreviewHeader({ id, targets }: { id: string, targets: SelfTarget[] }) {
   );
 }
 
-function TargetPreview({ id, targets, employees, isAdmin, onEdit, onDelete }: { id: string, targets: SelfTarget[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function TargetPreview({ id, targets, employees, isAdmin, review, onEdit, onDelete }: { id: string, targets: SelfTarget[], employees: any[], isAdmin: boolean, review?: import("@/app/employee-engagement/components/review-status").EngagementReview, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const t = targets.find(x => x.id === id);
   if (!t) return null;
 
@@ -437,6 +447,8 @@ function TargetPreview({ id, targets, employees, isAdmin, onEdit, onDelete }: { 
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <ReviewBanner review={review} />
 
       <SubmitterDetails employeeId={t.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={t.createdAt} />
 

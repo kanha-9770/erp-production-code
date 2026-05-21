@@ -41,6 +41,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { useEngagementReviews, ReviewCell, ReviewBanner } from "@/app/employee-engagement/components/review-status";
 
 interface ProblemRegistration {
   id: string;
@@ -109,6 +110,7 @@ export default function ProblemRegistrationPage() {
   const { toast } = useToast();
 
   const [problems, setProblems] = useState<ProblemRegistration[]>([]);
+  const reviews = useEngagementReviews("Problem", problems.length);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -238,6 +240,13 @@ export default function ProblemRegistrationPage() {
         },
       },
       {
+        id: "review",
+        header: "Review",
+        width: 140,
+        group: "Overview",
+        cell: (p) => <ReviewCell review={reviews[p.id]} />,
+      },
+      {
         id: "date",
         header: "Registered",
         width: 130,
@@ -258,7 +267,7 @@ export default function ProblemRegistrationPage() {
       { id: "media", header: "Media", width: 160, group: "Problem Info", defaultHidden: true, cell: (p) => plain(p, "media") },
       { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Problem Info", defaultHidden: true, align: "right", cell: (p) => plain(p, "employeeEngagementPoints") },
     ];
-  }, []);
+  }, [reviews]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this problem record?")) return;
@@ -347,7 +356,7 @@ export default function ProblemRegistrationPage() {
             onRowClick={(p) => setSelectedId(p.id)}
           />
         }
-        preview={selectedId ? <ProblemPreview id={selectedId} problems={problems} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <ProblemPreview id={selectedId} problems={problems} employees={employees} isAdmin={isAdmin} review={reviews[selectedId]} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} problems={problems} /> : null}
       />
 
@@ -430,7 +439,7 @@ function PreviewHeader({ id, problems }: { id: string, problems: ProblemRegistra
   );
 }
 
-function ProblemPreview({ id, problems, employees, isAdmin, onEdit, onDelete }: { id: string, problems: ProblemRegistration[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function ProblemPreview({ id, problems, employees, isAdmin, review, onEdit, onDelete }: { id: string, problems: ProblemRegistration[], employees: any[], isAdmin: boolean, review?: import("@/app/employee-engagement/components/review-status").EngagementReview, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const p = problems.find(x => x.id === id);
   if (!p) return null;
 
@@ -446,6 +455,8 @@ function ProblemPreview({ id, problems, employees, isAdmin, onEdit, onDelete }: 
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(p.id)}><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      <ReviewBanner review={review} />
 
       <SubmitterDetails employeeId={p.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={p.registrationDate} />
 

@@ -45,6 +45,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
 } from "@/components/ui/sheet";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
+import { useEngagementReviews, ReviewCell, ReviewBanner } from "@/app/employee-engagement/components/review-status";
 
 interface EmployeeSuggestion {
   id: string;
@@ -105,6 +106,7 @@ export default function EmployeeSuggestionPage() {
   const { toast } = useToast();
 
   const [suggestions, setSuggestions] = useState<EmployeeSuggestion[]>([]);
+  const reviews = useEngagementReviews("Suggestion", suggestions.length);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -229,6 +231,13 @@ export default function EmployeeSuggestionPage() {
         },
       },
       {
+        id: "review",
+        header: "Review",
+        width: 140,
+        group: "Overview",
+        cell: (s) => <ReviewCell review={reviews[s.id]} />,
+      },
+      {
         id: "date",
         header: "Date",
         width: 130,
@@ -249,7 +258,7 @@ export default function EmployeeSuggestionPage() {
       { id: "media", header: "Media", width: 160, group: "Suggestion", defaultHidden: true, cell: (s) => plain(s, "media") },
       { id: "feedback", header: "Feedback", width: 240, group: "Suggestion", defaultHidden: true, cell: (s) => <span className="text-xs truncate">{s.feedback || "—"}</span> },
     ];
-  }, []);
+  }, [reviews]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this suggestion?")) return;
@@ -337,7 +346,7 @@ export default function EmployeeSuggestionPage() {
             onRowClick={(s) => setSelectedId(s.id)}
           />
         }
-        preview={selectedId ? <SuggestionPreview id={selectedId} suggestions={suggestions} employees={employees} isAdmin={isAdmin} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
+        preview={selectedId ? <SuggestionPreview id={selectedId} suggestions={suggestions} employees={employees} isAdmin={isAdmin} review={reviews[selectedId]} onEdit={(id) => setEditingId(id)} onDelete={handleDelete} /> : null}
         previewHeader={selectedId ? <PreviewHeader id={selectedId} suggestions={suggestions} /> : null}
       />
 
@@ -420,7 +429,7 @@ function PreviewHeader({ id, suggestions }: { id: string, suggestions: EmployeeS
   );
 }
 
-function SuggestionPreview({ id, suggestions, employees, isAdmin, onEdit, onDelete }: { id: string, suggestions: EmployeeSuggestion[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function SuggestionPreview({ id, suggestions, employees, isAdmin, review, onEdit, onDelete }: { id: string, suggestions: EmployeeSuggestion[], employees: any[], isAdmin: boolean, review?: import("@/app/employee-engagement/components/review-status").EngagementReview, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const s = suggestions.find(x => x.id === id);
   if (!s) return null;
 
@@ -436,6 +445,8 @@ function SuggestionPreview({ id, suggestions, employees, isAdmin, onEdit, onDele
           <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(s.id)}><Trash2 className="h-4 h-4" /></Button>
         </div>
       </div>
+
+      <ReviewBanner review={review} />
 
       <SubmitterDetails employeeId={s.employeeId} employees={employees} isAdmin={isAdmin} submissionDate={s.submissionDate} />
 
