@@ -904,10 +904,9 @@ export function EmployeeForm({
     if (!values.firstName.trim() && !values.employeeName.trim()) {
       next.firstName = "First name is required";
     }
-    if (
-      values.emailAddress1 &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress1)
-    ) {
+    if (!values.emailAddress1.trim()) {
+      next.emailAddress1 = "Personal email is required";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.emailAddress1)) {
       next.emailAddress1 = "Not a valid email address";
     }
     if (
@@ -1197,7 +1196,7 @@ export function EmployeeForm({
       <SectionHeader index={2} title="Contact Information" subtitle="Email, phone, addresses, emergency" />
       <Card>
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
-          <Field label="Personal Email" error={errors.emailAddress1}>
+          <Field label="Personal Email *" error={errors.emailAddress1}>
             <Input
               type="email"
               value={values.emailAddress1}
