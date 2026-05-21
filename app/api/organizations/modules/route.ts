@@ -95,7 +95,7 @@ export async function PUT(request: NextRequest) {
     // cleared (FormModule rows are kept so any custom forms aren't lost).
     await ensureErpModuleSidebar(tx, orgId, selectedModules)
     return org
-  })
+  }, { timeout: 30000 })
 
   return NextResponse.json({
     success: true,
