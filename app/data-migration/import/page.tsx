@@ -17,6 +17,12 @@ import {
   useProcessImportMutation,
 } from "@/lib/api/forms"
 import {
+  getStaticModules,
+  getStaticFormEntries,
+  getStaticFieldsForModule,
+  STATIC_FORMS,
+} from "@/lib/static-page-fields"
+import {
   FileUpload,
   type ParsedFilePreview,
 } from "@/components/data-migration/file-upload"
@@ -44,22 +50,74 @@ export default function ImportPage() {
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; percent: number } | null>(null)
 
   // RTK Query
+  // Selecting a synthetic static module (id starts with `static-mod:`) skips
+  // the formDetail fetch since static forms aren't form-builder Forms — we
+  // pull their fields from lib/static-page-fields instead.
+  const isStaticModule = selectedModuleId.startsWith("static-mod:")
+  const isStaticForm = selectedFormId.startsWith("static:")
+
   const { data: modulesData, isLoading: loadingModules } = useGetPermittedModulesQuery()
-  const { data: formDetail, isLoading: loadingForm } = useGetFormDetailQuery(selectedFormId, { skip: !selectedFormId })
+  const { data: formDetail, isLoading: loadingForm } = useGetFormDetailQuery(selectedFormId, {
+    skip: !selectedFormId || isStaticForm,
+  })
   const [createImportJob] = useCreateImportJobMutation()
   const [addImportMapping] = useAddImportMappingMutation()
   const [processImport] = useProcessImportMutation()
 
-  const modules = modulesData?.modules || []
+  // Merge real (form-builder) modules with synthetic static modules so the
+  // user can pick e.g. "Employee Master" and bulk-import directly into the
+  // Employee table.
+  const modules = useMemo(() => {
+    const dynamic = (modulesData?.modules || []).map((m: any) => ({
+      module_id: m.module_id,
+      module_name: m.module_name,
+      forms: m.forms,
+      isStatic: false,
+    }))
+    const staticMods = getStaticModules().map((sm) => ({
+      module_id: sm.id,
+      module_name: `${sm.name} (static)`,
+      forms: undefined as any,
+      isStatic: true,
+    }))
+    return [...dynamic, ...staticMods]
+  }, [modulesData])
 
   const moduleForms = useMemo(() => {
     if (!selectedModuleId) return []
-    const mod = modules.find((m) => m.module_id === selectedModuleId)
-    return mod?.forms?.filter((f) => f.isPublished) || []
-  }, [modules, selectedModuleId])
+    if (isStaticModule) {
+      // Static module — synthesise the form list from the registry. The
+      // module name in the registry matches the friendly name we display
+      // (minus the "(static)" suffix tacked on for the dropdown).
+      const mod = modules.find((m: any) => m.module_id === selectedModuleId)
+      const baseName = (mod?.module_name || "").replace(/ \(static\)$/, "")
+      return getStaticFormEntries(baseName).map((f) => ({
+        id: f.id,
+        name: f.name,
+        isPublished: f.isPublished,
+      }))
+    }
+    const mod = modules.find((m: any) => m.module_id === selectedModuleId)
+    return mod?.forms?.filter((f: any) => f.isPublished) || []
+  }, [modules, selectedModuleId, isStaticModule])
 
-  // Get form fields for mapping (sections + all subforms)
+  // Get form fields for mapping (sections + all subforms). For static forms
+  // we use the registry instead of formDetail — same shape (id / label /
+  // type / group) so the rest of the wizard doesn't have to care.
   const formFields = useMemo(() => {
+    if (isStaticForm) {
+      const entry = STATIC_FORMS.find((f) => f.formId === selectedFormId)
+      if (!entry) return []
+      return entry.fields.map((f) => ({
+        // For static forms the "field id" the wizard tracks is the coreKey
+        // itself — that's what the static-import endpoint reads to write
+        // the right Prisma column.
+        id: f.coreKey,
+        label: f.label,
+        type: f.type,
+        group: entry.formName,
+      }))
+    }
     if (!formDetail?.data) return []
     const fields: { id: string; label: string; type: string; group?: string }[] = []
 
@@ -85,18 +143,34 @@ export default function ImportPage() {
     collectSubformFields(formDetail.data.subforms || [])
 
     return fields
-  }, [formDetail])
+  }, [formDetail, selectedFormId, isStaticForm])
 
-  // Auto-map columns to fields by label match
+  // Auto-map columns to fields. Matches on (in priority order): exact label,
+  // exact id/coreKey, normalised label (lowercase + non-alphanum stripped),
+  // normalised id. For static forms the id IS the coreKey, so a CSV column
+  // header like "employeeName" matches the Employee Name field, and "Primary
+  // Email" matches "primaryEmail".
   const autoMap = () => {
     const hdrs = uploadedFile?.preview.headers
     if (!hdrs || !Array.isArray(hdrs) || hdrs.length === 0 || formFields.length === 0) return
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
     const newMappings: { sourceColumn: string; targetFieldId: string }[] = []
+    const usedFieldIds = new Set<string>()
     for (const header of hdrs) {
-      const match = formFields.find(
-        (f: any) => f.label.toLowerCase().trim() === header.toLowerCase().trim()
-      )
+      const headerLower = header.toLowerCase().trim()
+      const headerNorm = norm(header)
+      const match = formFields.find((f: any) => {
+        if (usedFieldIds.has(f.id)) return false
+        const label = String(f.label || "").toLowerCase().trim()
+        const id = String(f.id || "").toLowerCase().trim()
+        if (label === headerLower) return true
+        if (id === headerLower) return true
+        if (norm(label) === headerNorm) return true
+        if (norm(id) === headerNorm) return true
+        return false
+      })
       if (match) {
+        usedFieldIds.add(match.id)
         newMappings.push({ sourceColumn: header, targetFieldId: match.id })
       }
     }
@@ -109,6 +183,15 @@ export default function ImportPage() {
       autoMap()
     }
   }, [uploadedFile, formFields, step])
+
+  // Static modules have exactly one synthetic form, so picking the module
+  // implicitly determines the form. Auto-select it so the user doesn't have
+  // to click through a one-option dropdown to enable Continue.
+  useEffect(() => {
+    if (isStaticModule && moduleForms.length === 1 && !selectedFormId) {
+      setSelectedFormId(moduleForms[0].id)
+    }
+  }, [isStaticModule, moduleForms, selectedFormId])
 
   const handleFileUpload = (file: File, preview: ParsedFilePreview) => {
     setUploadedFile({ file, preview })
@@ -123,6 +206,92 @@ export default function ImportPage() {
     if (!uploadedFile || mappings.length === 0 || !selectedFormId) return
     setIsProcessing(true)
     setImportProgress(null)
+
+    // Static-form import — bypass the FormRecord-based pipeline and hit
+    // /api/static-import/process directly. The body uses `targetCoreKey`
+    // (not `targetFieldId`) because static handlers read coreKeys, not
+    // form-builder field IDs.
+    if (isStaticForm) {
+      try {
+        const { headers, allRows } = uploadedFile.preview
+        const allDataRows = allRows || uploadedFile.preview.rows
+        const rowObjects = allDataRows.map((row) => {
+          const obj: Record<string, string> = {}
+          headers.forEach((h, i) => { obj[h] = row[i] || "" })
+          return obj
+        })
+
+        const totalRows = rowObjects.length
+        const totalChunks = Math.ceil(totalRows / CHUNK_SIZE)
+        let totalSuccess = 0
+        let totalFailed = 0
+        let totalSkipped = 0
+        let processedRows = 0
+
+        setImportProgress({ current: 0, total: totalRows, percent: 0 })
+
+        const chunks = Array.from({ length: totalChunks }, (_, idx) => ({
+          chunkIdx: idx,
+          start: idx * CHUNK_SIZE,
+          end: Math.min((idx + 1) * CHUNK_SIZE, totalRows),
+        }))
+
+        for (let batchStart = 0; batchStart < chunks.length; batchStart += MAX_CONCURRENT_CHUNKS) {
+          const batch = chunks.slice(batchStart, batchStart + MAX_CONCURRENT_CHUNKS)
+          const results = await Promise.allSettled(
+            batch.map(async (chunk) => {
+              const res = await fetch("/api/static-import/process", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  formId: selectedFormId,
+                  mappings: mappings.map((m) => ({
+                    sourceColumn: m.sourceColumn,
+                    targetCoreKey: m.targetFieldId,
+                  })),
+                  rows: rowObjects.slice(chunk.start, chunk.end),
+                }),
+              })
+              const json = await res.json()
+              if (!json.success) throw new Error(json.error || "Import chunk failed")
+              return json
+            })
+          )
+
+          for (let i = 0; i < results.length; i++) {
+            const result = results[i]
+            const chunk = batch[i]
+            if (result.status === "fulfilled") {
+              totalSuccess += result.value.successCount || 0
+              totalFailed += result.value.failedCount || 0
+              totalSkipped += result.value.skippedCount || 0
+            } else {
+              totalFailed += chunk.end - chunk.start
+              console.error(`Static chunk ${chunk.chunkIdx} failed:`, result.reason)
+            }
+            processedRows += chunk.end - chunk.start
+          }
+
+          setImportProgress({
+            current: processedRows,
+            total: totalRows,
+            percent: Math.round((processedRows / totalRows) * 100),
+          })
+        }
+
+        setImportResult({ success: totalSuccess, failed: totalFailed, skipped: totalSkipped })
+        setStep("result")
+        toast({ title: "Import Complete", description: `${totalSuccess} records imported successfully` })
+      } catch (error: any) {
+        const errorMsg = error?.message || "Something went wrong"
+        toast({ title: "Import Failed", description: errorMsg, variant: "destructive" })
+      } finally {
+        setIsProcessing(false)
+        setImportProgress(null)
+      }
+      return
+    }
 
     try {
       // Step 1: Create import job
