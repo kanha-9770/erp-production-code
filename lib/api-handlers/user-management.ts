@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import {
   getCallerRoleContext,
-  getInheritedUserIds,
+  getDescendantRoleIds,
 } from "@/lib/database/roles";
 import { moveToTrash } from "@/lib/trash";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
@@ -467,32 +467,77 @@ export const UserManagementHandlers = {
       } else {
         // Hierarchy-based visibility: a parent role (e.g. HR) sees the
         // employee records of every role *below* it in the org's role tree,
-        // not just their own. We reuse the same descendant-walk helper the
-        // form-record queries use so the rules stay consistent across the app.
+        // not just their own.
         //
-        // getInheritedUserIds() returns the union of users assigned to any
-        // descendant role of the caller's roles, scoped to the caller's
-        // organization unit(s). It returns null only for admins (handled in
-        // the branch above). The caller's own record is always added so a
-        // leaf employee (no descendants) still sees themselves.
+        // NOTE: unlike form-record visibility (which uses the unit-scoped
+        // getInheritedUserIds to keep teams isolated), Employee Master is an
+        // HR/management tool — a parent role should see every employee in a
+        // descendant role regardless of which unit they sit in. So we walk
+        // the role tree directly and pull all users in those roles, without
+        // the shared-unit guard. The caller's own record is always added so
+        // a leaf employee (no descendants) still sees themselves.
         const callerCtx = await getCallerRoleContext(
           authUser.id,
           authUser.organizationId as string,
         );
-        const inheritedIds =
-          (await getInheritedUserIds(
-            authUser.organizationId as string,
-            callerCtx,
-          )) ?? [];
+        const descendantRoleIds = await getDescendantRoleIds(
+          authUser.organizationId as string,
+          callerCtx.roleIds,
+        );
+        const descendantUsers =
+          descendantRoleIds.length > 0
+            ? await prisma.userUnitAssignment.findMany({
+                where: {
+                  roleId: { in: descendantRoleIds },
+                  role: { organizationId: authUser.organizationId },
+                },
+                select: { userId: true },
+                distinct: ["userId"],
+              })
+            : [];
         const visibleUserIds = Array.from(
-          new Set<string>([authUser.id, ...inheritedIds]),
+          new Set<string>([
+            authUser.id,
+            ...descendantUsers.map((a) => a.userId),
+          ]),
+        );
+
+        // Creators whose freshly-onboarded (still role-less) employees the
+        // caller should see: the caller plus anyone who shares one of the
+        // caller's roles. This makes the orphan window peer-shared — e.g. if
+        // two people both hold the HR role, each sees employees the other
+        // created even before a role/unit is assigned. Once a role IS
+        // assigned the record shows up via the hierarchy arm for everyone
+        // above it regardless of creator.
+        const peerCreators =
+          callerCtx.roleIds.length > 0
+            ? await prisma.userUnitAssignment.findMany({
+                where: {
+                  roleId: { in: callerCtx.roleIds },
+                  role: { organizationId: authUser.organizationId },
+                },
+                select: { userId: true },
+                distinct: ["userId"],
+              })
+            : [];
+        const creatorIds = Array.from(
+          new Set<string>([authUser.id, ...peerCreators.map((a) => a.userId)]),
         );
 
         employees = await prisma.employee.findMany({
           where: {
             status: "ACTIVE",
-            userId: { in: visibleUserIds },
             user: { organizationId: authUser.organizationId },
+            // Visible if the employee's linked user is the caller or sits
+            // below them in the role hierarchy, OR the record was created by
+            // the caller or one of their role-peers. The createdById arm
+            // covers the gap where a freshly onboarded employee has no role
+            // yet (so isn't in the hierarchy) but should still be seen by the
+            // HR/manager team that added them.
+            OR: [
+              { userId: { in: visibleUserIds } },
+              { createdById: { in: creatorIds } },
+            ],
           },
           select: employeeSelect,
           orderBy: { employeeName: "asc" },
@@ -537,6 +582,10 @@ export const UserManagementHandlers = {
       }
 
       const data = sanitizeEmployeePayload(body) as any;
+      // Stamp the creator so the employee-list visibility filter can show
+      // this record to whoever onboarded it, even while it has no role/unit
+      // assignment yet (and is therefore outside the role hierarchy).
+      data.createdById = authUser.id;
 
       // The list query (`getEmployees`) filters by the linked user's
       // organizationId — Employee has no organization column of its own. If

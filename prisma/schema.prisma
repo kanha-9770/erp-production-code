@@ -1456,12 +1456,20 @@ model Employee {
   noticeServed               Boolean?        @default(false) @map("notice_served")
   // Misc
   companySimIssue            Boolean?        @default(false) @map("company_sim_issue")
+  // The user who created this employee record (e.g. the HR who onboarded
+  // them). Used by the employee-list visibility filter so a creator always
+  // sees employees they added, even before a role/unit is assigned and the
+  // record joins the role hierarchy. Nullable: legacy rows and self-signups
+  // have no creator. Scalar-only (no relation) to keep the migration purely
+  // additive.
+  createdById                String?         @map("created_by_id")
   formRecords14              FormRecord14[]
   referralsMade              EmployeeReferral[]
   createdAt                  DateTime        @default(now()) @map("created_at")
   updatedAt                  DateTime        @updatedAt @map("updated_at")
 
   @@index([userId])
+  @@index([createdById])
   @@index([department])
   @@index([designation])
   @@index([status])
