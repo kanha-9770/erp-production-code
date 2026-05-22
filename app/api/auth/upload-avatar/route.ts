@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
+import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
@@ -49,7 +50,11 @@ export async function POST(request: NextRequest) {
       data: { avatar: avatarUrl },
     });
 
-    return NextResponse.json({ avatarUrl });
+    // Mirror the photo onto the linked Employee record (employeeImage).
+    await syncUserToEmployee(authUser.id, { avatar: avatarUrl });
+
+    // Return `url` to match the client mutation contract (PersonalTab reads res.url).
+    return NextResponse.json({ success: true, url: avatarUrl });
   } catch (error) {
     console.error("Avatar upload error:", error);
     return NextResponse.json(
