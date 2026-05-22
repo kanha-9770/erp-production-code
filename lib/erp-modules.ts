@@ -50,10 +50,13 @@ export const ALWAYS_ON_GROUPS: StaticPageGroup[] = [
 export const ERP_MODULES: ErpModuleDef[] = [
   {
     id: "hr",
-    label: "HR & Workforce",
+    label: "HR",
     description:
-      "Attendance, leave, payroll, employees, recruitment, engagement, performance",
+      "Attendance, leave, payroll, employees, recruitment, engagement, performance, assets",
     icon: "users",
+    // NOTE: "Asset & Admin" is folded into HR (it appears as a sub-folder of
+    // the HR module in the default sidebar blueprint) so a default new org
+    // gets the asset register without a separate module toggle.
     groups: [
       "Attendance",
       "Leave Management",
@@ -61,6 +64,7 @@ export const ERP_MODULES: ErpModuleDef[] = [
       "HR & Employees",
       "Employee Engagement",
       "Performance",
+      "Asset & Admin",
     ],
     routePrefixes: [
       "/attendance",
@@ -70,12 +74,13 @@ export const ERP_MODULES: ErpModuleDef[] = [
       "/hr",
       "/employee-engagement",
       "/performance",
+      "/asset-management",
     ],
     recommended: true,
   },
   {
     id: "real_estate",
-    label: "Real Estate Brokerage",
+    label: "MLM",
     description:
       "Properties, agents, leads, transactions, commissions, MLM hierarchy",
     icon: "building2",
@@ -89,14 +94,6 @@ export const ERP_MODULES: ErpModuleDef[] = [
     icon: "boxes",
     groups: ["Inventory"],
     routePrefixes: ["/inventory", "/storefront"],
-  },
-  {
-    id: "asset_management",
-    label: "Asset Management",
-    description: "Laptops, phones, monitors, SIM cards — assignment & status",
-    icon: "package",
-    groups: ["Asset & Admin"],
-    routePrefixes: ["/asset-management"],
   },
 ];
 

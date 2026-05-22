@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         rootUnit,
         adminRole,
       }
-    })
+    }, { timeout: 30000 })
 
     return NextResponse.json({
       success: true,

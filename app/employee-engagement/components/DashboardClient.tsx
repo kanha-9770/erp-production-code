@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { getStatusMeta } from "@/lib/constants/engagement";
-import SubmissionPaperView, { type SubmissionPaperData } from "./SubmissionPaperView";
+import SubmissionPaperView, { downloadPaperView, type SubmissionPaperData } from "./SubmissionPaperView";
 
 const POINTS_MIN = 1;
 const POINTS_MAX = 12;
@@ -200,6 +200,8 @@ export default function DashboardClient({
   // each row of the Award Points table. Shows the submission rendered
   // like the printed Nessco form.
   const [viewDialogFor, setViewDialogFor] = useState<EngagementItem | null>(null);
+  // Captures the rendered paper-form node for the "Download" full-page export.
+  const paperRef = useRef<HTMLDivElement>(null);
 
   // Report generator — independent of the page-level Time filter so admin
   // can review the current month while generating last quarter's report.
@@ -790,98 +792,105 @@ export default function DashboardClient({
   const totalSubmissions = filteredData.length;
 
   return (
-    <div className="flex-1 space-y-8 p-8 pt-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between pb-6 border-b">
-        <div className="space-y-1">
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-            Engagement Analytics Hub
-          </h2>
-          <p className="text-muted-foreground flex items-center gap-2">
-            <Clock className="w-4 h-4" /> Real-time tracking of employee engagement submodules
-          </p>
-        </div>
-        
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search SubID, Emp, Title..."
-              className="w-[200px] pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          
-          <Select value={moduleFilter} onValueChange={(v: any) => setModuleFilter(v)}>
-            <SelectTrigger className="w-[160px]">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="All Modules" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Modules</SelectItem>
-              <SelectItem value="Kaizen">Kaizen</SelectItem>
-              <SelectItem value="Suggestion">Suggestions</SelectItem>
-              <SelectItem value="Problem">Problem Reg.</SelectItem>
-              <SelectItem value="Initiative">Self Initiative</SelectItem>
-              <SelectItem value="Target">Self Target</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={timeFilter} onValueChange={(v: any) => setTimeFilter(v)}>
-            <SelectTrigger className="w-[180px]">
-              <CalendarIcon className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="Time Period" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">This Week</SelectItem>
-              <SelectItem value="last7">Last 7 Days</SelectItem>
-              <SelectItem value="last30">Last 30 Days</SelectItem>
-              <SelectItem value="last90">Last 90 Days</SelectItem>
-              <SelectItem value="monthly">This Month</SelectItem>
-              <SelectItem value="quarterly">This Quarter</SelectItem>
-              <SelectItem value="annually">This Year</SelectItem>
-              <SelectItem value="all">All Time</SelectItem>
-              <SelectItem value="custom">Custom Range…</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {timeFilter === "custom" && (
-            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
-              <Input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="h-8 w-[140px] border-0 bg-transparent p-1 text-xs focus-visible:ring-0"
-                aria-label="From date"
-                max={customTo || undefined}
-              />
-              <span className="text-xs text-muted-foreground">to</span>
-              <Input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="h-8 w-[140px] border-0 bg-transparent p-1 text-xs focus-visible:ring-0"
-                aria-label="To date"
-                min={customFrom || undefined}
-              />
-              {(customFrom || customTo) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setCustomFrom(""); setCustomTo(""); }}
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                  title="Clear date range"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                </Button>
-              )}
+    <div className="flex-1 space-y-6 p-4 sm:p-6">
+      {/* ── Workspace-style header bar (matches the module pages) ──────── */}
+      <div className="rounded-xl border bg-card shadow-sm">
+        <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <TrendingUp className="h-5 w-5" />
             </div>
-          )}
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
+                Engagement Analytics Hub
+              </h1>
+              <div className="text-xs text-muted-foreground truncate">
+                {totalSubmissions} submission{totalSubmissions === 1 ? "" : "s"} in current view
+              </div>
+            </div>
+          </div>
+          <div className="flex-1" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search SubID, Emp, Title..."
+                className="pl-8 h-8 w-64 text-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+
+            <Select value={moduleFilter} onValueChange={(v: any) => setModuleFilter(v)}>
+              <SelectTrigger className="h-8 w-[150px] text-sm">
+                <Filter className="w-3.5 h-3.5 mr-1.5" />
+                <SelectValue placeholder="All Modules" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Modules</SelectItem>
+                <SelectItem value="Kaizen">Kaizen</SelectItem>
+                <SelectItem value="Suggestion">Suggestions</SelectItem>
+                <SelectItem value="Problem">Problem Reg.</SelectItem>
+                <SelectItem value="Initiative">Self Initiative</SelectItem>
+                <SelectItem value="Target">Self Target</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={timeFilter} onValueChange={(v: any) => setTimeFilter(v)}>
+              <SelectTrigger className="h-8 w-[170px] text-sm">
+                <CalendarIcon className="w-3.5 h-3.5 mr-1.5" />
+                <SelectValue placeholder="Time Period" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">This Week</SelectItem>
+                <SelectItem value="last7">Last 7 Days</SelectItem>
+                <SelectItem value="last30">Last 30 Days</SelectItem>
+                <SelectItem value="last90">Last 90 Days</SelectItem>
+                <SelectItem value="monthly">This Month</SelectItem>
+                <SelectItem value="quarterly">This Quarter</SelectItem>
+                <SelectItem value="annually">This Year</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="custom">Custom Range…</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+
+        {timeFilter === "custom" && (
+          <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-2 border-t pt-3">
+            <span className="text-xs font-medium text-muted-foreground">Custom range:</span>
+            <Input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="h-8 w-[150px] text-xs"
+              aria-label="From date"
+              max={customTo || undefined}
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <Input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="h-8 w-[150px] text-xs"
+              aria-label="To date"
+              min={customFrom || undefined}
+            />
+            {(customFrom || customTo) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => { setCustomFrom(""); setCustomTo(""); }}
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title="Clear date range"
+              >
+                <RotateCcw className="h-3 w-3 mr-1" /> Clear
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Reviewer role banner ──────────────────────────────────────── */}
@@ -941,7 +950,7 @@ export default function DashboardClient({
             <p className="text-xs text-muted-foreground mt-1 font-medium">Total Submissions</p>
           </CardContent>
         </Card>
-        
+
         {["Kaizen", "Suggestion", "Problem", "Initiative", "Target"].map((mod) => {
           const Icon = MODULE_ICONS[mod];
           const count = moduleCounts[mod] || 0;
@@ -1772,13 +1781,49 @@ export default function DashboardClient({
                     Read-only paper-form rendering of {it.moduleType.toLowerCase()} submission for {it.employeeName}.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="p-6">
+                <div className="p-6" ref={paperRef}>
                   <SubmissionPaperView data={data} />
                 </div>
+
+                {/* Editable Admin / HR remark — typing here updates the
+                    "Remark" cell in the paper form above live, so it is
+                    included when you Print / Download. */}
+                <div className="px-6 pb-2">
+                  <label className="text-xs uppercase tracking-wider font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                    Remark (by Admin / HR)
+                  </label>
+                  <Textarea
+                    value={remarkBySubmission[it.id] ?? ""}
+                    onChange={(e) => onRemarkChange(it.id, e.target.value)}
+                    onBlur={() => flushRemark(it.id)}
+                    disabled={!canReview}
+                    placeholder={canReview ? "Write a remark — appears on the printed / downloaded form…" : "Admin / HR only"}
+                    className="mt-1 min-h-[70px]"
+                  />
+                  {canReview && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Saved automatically when you click away. It shows in the form above and in the downloaded page.
+                    </p>
+                  )}
+                </div>
+
                 <DialogFooter className="px-6 py-3 border-t">
-                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadPaperView(paperRef.current, `${data.displayId}-${it.moduleType}`)}
+                  >
                     <Printer className="h-3.5 w-3.5 mr-1" />
                     Print
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadPaperView(paperRef.current, `${data.displayId}-${it.moduleType}`)}
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1" />
+                    Download
                   </Button>
                   <Button size="sm" onClick={() => setViewDialogFor(null)}>Close</Button>
                 </DialogFooter>

@@ -1564,6 +1564,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         last_name: true,
         department: true,
         joinDate: true,
+        createdAt: true,
         employee: {
           select: {
             id: true,
@@ -1648,11 +1649,23 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
         isOvertimeApplicable: u.employee?.isOvertimeApplicable ?? null,
         overtimeRate: empOtRate,
         matchKeys,
+        // Fallback chain for the joining date that bounds payable days:
+        //   1. Employee.dateOfJoining (HR-confirmed, authoritative)
+        //   2. User.joinDate (set by user-onboarding flow)
+        //   3. User.createdAt (the row was inserted, so the user did not
+        //      exist in the org before this — using this as a floor stops
+        //      payroll from billing weekly-offs / holidays that fall in
+        //      the month *before* the user was added at all.)
+        // Without (3) a freshly-added user inherited a `null` joining date
+        // and the classifier at lib/utils/payroll-utils.ts:678 silently
+        // counted every weekly-off in the month as payable.
         dateOfJoining: u.employee?.dateOfJoining
           ? new Date(u.employee.dateOfJoining).toISOString().slice(0, 10)
           : u.joinDate
             ? new Date(u.joinDate).toISOString().slice(0, 10)
-            : null,
+            : u.createdAt
+              ? new Date(u.createdAt).toISOString().slice(0, 10)
+              : null,
         dateOfLeaving: u.employee?.dateOfLeaving
           ? new Date(u.employee.dateOfLeaving).toISOString().slice(0, 10)
           : null,

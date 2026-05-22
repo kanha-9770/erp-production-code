@@ -10,6 +10,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
+import {
+  getCallerRoleContext,
+  getDescendantRoleIds,
+} from "@/lib/database/roles";
 import { moveToTrash } from "@/lib/trash";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
@@ -315,6 +319,29 @@ export const UserManagementHandlers = {
         });
       }
 
+      // Reverse of the sync in updateEmployee: push the account's shared
+      // identity/contact fields onto the linked Employee record so Employee
+      // Master shows the same values. `updatedData` only carries fields the
+      // caller actually changed, so a partial edit never blanks the other
+      // side. updateMany is a no-op when the user has no employee row.
+      const employeeSync: Record<string, any> = {};
+      if (updatedData.email) employeeSync.emailAddress1 = updatedData.email;
+      if (updatedData.first_name !== undefined) employeeSync.firstName = updatedData.first_name;
+      if (updatedData.last_name !== undefined) employeeSync.lastName = updatedData.last_name;
+      if (updatedData.department !== undefined) employeeSync.department = updatedData.department;
+      if (updatedData.phone !== undefined) employeeSync.personalContact = updatedData.phone;
+      if (updatedData.avatar !== undefined) employeeSync.employeeImage = updatedData.avatar;
+      // Recompose the employee display name when either name part changed.
+      if (updatedData.first_name !== undefined || updatedData.last_name !== undefined) {
+        const fn = updatedData.first_name ?? user.first_name ?? "";
+        const ln = updatedData.last_name ?? user.last_name ?? "";
+        const full = `${fn} ${ln}`.trim();
+        if (full) employeeSync.employeeName = full;
+      }
+      if (Object.keys(employeeSync).length > 0) {
+        await prisma.employee.updateMany({ where: { userId }, data: employeeSync });
+      }
+
       const finalUser = await prisma.user.findUnique({
         where: { id: userId },
         include: {
@@ -363,10 +390,15 @@ export const UserManagementHandlers = {
 
       const userWithRoles = await prisma.user.findUnique({
         where: { id: authUser.id },
-        select: { unitAssignments: { include: { role: { select: { name: true } } } } },
+        select: { unitAssignments: { include: { role: { select: { name: true, isAdmin: true } } } } },
       });
+      // Admin if any assigned role is flagged isAdmin OR named "*admin*".
+      // We keep the name-based check alongside the boolean so older orgs
+      // that named a role "Admin" without setting the flag still work.
       const adminUser = userWithRoles?.unitAssignments.some(
-        (ua: any) => ua.role.name.toLowerCase().includes("admin")
+        (ua: any) =>
+          ua.role.isAdmin === true ||
+          ua.role.name.toLowerCase().includes("admin")
       ) ?? false;
 
       // Mirror EmployeeListItem — selects every field exposed by the static
@@ -433,9 +465,82 @@ export const UserManagementHandlers = {
           orderBy: { employeeName: "asc" },
         });
       } else {
+        // Hierarchy-based visibility: a parent role (e.g. HR) sees the
+        // employee records of every role *below* it in the org's role tree,
+        // not just their own.
+        //
+        // NOTE: unlike form-record visibility (which uses the unit-scoped
+        // getInheritedUserIds to keep teams isolated), Employee Master is an
+        // HR/management tool — a parent role should see every employee in a
+        // descendant role regardless of which unit they sit in. So we walk
+        // the role tree directly and pull all users in those roles, without
+        // the shared-unit guard. The caller's own record is always added so
+        // a leaf employee (no descendants) still sees themselves.
+        const callerCtx = await getCallerRoleContext(
+          authUser.id,
+          authUser.organizationId as string,
+        );
+        const descendantRoleIds = await getDescendantRoleIds(
+          authUser.organizationId as string,
+          callerCtx.roleIds,
+        );
+        const descendantUsers =
+          descendantRoleIds.length > 0
+            ? await prisma.userUnitAssignment.findMany({
+                where: {
+                  roleId: { in: descendantRoleIds },
+                  role: { organizationId: authUser.organizationId },
+                },
+                select: { userId: true },
+                distinct: ["userId"],
+              })
+            : [];
+        const visibleUserIds = Array.from(
+          new Set<string>([
+            authUser.id,
+            ...descendantUsers.map((a) => a.userId),
+          ]),
+        );
+
+        // Creators whose freshly-onboarded (still role-less) employees the
+        // caller should see: the caller plus anyone who shares one of the
+        // caller's roles. This makes the orphan window peer-shared — e.g. if
+        // two people both hold the HR role, each sees employees the other
+        // created even before a role/unit is assigned. Once a role IS
+        // assigned the record shows up via the hierarchy arm for everyone
+        // above it regardless of creator.
+        const peerCreators =
+          callerCtx.roleIds.length > 0
+            ? await prisma.userUnitAssignment.findMany({
+                where: {
+                  roleId: { in: callerCtx.roleIds },
+                  role: { organizationId: authUser.organizationId },
+                },
+                select: { userId: true },
+                distinct: ["userId"],
+              })
+            : [];
+        const creatorIds = Array.from(
+          new Set<string>([authUser.id, ...peerCreators.map((a) => a.userId)]),
+        );
+
         employees = await prisma.employee.findMany({
-          where: { userId: authUser.id, status: "ACTIVE" },
+          where: {
+            status: "ACTIVE",
+            user: { organizationId: authUser.organizationId },
+            // Visible if the employee's linked user is the caller or sits
+            // below them in the role hierarchy, OR the record was created by
+            // the caller or one of their role-peers. The createdById arm
+            // covers the gap where a freshly onboarded employee has no role
+            // yet (so isn't in the hierarchy) but should still be seen by the
+            // HR/manager team that added them.
+            OR: [
+              { userId: { in: visibleUserIds } },
+              { createdById: { in: creatorIds } },
+            ],
+          },
           select: employeeSelect,
+          orderBy: { employeeName: "asc" },
         });
       }
 
@@ -477,6 +582,10 @@ export const UserManagementHandlers = {
       }
 
       const data = sanitizeEmployeePayload(body) as any;
+      // Stamp the creator so the employee-list visibility filter can show
+      // this record to whoever onboarded it, even while it has no role/unit
+      // assignment yet (and is therefore outside the role hierarchy).
+      data.createdById = authUser.id;
 
       // The list query (`getEmployees`) filters by the linked user's
       // organizationId — Employee has no organization column of its own. If
@@ -603,6 +712,47 @@ export const UserManagementHandlers = {
 
       const data = sanitizeEmployeePayload(body, { partial: true });
       const employee = await prisma.employee.update({ where: { id }, data });
+
+      // Mirror the shared identity/contact fields onto the linked User
+      // account so an edit in Employee Master shows up everywhere the User
+      // record is read (the "Create Users from Employee" / Edit User panel,
+      // the header avatar, etc). updateUser does the exact reverse, so these
+      // fields behave as one value editable from either side. Only fields
+      // actually present (non-empty) in this payload are synced, so a partial
+      // edit never blanks the other side.
+      if (employee.userId) {
+        const linkedUser = await prisma.user.findUnique({
+          where: { id: employee.userId },
+          select: { id: true, email: true },
+        });
+        if (linkedUser) {
+          const userSync: Record<string, any> = {};
+          const str = (v: any) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+          const firstName = str(data.firstName);
+          const lastName = str(data.lastName);
+          if (firstName !== undefined) userSync.first_name = firstName;
+          if (lastName !== undefined) userSync.last_name = lastName;
+          if (str(data.department) !== undefined) userSync.department = str(data.department);
+          if (str(data.personalContact) !== undefined) userSync.phone = str(data.personalContact);
+          if (str(data.employeeImage) !== undefined) userSync.avatar = str(data.employeeImage);
+
+          // Email maps to the login address — only sync a valid, changed
+          // value that no *other* account already owns (don't 500 the edit
+          // on the User.email unique constraint).
+          const newEmail = str(data.emailAddress1);
+          if (newEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail) && linkedUser.email !== newEmail) {
+            const clash = await prisma.user.findFirst({
+              where: { email: newEmail, NOT: { id: linkedUser.id } },
+              select: { id: true },
+            });
+            if (!clash) userSync.email = newEmail;
+          }
+
+          if (Object.keys(userSync).length > 0) {
+            await prisma.user.update({ where: { id: linkedUser.id }, data: userSync });
+          }
+        }
+      }
 
       // If the update touched any field the payroll engine reads, drop the
       // live cache for this org so the next /api/payroll fetch recomputes
