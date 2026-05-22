@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
+import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
 import { unlink } from "fs/promises";
 import path from "path";
 
@@ -38,6 +39,9 @@ export async function POST(request: NextRequest) {
       where: { id: userId },
       data: { avatar: null },
     });
+
+    // Clear the photo on the linked Employee record too.
+    await syncUserToEmployee(userId, { avatar: null });
 
     return NextResponse.json({ success: true, message: "Avatar removed successfully" });
   } catch (error) {
