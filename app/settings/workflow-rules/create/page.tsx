@@ -53,6 +53,7 @@ import { format } from "date-fns"
 import {
   getStaticFieldsForModule,
   getStaticFormEntries,
+  getStaticModules,
 } from "@/lib/static-page-fields"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -1335,6 +1336,33 @@ export default function CreateWorkflowRulePage() {
     )
   }, [treeData, moduleName])
 
+  // ── Module picker options (dynamic + static) ───────────────────────────
+  // The bindings tree (`treeData`) only knows about form-builder modules.
+  // Static, hand-coded pages (Employee Master, Job Application, Leads, …)
+  // never appear there, so on their own the module dropdowns would hide
+  // them. Merge in `getStaticModules()` and dedupe by name (case-insensitive)
+  // so a static page that *also* has a dynamic form isn't listed twice. The
+  // dynamic entry wins the dedupe because it carries the real module_id.
+  const moduleSelectOptions = useMemo(() => {
+    const out: Array<{ id: string; name: string }> = []
+    const seen = new Set<string>()
+    for (const m of (treeData?.data || []) as any[]) {
+      const name = m.name || ""
+      if (!name) continue
+      const key = name.trim().toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ id: m.id, name })
+    }
+    for (const m of getStaticModules()) {
+      const key = m.name.trim().toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ id: m.id, name: m.name })
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name))
+  }, [treeData])
+
   // Report Export module/forms/fields options — declared after `treeData`
   // so they don't trigger a TDZ error on render.
   const reportFormsInModule = useMemo(() => {
@@ -1657,12 +1685,12 @@ export default function CreateWorkflowRulePage() {
                     <SelectValue placeholder="Pick a module…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(treeData?.data || []).length === 0 ? (
+                    {moduleSelectOptions.length === 0 ? (
                       <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                         No modules yet. Create one in Settings → Modules.
                       </div>
                     ) : (
-                      (treeData?.data || []).map((m: any) => (
+                      moduleSelectOptions.map((m: any) => (
                         <SelectItem key={m.id} value={m.name} className="text-xs">
                           {m.name}
                         </SelectItem>
@@ -2478,12 +2506,12 @@ export default function CreateWorkflowRulePage() {
                                         <SelectValue placeholder="Select a module…" />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {(treeData?.data || []).length === 0 ? (
+                                        {moduleSelectOptions.length === 0 ? (
                                           <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                                             No modules yet. Create one in Settings → Modules.
                                           </div>
                                         ) : (
-                                          (treeData?.data || []).map((m: any) => (
+                                          moduleSelectOptions.map((m: any) => (
                                             <SelectItem key={m.id} value={m.name} className="text-xs">
                                               {m.name}
                                             </SelectItem>
@@ -3267,12 +3295,12 @@ export default function CreateWorkflowRulePage() {
                         <SelectValue placeholder="Select a module…" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(treeData?.data || []).length === 0 ? (
+                        {moduleSelectOptions.length === 0 ? (
                           <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                             No modules yet. Create one in Settings → Modules.
                           </div>
                         ) : (
-                          (treeData?.data || []).map((m: any) => (
+                          moduleSelectOptions.map((m: any) => (
                             <SelectItem key={m.id} value={m.name} className="text-xs">
                               {m.name}
                             </SelectItem>
@@ -3414,16 +3442,6 @@ export default function CreateWorkflowRulePage() {
                         </p>
                       )}
                     </div>
-
-                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground pt-1">
-                      <input
-                        type="checkbox"
-                        checked={emailFormSendAsMass}
-                        onChange={(e) => setEmailFormSendAsMass(e.target.checked)}
-                        className="h-3.5 w-3.5"
-                      />
-                      Send this notification as a Single Mass Email with all recipients displayed
-                    </label>
                   </div>
                 </div>
 
@@ -3617,103 +3635,6 @@ export default function CreateWorkflowRulePage() {
                   </div>
                 </div>
 
-                {/* SMTP password — OPTIONAL. Leave blank to relay through
-                    your env-level account (EMAIL_USER). The recipient may
-                    then see the From rewritten to that account by Gmail /
-                    Outlook. To preserve the picked sender on the recipient
-                    side, paste an app password for that sender here. */}
-                <div className="grid grid-cols-[110px_1fr] items-start gap-3">
-                  <Label htmlFor="email-smtp-pass" className="text-xs text-right pt-2">
-                    SMTP Password
-                    <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-normal mt-0.5">
-                      optional
-                    </span>
-                  </Label>
-                  <div className="space-y-1">
-                    <div className="flex gap-2">
-                      <Input
-                        id="email-smtp-pass"
-                        type={emailFormShowSmtpPass ? "text" : "password"}
-                        value={emailFormSmtpPass}
-                        onChange={(e) => setEmailFormSmtpPass(e.target.value)}
-                        placeholder={
-                          emailFormSmtpPassPreserved
-                            ? "•••••••• (saved — leave blank to keep)"
-                            : "Optional — app password for the picked sender"
-                        }
-                        className="h-8 text-xs"
-                        autoComplete="new-password"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-[11px] px-2 shrink-0"
-                        onClick={() => setEmailFormShowSmtpPass((v) => !v)}
-                      >
-                        {emailFormShowSmtpPass ? "Hide" : "Show"}
-                      </Button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground leading-snug">
-                      Leave blank to relay via the org's configured SMTP account —
-                      emails will go out, but Gmail / Outlook rewrite the visible
-                      <span className="font-mono"> From </span> to that account.
-                      To make the recipient see <span className="font-mono">{emailFormFrom || "the picked sender"}</span> in their inbox, paste an{" "}
-                      <span className="font-medium">app password</span> for that
-                      account here (Gmail → Account → Security → App passwords).
-                    </p>
-                    <button
-                      type="button"
-                      className="text-[10px] text-primary hover:underline"
-                      onClick={() => setEmailFormShowAdvanced((v) => !v)}
-                    >
-                      {emailFormShowAdvanced ? "Hide" : "Show"} advanced SMTP options
-                    </button>
-                    {emailFormShowAdvanced && (
-                      <div className="mt-1 grid grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-[10px] text-muted-foreground">
-                            SMTP user (defaults to From)
-                          </Label>
-                          <Input
-                            value={emailFormSmtpUser}
-                            onChange={(e) => setEmailFormSmtpUser(e.target.value)}
-                            placeholder={emailFormFrom || "user@example.com"}
-                            className="h-8 text-xs mt-0.5"
-                            autoComplete="off"
-                          />
-                        </div>
-                        <div className="flex items-end">
-                          <p className="text-[10px] text-muted-foreground leading-snug">
-                            Override only if the SMTP login differs from the From address
-                            (e.g. an alias). SMTP host & port stay from your env config.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-[110px_1fr] items-center gap-3">
-                  <Label htmlFor="email-replyto" className="text-xs text-right">Reply to</Label>
-                  <Input
-                    id="email-replyto"
-                    value={emailFormReplyTo}
-                    onChange={(e) => setEmailFormReplyTo(e.target.value)}
-                    placeholder="Optional"
-                    className="h-8 text-xs"
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-muted-foreground ml-[122px]">
-                  <input
-                    type="checkbox"
-                    checked={emailFormBestTime}
-                    onChange={(e) => setEmailFormBestTime(e.target.checked)}
-                    className="h-3.5 w-3.5"
-                  />
-                  Send this email notification at Best Time to Email.
-                </label>
               </div>
 
               <DialogFooter className="border-t px-6 py-3 gap-2">
@@ -3873,12 +3794,12 @@ export default function CreateWorkflowRulePage() {
                         <SelectValue placeholder="Select a module…" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(treeData?.data || []).length === 0 ? (
+                        {moduleSelectOptions.length === 0 ? (
                           <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
                             No modules yet. Create one in Settings → Modules.
                           </div>
                         ) : (
-                          (treeData?.data || []).map((m: any) => (
+                          moduleSelectOptions.map((m: any) => (
                             <SelectItem key={m.id} value={m.name} className="text-xs">
                               {m.name}
                             </SelectItem>

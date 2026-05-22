@@ -204,6 +204,19 @@ function getRecordFieldValue(
     return unwrap((recordData as any)[fieldId])
   }
 
+  // Case-insensitive top-level key match. Conditions authored in the rule UI
+  // store the field's *label* (e.g. "Status"), while static-page records are
+  // keyed by the lowercase column / coreKey (e.g. "status"). A case-sensitive
+  // lookup would miss this and the condition would resolve to undefined —
+  // making "Status is Shortlisted" silently never match. Lowercasing both
+  // sides bridges label ↔ coreKey for the common single-word field names.
+  {
+    const wanted = fieldId.trim().toLowerCase()
+    for (const k of Object.keys(recordData)) {
+      if (k.toLowerCase() === wanted) return unwrap((recordData as any)[k])
+    }
+  }
+
   // Static-page field IDs are synthesized as `static:<formId>:<coreKey>`. The
   // recordData from a static-route `fireWorkflow` call is keyed by the
   // coreKey alone (e.g. `userId`, `employeeName`), so strip the prefix and
@@ -432,23 +445,41 @@ function evaluateConditions(
     if (!c?.field || !c?.operator) return true
     const left = getRecordFieldValue(recordData, c.field)
     const right = c.value
+    // String comparisons are case-insensitive throughout. Record values are
+    // often stored normalised (e.g. Job Application status is uppercased to
+    // "SHORTLISTED") while the rule's condition value comes from the UI in
+    // title case ("Shortlisted"). A case-sensitive compare would never match
+    // and the rule would silently never fire (or, for the operators that used
+    // to hit the permissive `default` below, always fire). Lowercasing both
+    // sides makes the operators behave the way an admin expects.
+    const l = String(left ?? "").trim().toLowerCase()
+    const r = String(right ?? "").trim().toLowerCase()
     switch (c.operator) {
       case "is":
       case "equals":
       case "=":
-        return String(left ?? "") === String(right ?? "")
+        return l === r
       case "is not":
       case "!=":
-        return String(left ?? "") !== String(right ?? "")
+        return l !== r
       case "contains":
-        return String(left ?? "").toLowerCase().includes(String(right ?? "").toLowerCase())
+        return l.includes(r)
+      case "does not contain":
+        return !l.includes(r)
+      case "starts with":
+        return l.startsWith(r)
+      case "ends with":
+        return l.endsWith(r)
       case "is empty":
         return left === undefined || left === null || left === ""
       case "is not empty":
         return !(left === undefined || left === null || left === "")
       default:
-        // Unknown operator → treat as match so we don't silently drop firings.
-        return true
+        // Genuinely unrecognised operator. Every operator the rule UI offers
+        // is handled above, so reaching here means a malformed rule — fail
+        // the match rather than firing the action against every record.
+        console.warn(`[workflow] unknown condition operator "${c.operator}" — treating as no-match`)
+        return false
     }
   })
 }
