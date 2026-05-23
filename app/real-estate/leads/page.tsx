@@ -541,6 +541,7 @@ function ListView({ setViewMode }: { setViewMode: (m: "list" | "kanban") => void
               columns={columns}
               rows={items}
               rowId={(l) => l.id}
+              pageSize={10}
               isLoading={isLoading}
               selectedId={selectedId}
               onRowClick={(l) => setSelectedId(l.id)}

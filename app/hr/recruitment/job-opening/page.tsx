@@ -623,6 +623,7 @@ export default function JobOpeningListPage() {
                 columns={columns}
                 rows={items}
                 rowId={(o) => o.id}
+                pageSize={10}
                 isLoading={isLoading}
                 selectedId={selectedId}
                 onRowClick={(o) => setSelectedId(o.id)}

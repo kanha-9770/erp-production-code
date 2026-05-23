@@ -88,6 +88,7 @@
     "jspdf-autotable": "^5.0.7",
     "libphonenumber-js": "^1.12.33",
     "lucide-react": "^0.454.0",
+    "mammoth": "^1.12.0",
     "markmap-common": "^0.18.9",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
@@ -99,6 +100,7 @@
     "node-cron": "3.0.3",
     "nodemailer": "^7.0.6",
     "openai": "^6.18.0",
+    "pdf-parse": "^2.4.5",
     "prisma": "6.19.0",
     "react": "^18",
     "react-big-calendar": "^1.19.4",
@@ -130,8 +132,8 @@
     "@types/bcrypt": "^5.0.2",
     "@types/bcryptjs": "^3.0.0",
     "@types/dagre": "^0.7.54",
-    "@types/node": "^22",
-    "@types/react": "^18",
+    "@types/node": "^22.19.18",
+    "@types/react": "^18.3.28",
     "@types/react-dom": "^18",
     "@types/react-mentions": "^4.4.1",
     "@types/web-push": "^3.6.4",
@@ -141,6 +143,6 @@
     "install": "^0.13.0",
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   }
 }

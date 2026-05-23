@@ -329,6 +329,7 @@ export default function SelfInitiativePage() {
             columns={columns}
             rows={items}
             rowId={(i) => i.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(i) => setSelectedId(i.id)}

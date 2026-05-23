@@ -611,6 +611,7 @@ export default function EmployeeReferralListPage() {
                 columns={columns}
                 rows={items}
                 rowId={(r) => r.id}
+                pageSize={10}
                 isLoading={isLoading}
                 selectedId={selectedId}
                 onRowClick={(r) => setSelectedId(r.id)}

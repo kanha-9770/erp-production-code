@@ -357,6 +357,7 @@ export default function PerformanceAppraisalPage() {
             columns={columns}
             rows={filteredItems}
             rowId={(a) => a.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(a) => setSelectedId(a.id)}

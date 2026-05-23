@@ -333,6 +333,7 @@ export default function TransactionsListPage() {
               columns={columns}
               rows={items}
               rowId={(t) => t.id}
+              pageSize={10}
               isLoading={isLoading}
               selectedId={selectedId}
               onRowClick={(t) => setSelectedId(t.id)}

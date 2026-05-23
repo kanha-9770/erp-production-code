@@ -517,6 +517,44 @@ export default function JobApplicationListPage() {
         ),
       },
       {
+        id: "experience",
+        header: "Experience",
+        width: 110,
+        copyValue: (a) => a.resumeTotalExperience ?? "",
+        cell: (a) => (
+          <span className="text-xs text-muted-foreground">
+            {a.resumeTotalExperience ?? "—"}
+          </span>
+        ),
+      },
+      {
+        id: "skills",
+        header: "Skills",
+        width: 220,
+        defaultHidden: true,
+        copyValue: (a) => a.resumeSkills ?? "",
+        cell: (a) =>
+          a.resumeSkills ? (
+            <div className="flex flex-wrap gap-1">
+              {a.resumeSkills
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .slice(0, 4)
+                .map((skill) => (
+                  <span
+                    key={skill}
+                    className="rounded bg-muted px-1.5 py-0.5 text-[10px]"
+                  >
+                    {skill}
+                  </span>
+                ))}
+            </div>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">—</span>
+          ),
+      },
+      {
         id: "resume",
         header: "Resume",
         width: 100,
@@ -679,6 +717,7 @@ export default function JobApplicationListPage() {
                 columns={columns}
                 rows={items}
                 rowId={(a) => a.id}
+                pageSize={10}
                 isLoading={isLoading}
                 selectedId={selectedId}
                 onRowClick={(a) => setSelectedId(a.id)}
@@ -1026,6 +1065,44 @@ function ApplicationPreview({ id }: { id: string }) {
             <FileText className="h-4 w-4 shrink-0" />
             {a.applicantResumeName || "Open resume"}
           </a>
+        </Card>
+      )}
+
+      {(a.resumeSummary ||
+        a.resumeSkills ||
+        a.resumeTotalExperience ||
+        a.resumeEducation) && (
+        <Card className="p-4 space-y-2">
+          <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            Scanned from resume
+          </div>
+          {a.resumeSummary && (
+            <p className="text-sm leading-relaxed">{a.resumeSummary}</p>
+          )}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {a.resumeTotalExperience && (
+              <Fact label="Experience" value={a.resumeTotalExperience} />
+            )}
+            {a.resumeEducation && (
+              <Fact label="Education" value={a.resumeEducation} />
+            )}
+          </div>
+          {a.resumeSkills && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {a.resumeSkills
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .map((skill) => (
+                  <span
+                    key={skill}
+                    className="rounded bg-muted px-2 py-0.5 text-[11px]"
+                  >
+                    {skill}
+                  </span>
+                ))}
+            </div>
+          )}
         </Card>
       )}
 

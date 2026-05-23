@@ -351,6 +351,7 @@ export default function ProblemRegistrationPage() {
             columns={columns}
             rows={items}
             rowId={(p) => p.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(p) => setSelectedId(p.id)}

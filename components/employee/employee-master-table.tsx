@@ -198,7 +198,7 @@ type Prefs = {
 function defaultPrefs(): Prefs {
   return {
     hiddenColumns: [],
-    perPage: 20,
+    perPage: 10,
     wrapText: false,
     sort: null,
     savedViews: [],
@@ -215,7 +215,7 @@ function loadPrefs(key: string): Prefs {
     const parsed = JSON.parse(raw);
     return {
       hiddenColumns: Array.isArray(parsed.hiddenColumns) ? parsed.hiddenColumns : [],
-      perPage: typeof parsed.perPage === "number" ? parsed.perPage : 20,
+      perPage: typeof parsed.perPage === "number" ? parsed.perPage : 10,
       wrapText: !!parsed.wrapText,
       sort: parsed.sort ?? null,
       savedViews: Array.isArray(parsed.savedViews) ? parsed.savedViews : [],
