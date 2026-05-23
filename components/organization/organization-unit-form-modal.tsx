@@ -558,15 +558,18 @@ export function OrganizationUnitFormModal() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose() }}>
-      <DialogContent 
+      <DialogContent
         className={cn(
-          "sm:max-w-[800px] lg:max-w-[900px] max-h-[92vh] overflow-y-auto",
-          "p-4 sm:p-5 md:p-6",
+          "sm:max-w-[800px] lg:max-w-[900px] max-h-[92vh]",
+          // Flex column so the header and footer stay pinned and only the
+          // middle scrolls. overflow-hidden + p-0/gap-0 override the base
+          // DialogContent's `grid`, padding and gap (resolved by tailwind-merge).
+          "flex flex-col overflow-hidden p-0 gap-0",
           "bg-gradient-to-b from-white to-slate-50/40",
           "border border-slate-200 shadow-xl rounded-xl sm:rounded-2xl"
         )}
       >
-        <DialogHeader className="mb-5 sm:mb-6 pb-4 border-b border-slate-200">
+        <DialogHeader className="shrink-0 px-4 sm:px-5 md:px-6 pt-4 sm:pt-5 md:pt-6 pb-4 border-b border-slate-200">
           <DialogTitle className="flex items-center gap-3 text-xl sm:text-2xl font-bold text-slate-900">
             <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg bg-blue-600 shadow-md">
               <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
@@ -575,7 +578,9 @@ export function OrganizationUnitFormModal() {
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-7">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1 overflow-hidden">
+          {/* Scrollable body — the single scroll region; header & footer stay pinned. */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 md:px-6 py-5 sm:py-6 space-y-6 sm:space-y-7">
           {/* Basic Info Section */}
           <div className="space-y-4 sm:space-y-5 bg-white/60 p-4 sm:p-6 rounded-xl border border-slate-200 shadow-sm">
             <div className="space-y-2">
@@ -672,7 +677,7 @@ export function OrganizationUnitFormModal() {
                 </div>
               )}
 
-              <div className="max-h-[35vh] sm:max-h-[45vh] overflow-y-auto border border-slate-200 rounded-xl p-3 sm:p-4 bg-white/60 shadow-inner space-y-3">
+              <div className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-white/60 shadow-inner space-y-3">
                 {availableRoles.length === 0 ? (
                   <p className="text-sm text-slate-500 text-center py-6 sm:py-8 italic">
                     No roles available yet. Create roles first to assign them here.
@@ -726,7 +731,7 @@ export function OrganizationUnitFormModal() {
                   <Label className="text-sm sm:text-base font-medium text-slate-700">
                     Currently Assigned ({assignedUsers.length})
                   </Label>
-                  <div className="space-y-2.5 max-h-[30vh] sm:max-h-[40vh] overflow-y-auto p-3 sm:p-4 bg-blue-50/40 rounded-xl border border-blue-200/60">
+                  <div className="space-y-2.5 p-3 sm:p-4 bg-blue-50/40 rounded-xl border border-blue-200/60">
                     {assignedUsers.map(({ user, role, assignment }) => (
                       <div 
                         key={assignment.userId} 
@@ -777,7 +782,7 @@ export function OrganizationUnitFormModal() {
                 <Label className="text-sm sm:text-base font-medium text-slate-700">
                   Available Users ({unassignedUsers.length})
                 </Label>
-                <div className="max-h-[35vh] sm:max-h-[45vh] overflow-y-auto border border-slate-200 rounded-xl p-3 sm:p-4 bg-white/60 shadow-inner space-y-2.5">
+                <div className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-white/60 shadow-inner space-y-2.5">
                   {unassignedUsers.length === 0 ? (
                     <p className="text-sm sm:text-base text-slate-500 text-center py-8 sm:py-10 italic">
                       All users are already assigned to this unit.
@@ -824,9 +829,10 @@ export function OrganizationUnitFormModal() {
               </div>
             </TabsContent>
           </Tabs>
+          </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 sm:gap-4 pt-5 sm:pt-6 border-t border-slate-200">
+          {/* Action Buttons — pinned footer outside the scroll region */}
+          <div className="shrink-0 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 sm:gap-4 px-4 sm:px-5 md:px-6 py-4 sm:py-5 border-t border-slate-200 bg-white/70">
             <Button 
               type="button" 
               variant="outline" 

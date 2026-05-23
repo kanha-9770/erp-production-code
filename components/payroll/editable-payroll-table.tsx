@@ -283,12 +283,12 @@ export function EditablePayrollTable({
 
   return (
     <div className="border border-[#e0e0e0] bg-white dark:bg-background overflow-hidden h-full">
-      <div className="overflow-auto h-full">
+      <div className="overflow-auto h-full [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 z-20 bg-[#e8eaed] dark:bg-muted">
             <tr>
               {isAdmin && onSelectionChange && (
-                <th className="w-10 min-w-[40px] border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted py-1 px-2 text-center sticky left-0 z-10">
+                <th className="w-10 min-w-[40px] border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted py-1 px-2 text-center md:sticky md:left-0 z-10">
                   <input
                     type="checkbox"
                     checked={isAllSelected}
@@ -297,7 +297,7 @@ export function EditablePayrollTable({
                   />
                 </th>
               )}
-              <th className="w-10 min-w-[40px] border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted text-[11px] font-semibold text-[#5f6368] py-1 px-2 text-center sticky left-0 z-10">
+              <th className="w-10 min-w-[40px] border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted text-[11px] font-semibold text-[#5f6368] py-1 px-2 text-center md:sticky md:left-0 z-10">
                 #
               </th>
               <th className="border border-[#e0e0e0] px-2 py-1 text-left text-[11px] font-semibold text-[#202124] min-w-[160px]">
@@ -358,7 +358,7 @@ export function EditablePayrollTable({
                     )}
                   >
                     {isAdmin && onSelectionChange && (
-                      <td className="border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted py-1 px-2 text-center sticky left-0 z-10">
+                      <td className="border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted py-1 px-2 text-center md:sticky md:left-0 z-10">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -367,7 +367,7 @@ export function EditablePayrollTable({
                         />
                       </td>
                     )}
-                    <td className="border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted text-[11px] font-medium text-[#5f6368] py-1 px-2 text-center sticky left-0 z-10">
+                    <td className="border border-[#e0e0e0] bg-[#e8eaed] dark:bg-muted text-[11px] font-medium text-[#5f6368] py-1 px-2 text-center md:sticky md:left-0 z-10">
                       {index + 1}
                     </td>
                     <td className="border border-[#e0e0e0] px-2 py-1 text-[13px]">

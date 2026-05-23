@@ -913,7 +913,10 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
         )}
 
       {/* Table */}
-      <div ref={tableRef} className="flex-1 min-h-0 overflow-auto">
+      <div
+        ref={tableRef}
+        className="flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]"
+      >
         <table
           className="border-separate border-spacing-0 text-sm"
           style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}
@@ -933,15 +936,15 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
           <thead className="sticky top-0 z-10">
             {/* Section banner row */}
             <tr>
-              <th className="bg-muted border-b border-r h-9 sticky left-0 z-30" />
+              <th className="bg-muted border-b border-r h-9 md:sticky md:left-0 z-30" />
               <th
-                className="bg-muted border-b border-r h-9 sticky z-30 text-xs font-semibold text-muted-foreground text-center"
+                className="bg-muted border-b border-r h-9 md:sticky z-30 text-xs font-semibold text-muted-foreground text-center"
                 style={{ left: COL_W_CHECK }}
               >
                 #
               </th>
               <th
-                className="bg-muted border-b border-r h-9 sticky z-30 text-xs font-semibold text-muted-foreground text-center"
+                className="bg-muted border-b border-r h-9 md:sticky z-30 text-xs font-semibold text-muted-foreground text-center"
                 style={{ left: COL_W_CHECK + COL_W_NUM }}
               >
                 Actions
@@ -958,7 +961,7 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
             </tr>
             {/* Field row */}
             <tr>
-              <th className="bg-background border-b border-r h-14 px-2 sticky left-0 z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]">
+              <th className="bg-background border-b border-r h-14 px-2 md:sticky md:left-0 z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]">
                 <Checkbox
                   checked={isAllPageSelected}
                   onCheckedChange={(v) => toggleAllOnPage(!!v)}
@@ -966,11 +969,11 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
                 />
               </th>
               <th
-                className="bg-background border-b border-r h-14 sticky z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
+                className="bg-background border-b border-r h-14 md:sticky z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
                 style={{ left: COL_W_CHECK }}
               />
               <th
-                className="bg-background border-b border-r h-14 sticky z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
+                className="bg-background border-b border-r h-14 md:sticky z-30 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
                 style={{ left: COL_W_CHECK + COL_W_NUM }}
               />
               {visibleColumns.map((c) => {
@@ -1053,7 +1056,7 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
                   onClick={() => onRowClick?.(row)}
                 >
                   <td
-                    className="border-b border-r px-2 sticky left-0 bg-background group-hover:bg-muted z-20 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
+                    className="border-b border-r px-2 md:sticky md:left-0 bg-background group-hover:bg-muted z-20 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Checkbox
@@ -1069,13 +1072,13 @@ export function EmployeeMasterTable<T>(props: Props<T>) {
                     />
                   </td>
                   <td
-                    className="border-b border-r sticky bg-background group-hover:bg-muted z-20 text-xs text-muted-foreground tabular-nums text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
+                    className="border-b border-r md:sticky bg-background group-hover:bg-muted z-20 text-xs text-muted-foreground tabular-nums text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
                     style={{ left: COL_W_CHECK }}
                   >
                     {start + idx + 1}
                   </td>
                   <td
-                    className="border-b border-r sticky bg-background group-hover:bg-muted z-20 text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
+                    className="border-b border-r md:sticky bg-background group-hover:bg-muted z-20 text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]"
                     style={{ left: COL_W_CHECK + COL_W_NUM }}
                     onClick={(e) => e.stopPropagation()}
                   >

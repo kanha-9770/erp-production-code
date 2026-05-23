@@ -38,6 +38,7 @@ import {
   Copy as CopyIcon,
 } from "lucide-react";
 import { useTablePrefs } from "./table-prefs";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export interface ColumnDef<T> {
   id: string;
@@ -145,6 +146,10 @@ export function DataTable<T>({
 
   const visible = useVisibleColumns(columns, prefs.hidden);
   const { offsets, pinnedSet } = useStickyOffsets(visible, prefs.width, ROW_GUTTER_WIDTH);
+  // On mobile, column pinning (sticky/frozen columns) is disabled so the
+  // table scrolls freely left/right — frozen columns otherwise eat the narrow
+  // viewport and make horizontal scrolling feel stuck. Pinning stays on md+.
+  const isMobile = useIsMobile();
 
   // ── Selection model ──────────────────────────────────────────────────────
   // anchor = cell where mouse-down began (or the only cell after a click)
@@ -272,7 +277,7 @@ export function DataTable<T>({
       onMouseUp={() => { isDraggingRef.current = false; }}
       onMouseLeave={() => { isDraggingRef.current = false; }}
     >
-      <div className="relative flex-1 overflow-auto bg-background">
+      <div className="relative flex-1 overflow-auto bg-background [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]">
         <table
           className="w-full text-[13px] border-separate border-spacing-0"
           style={{ tableLayout: "fixed" }}
@@ -307,11 +312,11 @@ export function DataTable<T>({
             <tr>
               {/* Row gutter corner */}
               <th
-                className="bg-muted border-b border-r border-border h-9 sticky left-0 z-40"
+                className="bg-muted border-b border-r border-border h-9 md:sticky md:left-0 z-40"
                 aria-hidden
               />
               {visible.map((col, idx) => {
-                const isPinned = pinnedSet.has(col.id);
+                const isPinned = !isMobile && pinnedSet.has(col.id);
                 const sortDir =
                   prefs.sort && prefs.sort.column === col.sortKey ? prefs.sort.direction : null;
                 return (
@@ -401,7 +406,7 @@ export function DataTable<T>({
                       data cells bleed through the sticky gutter, which made
                       pill badges like "ACTIVE" appear to float outside the
                       table on horizontal scroll. */}
-                  <td className="border-b border-r border-border bg-muted sticky left-0 z-30" />
+                  <td className="border-b border-r border-border bg-muted md:sticky md:left-0 z-30" />
                   {visible.map((c) => (
                     <td
                       key={c.id}
@@ -448,7 +453,7 @@ export function DataTable<T>({
                         which let those badges peek out on the left. */}
                     <td
                       className={cn(
-                        "border-b border-r border-border text-center text-[10px] tabular-nums text-muted-foreground select-none sticky left-0 z-30",
+                        "border-b border-r border-border text-center text-[10px] tabular-nums text-muted-foreground select-none md:sticky md:left-0 z-30",
                         cellPad,
                         isInRange && "text-primary font-semibold",
                       )}
@@ -462,7 +467,7 @@ export function DataTable<T>({
                       {rIdx + 1}
                     </td>
                     {visible.map((col, cIdx) => {
-                      const isPinned = pinnedSet.has(col.id);
+                      const isPinned = !isMobile && pinnedSet.has(col.id);
                       const isFocus =
                         sel && sel.focus.r === rIdx && sel.focus.c === cIdx;
                       const isInCellRange =
