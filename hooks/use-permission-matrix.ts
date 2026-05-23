@@ -309,10 +309,20 @@ export function usePermissionMatrix(selectedForm: string | null): UsePermissionM
         setChanges(new Map())
 
         toast({ title: "Permissions saved", description: `${changes.size} change(s) applied.` })
-      } catch (err) {
+      } catch (err: any) {
+        // RTK Query rejections are { status, data } objects, NOT Error instances,
+        // so reading err.message alone always fell through to the generic string
+        // and hid the real server reason. Read the API error/details first.
+        const description =
+          err?.data?.error ||
+          err?.data?.details ||
+          err?.data?.message ||
+          err?.error ||
+          (err instanceof Error ? err.message : null) ||
+          "Failed to save permissions"
         toast({
           title: "Save failed",
-          description: err instanceof Error ? err.message : "Failed to save permissions",
+          description,
           variant: "destructive",
         })
       } finally {

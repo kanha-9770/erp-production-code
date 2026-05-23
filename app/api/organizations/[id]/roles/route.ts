@@ -30,9 +30,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json(role, { status: 201 });
   } catch (error: any) {
     console.error("Error creating role:", error);
-    if (error.message?.includes("not found")) {
-      return NextResponse.json({ error: error.message }, { status: 404 });
-    }
-    return NextResponse.json({ error: "Failed to create role" }, { status: 500 });
+    const message: string = error?.message || "Failed to create role";
+    // Map the (now meaningful) error message to an appropriate HTTP status.
+    let status = 500;
+    if (message.includes("already exists")) status = 409; // duplicate name
+    else if (message.includes("not found") || message.includes("no longer exists")) status = 404;
+    else if (message.includes("different organization") || message.includes("Invalid reference")) status = 400;
+    // Return both `error` and `message` so any client shape can read the reason.
+    return NextResponse.json({ error: message, message }, { status });
   }
 }

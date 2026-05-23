@@ -290,6 +290,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const { data: userData, isLoading: userLoading } = useGetUserQuery();
 
   const organizationId = userData?.user?.organization?.id ?? null;
+  const organizationName = userData?.user?.organization?.name ?? "Organization";
 
   // Set organization ID when user data loads
   useEffect(() => {
@@ -342,16 +343,16 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   // Ensure org on first load
   useEffect(() => {
     if (state.organizationId) {
-      ensureOrg({ id: state.organizationId, name: "Default Organization" }).catch(() => {});
+      ensureOrg({ id: state.organizationId, name: organizationName }).catch(() => {});
     }
-  }, [state.organizationId, ensureOrg]);
+  }, [state.organizationId, organizationName, ensureOrg]);
 
   const refreshData = useCallback(async () => {
     if (!state.organizationId) return;
 
     try {
       dispatch({ type: "SET_LOADING", payload: true });
-      await ensureOrg({ id: state.organizationId, name: "Default Organization" }).unwrap();
+      await ensureOrg({ id: state.organizationId, name: organizationName }).unwrap();
       await Promise.all([refetchRoles(), refetchUnits()]);
       dispatch({ type: "SET_ERROR", payload: null });
     } catch {
@@ -364,7 +365,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
-  }, [state.organizationId, ensureOrg, refetchRoles, refetchUnits, toast]);
+  }, [state.organizationId, organizationName, ensureOrg, refetchRoles, refetchUnits, toast]);
 
   return (
     <RoleContext.Provider value={{ state, dispatch, refreshData }}>

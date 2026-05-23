@@ -1,6 +1,38 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import type { Role, RoleFormData } from "@/types/role";
 import { validateSession } from "@/lib/auth"; // If needed for server-side checks
+
+/**
+ * Translate raw Prisma/DB errors into clear, user-facing messages.
+ *
+ * The CRUD helpers below used to swallow every error and rethrow a generic
+ * "Failed to X" string, which meant the UI toast could never explain WHY a
+ * save failed (most commonly a duplicate role name hitting the
+ * `@@unique([name, organizationId])` constraint). This keeps the real reason
+ * intact so it can bubble up to the API route and into the toast.
+ */
+function toFriendlyRoleError(error: unknown, fallback: string): Error {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    // Unique constraint violation — almost always a duplicate role name in the org.
+    if (error.code === "P2002") {
+      return new Error("A role with this name already exists in this organization. Please choose a different name.");
+    }
+    // Foreign-key failure — e.g. a parentId or organizationId that doesn't exist.
+    if (error.code === "P2003") {
+      return new Error("Invalid reference: the selected parent role or organization no longer exists.");
+    }
+    // Record not found for update/delete.
+    if (error.code === "P2025") {
+      return new Error("The role no longer exists. It may have been deleted by someone else.");
+    }
+  }
+  // Already a meaningful Error (e.g. our own validation throws) — preserve it.
+  if (error instanceof Error && error.message) {
+    return error;
+  }
+  return new Error(fallback);
+}
 
 /**
  * Fetch all roles for a specific organization (already good, but added safety logs)
@@ -130,7 +162,7 @@ export async function createRole(
     };
   } catch (error) {
     console.error("[createRole] Error:", error);
-    throw new Error("Failed to create role");
+    throw toFriendlyRoleError(error, "Failed to create role");
   }
 }
 
@@ -182,7 +214,7 @@ export async function updateRole(
     };
   } catch (error) {
     console.error("[updateRole] Error:", error);
-    throw new Error("Failed to update role");
+    throw toFriendlyRoleError(error, "Failed to update role");
   }
 }
 
@@ -224,7 +256,7 @@ export async function deleteRole(roleId: string, currentOrganizationId?: string)
     });
   } catch (error) {
     console.error("[deleteRole] Error:", error);
-    throw new Error("Failed to delete role");
+    throw toFriendlyRoleError(error, "Failed to delete role");
   }
 }
 
