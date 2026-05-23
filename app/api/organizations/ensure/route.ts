@@ -3,21 +3,25 @@ import { prisma } from "@/lib/prisma"
 
 export async function POST(request: NextRequest) {
   try {
-    const { name } = await request.json()
+    const { id, name } = await request.json()
 
-    // Check if organization already exists
-    let organization = await prisma.organization.findFirst({
-      where: { name },
-    })
-
-    if (!organization) {
-      // Create new organization
-      organization = await prisma.organization.create({
-        data: {
-          name,
-        },
-      })
+    // Ensure by ID, not by name. The previous implementation looked up by name
+    // and created a new org when none matched — so a hardcoded "Default
+    // Organization" name spawned a fresh orphan org on every load for any user
+    // whose org had a different name. Upserting by id is idempotent and never
+    // overwrites an existing org's name.
+    if (!id) {
+      return NextResponse.json(
+        { error: "Organization id is required" },
+        { status: 400 },
+      )
     }
+
+    const organization = await prisma.organization.upsert({
+      where: { id },
+      update: {}, // never clobber an existing org's name/details
+      create: { id, name: name || "Organization" },
+    })
 
     return NextResponse.json(organization)
   } catch (error) {

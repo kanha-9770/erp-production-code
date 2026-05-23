@@ -437,9 +437,10 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
+import { useGetUserQuery } from "@/lib/api/auth"
 import type { Role, RoleFormData } from "@/types/role"
 import { flattenRoles } from "@/lib/utils/organization-utils"
 import {
@@ -460,7 +461,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Shield, ShieldAlert } from "lucide-react"
+import { Shield, ShieldAlert, Building2, AlertCircle, CheckCircle2, GitBranch } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useCreateOrgRoleMutation, useUpdateRoleMutation } from "@/lib/api/organization"
 
@@ -488,6 +489,34 @@ export function RoleFormModal() {
   const isOpen = state.selectedRole !== null
   const creating = isCreating(state.selectedRole)
   const isExistingAdmin = !creating && !!(state.selectedRole as any)?.isAdmin
+
+  // Organization context — so the user always knows WHICH org the role lands in.
+  // Role names are unique per organization, so showing this prevents the most
+  // common confusion (especially when two orgs share a display name).
+  const { data: userData } = useGetUserQuery()
+  const organizationName = userData?.user?.organization?.name ?? "your organization"
+
+  // Live, per-organization duplicate-name detection. This is the root cause of
+  // most "role creation isn't working" reports: the DB enforces
+  // unique(name, organizationId), so a repeated name is rejected. We surface
+  // it instantly here, before the user ever clicks Save.
+  const existingNames = useMemo(() => {
+    const map = new Map<string, string>() // lowercased name -> original casing
+    flattenRoles(state.roles)
+      .filter((r) => r.id !== state.selectedRole?.id)
+      .forEach((r) => map.set(r.name.trim().toLowerCase(), r.name))
+    return map
+  }, [state.roles, state.selectedRole])
+
+  const trimmedName = formData.name.trim()
+  const duplicateOf = trimmedName ? existingNames.get(trimmedName.toLowerCase()) : undefined
+  const isDuplicate = !!duplicateOf && !isExistingAdmin
+
+  // Human-readable summary of where this role sits in the hierarchy.
+  const parentName = useMemo(() => {
+    if (!formData.parentId) return null
+    return flattenRoles(state.roles).find((r) => r.id === formData.parentId)?.name ?? null
+  }, [formData.parentId, state.roles])
 
   // Synchronize form when selectedRole changes
   useEffect(() => {
@@ -523,6 +552,15 @@ export function RoleFormModal() {
       return
     }
 
+    if (isDuplicate) {
+      toast({
+        title: "Name already in use",
+        description: `A role named "${duplicateOf}" already exists in ${organizationName}. Please choose a different name.`,
+        variant: "destructive",
+      })
+      return
+    }
+
     setLoading(true)
     try {
       // CRITICAL FIX: Convert empty parentId strings to null 
@@ -540,6 +578,11 @@ export function RoleFormModal() {
       }
 
       if (creating) {
+        // Guard: a missing organization id would POST to /organizations/null/roles
+        // and fail server-side with a confusing 404. Fail fast with a clear message.
+        if (!state.organizationId) {
+          throw new Error("No organization selected. Please reload the page and try again.")
+        }
         // Create new role
         await createOrgRole({
           organizationId: state.organizationId,
@@ -566,7 +609,12 @@ export function RoleFormModal() {
       console.error("Save Role Error:", error)
       toast({
         title: "Action Failed",
-        description: error?.data?.message || error?.message || "Something went wrong while saving.",
+        description:
+          error?.data?.error ||
+          error?.data?.message ||
+          error?.error ||
+          error?.message ||
+          "Something went wrong while saving.",
         variant: "destructive",
       })
     } finally {
@@ -587,27 +635,69 @@ export function RoleFormModal() {
           "p-4 sm:p-6 bg-white border border-slate-200 shadow-2xl rounded-xl sm:rounded-2xl"
         )}
       >
-        <DialogHeader className="mb-6">
-          <DialogTitle className="flex items-center gap-2.5 text-2xl font-bold">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-600 text-white">
+        <DialogHeader className="mb-6 space-y-3">
+          <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/25">
               <Shield className="h-5 w-5" />
             </div>
-            {creating ? "Create New Role" : "Edit Role"}
+            <div className="flex flex-col">
+              <span className="leading-tight">{creating ? "Create New Role" : "Edit Role"}</span>
+              <span className="text-xs font-normal text-slate-400">
+                {creating ? "Add a role to your organization hierarchy" : "Update this role's details"}
+              </span>
+            </div>
           </DialogTitle>
+
+          {/* Organization context — role names are unique per organization */}
+          <div className="flex items-center gap-2 rounded-lg border border-purple-100 bg-purple-50/60 px-3 py-2">
+            <Building2 className="h-4 w-4 flex-shrink-0 text-purple-600" />
+            <span className="text-xs text-slate-600">
+              In <span className="font-semibold text-purple-700">{organizationName}</span>
+            </span>
+          </div>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="role-name" className="text-base font-medium">Role Name *</Label>
-            <Input
-              id="role-name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="e.g. Sales Manager"
-              required
-              disabled={loading || isExistingAdmin}
-              className="h-11 focus:ring-2 focus:ring-purple-500"
-            />
+            <div className="relative">
+              <Input
+                id="role-name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="e.g. Sales Manager"
+                required
+                disabled={loading || isExistingAdmin}
+                aria-invalid={isDuplicate}
+                className={cn(
+                  "h-11 pr-10 transition-colors",
+                  isDuplicate
+                    ? "border-red-400 focus:ring-2 focus:ring-red-400"
+                    : trimmedName && !isExistingAdmin
+                      ? "border-emerald-400 focus:ring-2 focus:ring-emerald-400"
+                      : "focus:ring-2 focus:ring-purple-500"
+                )}
+              />
+              {trimmedName && !isExistingAdmin && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {isDuplicate ? (
+                    <AlertCircle className="h-5 w-5 text-red-500" />
+                  ) : (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                  )}
+                </span>
+              )}
+            </div>
+            {isDuplicate ? (
+              <p className="flex items-center gap-1.5 text-xs font-medium text-red-600">
+                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                A role named &ldquo;{duplicateOf}&rdquo; already exists in {organizationName}. Names must be unique per organization.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">
+                Must be unique within {organizationName}.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -629,6 +719,10 @@ export function RoleFormModal() {
                 ))}
               </SelectContent>
             </Select>
+            <p className="flex items-center gap-1.5 text-xs text-slate-400">
+              <GitBranch className="h-3.5 w-3.5 flex-shrink-0" />
+              {parentName ? <>Reports to <span className="font-medium text-slate-600">{parentName}</span></> : "Top-level role (reports to no one)"}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -703,8 +797,8 @@ export function RoleFormModal() {
             {!isExistingAdmin && (
               <Button
                 type="submit"
-                disabled={loading}
-                className="h-11 px-8 bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-lg"
+                disabled={loading || isDuplicate || !trimmedName}
+                className="h-11 px-8 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold shadow-lg shadow-purple-600/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 {loading ? (
                    <div className="flex items-center gap-2">

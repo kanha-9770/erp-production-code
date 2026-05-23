@@ -170,9 +170,23 @@ async function handleUpdate(request: NextRequest) {
     });
     const validRoleIds = new Set(orgRoles.map((r) => r.id));
 
+    // Batch verify permissions exist. Without this a stale/deleted permissionId
+    // would fail the whole createMany transaction with a cryptic foreign-key
+    // 500 instead of being cleanly skipped with a reason.
+    const uniquePermissionIds = new Set(validItems.map((i) => i.permissionId));
+    const existingPerms = await prisma.permission.findMany({
+      where: { id: { in: Array.from(uniquePermissionIds) } },
+      select: { id: true },
+    });
+    const validPermissionIds = new Set(existingPerms.map((p) => p.id));
+
     const finalItems = validItems.filter((item) => {
       if (!validRoleIds.has(item.roleId)) {
         skipped.push({ reason: "role not in organization", roleId: item.roleId });
+        return false;
+      }
+      if (!validPermissionIds.has(item.permissionId)) {
+        skipped.push({ reason: "permission does not exist", permissionId: item.permissionId });
         return false;
       }
       return true;

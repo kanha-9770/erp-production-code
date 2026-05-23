@@ -442,11 +442,18 @@ export function useFieldPermissionMatrix(
           title: "Field permissions saved",
           description: `${changes.size} change(s) applied.`,
         })
-      } catch (err) {
+      } catch (err: any) {
         console.error("[useFieldPermissionMatrix] Save failed:", err)
         toast({
           title: "Save failed",
-          description: err instanceof Error ? err.message : "Failed to save field permissions",
+          // RTK Query rejections are { status, data } objects, not Error instances.
+          description:
+            err?.data?.error ||
+            err?.data?.details ||
+            err?.data?.message ||
+            err?.error ||
+            (err instanceof Error ? err.message : null) ||
+            "Failed to save field permissions",
           variant: "destructive",
         })
       } finally {

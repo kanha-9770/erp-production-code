@@ -361,11 +361,18 @@ export function useSectionPermissionMatrix(
           title: "Section permissions saved",
           description: `${changes.size} change(s) applied.`,
         })
-      } catch (err) {
+      } catch (err: any) {
         console.error("[useSectionPermissionMatrix] Save failed:", err)
         toast({
           title: "Save failed",
-          description: err instanceof Error ? err.message : "Failed to save section permissions",
+          // RTK Query rejections are { status, data } objects, not Error instances.
+          description:
+            err?.data?.error ||
+            err?.data?.details ||
+            err?.data?.message ||
+            err?.error ||
+            (err instanceof Error ? err.message : null) ||
+            "Failed to save section permissions",
           variant: "destructive",
         })
       } finally {

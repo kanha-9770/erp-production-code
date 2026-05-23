@@ -53,9 +53,14 @@ export async function PUT(
     return NextResponse.json({ success: true, data: updated });
   } catch (error: any) {
     console.error("[PUT /api/roles/[id]] Error:", error);
+    const message: string = error?.message || "Failed to update role";
+    let status = 500;
+    if (message.includes("already exists")) status = 409;
+    else if (message.includes("not found") || message.includes("no longer exists")) status = 404;
+    else if (message.includes("own organization")) status = 403;
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to update role" },
-      { status: 500 }
+      { success: false, error: message, message },
+      { status }
     );
   }
 }
