@@ -23,6 +23,7 @@ import {
   type AdvancedCondition,
 } from "@/lib/api-handlers/employee-filters";
 import bcrypt from "bcryptjs";
+import { canManageUsers } from "@/lib/permissions/has-permission";
 
 // Compensation fields on Employee that affect the payroll engine. When any
 // of these change in an update, the live payroll cache must be invalidated so
@@ -172,6 +173,18 @@ export const UserManagementHandlers = {
   async createUser(request: NextRequest): Promise<NextResponse> {
     return handle(async () => {
       const authUser = await requireAuth(request);
+
+      // Gate creation behind MANAGE_USERS. Previously this handler had no
+      // permission check at all — any authenticated user could create users
+      // by POSTing here directly. Admins and roles granted MANAGE_USERS
+      // (e.g. HR) pass.
+      const canManage = await canManageUsers(authUser.id);
+      if (!canManage)
+        return NextResponse.json(
+          { error: "Unauthorized: requires MANAGE_USERS permission" },
+          { status: 403 }
+        );
+
       const body = await request.json();
       const { email, first_name, last_name, department, password, unitId, roleId } = body;
 
@@ -226,11 +239,11 @@ export const UserManagementHandlers = {
   async getUser(request: NextRequest, userId: string): Promise<NextResponse> {
     return handle(async () => {
       const authUser = await requireAuth(request);
-      const userAdmin = await isAdmin(authUser.id);
+      const canManage = await canManageUsers(authUser.id);
 
-      if (!userAdmin && authUser.id !== userId)
+      if (!canManage && authUser.id !== userId)
         return NextResponse.json(
-          { error: "Unauthorized: Only admins or self can view this user" },
+          { error: "Unauthorized: requires MANAGE_USERS permission or self-access" },
           { status: 403 }
         );
 
@@ -257,10 +270,13 @@ export const UserManagementHandlers = {
   async updateUser(request: NextRequest, userId: string): Promise<NextResponse> {
     return handle(async () => {
       const authUser = await requireAuth(request);
-      const userAdmin = await isAdmin(authUser.id);
+      const canManage = await canManageUsers(authUser.id);
 
-      if (!userAdmin)
-        return NextResponse.json({ error: "Unauthorized: Only admins can update users" }, { status: 403 });
+      if (!canManage)
+        return NextResponse.json(
+          { error: "Unauthorized: requires MANAGE_USERS permission" },
+          { status: 403 }
+        );
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user || user.organizationId !== authUser.organizationId)
@@ -365,10 +381,13 @@ export const UserManagementHandlers = {
   async deleteUser(request: NextRequest, userId: string): Promise<NextResponse> {
     return handle(async () => {
       const authUser = await requireAuth(request);
-      const userAdmin = await isAdmin(authUser.id);
+      const canManage = await canManageUsers(authUser.id);
 
-      if (!userAdmin)
-        return NextResponse.json({ error: "Unauthorized: Only admins can delete users" }, { status: 403 });
+      if (!canManage)
+        return NextResponse.json(
+          { error: "Unauthorized: requires MANAGE_USERS permission" },
+          { status: 403 }
+        );
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user || user.organizationId !== authUser.organizationId)

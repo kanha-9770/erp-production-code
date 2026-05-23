@@ -76,6 +76,21 @@ export const organizationApi = baseApi.injectEndpoints({
       invalidatesTags: ["OrgRoles"],
     }),
 
+    // Insert a new role between an existing parent and one of its children.
+    // Atomic on the server — child + descendants are re-parented in the same
+    // transaction that creates the new role.
+    insertRoleBetween: builder.mutation<
+      { success: boolean; data: Role },
+      { organizationId: string; body: { childRoleId: string; name: string; description?: string; shareDataWithPeers?: boolean; isAdmin?: boolean } }
+    >({
+      query: ({ organizationId, body }) => ({
+        url: `/organizations/${organizationId}/roles/insert-between`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
     // Update role
     updateRole: builder.mutation<{ success: boolean; data: any }, { roleId: string; body: Record<string, any> }>({
       query: ({ roleId, body }) => ({
@@ -131,6 +146,7 @@ export const {
   useUpdateOrgUnitMutation,
   useDeleteOrgUnitMutation,
   useCreateOrgRoleMutation,
+  useInsertRoleBetweenMutation,
   useUpdateRoleMutation,
   useGetOrganizationUnitsQuery,
   useLazyGetOrganizationUnitsQuery,

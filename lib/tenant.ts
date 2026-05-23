@@ -158,10 +158,17 @@ export async function authorizeOrgMember(req: Request, rawOrgId: string): Promis
 }
 
 /**
- * Write access: user must be an Admin within the organization.
+ * Write access: user must be a Super Admin (or legacy Admin) within the organization.
  * Admin is defined as:
  *  - user.organizationId === orgId (bootstrapped primary org), OR
- *  - any UserUnitAssignment in the org where Role.name === "Admin".
+ *  - any UserUnitAssignment in the org where the role has isAdmin=true, OR
+ *  - any UserUnitAssignment in the org where Role.name contains "admin"
+ *    (case-insensitive — matches "Super Admin", "Admin", "Administrator", etc.).
+ *
+ * Why fuzzy: the master role was renamed from "Admin"/"ADMIN" to "Super Admin"
+ * but existing organizations may still hold legacy records. The fuzzy match
+ * keeps both shapes working without a forced migration. The isAdmin flag is
+ * the preferred signal; the name check is the safety net.
  */
 export async function authorizeOrgAdmin(req: Request, rawOrgId: string): Promise<{ userId: string; orgId: string }> {
   const { userId, orgId } = await resolveAuthorizedOrgId(req, rawOrgId)
@@ -175,17 +182,20 @@ export async function authorizeOrgAdmin(req: Request, rawOrgId: string): Promise
     return { userId, orgId }
   }
 
-  // Else must have Admin role within any unit of this org
+  // Else must have an admin-flagged role (or a role named like "*admin*") within any unit of this org
   const adminAssignment = await prisma.userUnitAssignment.findFirst({
     where: {
       userId,
       unit: { organizationId: orgId },
-      role: { name: "Admin" },
+      OR: [
+        { role: { isAdmin: true } },
+        { role: { name: { contains: "admin", mode: "insensitive" } } },
+      ],
     },
     select: { id: true },
   })
   if (!adminAssignment) {
-    throw new HttpError(403, "Forbidden: admin role required in this organization")
+    throw new HttpError(403, "Forbidden: super admin role required in this organization")
   }
 
   return { userId, orgId }

@@ -219,6 +219,117 @@ export async function updateRole(
 }
 
 /**
+ * Insert a new role between an existing parent and one of its children.
+ *
+ * Given a hierarchy   Parent → Child (+ subtree)
+ * this produces       Parent → NewRole → Child (+ subtree)
+ *
+ * Everything happens in a single transaction so the tree is never observed
+ * in a half-mutated state. Levels of the child and every descendant get
+ * bumped by +1 to keep the `level` column in sync with depth-from-root.
+ *
+ * - `childRoleId` must belong to `organizationId`.
+ * - The new role's `parentId` is taken from the child's current parent —
+ *   the caller cannot move the child elsewhere via this endpoint.
+ * - Admin roles cannot be displaced (child cannot be an admin role).
+ */
+export async function insertRoleBetween(params: {
+  organizationId: string;
+  childRoleId: string;
+  newRole: RoleFormData;
+}): Promise<Role> {
+  const { organizationId, childRoleId, newRole } = params;
+
+  try {
+    if (!organizationId) throw new Error("organizationId is required");
+    if (!childRoleId) throw new Error("childRoleId is required");
+    if (!newRole?.name?.trim()) throw new Error("Role name is required");
+
+    return await prisma.$transaction(async (tx) => {
+      // 1. Load the child and verify it belongs to the org.
+      const child = await tx.role.findUnique({
+        where: { id: childRoleId },
+        select: {
+          id: true,
+          organizationId: true,
+          parentId: true,
+          level: true,
+          isAdmin: true,
+        },
+      });
+
+      if (!child) throw new Error("Child role not found");
+      if (child.organizationId !== organizationId) {
+        throw new Error("Child role belongs to a different organization");
+      }
+      if (child.isAdmin) {
+        throw new Error("Cannot insert a role above an admin role");
+      }
+
+      // 2. Create the new role at the child's current position.
+      const created = await tx.role.create({
+        data: {
+          name: newRole.name.trim(),
+          description: newRole.description || "",
+          shareDataWithPeers: !!newRole.shareDataWithPeers,
+          isAdmin: !!newRole.isAdmin,
+          level: child.level,
+          parentId: child.parentId,
+          organizationId,
+        },
+      });
+
+      // 3. Re-parent the child onto the new role. Its level moves down by 1.
+      await tx.role.update({
+        where: { id: child.id },
+        data: {
+          parentId: created.id,
+          level: child.level + 1,
+        },
+      });
+
+      // 4. Cascade level +1 to every descendant of the child. We use a
+      //    recursive CTE so deep trees don't fan out into N queries, and
+      //    we cap depth at 50 as a cycle safety net (real org charts are
+      //    rarely deeper than 10).
+      await tx.$executeRaw`
+        WITH RECURSIVE descendants AS (
+          SELECT id, parent_id, 0 AS depth
+          FROM roles
+          WHERE parent_id = ${child.id}
+            AND organization_id = ${organizationId}
+            AND is_active = true
+          UNION ALL
+          SELECT r.id, r.parent_id, d.depth + 1
+          FROM roles r
+          JOIN descendants d ON r.parent_id = d.id
+          WHERE r.organization_id = ${organizationId}
+            AND r.is_active = true
+            AND d.depth < 50
+        )
+        UPDATE roles
+        SET level = level + 1, updated_at = NOW()
+        WHERE id IN (SELECT id FROM descendants)
+      `;
+
+      return {
+        id: created.id,
+        name: created.name,
+        description: created.description || "",
+        shareDataWithPeers: created.shareDataWithPeers,
+        isAdmin: created.isAdmin,
+        level: created.level,
+        parentId: created.parentId || undefined,
+        children: [],
+      };
+    });
+  } catch (error) {
+    console.error("[insertRoleBetween] Error:", error);
+    throw toFriendlyRoleError(error, "Failed to insert role between");
+  }
+}
+
+/**
  * Delete role — now safely scoped to organization
  */
 export async function deleteRole(roleId: string, currentOrganizationId?: string): Promise<void> {

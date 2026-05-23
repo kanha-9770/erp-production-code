@@ -461,9 +461,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Shield, ShieldAlert, Building2, AlertCircle, CheckCircle2, GitBranch } from "lucide-react"
+import { Shield, ShieldAlert, Building2, AlertCircle, CheckCircle2, GitBranch, ArrowUpFromLine } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useCreateOrgRoleMutation, useUpdateRoleMutation } from "@/lib/api/organization"
+import { useCreateOrgRoleMutation, useInsertRoleBetweenMutation, useUpdateRoleMutation } from "@/lib/api/organization"
 
 const EMPTY_FORM: RoleFormData = { name: "", description: "", shareDataWithPeers: false, isAdmin: false, parentId: "" }
 
@@ -484,11 +484,30 @@ export function RoleFormModal() {
   const [loading, setLoading] = useState(false)
   
   const [createOrgRole] = useCreateOrgRoleMutation()
+  const [insertRoleBetween] = useInsertRoleBetweenMutation()
   const [updateRole] = useUpdateRoleMutation()
 
   const isOpen = state.selectedRole !== null
   const creating = isCreating(state.selectedRole)
   const isExistingAdmin = !creating && !!(state.selectedRole as any)?.isAdmin
+
+  // "Insert between" mode — set by the tree node's "Insert Above" button.
+  // The selected role carries:
+  //   _insertBeforeId   — the existing child that will be pushed down a level
+  //   _insertBeforeName — that child's name (for the banner)
+  // In this mode the parent is fixed (it's whatever the child's parent was)
+  // and the parent-picker is hidden.
+  const insertBeforeId: string | undefined = (state.selectedRole as any)?._insertBeforeId
+  const insertBeforeName: string | undefined = (state.selectedRole as any)?._insertBeforeName
+  const isInsertBetween = creating && !!insertBeforeId
+
+  // Look up the parent name once for the banner.
+  const insertBetweenParentName = useMemo(() => {
+    if (!isInsertBetween) return null
+    const parentId = state.selectedRole?.parentId
+    if (!parentId) return null
+    return flattenRoles(state.roles).find((r) => r.id === parentId)?.name ?? null
+  }, [isInsertBetween, state.selectedRole, state.roles])
 
   // Organization context — so the user always knows WHICH org the role lands in.
   // Role names are unique per organization, so showing this prevents the most
@@ -583,12 +602,32 @@ export function RoleFormModal() {
         if (!state.organizationId) {
           throw new Error("No organization selected. Please reload the page and try again.")
         }
-        // Create new role
-        await createOrgRole({
-          organizationId: state.organizationId,
-          body: payload,
-        }).unwrap()
-        toast({ title: "Success", description: "New role created successfully" })
+
+        if (isInsertBetween && insertBeforeId) {
+          // Atomic "insert between" — server creates the new role and re-parents
+          // the child + descendants inside a single transaction.
+          await insertRoleBetween({
+            organizationId: state.organizationId,
+            body: {
+              childRoleId: insertBeforeId,
+              name: payload.name,
+              description: payload.description,
+              shareDataWithPeers: payload.shareDataWithPeers,
+              isAdmin: payload.isAdmin,
+            },
+          }).unwrap()
+          toast({
+            title: "Role inserted",
+            description: `"${payload.name}" was inserted above "${insertBeforeName ?? "the selected role"}".`,
+          })
+        } else {
+          // Create new role at the chosen position in the tree.
+          await createOrgRole({
+            organizationId: state.organizationId,
+            body: payload,
+          }).unwrap()
+          toast({ title: "Success", description: "New role created successfully" })
+        }
       } else {
         // Update existing role
         const roleId = state.selectedRole?.id;
@@ -637,16 +676,53 @@ export function RoleFormModal() {
       >
         <DialogHeader className="mb-6 space-y-3">
           <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/25">
-              <Shield className="h-5 w-5" />
+            <div className={cn(
+              "flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg",
+              isInsertBetween
+                ? "bg-gradient-to-br from-indigo-600 to-blue-600 shadow-indigo-600/25"
+                : "bg-gradient-to-br from-purple-600 to-indigo-600 shadow-purple-600/25"
+            )}>
+              {isInsertBetween ? <ArrowUpFromLine className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
             </div>
             <div className="flex flex-col">
-              <span className="leading-tight">{creating ? "Create New Role" : "Edit Role"}</span>
+              <span className="leading-tight">
+                {isInsertBetween ? "Insert Role Between" : creating ? "Create New Role" : "Edit Role"}
+              </span>
               <span className="text-xs font-normal text-slate-400">
-                {creating ? "Add a role to your organization hierarchy" : "Update this role's details"}
+                {isInsertBetween
+                  ? "Slot a new role between an existing parent and child"
+                  : creating
+                    ? "Add a role to your organization hierarchy"
+                    : "Update this role's details"}
               </span>
             </div>
           </DialogTitle>
+
+          {/* Insert-between context banner: shows EXACTLY where the new role
+              will land in the tree so the user can verify before submitting. */}
+          {isInsertBetween && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 space-y-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-700">
+                Tree change preview
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 font-medium text-slate-700">
+                  {insertBetweenParentName ?? "Top level"}
+                </span>
+                <ArrowUpFromLine className="h-3.5 w-3.5 text-indigo-500 rotate-90" />
+                <span className="rounded-md bg-indigo-600 px-2.5 py-1 font-semibold text-white shadow-sm">
+                  {formData.name.trim() || "New role"}
+                </span>
+                <ArrowUpFromLine className="h-3.5 w-3.5 text-indigo-500 rotate-90" />
+                <span className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 font-medium text-slate-700">
+                  {insertBeforeName ?? "Selected role"}
+                </span>
+              </div>
+              <p className="text-xs text-indigo-700/80">
+                <span className="font-semibold">&ldquo;{insertBeforeName}&rdquo;</span> and everything beneath it will move down one level.
+              </p>
+            </div>
+          )}
 
           {/* Organization context — role names are unique per organization */}
           <div className="flex items-center gap-2 rounded-lg border border-purple-100 bg-purple-50/60 px-3 py-2">
@@ -700,30 +776,35 @@ export function RoleFormModal() {
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="role-parent" className="text-base font-medium">Reports To</Label>
-            <Select
-              disabled={loading || isExistingAdmin}
-              value={formData.parentId || "none"}
-              onValueChange={(value) => setFormData({ ...formData, parentId: value === "none" ? "" : value })}
-            >
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Select parent role" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[300px]">
-                <SelectItem value="none">— No parent (Top-level) —</SelectItem>
-                {availableParents.map((role) => (
-                  <SelectItem key={role.id} value={role.id}>
-                    {"  ".repeat(role.level)} {role.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="flex items-center gap-1.5 text-xs text-slate-400">
-              <GitBranch className="h-3.5 w-3.5 flex-shrink-0" />
-              {parentName ? <>Reports to <span className="font-medium text-slate-600">{parentName}</span></> : "Top-level role (reports to no one)"}
-            </p>
-          </div>
+          {/* Parent picker hidden when inserting between: the parent is fixed
+              to the existing child's current parent, so letting the user
+              change it here would silently break the "insert between" intent. */}
+          {!isInsertBetween && (
+            <div className="space-y-2">
+              <Label htmlFor="role-parent" className="text-base font-medium">Reports To</Label>
+              <Select
+                disabled={loading || isExistingAdmin}
+                value={formData.parentId || "none"}
+                onValueChange={(value) => setFormData({ ...formData, parentId: value === "none" ? "" : value })}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Select parent role" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="none">— No parent (Top-level) —</SelectItem>
+                  {availableParents.map((role) => (
+                    <SelectItem key={role.id} value={role.id}>
+                      {"  ".repeat(role.level)} {role.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="flex items-center gap-1.5 text-xs text-slate-400">
+                <GitBranch className="h-3.5 w-3.5 flex-shrink-0" />
+                {parentName ? <>Reports to <span className="font-medium text-slate-600">{parentName}</span></> : "Top-level role (reports to no one)"}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="role-description" className="text-base font-medium">Description</Label>
@@ -756,26 +837,30 @@ export function RoleFormModal() {
             </div>
           </div>
 
-          <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
-            <Checkbox
-              id="isAdmin"
-              checked={formData.isAdmin}
-              disabled={loading || isExistingAdmin}
-              onCheckedChange={(checked) => setFormData({ ...formData, isAdmin: !!checked })}
-              className="h-5 w-5 data-[state=checked]:bg-amber-600"
-            />
-            <div className="space-y-1">
-              <Label htmlFor="isAdmin" className="text-sm font-bold text-amber-900 leading-none cursor-pointer">
-                <span className="flex items-center gap-1.5">
-                  <ShieldAlert className="h-4 w-4 text-amber-600" />
-                  Admin Role
-                </span>
-              </Label>
-              <p className="text-xs text-amber-700/90">
-                Grant full administrative privileges. Admin roles cannot be edited or deleted once created.
-              </p>
+          {/* Admin promotion is disallowed when inserting between — a brand-new
+              middle role gaining super-admin powers would be a footgun. */}
+          {!isInsertBetween && (
+            <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
+              <Checkbox
+                id="isAdmin"
+                checked={formData.isAdmin}
+                disabled={loading || isExistingAdmin}
+                onCheckedChange={(checked) => setFormData({ ...formData, isAdmin: !!checked })}
+                className="h-5 w-5 data-[state=checked]:bg-amber-600"
+              />
+              <div className="space-y-1">
+                <Label htmlFor="isAdmin" className="text-sm font-bold text-amber-900 leading-none cursor-pointer">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldAlert className="h-4 w-4 text-amber-600" />
+                    Admin Role
+                  </span>
+                </Label>
+                <p className="text-xs text-amber-700/90">
+                  Grant full administrative privileges. Admin roles cannot be edited or deleted once created.
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           {isExistingAdmin && (
             <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-xs text-red-700 flex items-center gap-2">
@@ -798,17 +883,22 @@ export function RoleFormModal() {
               <Button
                 type="submit"
                 disabled={loading || isDuplicate || !trimmedName}
-                className="h-11 px-8 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold shadow-lg shadow-purple-600/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className={cn(
+                  "h-11 px-8 text-white font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all",
+                  isInsertBetween
+                    ? "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 shadow-indigo-600/25"
+                    : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-purple-600/25"
+                )}
               >
                 {loading ? (
                    <div className="flex items-center gap-2">
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      Saving...
+                      {isInsertBetween ? "Inserting..." : "Saving..."}
                    </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <Shield className="h-4 w-4" />
-                    {creating ? "Create Role" : "Update Role"}
+                    {isInsertBetween ? <ArrowUpFromLine className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                    {isInsertBetween ? "Insert Role" : creating ? "Create Role" : "Update Role"}
                   </div>
                 )}
               </Button>

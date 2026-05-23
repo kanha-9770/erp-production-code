@@ -62,12 +62,15 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Create the ADMIN role for this organization
+      // Create the Super Admin role for this organization — the master role
+      // that controls all access. The isAdmin flag short-circuits permission
+      // checks across the app (see lib/api-helpers.ts and hooks/usePermissions.ts).
       const adminRole = await tx.role.create({
         data: {
-          name: "ADMIN",
-          description: "Administrator with full access to the organization",
+          name: "Super Admin",
+          description: "Super Administrator with full access to the organization",
           organizationId: organization.id,
+          isAdmin: true,
         },
       })
 
@@ -79,13 +82,13 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Assign user to root unit with ADMIN role
+      // Assign user to root unit with Super Admin role
       await tx.userUnitAssignment.create({
         data: {
           userId: userId,
           unitId: rootUnit.id,
           roleId: adminRole.id,
-          notes: "Organization creator and administrator",
+          notes: "Organization creator and super administrator",
         },
       })
 

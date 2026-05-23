@@ -1351,15 +1351,13 @@ export class DatabaseRoles {
   static async seedDefaultRoles(): Promise<void> {
     try {
 
-      // Create default roles (just for designation purposes)
+      // Create default roles. "Super Admin" is the master role that controls
+      // the entire application; all others are designation-only and rely on
+      // explicit permission grants.
       const defaultRoles = [
         {
           name: "Super Admin",
-          description: "Super Administrator designation"
-        },
-        {
-          name: "Admin",
-          description: "Administrator designation"
+          description: "Super Administrator with full access to the organization"
         },
         {
           name: "Manager",

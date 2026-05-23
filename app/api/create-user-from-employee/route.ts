@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { parseEmployeeData } from '@/lib/employeeDataParser';
 import { generateJWT, generateSessionToken } from '@/lib/auth';
 import { validateSession } from '@/lib/auth'; // Add this import if not present
+import { canManageUsers } from '@/lib/permissions/has-permission';
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,6 +23,17 @@ export async function POST(request: NextRequest) {
     console.log("this is the session data", userSession);
     if (!userSession) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    // Permission gate: this endpoint provisions new users with role+unit
+    // assignments, which is the same blast radius as POST /api/users. Gate
+    // it on MANAGE_USERS so only admins or HR-style roles can use it.
+    const canManage = await canManageUsers(userSession.user.id);
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Unauthorized: requires MANAGE_USERS permission" },
+        { status: 403 }
+      );
     }
 
     // Get current user's organization ID

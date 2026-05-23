@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { Shield, Plus, Settings2, Trash2, ChevronDown, ChevronUp } from "lucide-react"
+import { Shield, Plus, Settings2, Trash2, ChevronDown, ChevronUp, ArrowUpFromLine } from "lucide-react"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -91,6 +91,44 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
         )}
 
         <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100 z-30">
+          {/* Insert a NEW role between this role's parent and this role. The
+              current node (and its entire subtree) shifts one level down.
+              Disabled for the root (there is no parent above it) and for
+              admin nodes (admin cannot be displaced). */}
+          {!isRoot && !isAdminRole && (
+            <button
+              onClick={() =>
+                dispatch({
+                  type: "SELECT_ROLE",
+                  payload: {
+                    role: {
+                      id: "new",
+                      // parentId here is the *new* role's parent — i.e. this
+                      // node's current parent. If this node was a top-level
+                      // role with no parentId, the new role becomes the new
+                      // top-level role.
+                      parentId: role.parentId,
+                      name: "",
+                      description: "",
+                      isAdmin: false,
+                      shareDataWithPeers: false,
+                      level: role.level ?? 0,
+                      children: [],
+                      // Marker consumed by the role-form modal to switch into
+                      // "insert between" mode. Carries the id of the child
+                      // that will be pushed down one level.
+                      _insertBeforeId: role.id,
+                      _insertBeforeName: role.name,
+                    } as any,
+                  },
+                })
+              }
+              className="bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700"
+              title={`Insert a role above "${role.name || "this role"}"`}
+            >
+              <ArrowUpFromLine className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             onClick={() =>
               dispatch({

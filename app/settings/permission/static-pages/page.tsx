@@ -41,11 +41,20 @@ import {
   Lock,
   Sparkles,
   Layers,
+  ShieldCheck,
 } from "lucide-react"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { useToast } from "@/hooks/use-toast"
 import { useModules } from "@/hooks/use-modules"
 import { staticPagesByGroup, type StaticPage } from "@/lib/static-pages"
 import type { PermissionModule } from "@/types/permissions"
+import { RoutePermissionMatrix } from "@/components/admin/route-permission-matrix"
 
 const NO_GROUP = "__no_group__" // sentinel: clear group anchor
 const INHERIT = "__inherit__"   // sentinel: clear per-page override
@@ -75,6 +84,11 @@ export default function StaticPagesAnchorPage() {
   const [saving, setSaving] = useState(false)
   const [forbidden, setForbidden] = useState(false)
   const [search, setSearch] = useState("")
+
+  // Page selected for permission editing. The sheet renders the
+  // RoutePermissionMatrix for this page's path — it handles auto-creating
+  // the RoutePermission row on first save and applying role/user grants.
+  const [permPage, setPermPage] = useState<StaticPage | null>(null)
 
   const groups = useMemo(() => staticPagesByGroup(), [])
 
@@ -411,10 +425,11 @@ export default function StaticPagesAnchorPage() {
                   <table className="w-full hidden md:table">
                     <thead className="border-y bg-muted/30 text-xs uppercase text-muted-foreground">
                       <tr>
-                        <th className="text-left p-3 w-[35%]">Page</th>
+                        <th className="text-left p-3 w-[30%]">Page</th>
                         <th className="text-left p-3">Path</th>
-                        <th className="text-left p-3 w-[260px]">Per-page override</th>
-                        <th className="text-left p-3 w-[180px]">Resolved → module</th>
+                        <th className="text-left p-3 w-[240px]">Per-page override</th>
+                        <th className="text-left p-3 w-[160px]">Resolved → module</th>
+                        <th className="text-left p-3 w-[140px]">Permissions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -445,6 +460,7 @@ export default function StaticPagesAnchorPage() {
                             onChange={setPageAnchor}
                             source={source}
                             resolvedName={resolvedName}
+                            onManagePermissions={() => setPermPage(page)}
                           />
                         )
                       })}
@@ -480,6 +496,7 @@ export default function StaticPagesAnchorPage() {
                           onChange={setPageAnchor}
                           source={source}
                           resolvedName={resolvedName}
+                          onManagePermissions={() => setPermPage(page)}
                         />
                       )
                     })}
@@ -490,6 +507,40 @@ export default function StaticPagesAnchorPage() {
           })}
         </div>
       )}
+
+      {/* Permission editor sheet — opened from the "Permissions" action on
+          each row. Reuses RoutePermissionMatrix so role/user grants for
+          static pages behave identically to dynamic routes. Until an admin
+          grants a role here, non-admin roles cannot access the page (admin
+          bypasses all checks). */}
+      <Sheet
+        open={!!permPage}
+        onOpenChange={(open) => {
+          if (!open) setPermPage(null)
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-2xl overflow-y-auto p-0"
+        >
+          <SheetHeader className="p-4 sm:p-6 border-b">
+            <SheetTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              Static Page Permissions
+            </SheetTitle>
+            <SheetDescription className="text-xs sm:text-sm">
+              Grant roles access to{" "}
+              <code className="font-mono text-[11px] bg-muted px-1 py-0.5 rounded">
+                {permPage?.path}
+              </code>
+              . Roles default to denied — admin always has access.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="p-4 sm:p-6">
+            {permPage && <RoutePermissionMatrix path={permPage.path} />}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Mobile sticky action bar — keeps Save/Reset always reachable */}
       <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t bg-background/95 backdrop-blur p-3 flex gap-2 shadow-lg">
@@ -527,6 +578,7 @@ function PageRow({
   onChange,
   source,
   resolvedName,
+  onManagePermissions,
 }: {
   page: StaticPage
   manualValue: string | null
@@ -535,6 +587,7 @@ function PageRow({
   onChange: (path: string, moduleId: string) => void
   source: "manual" | "group" | "auto" | "hidden"
   resolvedName: string | null
+  onManagePermissions: () => void
 }) {
   return (
     <tr className={isDirty ? "bg-amber-50/40 dark:bg-amber-900/10 border-b" : "border-b"}>
@@ -600,6 +653,17 @@ function PageRow({
           </div>
         )}
       </td>
+      <td className="p-3">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs"
+          onClick={onManagePermissions}
+        >
+          <ShieldCheck className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+          Manage
+        </Button>
+      </td>
     </tr>
   )
 }
@@ -643,6 +707,7 @@ function PageCard({
   onChange,
   source,
   resolvedName,
+  onManagePermissions,
 }: {
   page: StaticPage
   manualValue: string | null
@@ -651,6 +716,7 @@ function PageCard({
   onChange: (path: string, moduleId: string) => void
   source: "manual" | "group" | "auto" | "hidden"
   resolvedName: string | null
+  onManagePermissions: () => void
 }) {
   return (
     <li
@@ -734,6 +800,16 @@ function PageCard({
           </span>
         )}
       </div>
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-9 w-full text-xs"
+        onClick={onManagePermissions}
+      >
+        <ShieldCheck className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+        Manage Permissions
+      </Button>
     </li>
   )
 }
