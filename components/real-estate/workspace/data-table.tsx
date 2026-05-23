@@ -75,6 +75,25 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   emptyState?: ReactNode;
   onSortChange?: (column: string | null, direction: "asc" | "desc" | null) => void;
+  /**
+   * When set (> 0), the table paginates client-side: only this many rows
+   * render at a time and a Previous/Next footer appears. Omit to render
+   * every row (the original behaviour the Real Estate pages rely on).
+   */
+  pageSize?: number;
+  /**
+   * Controlled (server-side) pagination. When supplied, the table does NOT
+   * slice `rows` itself — it renders exactly the `rows` given (already the
+   * current page) and drives the footer from these values, calling
+   * `onPageChange` when the user clicks Previous/Next. Use this for true
+   * server-side pagination where each page is a separate fetch.
+   */
+  serverPagination?: {
+    page: number; // 0-based current page
+    pageSize: number;
+    total: number; // total rows across all pages
+    onPageChange: (page: number) => void;
+  };
 }
 
 interface CellRef { r: number; c: number }
@@ -132,19 +151,66 @@ const ROW_GUTTER_WIDTH = 44; // pixels — wide enough for 5-digit row numbers
 export function DataTable<T>({
   tableId,
   columns,
-  rows,
+  rows: allRows,
   rowId,
   isLoading,
   selectedId,
   onRowClick,
   emptyState,
   onSortChange,
+  pageSize,
+  serverPagination,
 }: DataTableProps<T>) {
   const { prefs, isHidden, toggleHidden, setWidth, setSort, setDensity } =
     useTablePrefs(tableId);
 
   const visible = useVisibleColumns(columns, prefs.hidden);
   const { offsets, pinnedSet } = useStickyOffsets(visible, prefs.width, ROW_GUTTER_WIDTH);
+
+  // ── Pagination ────────────────────────────────────────────────────────────
+  // Two modes:
+  //   • Server-side (serverPagination set) — parent owns page/total and `rows`
+  //     is ALREADY the current page; we just render it and wire the footer.
+  //   • Client-side (pageSize set) — we slice `allRows` ourselves.
+  // When neither is set, every row renders (original Real Estate behaviour).
+  const [clientPage, setClientPage] = useState(0);
+  const serverMode = !!serverPagination;
+  const clientPaginate = !serverMode && !!pageSize && pageSize > 0;
+  const paginate = serverMode || clientPaginate;
+
+  const effectivePageSize = serverMode ? serverPagination!.pageSize : pageSize ?? 0;
+  const totalRows = serverMode ? serverPagination!.total : allRows.length;
+  const totalPages =
+    paginate && effectivePageSize > 0
+      ? Math.max(1, Math.ceil(totalRows / effectivePageSize))
+      : 1;
+  const currentPage = serverMode ? serverPagination!.page : clientPage;
+  const safePage = Math.min(currentPage, totalPages - 1);
+
+  // Client mode only: snap back to a valid page when the data shrinks so we
+  // don't strand the user on an empty page. Server mode's page is the
+  // parent's responsibility.
+  useEffect(() => {
+    if (!serverMode && clientPage !== safePage) setClientPage(safePage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safePage, serverMode]);
+
+  const goToPage = useCallback(
+    (p: number) => {
+      const clamped = Math.max(0, Math.min(totalPages - 1, p));
+      if (serverMode) serverPagination!.onPageChange(clamped);
+      else setClientPage(clamped);
+    },
+    [serverMode, serverPagination, totalPages],
+  );
+
+  const rows = useMemo(() => {
+    // Server mode: rows are already the page slice. Client mode: slice here.
+    if (!clientPaginate) return allRows;
+    const start = safePage * (pageSize as number);
+    return allRows.slice(start, start + (pageSize as number));
+  }, [allRows, clientPaginate, safePage, pageSize]);
+  const pageStart = paginate ? safePage * effectivePageSize : 0;
 
   // ── Selection model ──────────────────────────────────────────────────────
   // anchor = cell where mouse-down began (or the only cell after a click)
@@ -459,7 +525,7 @@ export function DataTable<T>({
                         isolation: "isolate",
                       }}
                     >
-                      {rIdx + 1}
+                      {pageStart + rIdx + 1}
                     </td>
                     {visible.map((col, cIdx) => {
                       const isPinned = pinnedSet.has(col.id);
@@ -533,6 +599,41 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination footer — when client- or server-side pagination is on.
+          Stacks vertically + centres on mobile so the controls never spill
+          past the viewport; switches to the spaced-out row on sm+. */}
+      {paginate && !isLoading && totalRows > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 border-t bg-background text-xs shrink-0">
+          <span className="text-muted-foreground tabular-nums order-2 sm:order-1 text-center">
+            Showing {pageStart + 1}–{Math.min(pageStart + effectivePageSize, totalRows)} of{" "}
+            {totalRows.toLocaleString()}
+          </span>
+          <div className="flex items-center justify-center gap-1 order-1 sm:order-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              disabled={safePage <= 0}
+              onClick={() => goToPage(safePage - 1)}
+            >
+              Previous
+            </Button>
+            <span className="px-1.5 tabular-nums whitespace-nowrap">
+              {safePage + 1} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              disabled={safePage >= totalPages - 1}
+              onClick={() => goToPage(safePage + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Status bar — shows the selection summary like Excel does */}
       {sel && (

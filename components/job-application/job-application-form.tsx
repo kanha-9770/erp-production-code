@@ -38,6 +38,10 @@ import type {
   ApplicantSource,
 } from "@/lib/api/job-applications";
 import { useUploadFileMutation } from "@/lib/api/upload";
+import {
+  useParseResumeMutation,
+  type ParsedResume,
+} from "@/lib/api/resume";
 
 const JOB_APPLICATION_BUILDER_FORM_ID = "";
 
@@ -91,6 +95,14 @@ export interface JobApplicationFormValues {
   applicantResumeUrl: string;
   applicantResumeName: string;
 
+  // Data scanned out of the uploaded resume (see /api/parse-resume).
+  resumeData: ParsedResume | null;
+  resumeParsedText: string;
+  resumeSkills: string;
+  resumeTotalExperience: string;
+  resumeEducation: string;
+  resumeSummary: string;
+
   coverLetter: string;
   salaryExpectation: string;
   jobDescription: string;
@@ -113,6 +125,13 @@ const EMPTY: JobApplicationFormValues = {
 
   applicantResumeUrl: "",
   applicantResumeName: "",
+
+  resumeData: null,
+  resumeParsedText: "",
+  resumeSkills: "",
+  resumeTotalExperience: "",
+  resumeEducation: "",
+  resumeSummary: "",
 
   coverLetter: "",
   salaryExpectation: "",
@@ -138,6 +157,13 @@ export function fromApplication(a: JobApplication): JobApplicationFormValues {
     applicantResumeUrl: a.applicantResumeUrl ?? "",
     applicantResumeName: a.applicantResumeName ?? "",
 
+    resumeData: (a.resumeData as ParsedResume | null) ?? null,
+    resumeParsedText: a.resumeParsedText ?? "",
+    resumeSkills: a.resumeSkills ?? "",
+    resumeTotalExperience: a.resumeTotalExperience ?? "",
+    resumeEducation: a.resumeEducation ?? "",
+    resumeSummary: a.resumeSummary ?? "",
+
     coverLetter: a.coverLetter ?? "",
     salaryExpectation: a.salaryExpectation ?? "",
     jobDescription: a.jobDescription ?? "",
@@ -162,6 +188,13 @@ export function toApiPayload(v: JobApplicationFormValues): Record<string, any> {
 
     applicantResumeUrl: v.applicantResumeUrl.trim() || null,
     applicantResumeName: v.applicantResumeName.trim() || null,
+
+    resumeData: v.resumeData,
+    resumeParsedText: v.resumeParsedText.trim() || null,
+    resumeSkills: v.resumeSkills.trim() || null,
+    resumeTotalExperience: v.resumeTotalExperience.trim() || null,
+    resumeEducation: v.resumeEducation.trim() || null,
+    resumeSummary: v.resumeSummary.trim() || null,
 
     coverLetter: v.coverLetter.trim() || null,
     salaryExpectation: v.salaryExpectation.trim() || null,
@@ -195,6 +228,7 @@ export function JobApplicationForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [uploadFile, { isLoading: uploading }] = useUploadFileMutation();
+  const [parseResume, { isLoading: scanning }] = useParseResumeMutation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -238,6 +272,7 @@ export function JobApplicationForm({
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setError(null);
     const fd = new FormData();
     fd.append("file", file);
     try {
@@ -250,6 +285,31 @@ export function JobApplicationForm({
         applicantResumeUrl: res.imageUrl!,
         applicantResumeName: file.name,
       }));
+
+      // Scan the resume into structured data. This is best-effort: a failed
+      // scan (no AI provider, unreadable file, provider error) must not block
+      // saving the application, so we swallow errors and just skip the data.
+      try {
+        const scanFd = new FormData();
+        scanFd.append("file", file);
+        const scan = await parseResume(scanFd).unwrap();
+        setValues((prev) => ({
+          ...prev,
+          resumeData: scan.data,
+          resumeParsedText: scan.text ?? "",
+          resumeSkills: scan.skills ?? "",
+          resumeTotalExperience: scan.totalExperience ?? "",
+          resumeEducation: scan.education ?? "",
+          resumeSummary: scan.summary ?? "",
+          // Auto-fill blank applicant fields from the resume so the recruiter
+          // doesn't retype them. Never overwrite something already entered.
+          applicantName: prev.applicantName || scan.data?.fullName || "",
+          applicantEmail: prev.applicantEmail || scan.data?.email || "",
+          applicantMobile: prev.applicantMobile || scan.data?.phone || "",
+        }));
+      } catch (scanErr) {
+        console.error("[job-application] resume scan failed:", scanErr);
+      }
     } catch (err: any) {
       // RTK Query errors expose the server response on `err.data`; native
       // errors thrown above use `err.message`. Pull from both so the user
@@ -274,6 +334,12 @@ export function JobApplicationForm({
       ...prev,
       applicantResumeUrl: "",
       applicantResumeName: "",
+      resumeData: null,
+      resumeParsedText: "",
+      resumeSkills: "",
+      resumeTotalExperience: "",
+      resumeEducation: "",
+      resumeSummary: "",
     }));
   };
 
@@ -498,6 +564,63 @@ export function JobApplicationForm({
                   </span>
                 </div>
               )}
+
+              {scanning && (
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Scanning resume…
+                </div>
+              )}
+
+              {!scanning &&
+                values.applicantResumeUrl &&
+                (values.resumeSkills ||
+                  values.resumeTotalExperience ||
+                  values.resumeSummary) && (
+                  <div className="rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Scanned from resume
+                    </div>
+                    {values.resumeSummary && (
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        {values.resumeSummary}
+                      </p>
+                    )}
+                    {values.resumeTotalExperience && (
+                      <div className="text-[11px]">
+                        <span className="text-muted-foreground">
+                          Experience:{" "}
+                        </span>
+                        {values.resumeTotalExperience}
+                      </div>
+                    )}
+                    {values.resumeEducation && (
+                      <div className="text-[11px]">
+                        <span className="text-muted-foreground">
+                          Education:{" "}
+                        </span>
+                        {values.resumeEducation}
+                      </div>
+                    )}
+                    {values.resumeSkills && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {values.resumeSkills
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                          .slice(0, 12)
+                          .map((skill) => (
+                            <span
+                              key={skill}
+                              className="rounded bg-background border px-1.5 py-0.5 text-[10px]"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
           </Field>
           <Field label="Salary Expectation">

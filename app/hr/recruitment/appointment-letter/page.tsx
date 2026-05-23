@@ -847,6 +847,7 @@ export default function AppointmentLetterListPage() {
                 columns={columns}
                 rows={items}
                 rowId={(l) => l.id}
+                pageSize={10}
                 isLoading={isLoading}
                 selectedId={selectedId}
                 onRowClick={(l) => setSelectedId(l.id)}

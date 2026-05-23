@@ -354,6 +354,7 @@ export default function InventoryListPage() {
               columns={columns}
               rows={items}
               rowId={(p) => p.id}
+              pageSize={10}
               isLoading={isLoading}
               selectedId={selectedId}
               onRowClick={(p) => setSelectedId(p.id)}

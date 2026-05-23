@@ -445,6 +445,7 @@ export default function AgentsListPage() {
               columns={columns}
               rows={items}
               rowId={(a) => a.id}
+              pageSize={10}
               isLoading={isLoading}
               selectedId={selectedId}
               onRowClick={(a) => setSelectedId(a.id)}

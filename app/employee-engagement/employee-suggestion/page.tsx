@@ -341,6 +341,7 @@ export default function EmployeeSuggestionPage() {
             columns={columns}
             rows={items}
             rowId={(s) => s.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(s) => setSelectedId(s.id)}

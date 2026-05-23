@@ -254,6 +254,7 @@ export default function HierarchyListPage() {
           columns={columns}
           rows={filtered}
           rowId={(n) => n.id}
+          pageSize={10}
           isLoading={treeQ.isLoading}
           selectedId={selectedId}
           onRowClick={(n) => setSelectedId(n.id)}
