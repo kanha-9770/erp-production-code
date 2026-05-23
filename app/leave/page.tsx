@@ -132,6 +132,12 @@ export default function LeavePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
+  // Monthly short-leave allowance pulled from Attendance Configuration. `null`
+  // means we haven't fetched it yet (don't gate); a number is the cap and
+  // gates the Apply form's dropdown / submit when this month's usage hits it.
+  const [monthlyShortLeaveQuota, setMonthlyShortLeaveQuota] = useState<
+    number | null
+  >(null);
 
   // Calendar state — month being viewed + the month's calendar data.
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
@@ -149,10 +155,15 @@ export default function LeavePage() {
     setRefreshing(true);
     try {
       const { from, to } = monthBounds(calendarMonth);
-      const [bRes, rRes, cRes] = await Promise.all([
+      const [bRes, rRes, cRes, aRes] = await Promise.all([
         fetch('/api/leaves/balance', { cache: 'no-store', credentials: 'include' }),
         fetch('/api/leaves?limit=200', { cache: 'no-store', credentials: 'include' }),
         fetch(`/api/leaves/calendar?from=${from}&to=${to}&scope=mine`, {
+          cache: 'no-store',
+          credentials: 'include',
+        }),
+        // Attendance config — used here only for the monthly short-leave cap.
+        fetch('/api/attendance-config', {
           cache: 'no-store',
           credentials: 'include',
         }),
@@ -160,8 +171,15 @@ export default function LeavePage() {
       const bJson = await bRes.json();
       const rJson = await rRes.json();
       const cJson = await cRes.json();
+      const aJson = await aRes.json().catch(() => ({ success: false }));
       if (bJson.success) setBalances(bJson.balances ?? []);
       if (rJson.success) setRequests(rJson.requests ?? []);
+      if (aJson?.success && aJson.config) {
+        const raw = aJson.config.monthlyShortLeaveQuota;
+        setMonthlyShortLeaveQuota(
+          Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : 0,
+        );
+      }
       if (cJson.success) {
         setCalendarData({
           weeklyOffDays: cJson.weeklyOffDays ?? [0],
@@ -199,6 +217,28 @@ export default function LeavePage() {
       ),
     [requests, today],
   );
+
+  // Short-leave occurrences applied this calendar month (PENDING + APPROVED).
+  // Compared against `monthlyShortLeaveQuota` in the Apply sheet to gate the
+  // Short Leave option once the cap is reached. Counted by the leave's
+  // startDate, which mirrors the server-side check.
+  const shortLeaveUsedThisMonth = useMemo(() => {
+    const shortIds = new Set(
+      (balances ?? [])
+        .filter((b) => b.leaveType.category === 'SHORT_LEAVE')
+        .map((b) => b.leaveType.id),
+    );
+    if (shortIds.size === 0) return 0;
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    return (requests ?? []).filter((r) => {
+      if (!shortIds.has(r.leaveTypeId)) return false;
+      if (r.status !== 'PENDING' && r.status !== 'APPROVED') return false;
+      const d = new Date(`${r.startDate}T00:00:00`);
+      return d.getFullYear() === y && d.getMonth() === m;
+    }).length;
+  }, [balances, requests]);
 
   // Used by the Apply form to flag overlap; covers a wide window so picking
   // a date 6 months out still detects an existing leave there.
@@ -388,6 +428,8 @@ export default function LeavePage() {
         holidays={calendarData.holidays}
         weeklyOffDays={calendarData.weeklyOffDays}
         existingLeaves={allMyActiveLeaves}
+        monthlyShortLeaveQuota={monthlyShortLeaveQuota}
+        shortLeaveUsedThisMonth={shortLeaveUsedThisMonth}
         onApplied={() => {
           setApplyOpen(false);
           refresh();
@@ -910,6 +952,8 @@ function ApplyLeaveSheet({
   holidays,
   weeklyOffDays,
   existingLeaves,
+  monthlyShortLeaveQuota,
+  shortLeaveUsedThisMonth,
   onApplied,
 }: {
   open: boolean;
@@ -918,8 +962,19 @@ function ApplyLeaveSheet({
   holidays: CalendarHoliday[];
   weeklyOffDays: number[];
   existingLeaves: CalendarLeave[];
+  /** Cap from Attendance Configuration. null = not loaded yet → don't gate. */
+  monthlyShortLeaveQuota: number | null;
+  /** PENDING + APPROVED short-leave occurrences in the current calendar month. */
+  shortLeaveUsedThisMonth: number;
   onApplied: () => void;
 }) {
+  // Short Leave is blocked once the monthly allowance is hit (or when the
+  // quota is configured as 0). Half-day and Full-day remain available.
+  const shortLeaveBlocked =
+    monthlyShortLeaveQuota != null &&
+    shortLeaveUsedThisMonth >= monthlyShortLeaveQuota;
+  const isTypeDisabled = (b: BalanceRow) =>
+    b.leaveType.category === 'SHORT_LEAVE' && shortLeaveBlocked;
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [leaveTypeId, setLeaveTypeId] = useState('');
@@ -933,16 +988,30 @@ function ApplyLeaveSheet({
   // becomes eligible. Past dates remain disabled regardless.
   const [isEmergency, setIsEmergency] = useState(false);
 
-  // Reset on open so a fresh form appears each time.
+  // Reset on open so a fresh form appears each time. Mirror the dropdown's
+  // filter + disable rules when picking the default so the form never opens
+  // with a hidden (hourly) or disabled (short-leave over quota) type
+  // pre-selected.
   useEffect(() => {
     if (open) {
-      setLeaveTypeId(balances[0]?.leaveType.id ?? '');
+      const firstSelectable = balances.find(
+        (b) =>
+          b.leaveType.category !== 'HOURLY' &&
+          b.leaveType.code !== 'HOURLY_LEAVE' &&
+          !isTypeDisabled(b),
+      );
+      setLeaveTypeId(firstSelectable?.leaveType.id ?? '');
       setRange({ startDate: null, endDate: null });
       setDuration('FULL_DAY');
       setReason('');
       setIsEmergency(false);
     }
-  }, [open, balances]);
+    // Deliberately omit `isTypeDisabled` — it's a closure over props, and
+    // including it would reset the form on every parent re-render. The cap
+    // can only change between Apply-sheet openings anyway (refresh runs on
+    // submit), so re-evaluating on `open` is sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, balances, shortLeaveBlocked]);
 
   // If user picks half-day, lock to single date.
   useEffect(() => {
@@ -1121,19 +1190,56 @@ function ApplyLeaveSheet({
                 <SelectValue placeholder="Select leave type" />
               </SelectTrigger>
               <SelectContent>
-                {balances.map((b) => (
-                  <SelectItem key={b.leaveType.id} value={b.leaveType.id}>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="inline-block h-2 w-2 rounded-full"
-                        style={{ backgroundColor: b.leaveType.color || '#94a3b8' }}
-                      />
-                      {b.leaveType.name}
-                    </span>
-                  </SelectItem>
-                ))}
+                {balances
+                  // Hourly leave is intentionally hidden from this form — the
+                  // option is kept in the data model so existing rows still
+                  // resolve, but new requests can no longer choose it.
+                  .filter(
+                    (b) =>
+                      b.leaveType.category !== 'HOURLY' &&
+                      b.leaveType.code !== 'HOURLY_LEAVE',
+                  )
+                  .map((b) => {
+                    // Short Leave is disabled when this calendar month's usage
+                    // has hit the org's "Short leaves / month" allowance set
+                    // in Attendance Configuration.
+                    const disabled = isTypeDisabled(b);
+                    return (
+                      <SelectItem
+                        key={b.leaveType.id}
+                        value={b.leaveType.id}
+                        disabled={disabled}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full"
+                            style={{
+                              backgroundColor:
+                                b.leaveType.color || '#94a3b8',
+                            }}
+                          />
+                          <span>{b.leaveType.name}</span>
+                          {disabled && (
+                            <span className="text-[10px] text-muted-foreground">
+                              · monthly limit reached
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
               </SelectContent>
             </Select>
+            {shortLeaveBlocked &&
+              balances.some(
+                (b) => b.leaveType.category === 'SHORT_LEAVE',
+              ) && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                  {monthlyShortLeaveQuota === 0
+                    ? 'Short leave is not allowed by your organization. Pick a half-day or full-day leave instead.'
+                    : `You've used all ${monthlyShortLeaveQuota} short leave${monthlyShortLeaveQuota === 1 ? '' : 's'} for this month. Pick a half-day or full-day leave instead.`}
+                </div>
+              )}
             {balance && (
               <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-xs space-y-1.5">
                 <div className="font-medium">
