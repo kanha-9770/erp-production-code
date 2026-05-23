@@ -363,6 +363,7 @@ export default function KraPage() {
             columns={columns}
             rows={filteredItems}
             rowId={(k) => k.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(k) => setSelectedId(k.id)}

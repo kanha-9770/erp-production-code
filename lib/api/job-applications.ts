@@ -1,5 +1,6 @@
 import { baseApi } from "./baseApi";
 import type { EmploymentType } from "./staffing-plans";
+import type { ParsedResume } from "./resume";
 
 export type JobApplicationStatus =
   | "NEW"
@@ -51,6 +52,14 @@ export interface JobApplication {
 
   applicantResumeUrl: string | null;
   applicantResumeName: string | null;
+
+  resumeData: ParsedResume | null;
+  resumeParsedText: string | null;
+  resumeSkills: string | null;
+  resumeTotalExperience: string | null;
+  resumeEducation: string | null;
+  resumeSummary: string | null;
+  resumeParsedAt: string | null;
 
   coverLetter: string | null;
   salaryExpectation: string | null;

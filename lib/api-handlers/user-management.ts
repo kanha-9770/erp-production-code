@@ -17,6 +17,11 @@ import {
 import { moveToTrash } from "@/lib/trash";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
+import {
+  buildEmployeeFilterClauses,
+  buildEmployeeOrderBy,
+  type AdvancedCondition,
+} from "@/lib/api-handlers/employee-filters";
 import bcrypt from "bcryptjs";
 
 // Compensation fields on Employee that affect the payroll engine. When any
@@ -388,6 +393,42 @@ export const UserManagementHandlers = {
     return handle(async () => {
       const authUser = await requireAuth(request);
 
+      // ── Parse pagination + filter + sort params ──────────────────────────
+      // All optional — when absent the endpoint falls back to "return every
+      // row" so older callers keep working. `page` is 0-based.
+      const sp = request.nextUrl.searchParams;
+      const rawPage = parseInt(sp.get("page") ?? "", 10);
+      const rawSize = parseInt(sp.get("pageSize") ?? "", 10);
+      const paginate = Number.isFinite(rawSize) && rawSize > 0;
+      const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
+      const pageSize = paginate ? rawSize : 0;
+
+      let conditions: AdvancedCondition[] = [];
+      const rawConditions = sp.get("conditions");
+      if (rawConditions) {
+        try {
+          const parsed = JSON.parse(rawConditions);
+          if (Array.isArray(parsed)) conditions = parsed;
+        } catch {
+          // Malformed conditions param — ignore rather than 400 so a stale
+          // saved view can't wedge the whole list.
+        }
+      }
+
+      const filterClauses = buildEmployeeFilterClauses({
+        search: sp.get("search") ?? undefined,
+        status: sp.get("status") ?? undefined,
+        gender: sp.get("gender") ?? undefined,
+        department: sp.get("department") ?? undefined,
+        minSalary: sp.get("minSalary") ?? undefined,
+        maxSalary: sp.get("maxSalary") ?? undefined,
+        conditions,
+      });
+      const orderBy = buildEmployeeOrderBy({
+        sortBy: sp.get("sortBy") ?? undefined,
+        sortDir: (sp.get("sortDir") as "asc" | "desc") ?? undefined,
+      });
+
       const userWithRoles = await prisma.user.findUnique({
         where: { id: authUser.id },
         select: { unitAssignments: { include: { role: { select: { name: true, isAdmin: true } } } } },
@@ -444,6 +485,7 @@ export const UserManagementHandlers = {
       };
 
       let employees;
+      let total = 0;
 
       if (adminUser) {
         const adminUserIds = await prisma.$queryRaw<{ id: string }[]>`
@@ -455,14 +497,24 @@ export const UserManagementHandlers = {
           AND r.name ILIKE '%admin%'
         `.then((rows) => rows.map((r) => r.id));
 
+        // Visibility constraints + the page's filter clauses, AND-ed together.
+        const where: any = {
+          AND: [
+            {
+              status: "ACTIVE",
+              userId: adminUserIds.length > 0 ? { notIn: adminUserIds } : undefined,
+              user: { organizationId: authUser.organizationId },
+            },
+            ...filterClauses,
+          ],
+        };
+
+        total = await prisma.employee.count({ where });
         employees = await prisma.employee.findMany({
-          where: {
-            status: "ACTIVE",
-            userId: adminUserIds.length > 0 ? { notIn: adminUserIds } : undefined,
-            user: { organizationId: authUser.organizationId },
-          },
+          where,
           select: employeeSelect,
-          orderBy: { employeeName: "asc" },
+          orderBy,
+          ...(paginate ? { skip: page * pageSize, take: pageSize } : {}),
         });
       } else {
         // Hierarchy-based visibility: a parent role (e.g. HR) sees the
@@ -524,27 +576,43 @@ export const UserManagementHandlers = {
           new Set<string>([authUser.id, ...peerCreators.map((a) => a.userId)]),
         );
 
+        const where: any = {
+          AND: [
+            {
+              status: "ACTIVE",
+              user: { organizationId: authUser.organizationId },
+              // Visible if the employee's linked user is the caller or sits
+              // below them in the role hierarchy, OR the record was created by
+              // the caller or one of their role-peers. The createdById arm
+              // covers the gap where a freshly onboarded employee has no role
+              // yet (so isn't in the hierarchy) but should still be seen by the
+              // HR/manager team that added them.
+              OR: [
+                { userId: { in: visibleUserIds } },
+                { createdById: { in: creatorIds } },
+              ],
+            },
+            ...filterClauses,
+          ],
+        };
+
+        total = await prisma.employee.count({ where });
         employees = await prisma.employee.findMany({
-          where: {
-            status: "ACTIVE",
-            user: { organizationId: authUser.organizationId },
-            // Visible if the employee's linked user is the caller or sits
-            // below them in the role hierarchy, OR the record was created by
-            // the caller or one of their role-peers. The createdById arm
-            // covers the gap where a freshly onboarded employee has no role
-            // yet (so isn't in the hierarchy) but should still be seen by the
-            // HR/manager team that added them.
-            OR: [
-              { userId: { in: visibleUserIds } },
-              { createdById: { in: creatorIds } },
-            ],
-          },
+          where,
           select: employeeSelect,
-          orderBy: { employeeName: "asc" },
+          orderBy,
+          ...(paginate ? { skip: page * pageSize, take: pageSize } : {}),
         });
       }
 
-      return NextResponse.json({ success: true, employees, isAdmin: adminUser });
+      return NextResponse.json({
+        success: true,
+        employees,
+        isAdmin: adminUser,
+        total,
+        page,
+        pageSize,
+      });
     }, "getEmployees");
   },
 

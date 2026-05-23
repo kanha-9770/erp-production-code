@@ -1795,6 +1795,17 @@ model JobApplication {
   applicantResumeUrl  String?            @map("applicant_resume_url")
   applicantResumeName String?            @map("applicant_resume_name")
 
+  // Data scanned out of the uploaded resume. `resumeData` holds the full
+  // structured parse (JSON); the flat columns below are denormalised copies
+  // of the most-used fields so the list table can show/filter them cheaply.
+  resumeParsedText      String?          @map("resume_parsed_text")     // raw extracted text
+  resumeData            Json?            @map("resume_data")            // full structured parse
+  resumeSkills          String?          @map("resume_skills")          // comma-joined skills
+  resumeTotalExperience String?          @map("resume_total_experience")// e.g. "6 years"
+  resumeEducation       String?          @map("resume_education")       // highest qualification
+  resumeSummary         String?          @map("resume_summary")         // 1–2 line summary
+  resumeParsedAt        DateTime?        @map("resume_parsed_at")
+
   coverLetter       String?              @map("cover_letter")
   salaryExpectation String?              @map("salary_expectation")
   jobDescription    String?              @map("job_description")

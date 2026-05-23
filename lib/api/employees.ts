@@ -122,6 +122,27 @@ interface ListResponse {
   success: boolean;
   employees: EmployeeListItem[];
   isAdmin: boolean;
+  /** Total rows matching the filters across ALL pages (server-side paginated). */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Query args for the server-paginated employee list. All optional so the
+ *  endpoint can still be called param-less to fetch everything. */
+export interface EmployeeListArgs {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  gender?: string;
+  department?: string;
+  minSalary?: string;
+  maxSalary?: string;
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  /** Advanced-filter conditions, serialised to JSON in the query string. */
+  conditions?: Array<{ fieldId: string; operator: string; value?: string; value2?: string }>;
 }
 
 interface SingleResponse<T> {
@@ -131,8 +152,26 @@ interface SingleResponse<T> {
 
 export const employeesApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    getEmployeeList: builder.query<ListResponse, void>({
-      query: () => "/employees",
+    getEmployeeList: builder.query<ListResponse, EmployeeListArgs | void>({
+      query: (args) => {
+        const a = (args ?? {}) as EmployeeListArgs;
+        const qs = new URLSearchParams();
+        if (a.page != null) qs.set("page", String(a.page));
+        if (a.pageSize != null) qs.set("pageSize", String(a.pageSize));
+        if (a.search) qs.set("search", a.search);
+        if (a.status) qs.set("status", a.status);
+        if (a.gender) qs.set("gender", a.gender);
+        if (a.department) qs.set("department", a.department);
+        if (a.minSalary) qs.set("minSalary", a.minSalary);
+        if (a.maxSalary) qs.set("maxSalary", a.maxSalary);
+        if (a.sortBy) qs.set("sortBy", a.sortBy);
+        if (a.sortDir) qs.set("sortDir", a.sortDir);
+        if (a.conditions && a.conditions.length) {
+          qs.set("conditions", JSON.stringify(a.conditions));
+        }
+        const q = qs.toString();
+        return q ? `/employees?${q}` : "/employees";
+      },
       providesTags: (result) =>
         result
           ? [

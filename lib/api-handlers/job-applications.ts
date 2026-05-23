@@ -114,6 +114,25 @@ function sanitize(body: Record<string, any>, opts: { partial?: boolean } = {}) {
   strOptional("designation");
   strOptional("applicantResumeUrl");
   strOptional("applicantResumeName");
+
+  // Scanned resume data. Flat text columns go through strOptional; the full
+  // structured parse is stored as JSON. We stamp resumeParsedAt whenever any
+  // parsed data is supplied so the UI can tell scanned rows apart.
+  strOptional("resumeParsedText");
+  strOptional("resumeSkills");
+  strOptional("resumeTotalExperience");
+  strOptional("resumeEducation");
+  strOptional("resumeSummary");
+  if ("resumeData" in body) {
+    const v = body.resumeData;
+    if (v === null || v === undefined || v === "") {
+      data.resumeData = null;
+    } else if (typeof v === "object") {
+      data.resumeData = v;
+      data.resumeParsedAt = new Date();
+    }
+  }
+
   strOptional("coverLetter");
   strOptional("salaryExpectation");
   strOptional("jobDescription");

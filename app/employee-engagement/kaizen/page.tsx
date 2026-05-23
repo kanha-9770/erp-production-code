@@ -469,6 +469,7 @@ export default function KaizenPage() {
             columns={columns}
             rows={items}
             rowId={(k) => k.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(k) => setSelectedId(k.id)}

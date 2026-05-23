@@ -339,6 +339,7 @@ export default function SelfTargetPage() {
             columns={columns}
             rows={items}
             rowId={(t) => t.id}
+            pageSize={10}
             isLoading={loading}
             selectedId={selectedId}
             onRowClick={(t) => setSelectedId(t.id)}

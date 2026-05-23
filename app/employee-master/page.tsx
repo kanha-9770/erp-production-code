@@ -9,7 +9,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useGetEmployeeListQuery,
   useGetEmployeeQuery,
@@ -34,7 +34,7 @@ import {
   DataTable, type ColumnDef,
   FilterChips, ActiveFilterPills,
   ViewsBar, useSavedViews,
-  AdvancedFilter, applyAdvancedFilters,
+  AdvancedFilter,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
@@ -78,11 +78,14 @@ const EMPTY_FILTERS: Filters = {
   search: "", status: "", gender: "", department: "", minSalary: "", maxSalary: "",
 };
 
+const PAGE_SIZE = 10;
+
 export default function EmployeeMasterListPage() {
   const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<{ by: string; dir: "asc" | "desc" } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
@@ -111,9 +114,45 @@ export default function EmployeeMasterListPage() {
     setPage(0);
   };
 
-  const { data, isLoading, isFetching } = useGetEmployeeListQuery();
-  const rawItems = data?.employees ?? [];
-  const total = rawItems.length;
+  // Server-side filtering + pagination — every filter / search / sort / page
+  // is sent to the API which returns only the current page plus the total
+  // count. Conditions are mapped to the {fieldId, operator, value, value2}
+  // wire shape the endpoint understands.
+  const queryArgs = useMemo(
+    () => ({
+      page,
+      pageSize: PAGE_SIZE,
+      search: filters.search || undefined,
+      status: filters.status || undefined,
+      gender: filters.gender || undefined,
+      department: filters.department || undefined,
+      minSalary: filters.minSalary || undefined,
+      maxSalary: filters.maxSalary || undefined,
+      sortBy: sort?.by,
+      sortDir: sort?.dir,
+      conditions: conditions.map((c) => ({
+        fieldId: c.fieldId,
+        operator: c.operator,
+        value: c.value,
+        value2: c.value2,
+      })),
+    }),
+    [page, filters, sort, conditions],
+  );
+
+  const { data, isLoading, isFetching } = useGetEmployeeListQuery(queryArgs);
+  // The server already filtered + paginated, so the rows we got ARE the page.
+  const items = data?.employees ?? [];
+  const total = data?.total ?? 0;
+
+  // If the current page falls past the end of the result set (e.g. the last
+  // row on the last page was deleted, or a filter shrank the total), snap
+  // back to the last valid page so the user doesn't sit on an empty view.
+  useEffect(() => {
+    if (isFetching) return;
+    const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [total, page, isFetching]);
 
   const [createEmployee, { isLoading: creating }] = useCreateEmployeeMutation();
   const [updateEmployee] = useUpdateEmployeeMutation();
@@ -128,11 +167,15 @@ export default function EmployeeMasterListPage() {
     return JSON.stringify(active.filters) !== JSON.stringify(filters);
   }, [filters, views.activeId, views.views]);
 
+  // Departments shown in the quick-filter chips. Derived from the current
+  // page's rows — with server-side pagination we no longer hold every row in
+  // memory. Users who need a department not on the current page can still
+  // type it into search or use the Advanced filter.
   const departments = useMemo(() => {
     const set = new Set<string>();
-    rawItems.forEach(e => { if (e.department) set.add(e.department); });
+    items.forEach(e => { if (e.department) set.add(e.department); });
     return Array.from(set).map(d => ({ value: d, label: d }));
-  }, [rawItems]);
+  }, [items]);
 
   const filterFields: FilterField[] = useMemo(
     () => [
@@ -163,27 +206,6 @@ export default function EmployeeMasterListPage() {
     ],
     [],
   );
-
-  const items = useMemo(() => {
-    let result = rawItems;
-    
-    // Apply basic filters
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      result = result.filter(e => 
-        e.employeeName.toLowerCase().includes(q) || 
-        e.emailAddress1?.toLowerCase().includes(q) ||
-        e.department?.toLowerCase().includes(q)
-      );
-    }
-    if (filters.status) result = result.filter(e => e.status === filters.status);
-    if (filters.gender) result = result.filter(e => e.gender === filters.gender);
-    if (filters.department) result = result.filter(e => e.department === filters.department);
-    if (filters.minSalary) result = result.filter(e => Number(e.totalSalary) >= Number(filters.minSalary));
-    if (filters.maxSalary) result = result.filter(e => Number(e.totalSalary) <= Number(filters.maxSalary));
-
-    return applyAdvancedFilters(result, conditions, filterFields);
-  }, [rawItems, filters, conditions, filterFields]);
 
   const activeFilterPills = useMemo(() => {
     const pills: Array<{ key: string; label: React.ReactNode }> = [];
@@ -841,7 +863,7 @@ export default function EmployeeMasterListPage() {
             <WorkspaceHeader
               icon={<Users className="h-5 w-5" />}
               title="Employee Master"
-              subtitle={`${items.length.toLocaleString()} record${items.length === 1 ? "" : "s"}${isFetching ? " · syncing…" : ""}`}
+              subtitle={`${total.toLocaleString()} record${total === 1 ? "" : "s"}${isFetching ? " · syncing…" : ""}`}
             >
               <div className="relative">
                 <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -856,7 +878,11 @@ export default function EmployeeMasterListPage() {
                   className="pl-8 h-8 w-64 text-sm"
                 />
               </div>
-              <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
+              <AdvancedFilter
+                fields={filterFields}
+                value={conditions}
+                onChange={(c) => { setConditions(c); setPage(0); }}
+              />
               <ManageColumnsButton
                 tableId="employee-master"
                 columns={columns}
@@ -926,6 +952,16 @@ export default function EmployeeMasterListPage() {
                 rows={items}
                 rowId={(e) => e.id}
                 isLoading={isLoading}
+                serverPagination={{
+                  page,
+                  pageSize: PAGE_SIZE,
+                  total,
+                  onPageChange: setPage,
+                }}
+                onSortChange={(column, direction) => {
+                  setSort(column && direction ? { by: column, dir: direction } : null);
+                  setPage(0);
+                }}
                 selectedId={selectedId}
                 onRowClick={(e) => setSelectedId(e.id)}
                 emptyState={
