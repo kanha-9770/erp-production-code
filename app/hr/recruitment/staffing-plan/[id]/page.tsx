@@ -2,7 +2,11 @@
 
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { useGetStaffingPlanQuery } from "@/lib/api/staffing-plans";
+import {
+  useGetStaffingPlanQuery,
+  type StaffingPlanStatus,
+  type EmploymentType,
+} from "@/lib/api/staffing-plans";
 import {
   DetailShell,
   DetailLoading,
@@ -14,7 +18,9 @@ import {
 } from "@/components/workspace/detail-shell";
 import { Briefcase, Calculator, Info, User } from "lucide-react";
 
-const STATUS_LABEL: Record<string, string> = {
+const BACK = "/hr/recruitment/staffing-plan";
+
+const STATUS_LABEL: Record<StaffingPlanStatus, string> = {
   DRAFT: "Draft",
   OPEN: "Open",
   ON_HOLD: "On Hold",
@@ -22,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<StaffingPlanStatus, "default" | "secondary" | "destructive" | "outline"> = {
   DRAFT: "secondary",
   OPEN: "default",
   ON_HOLD: "outline",
@@ -30,16 +36,14 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   CANCELLED: "destructive",
 };
 
-const EMPLOYMENT_TYPE_LABEL: Record<string, string> = {
-  FULL_TIME: "Full Time",
-  PART_TIME: "Part Time",
+const EMPLOYMENT_TYPE_LABEL: Record<EmploymentType, string> = {
+  FULL_TIME: "Full-time",
+  PART_TIME: "Part-time",
   CONTRACT: "Contract",
   INTERN: "Intern",
   TEMPORARY: "Temporary",
   CONSULTANT: "Consultant",
 };
-
-const BACK = "/hr/recruitment/staffing-plan";
 
 export default function StaffingPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -56,7 +60,7 @@ export default function StaffingPlanDetailPage() {
   const creator = p.createdBy
     ? `${p.createdBy.first_name ?? ""} ${p.createdBy.last_name ?? ""}`.trim() ||
       p.createdBy.email
-    : "—";
+    : null;
 
   return (
     <DetailShell
@@ -73,7 +77,7 @@ export default function StaffingPlanDetailPage() {
       subtitle={
         <>
           {p.designation} · {p.department}
-          {p.planCode ? <> · {p.planCode}</> : null}
+          {p.planCode ? <> · <span className="font-mono">{p.planCode}</span></> : null}
         </>
       }
     >
@@ -83,22 +87,43 @@ export default function StaffingPlanDetailPage() {
           <DetailFact label="Plan code" value={p.planCode} mono />
           <DetailFact label="Department" value={p.department} />
           <DetailFact label="Designation" value={p.designation} />
-          <DetailFact label="Employment type" value={EMPLOYMENT_TYPE_LABEL[p.employmentType] ?? p.employmentType} />
+          <DetailFact
+            label="Employment type"
+            value={EMPLOYMENT_TYPE_LABEL[p.employmentType] ?? p.employmentType}
+          />
           <DetailFact label="Vacancies" value={p.vacancies} />
         </DetailSection>
 
         <DetailSection title="Cost" icon={<Calculator className="h-3.5 w-3.5" />}>
-          <DetailFact label="Estimated cost per person" value={fmtMoney(p.estimatedCostPerPerson)} mono />
-          <DetailFact label="Total estimated cost" value={fmtMoney(p.totalEstimatedCost)} mono />
+          <DetailFact
+            label="Estimated cost per person"
+            value={fmtMoney(p.estimatedCostPerPerson)}
+            mono
+          />
+          <DetailFact
+            label="Total estimated cost"
+            value={fmtMoney(p.totalEstimatedCost)}
+            mono
+          />
+          <DetailFact label="Vacancies" value={p.vacancies} />
+          <DetailFact label="Status" value={STATUS_LABEL[p.status]} />
         </DetailSection>
 
-        <DetailSection title="Notes" icon={<Info className="h-3.5 w-3.5" />} className="lg:col-span-2">
+        <DetailSection
+          title="Notes"
+          icon={<Info className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
           <DetailFact label="Notes" value={p.notes} wide />
         </DetailSection>
 
-        <DetailSection title="Audit" icon={<User className="h-3.5 w-3.5" />} className="lg:col-span-2">
-          <DetailFact label="Created by" value={creator} />
+        <DetailSection
+          title="Audit"
+          icon={<User className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
           <DetailFact label="Plan ID" value={p.id} mono />
+          <DetailFact label="Created by" value={creator} />
           <DetailFact label="Created" value={fmtDate(p.createdAt)} />
           <DetailFact label="Updated" value={fmtDate(p.updatedAt)} />
         </DetailSection>

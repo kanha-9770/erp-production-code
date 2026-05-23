@@ -11,7 +11,17 @@ import {
   DetailFact,
   fmtDate,
 } from "@/components/workspace/detail-shell";
-import { TrendingUp, User, Info, Lightbulb, ThumbsUp } from "lucide-react";
+import {
+  TrendingUp,
+  User,
+  Info,
+  Lightbulb,
+  Layout,
+  ThumbsUp,
+  Zap,
+  FileText,
+  Paperclip,
+} from "lucide-react";
 import {
   BENEFIT_OPTIONS,
   STANDARD_UPDATED_OPTIONS,
@@ -36,7 +46,15 @@ interface Kaizen {
   beforeMedia?: string | null;
   afterMedia?: string | null;
   referenceImage?: string | null;
+  userId?: string;
 }
+
+const isImg = (s: string | null | undefined): s is string =>
+  !!s &&
+  (s.startsWith("data:image/") ||
+    s.startsWith("http://") ||
+    s.startsWith("https://") ||
+    s.startsWith("/"));
 
 export default function KaizenDetailPage() {
   const params = useParams<{ id: string }>();
@@ -78,6 +96,7 @@ export default function KaizenDetailPage() {
 
   const beforeMedia = kaizen.beforeMedia ?? kaizen.referenceImage ?? null;
   const afterMedia = kaizen.afterMedia ?? null;
+  const hasAnyMedia = !!(beforeMedia || afterMedia);
 
   return (
     <DetailShell
@@ -107,69 +126,124 @@ export default function KaizenDetailPage() {
 
         <DetailSection title="Submitter" icon={<User className="h-3.5 w-3.5" />}>
           <DetailFact label="Employee ID" value={kaizen.employeeId} mono />
-          <DetailFact label="Record ID" value={kaizen.id} mono />
+          <DetailFact label="User ID" value={kaizen.userId} mono />
         </DetailSection>
 
         <DetailSection
-          title="Problem & Analysis"
-          icon={<Lightbulb className="h-3.5 w-3.5" />}
+          title="Description"
+          icon={<Info className="h-3.5 w-3.5" />}
           className="lg:col-span-2"
         >
           <DetailFact label="Description" value={kaizen.description} wide />
+        </DetailSection>
+
+        <DetailSection
+          title="Current State"
+          icon={<Layout className="h-3.5 w-3.5" />}
+          className="border-l-4 border-l-amber-500"
+        >
           <DetailFact label="Current state" value={kaizen.currentState} wide />
+        </DetailSection>
+
+        <DetailSection
+          title="Proposed State"
+          icon={<Lightbulb className="h-3.5 w-3.5" />}
+          className="border-l-4 border-l-blue-500"
+        >
           <DetailFact label="Proposed state" value={kaizen.proposedState} wide />
         </DetailSection>
 
-        {(beforeMedia || afterMedia) ? (
+        {hasAnyMedia ? (
           <DetailSection
-            title="Before / After"
-            icon={<Info className="h-3.5 w-3.5" />}
+            title="Submitted Media"
+            icon={<Paperclip className="h-3.5 w-3.5" />}
             className="lg:col-span-2"
           >
-            {beforeMedia ? (
-              <div className="sm:col-span-1">
-                <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                  Before
+            <div className="sm:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                { label: "Before", value: beforeMedia },
+                { label: "After", value: afterMedia },
+              ].map((m) => (
+                <div key={m.label} className="rounded-md border bg-muted/30 p-2 space-y-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {m.label}
+                  </div>
+                  {!m.value ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground italic px-1 py-3">
+                      <Paperclip className="h-3.5 w-3.5" /> Not provided
+                    </div>
+                  ) : isImg(m.value) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.value}
+                      alt={`${m.label} for ${kaizen.title}`}
+                      className="max-h-[320px] w-full rounded border bg-white object-contain"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Paperclip className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="font-mono text-xs truncate" title={m.value}>
+                        {m.value}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={beforeMedia}
-                  alt="Before"
-                  className="rounded-md border w-full max-h-72 object-cover"
-                />
-              </div>
-            ) : null}
-            {afterMedia ? (
-              <div className="sm:col-span-1">
-                <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                  After
-                </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={afterMedia}
-                  alt="After"
-                  className="rounded-md border w-full max-h-72 object-cover"
-                />
-              </div>
-            ) : null}
+              ))}
+            </div>
           </DetailSection>
         ) : null}
 
         <DetailSection
-          title="Benefits & Standards"
-          icon={<Info className="h-3.5 w-3.5" />}
+          title="Benefits"
+          icon={<Zap className="h-3.5 w-3.5" />}
+          className="lg:col-span-2 border-l-4 border-l-emerald-500"
+        >
+          <div className="sm:col-span-2 space-y-2">
+            {benefitLabels.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {benefitLabels.map((b) => (
+                  <Badge key={b} variant="outline" className="text-[10px]">
+                    {b}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+            {decoded.freeText ? (
+              <p className="text-sm whitespace-pre-wrap">{decoded.freeText}</p>
+            ) : null}
+            {benefitLabels.length === 0 && !decoded.freeText ? (
+              <p className="text-sm text-muted-foreground italic">No benefits recorded.</p>
+            ) : null}
+          </div>
+        </DetailSection>
+
+        {standardLabels.length > 0 ? (
+          <DetailSection
+            title="Standards Updated"
+            icon={<FileText className="h-3.5 w-3.5" />}
+            className="lg:col-span-2"
+          >
+            <div className="sm:col-span-2">
+              <div className="flex flex-wrap gap-1.5">
+                {standardLabels.map((s) => (
+                  <Badge key={s} variant="secondary" className="text-[10px]">
+                    {s}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </DetailSection>
+        ) : null}
+
+        <DetailSection
+          title="Record"
+          icon={<FileText className="h-3.5 w-3.5" />}
           className="lg:col-span-2"
         >
-          <DetailFact
-            label="Benefits"
-            value={benefitLabels.length ? benefitLabels.join(", ") : null}
-            wide
-          />
-          <DetailFact
-            label="Standards updated"
-            value={standardLabels.length ? standardLabels.join(", ") : null}
-            wide
-          />
+          <DetailFact label="Kaizen ID" value={kaizen.id} mono />
+          <DetailFact label="Submission date" value={fmtDate(kaizen.submissionDate)} />
+          <DetailFact label="Has voted" value={kaizen.hasVoted ? "Yes" : "No"} />
+          <DetailFact label="Total votes" value={kaizen.votes} />
         </DetailSection>
       </div>
     </DetailShell>

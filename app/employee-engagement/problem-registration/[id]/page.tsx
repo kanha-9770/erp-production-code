@@ -11,7 +11,7 @@ import {
   DetailFact,
   fmtDate,
 } from "@/components/workspace/detail-shell";
-import { AlertTriangle, User, Info, Tag } from "lucide-react";
+import { AlertTriangle, User, Info, Tag, Calendar, ShieldAlert } from "lucide-react";
 
 const BACK = "/employee-engagement/problem-registration";
 
@@ -28,13 +28,6 @@ interface ProblemRegistration {
   employeeId: string;
 }
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  open: "default",
-  "in-review": "secondary",
-  resolved: "default",
-  closed: "outline",
-};
-
 const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   "in-review": "In Review",
@@ -42,11 +35,11 @@ const STATUS_LABEL: Record<string, string> = {
   closed: "Closed",
 };
 
-const SEVERITY_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  low: "outline",
-  medium: "secondary",
-  high: "default",
-  critical: "destructive",
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  open: "default",
+  "in-review": "secondary",
+  resolved: "default",
+  closed: "outline",
 };
 
 const SEVERITY_LABEL: Record<string, string> = {
@@ -54,6 +47,13 @@ const SEVERITY_LABEL: Record<string, string> = {
   medium: "Medium Impact",
   high: "High Impact",
   critical: "Critical",
+};
+
+const SEVERITY_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  low: "outline",
+  medium: "secondary",
+  high: "default",
+  critical: "destructive",
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -112,19 +112,22 @@ export default function ProblemRegistrationDetailPage() {
         </span>
       }
       subtitle={
-        <>
-          <Tag className="h-3 w-3 inline mr-1" />
+        <span className="inline-flex items-center gap-1.5">
+          <Tag className="h-3 w-3" />
           {CATEGORY_LABEL[problem.category] ?? problem.category} · {fmtDate(problem.registrationDate)}
-        </>
+        </span>
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <DetailSection title="Problem" icon={<AlertTriangle className="h-3.5 w-3.5" />}>
           <DetailFact label="Title" value={problem.title} />
           <DetailFact label="Severity" value={SEVERITY_LABEL[problem.severity]} />
-          <DetailFact label="Category" value={CATEGORY_LABEL[problem.category] ?? problem.category} />
+          <DetailFact
+            label="Category"
+            value={CATEGORY_LABEL[problem.category] ?? problem.category}
+          />
           <DetailFact label="Status" value={STATUS_LABEL[problem.status]} />
-          <DetailFact label="Registered" value={fmtDate(problem.registrationDate)} />
+          <DetailFact label="Registered on" value={fmtDate(problem.registrationDate)} />
         </DetailSection>
 
         <DetailSection title="Submitter" icon={<User className="h-3.5 w-3.5" />}>
@@ -138,8 +141,25 @@ export default function ProblemRegistrationDetailPage() {
           className="lg:col-span-2"
         >
           <DetailFact label="Description" value={problem.description} wide />
-          <DetailFact label="Proposed solution" value={problem.proposedSolution} wide />
-          <DetailFact label="Record ID" value={problem.id} mono />
+        </DetailSection>
+
+        {problem.proposedSolution ? (
+          <DetailSection
+            title="Proposed Solution"
+            icon={<ShieldAlert className="h-3.5 w-3.5" />}
+            className="lg:col-span-2 border-l-4 border-l-emerald-500"
+          >
+            <DetailFact label="Proposed solution" value={problem.proposedSolution} wide />
+          </DetailSection>
+        ) : null}
+
+        <DetailSection
+          title="Record"
+          icon={<Calendar className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
+          <DetailFact label="Problem ID" value={problem.id} mono />
+          <DetailFact label="Registered on" value={fmtDate(problem.registrationDate)} />
         </DetailSection>
       </div>
     </DetailShell>

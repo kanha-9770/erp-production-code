@@ -11,7 +11,7 @@ import {
   DetailFact,
   fmtDate,
 } from "@/components/workspace/detail-shell";
-import { MessageSquare, User, Info, Tag } from "lucide-react";
+import { MessageSquare, User, Info, Tag, Calendar, Paperclip } from "lucide-react";
 
 const BACK = "/employee-engagement/employee-suggestion";
 
@@ -23,17 +23,10 @@ interface EmployeeSuggestion {
   status: "submitted" | "under-review" | "accepted" | "rejected" | "implemented";
   submissionDate: string;
   feedback?: string;
+  referenceImage?: string;
   userId: string;
   employeeId: string;
 }
-
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  submitted: "default",
-  "under-review": "secondary",
-  accepted: "default",
-  implemented: "default",
-  rejected: "destructive",
-};
 
 const STATUS_LABEL: Record<string, string> = {
   submitted: "Submitted",
@@ -41,6 +34,14 @@ const STATUS_LABEL: Record<string, string> = {
   accepted: "Accepted",
   implemented: "Implemented",
   rejected: "Rejected",
+};
+
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  submitted: "default",
+  "under-review": "secondary",
+  accepted: "default",
+  implemented: "default",
+  rejected: "destructive",
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -99,13 +100,21 @@ export default function EmployeeSuggestionDetailPage() {
           </Badge>
         </span>
       }
-      subtitle={<>Submitted: {fmtDate(suggestion.submissionDate)}</>}
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          <Calendar className="h-3 w-3" />
+          Submitted: {fmtDate(suggestion.submissionDate)}
+        </span>
+      }
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <DetailSection title="Suggestion" icon={<MessageSquare className="h-3.5 w-3.5" />}>
           <DetailFact label="Title" value={suggestion.title} />
           <DetailFact label="Status" value={STATUS_LABEL[suggestion.status]} />
-          <DetailFact label="Category" value={CATEGORY_LABEL[suggestion.category] ?? suggestion.category} />
+          <DetailFact
+            label="Category"
+            value={CATEGORY_LABEL[suggestion.category] ?? suggestion.category}
+          />
           <DetailFact label="Submitted" value={fmtDate(suggestion.submissionDate)} />
         </DetailSection>
 
@@ -120,10 +129,35 @@ export default function EmployeeSuggestionDetailPage() {
           className="lg:col-span-2"
         >
           <DetailFact label="Suggestion" value={suggestion.suggestion} wide />
-          {suggestion.feedback ? (
+        </DetailSection>
+
+        {suggestion.referenceImage ? (
+          <DetailSection
+            title="Reference Media"
+            icon={<Paperclip className="h-3.5 w-3.5" />}
+            className="lg:col-span-2 border-l-4 border-l-purple-500"
+          >
+            <DetailFact label="Reference" value={suggestion.referenceImage} wide mono />
+          </DetailSection>
+        ) : null}
+
+        {suggestion.feedback ? (
+          <DetailSection
+            title="Feedback"
+            icon={<MessageSquare className="h-3.5 w-3.5" />}
+            className="lg:col-span-2 border-l-4 border-l-blue-500"
+          >
             <DetailFact label="Feedback" value={suggestion.feedback} wide />
-          ) : null}
-          <DetailFact label="Record ID" value={suggestion.id} mono />
+          </DetailSection>
+        ) : null}
+
+        <DetailSection
+          title="Record"
+          icon={<Calendar className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
+          <DetailFact label="Suggestion ID" value={suggestion.id} mono />
+          <DetailFact label="Submitted on" value={fmtDate(suggestion.submissionDate)} />
         </DetailSection>
       </div>
     </DetailShell>

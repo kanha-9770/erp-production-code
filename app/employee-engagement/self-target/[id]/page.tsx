@@ -11,7 +11,7 @@ import {
   DetailFact,
   fmtDate,
 } from "@/components/workspace/detail-shell";
-import { Target, User, Info, Zap } from "lucide-react";
+import { Target, User, Info, Zap, Calendar, CheckCircle2 } from "lucide-react";
 
 const BACK = "/employee-engagement/self-target";
 
@@ -27,16 +27,16 @@ interface SelfTarget {
   employeeId: string;
 }
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  "not-started": "secondary",
-  "in-progress": "default",
-  completed: "default",
-};
-
 const STATUS_LABEL: Record<string, string> = {
   "not-started": "Not Started",
   "in-progress": "In Progress",
   completed: "Completed",
+};
+
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  "not-started": "secondary",
+  "in-progress": "default",
+  completed: "default",
 };
 
 export default function SelfTargetDetailPage() {
@@ -84,7 +84,12 @@ export default function SelfTargetDetailPage() {
           </Badge>
         </span>
       }
-      subtitle={<>Target date: {fmtDate(target.targetDate)}</>}
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          <Calendar className="h-3 w-3" />
+          Target date: {fmtDate(target.targetDate)}
+        </span>
+      }
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <DetailSection title="Target" icon={<Target className="h-3.5 w-3.5" />}>
@@ -101,11 +106,30 @@ export default function SelfTargetDetailPage() {
         </DetailSection>
 
         <DetailSection
+          title="Progress"
+          icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
+          <div className="sm:col-span-2">
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+              Live progress
+            </div>
+            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-600 rounded-full transition-all"
+                style={{ width: `${Math.max(0, Math.min(100, target.progress))}%` }}
+              />
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">{target.progress}% complete</div>
+          </div>
+        </DetailSection>
+
+        <DetailSection
           title="Description"
           icon={<Info className="h-3.5 w-3.5" />}
           className="lg:col-span-2"
         >
-          <DetailFact label="Description" value={target.description} wide />
+          <DetailFact label="Target details" value={target.description} wide />
           <DetailFact label="Record ID" value={target.id} mono />
         </DetailSection>
       </div>

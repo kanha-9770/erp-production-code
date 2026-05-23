@@ -11,7 +11,7 @@ import {
   DetailFact,
   fmtDate,
 } from "@/components/workspace/detail-shell";
-import { Lightbulb, User, Info, Tag } from "lucide-react";
+import { Lightbulb, User, Info, Tag, Calendar, CheckCircle2 } from "lucide-react";
 
 const BACK = "/employee-engagement/self-initiative";
 
@@ -28,18 +28,18 @@ interface SelfInitiative {
   employeeId: string;
 }
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  planning: "secondary",
-  "in-progress": "default",
-  completed: "default",
-  "on-hold": "outline",
-};
-
 const STATUS_LABEL: Record<string, string> = {
   planning: "Planning",
   "in-progress": "In Progress",
   completed: "Completed",
   "on-hold": "On Hold",
+};
+
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  planning: "secondary",
+  "in-progress": "default",
+  completed: "default",
+  "on-hold": "outline",
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -97,16 +97,23 @@ export default function SelfInitiativeDetailPage() {
         </span>
       }
       subtitle={
-        <>
+        <span className="inline-flex items-center gap-1.5">
+          <Calendar className="h-3 w-3" />
           {fmtDate(initiative.startDate)} → {fmtDate(initiative.endDate)}
-        </>
+        </span>
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <DetailSection title="Initiative" icon={<Lightbulb className="h-3.5 w-3.5" />}>
           <DetailFact label="Title" value={initiative.title} />
-          <DetailFact label="Status" value={STATUS_LABEL[initiative.status] ?? initiative.status} />
-          <DetailFact label="Category" value={CATEGORY_LABEL[initiative.category] ?? initiative.category} />
+          <DetailFact
+            label="Status"
+            value={STATUS_LABEL[initiative.status] ?? initiative.status}
+          />
+          <DetailFact
+            label="Category"
+            value={CATEGORY_LABEL[initiative.category] ?? initiative.category}
+          />
           <DetailFact label="Start date" value={fmtDate(initiative.startDate)} />
           <DetailFact label="End date" value={fmtDate(initiative.endDate)} />
         </DetailSection>
@@ -123,7 +130,15 @@ export default function SelfInitiativeDetailPage() {
           className="lg:col-span-2"
         >
           <DetailFact label="Description" value={initiative.description} wide />
-          <DetailFact label="Record ID" value={initiative.id} mono />
+        </DetailSection>
+
+        <DetailSection
+          title="Record"
+          icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
+          <DetailFact label="Initiative ID" value={initiative.id} mono />
+          <DetailFact label="Created" value={fmtDate(initiative.createdAt)} />
         </DetailSection>
       </div>
     </DetailShell>

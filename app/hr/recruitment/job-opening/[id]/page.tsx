@@ -1,10 +1,14 @@
 "use client";
 
-import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useGetJobOpeningQuery } from "@/lib/api/job-openings";
+import {
+  useGetJobOpeningQuery,
+  type JobOpeningStatus,
+} from "@/lib/api/job-openings";
+import type { EmploymentType } from "@/lib/api/staffing-plans";
 import {
   DetailShell,
   DetailLoading,
@@ -14,9 +18,19 @@ import {
   fmtDate,
   fmtMoney,
 } from "@/components/workspace/detail-shell";
-import { Briefcase, Calculator, Info, FileText, Globe, ExternalLink } from "lucide-react";
+import {
+  Briefcase,
+  Calculator,
+  Globe,
+  Info,
+  FileText,
+  ExternalLink,
+  User,
+} from "lucide-react";
 
-const STATUS_LABEL: Record<string, string> = {
+const BACK = "/hr/recruitment/job-opening";
+
+const STATUS_LABEL: Record<JobOpeningStatus, string> = {
   DRAFT: "Draft",
   OPEN: "Open",
   ON_HOLD: "On Hold",
@@ -24,7 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   CANCELLED: "Cancelled",
 };
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<JobOpeningStatus, "default" | "secondary" | "destructive" | "outline"> = {
   DRAFT: "secondary",
   OPEN: "default",
   ON_HOLD: "outline",
@@ -32,16 +46,14 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   CANCELLED: "destructive",
 };
 
-const EMPLOYMENT_TYPE_LABEL: Record<string, string> = {
-  FULL_TIME: "Full Time",
-  PART_TIME: "Part Time",
+const EMPLOYMENT_TYPE_LABEL: Record<EmploymentType, string> = {
+  FULL_TIME: "Full-time",
+  PART_TIME: "Part-time",
   CONTRACT: "Contract",
   INTERN: "Intern",
   TEMPORARY: "Temporary",
   CONSULTANT: "Consultant",
 };
-
-const BACK = "/hr/recruitment/job-opening";
 
 export default function JobOpeningDetailPage() {
   const params = useParams<{ id: string }>();
@@ -58,7 +70,7 @@ export default function JobOpeningDetailPage() {
   const creator = o.createdBy
     ? `${o.createdBy.first_name ?? ""} ${o.createdBy.last_name ?? ""}`.trim() ||
       o.createdBy.email
-    : "—";
+    : null;
 
   return (
     <DetailShell
@@ -76,7 +88,7 @@ export default function JobOpeningDetailPage() {
               className="text-[10px] border-emerald-500/40 text-emerald-700 dark:text-emerald-400"
             >
               <Globe className="h-3 w-3 mr-1" />
-              Public
+              On career page
             </Badge>
           ) : null}
         </span>
@@ -84,7 +96,7 @@ export default function JobOpeningDetailPage() {
       subtitle={
         <>
           {o.designation} · {o.department}
-          {o.jobCode ? <> · {o.jobCode}</> : null}
+          {o.jobCode ? <> · <span className="font-mono">{o.jobCode}</span></> : null}
         </>
       }
     >
@@ -104,11 +116,12 @@ export default function JobOpeningDetailPage() {
         <DetailSection title="Compensation" icon={<Calculator className="h-3.5 w-3.5" />}>
           <DetailFact label="Approx salary" value={fmtMoney(o.salaryApprox)} mono />
           <DetailFact label="Publish on website" value={o.publishOnWebsite ? "Yes" : "No"} />
+          <DetailFact label="Status" value={STATUS_LABEL[o.status]} />
         </DetailSection>
 
         {o.staffingPlan ? (
           <DetailSection
-            title="Linked staffing plan"
+            title="Linked Staffing Plan"
             icon={<FileText className="h-3.5 w-3.5" />}
             className="lg:col-span-2"
           >
@@ -126,16 +139,20 @@ export default function JobOpeningDetailPage() {
         ) : null}
 
         <DetailSection
-          title="Job description"
+          title="Job Description"
           icon={<Info className="h-3.5 w-3.5" />}
           className="lg:col-span-2"
         >
           <DetailFact label="Description" value={o.jobDescription} wide />
         </DetailSection>
 
-        <DetailSection title="Audit" icon={<Info className="h-3.5 w-3.5" />} className="lg:col-span-2">
-          <DetailFact label="Created by" value={creator} />
+        <DetailSection
+          title="Audit"
+          icon={<User className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
           <DetailFact label="Opening ID" value={o.id} mono />
+          <DetailFact label="Created by" value={creator} />
           <DetailFact label="Created" value={fmtDate(o.createdAt)} />
           <DetailFact label="Updated" value={fmtDate(o.updatedAt)} />
         </DetailSection>
