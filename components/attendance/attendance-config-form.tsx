@@ -647,7 +647,7 @@ export function AttendanceConfigForm() {
               <Field
                 label="Short leaves / month"
                 htmlFor="monthlyShortLeaveQuota"
-                hint="Forgiven short-leave occurrences (e.g. coming late by < the window below)."
+                hint="Max short-leave requests each employee can apply per calendar month. Resets on the 1st. 0 disables short leave entirely."
               >
                 <Input
                   id="monthlyShortLeaveQuota"

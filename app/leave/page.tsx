@@ -303,7 +303,13 @@ export default function LeavePage() {
         </Card>
       ) : (
         <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {balances?.map((b) => {
+          {balances
+            ?.filter(
+              (b) =>
+                b.leaveType.category !== 'HOURLY' &&
+                b.leaveType.code !== 'HOURLY_LEAVE',
+            )
+            .map((b) => {
             const total = b.allocated + b.carriedForward;
             const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
             const accent = b.leaveType.color || '#94a3b8';
@@ -988,6 +994,25 @@ function ApplyLeaveSheet({
   // becomes eligible. Past dates remain disabled regardless.
   const [isEmergency, setIsEmergency] = useState(false);
 
+  // The leave-type CATEGORY drives which Duration options are valid.
+  //   FULL_DAY    → all three (Full / ½ AM / ½ PM)
+  //   HALF_DAY    → only ½ AM / ½ PM (a half-day leave is, by definition, half a day)
+  //   SHORT_LEAVE → fixed at HALF_DAY_FIRST so totalDays=0.5 and date picker
+  //                 stays single-day; the selector is hidden entirely
+  // The model field (LeaveRequest.duration) is unchanged; we just constrain
+  // which values the form can produce so the request the user submits matches
+  // the type name (no more "Half Day Leave for 1.0 day").
+  const selectedCategory =
+    balances.find((b) => b.leaveType.id === leaveTypeId)?.leaveType.category ?? null;
+  const isHalfDayType = selectedCategory === 'HALF_DAY';
+  const isShortLeaveType = selectedCategory === 'SHORT_LEAVE';
+  const durationLocked = isShortLeaveType; // selector hidden entirely
+
+  const defaultDurationFor = (category: string | null): Duration => {
+    if (category === 'HALF_DAY' || category === 'SHORT_LEAVE') return 'HALF_DAY_FIRST';
+    return 'FULL_DAY';
+  };
+
   // Reset on open so a fresh form appears each time. Mirror the dropdown's
   // filter + disable rules when picking the default so the form never opens
   // with a hidden (hourly) or disabled (short-leave over quota) type
@@ -1002,7 +1027,7 @@ function ApplyLeaveSheet({
       );
       setLeaveTypeId(firstSelectable?.leaveType.id ?? '');
       setRange({ startDate: null, endDate: null });
-      setDuration('FULL_DAY');
+      setDuration(defaultDurationFor(firstSelectable?.leaveType.category ?? null));
       setReason('');
       setIsEmergency(false);
     }
@@ -1021,6 +1046,21 @@ function ApplyLeaveSheet({
       }
     }
   }, [duration, range.startDate, range.endDate]);
+
+  // Normalise duration when the user switches leave type so the value can
+  // never contradict the type name:
+  //   HALF_DAY  → snap FULL_DAY to HALF_DAY_FIRST
+  //   SHORT     → snap to HALF_DAY_FIRST (selector is hidden anyway)
+  //   FULL_DAY  → leave as-is (all three are valid)
+  useEffect(() => {
+    if (!selectedCategory) return;
+    if (
+      (selectedCategory === 'HALF_DAY' || selectedCategory === 'SHORT_LEAVE') &&
+      duration === 'FULL_DAY'
+    ) {
+      setDuration('HALF_DAY_FIRST');
+    }
+  }, [selectedCategory, duration]);
 
   const balance = balances.find((b) => b.leaveType.id === leaveTypeId);
   const ruleMinNoticeDays = balance?.minNoticeDays ?? 0;
@@ -1299,35 +1339,51 @@ function ApplyLeaveSheet({
             </div>
           )}
 
-          {/* Duration as segmented control on mobile */}
-          <div className="space-y-2">
-            <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5" />
-              Duration
-            </Label>
-            <div className="grid grid-cols-3 gap-1 rounded-md border p-1 bg-muted/20">
-              {(
-                [
-                  ['FULL_DAY', 'Full'],
-                  ['HALF_DAY_FIRST', '½ AM'],
-                  ['HALF_DAY_SECOND', '½ PM'],
-                ] as const
-              ).map(([val, lbl]) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setDuration(val)}
-                  className={`h-9 text-xs font-medium rounded-sm transition-colors ${
-                    duration === val
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {lbl}
-                </button>
-              ))}
+          {/* Duration selector — its options depend on the leave-type category:
+              SHORT_LEAVE hides it entirely (the request is fixed at 0.5 day on
+              a single date); HALF_DAY drops the "Full" choice because a
+              half-day leave is, by definition, half a day; FULL_DAY shows all
+              three so a paid full-day quota can also be drawn down in halves. */}
+          {!durationLocked && (
+            <div className="space-y-2">
+              <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" />
+                Duration
+              </Label>
+              <div
+                className={`grid gap-1 rounded-md border p-1 bg-muted/20 ${
+                  isHalfDayType ? 'grid-cols-2' : 'grid-cols-3'
+                }`}
+              >
+                {(
+                  isHalfDayType
+                    ? ([
+                        ['HALF_DAY_FIRST', '½ AM'],
+                        ['HALF_DAY_SECOND', '½ PM'],
+                      ] as const)
+                    : ([
+                        ['FULL_DAY', 'Full'],
+                        ['HALF_DAY_FIRST', '½ AM'],
+                        ['HALF_DAY_SECOND', '½ PM'],
+                      ] as const)
+                ).map(([val, lbl]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setDuration(val)}
+                    aria-pressed={duration === val}
+                    className={`h-9 text-xs font-semibold rounded-sm transition-colors ${
+                      duration === val
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:bg-background hover:text-foreground'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Dates */}
           <div className="space-y-2">

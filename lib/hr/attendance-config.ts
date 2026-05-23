@@ -81,7 +81,10 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   overtimeAfterHours: 9,
   breakMinutes: 60,
   monthlyHalfDayQuota: 0,
-  monthlyShortLeaveQuota: 0,
+  // One short leave per user per month by default — counter resets at the
+  // start of each calendar month. Admin can raise/lower via Attendance
+  // Configuration → "Short leaves / month".
+  monthlyShortLeaveQuota: 1,
   shortLeaveHours: 2,
   overtimeStartBufferMinutes: 30,
   overtimeMaxHoursPerDay: 4,
