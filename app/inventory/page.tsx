@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Eye,
   Pencil,
   Layers,
 } from "lucide-react";
@@ -410,8 +411,13 @@ function PreviewHeader({ id }: { id: string }) {
       </Badge>
       <span className="font-semibold truncate text-sm">{p.name}</span>
       <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
-        <Link href={`/storefront/products/${p.slug}`} target="_blank" title="Open storefront preview">
+        <Link href={`/inventory/${p.id}`} title="Open full details">
           <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+        <Link href={`/storefront/products/${p.slug}`} target="_blank" title="Open storefront preview">
+          <Eye className="h-3.5 w-3.5" />
         </Link>
       </Button>
       <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0">

@@ -4,11 +4,12 @@
  * Self Initiative — premium workspace layout.
  */
 
+import Link from "next/link";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Lightbulb, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   CheckCircle2, Type, FileText, Tag, UserCircle, Clock, Save,
-  AlertCircle, Info
+  AlertCircle, Info, ExternalLink,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -391,9 +392,14 @@ function PreviewHeader({ id, initiatives }: { id: string, initiatives: SelfIniti
   const i = initiatives.find(x => x.id === id);
   if (!i) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className="text-[10px] uppercase font-bold">{i.status}</Badge>
       <span className="font-semibold text-sm truncate uppercase tracking-tight">{i.title}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/employee-engagement/self-initiative/${i.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

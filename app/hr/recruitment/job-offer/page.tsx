@@ -7,6 +7,7 @@
  * inline-edit status, filter chips, saved views, in-page create Sheet.
  */
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   useGetJobOffersQuery,
@@ -43,6 +44,7 @@ import {
   Calendar,
   Briefcase,
   Layers,
+  ExternalLink,
 } from "lucide-react";
 import {
   WorkspaceShell,
@@ -786,10 +788,15 @@ function PreviewHeader({
         {STATUS_LABEL[o.status]}
       </Badge>
       <span className="font-semibold truncate text-sm">{o.applicantName}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/hr/recruitment/job-offer/${o.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
       <Button
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 ml-auto"
+        className="h-7 w-7 shrink-0"
         title="Edit"
         onClick={onEdit}
       >

@@ -4,11 +4,12 @@
  * Problem Registration — premium workspace layout.
  */
 
+import Link from "next/link";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   AlertCircle, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   CheckCircle2, AlertTriangle, Type, FileText, Tag, UserCircle,
-  Info, Save, Paperclip, Upload
+  Info, Save, Paperclip, Upload, ExternalLink,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -433,9 +434,14 @@ function PreviewHeader({ id, problems }: { id: string, problems: ProblemRegistra
   const p = problems.find(x => x.id === id);
   if (!p) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className="text-[10px] uppercase">{p.status}</Badge>
       <span className="font-semibold text-sm truncate uppercase">{p.title}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/employee-engagement/problem-registration/${p.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }
