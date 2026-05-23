@@ -302,6 +302,52 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
   const lt = await getLeaveType(input.leaveTypeId);
   if (!lt) throw new LeaveError('UNKNOWN_LEAVE_TYPE', 'Leave type not found or inactive.', 404);
 
+  // Monthly short-leave allowance. The "Monthly allowances → Short leaves /
+  // month" knob in Attendance Configuration caps how many short-leave
+  // requests an employee can file in a calendar month. Once the cap is hit
+  // for the start-date's month, the request is rejected and the employee
+  // must fall back to half-day or full-day. Counting PENDING + APPROVED
+  // (rejected/cancelled don't consume the quota).
+  if (lt.type.category === 'SHORT_LEAVE') {
+    const cfg = await getAttendanceConfig(input.organizationId);
+    const quota = Math.max(0, Math.floor(cfg?.monthlyShortLeaveQuota ?? 0));
+    const anchor = new Date(`${input.startDate}T00:00:00`);
+    const monthStart = new Date(
+      anchor.getFullYear(),
+      anchor.getMonth(),
+      1,
+    );
+    const monthEnd = new Date(
+      anchor.getFullYear(),
+      anchor.getMonth() + 1,
+      1,
+    );
+    const ymd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const shortTypeIds = (
+      await (prisma as any).leaveType.findMany({
+        where: { category: 'SHORT_LEAVE', isActive: true },
+        select: { id: true },
+      })
+    ).map((t: { id: string }) => t.id);
+    const usedThisMonth = await (prisma as any).leaveRequest.count({
+      where: {
+        userId: input.userId,
+        leaveTypeId: { in: shortTypeIds },
+        status: { in: ['PENDING', 'APPROVED'] },
+        startDate: { gte: ymd(monthStart), lt: ymd(monthEnd) },
+      },
+    });
+    if (usedThisMonth >= quota) {
+      throw new LeaveError(
+        'SHORT_LEAVE_QUOTA_EXCEEDED',
+        quota === 0
+          ? 'Short leave is not allowed by your organization. Please apply for a half-day or full-day leave instead.'
+          : `Monthly short-leave allowance (${quota}) for ${anchor.toLocaleString('en-IN', { month: 'long' })} is exhausted. Please apply for a half-day or full-day leave instead.`,
+      );
+    }
+  }
+
   // Past-date guard — applies to every leave, including emergency. An
   // emergency means "I need to start today", not "I forgot to file last week".
   const today = todayStr();

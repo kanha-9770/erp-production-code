@@ -5,11 +5,13 @@
  * Tracks employee reviews, ratings, and development feedback.
  */
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   TrendingUp, Plus, Search, Pencil, Trash2, Star, StarHalf,
   CheckCircle2, Clock, Eye, Calendar, User, UserCheck, MessageSquare,
-  Award, TrendingDown, ClipboardCheck, ArrowRight, AlertCircle, Save, Info
+  Award, TrendingDown, ClipboardCheck, ArrowRight, AlertCircle, Save, Info,
+  ExternalLink,
 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -412,9 +414,14 @@ function PreviewHeader({ id, items }: { id: string, items: Appraisal[] }) {
   const a = items.find(x => x.id === id);
   if (!a) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className="text-[10px] uppercase font-bold">{a.id}</Badge>
       <span className="font-bold text-sm truncate uppercase tracking-tight">{a.employee}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/performance/appraisal/${a.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

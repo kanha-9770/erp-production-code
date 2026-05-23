@@ -227,6 +227,7 @@ export function JobApplicationForm({
     initial ? fromApplication(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
+  const [scanWarning, setScanWarning] = useState<string | null>(null);
   const [uploadFile, { isLoading: uploading }] = useUploadFileMutation();
   const [parseResume, { isLoading: scanning }] = useParseResumeMutation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -287,8 +288,10 @@ export function JobApplicationForm({
       }));
 
       // Scan the resume into structured data. This is best-effort: a failed
-      // scan (no AI provider, unreadable file, provider error) must not block
-      // saving the application, so we swallow errors and just skip the data.
+      // scan must not block saving the application, but we DO surface the
+      // failure as a non-blocking warning so the recruiter knows the parsed
+      // columns will be empty and why (no AI provider, unreadable file, …).
+      setScanWarning(null);
       try {
         const scanFd = new FormData();
         scanFd.append("file", file);
@@ -307,8 +310,25 @@ export function JobApplicationForm({
           applicantEmail: prev.applicantEmail || scan.data?.email || "",
           applicantMobile: prev.applicantMobile || scan.data?.phone || "",
         }));
-      } catch (scanErr) {
+        if (!scan.text && !scan.data) {
+          setScanWarning(
+            "Resume uploaded, but nothing could be extracted from it. The file may be a scanned image or an unsupported format.",
+          );
+        } else if (!scan.data) {
+          setScanWarning(
+            "Resume text was extracted, but the AI structured-parse step did not return data — check that an AI provider is configured for this organisation in Admin → AI Config.",
+          );
+        }
+      } catch (scanErr: any) {
+        const detail =
+          scanErr?.data?.error ||
+          scanErr?.error ||
+          scanErr?.message ||
+          "unknown error";
         console.error("[job-application] resume scan failed:", scanErr);
+        setScanWarning(
+          `Resume scan failed: ${detail}. The resume file itself was saved.`,
+        );
       }
     } catch (err: any) {
       // RTK Query errors expose the server response on `err.data`; native
@@ -330,6 +350,7 @@ export function JobApplicationForm({
   };
 
   const clearResume = () => {
+    setScanWarning(null);
     setValues((prev) => ({
       ...prev,
       applicantResumeUrl: "",
@@ -569,6 +590,12 @@ export function JobApplicationForm({
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   Scanning resume…
+                </div>
+              )}
+
+              {!scanning && scanWarning && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                  {scanWarning}
                 </div>
               )}
 

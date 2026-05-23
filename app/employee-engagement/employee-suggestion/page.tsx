@@ -7,6 +7,7 @@
  * advanced filtering, and spreadsheet-style DataTable.
  */
 
+import Link from "next/link";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   MessageSquare, Plus, Search, Mail, Phone, Calendar,
@@ -423,9 +424,14 @@ function PreviewHeader({ id, suggestions }: { id: string, suggestions: EmployeeS
   const s = suggestions.find(x => x.id === id);
   if (!s) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className="text-[10px] uppercase">{s.status}</Badge>
       <span className="font-semibold text-sm truncate uppercase">{s.title}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/employee-engagement/employee-suggestion/${s.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

@@ -1,6 +1,16 @@
 import { builtinModules } from 'node:module';
 
-const SERVER_ONLY_EXTERNALS = ['node-cron', 'nodemailer', 'xlsx'];
+const SERVER_ONLY_EXTERNALS = [
+  'node-cron',
+  'nodemailer',
+  'xlsx',
+  // Resume scanning — both shell out to Node-only dependencies (pdfjs-dist,
+  // mammoth's stream pipeline). Letting webpack bundle them breaks the
+  // dynamic requires inside pdf-parse and the worker resolution in pdfjs.
+  'pdf-parse',
+  'pdfjs-dist',
+  'mammoth',
+];
 
 // Every Node built-in (crypto, path, stream, fs, ...) plus the `node:` prefixed
 // form. The instrumentation bundle imports a chain of server-only modules

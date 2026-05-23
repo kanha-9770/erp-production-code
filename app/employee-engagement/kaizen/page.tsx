@@ -4,11 +4,13 @@
  * Kaizen — premium workspace layout.
  */
 
+import Link from "next/link";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   ThumbsUp, CheckCircle2, Lightbulb, Zap, Type, FileText, Layout,
-  ArrowRight, Save, X, UserCircle, AlertCircle, Info, Paperclip, Upload, Camera
+  ArrowRight, Save, X, UserCircle, AlertCircle, Info, Paperclip, Upload, Camera,
+  ExternalLink,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -554,9 +556,14 @@ function PreviewHeader({ id, kaizens }: { id: string, kaizens: Kaizen[] }) {
   if (!k) return null;
   const meta = getStatusMeta(k.status);
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className={`text-[10px] uppercase ${meta.className}`}>{meta.label}</Badge>
       <span className="font-semibold text-sm truncate uppercase">{k.title}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/employee-engagement/kaizen/${k.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

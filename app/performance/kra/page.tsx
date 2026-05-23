@@ -5,11 +5,12 @@
  * Tracks measurable objectives, goal weighting, and quarterly progress.
  */
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   Target, Plus, Search, Pencil, Trash2, TrendingUp, AlertTriangle,
   CheckCircle2, Calendar, User, Briefcase, Percent, Zap, Info,
-  ArrowRight, BarChart3, Flag, Layers, AlertCircle, Save
+  ArrowRight, BarChart3, Flag, Layers, AlertCircle, Save, ExternalLink,
 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -418,9 +419,14 @@ function PreviewHeader({ id, items }: { id: string, items: Kra[] }) {
   const k = items.find(x => x.id === id);
   if (!k) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0 w-full">
       <Badge variant="outline" className="text-[10px] uppercase font-bold">{k.id}</Badge>
       <span className="font-bold text-sm truncate uppercase tracking-tight">{k.employee}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/performance/kra/${k.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

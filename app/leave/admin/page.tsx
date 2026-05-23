@@ -53,7 +53,13 @@ import {
 import PageBackLink from '@/components/shared/page-back-link';
 
 interface BalanceRow {
-  leaveType: { id: string; name: string; code: string; color: string | null };
+  leaveType: {
+    id: string;
+    name: string;
+    code: string;
+    category: string;
+    color: string | null;
+  };
   year: number;
   allocated: number;
   carriedForward: number;
@@ -164,7 +170,18 @@ export default function LeaveAdminPage() {
     );
   }
 
-  const allTypes = employees?.[0]?.balances.map((b) => b.leaveType) ?? [];
+  // Hourly leave is hidden from the employee-facing Apply Leave form, so we
+  // hide it from the admin Allocations/Usage tables and Bulk Allocate dropdown
+  // as well — keeps the two surfaces in sync. The data model + existing rows
+  // are unchanged.
+  const allTypes =
+    employees?.[0]?.balances
+      .filter(
+        (b) =>
+          b.leaveType.category !== 'HOURLY' &&
+          b.leaveType.code !== 'HOURLY_LEAVE',
+      )
+      .map((b) => b.leaveType) ?? [];
 
   return (
     <div className="container mx-auto p-6 space-y-6">

@@ -40,16 +40,26 @@ export async function POST(request: NextRequest) {
     if (arrayBuffer.byteLength > MAX_BYTES) return apiError("File too large", 413);
 
     const buffer = Buffer.from(arrayBuffer);
+    const filename = fileEntry.name || "resume";
+    console.log(
+      `[api/parse-resume] scanning ${filename} (${arrayBuffer.byteLength}B, ${fileEntry.type || "no mime"}) for org=${user.organizationId}`,
+    );
     const result = await scanResume(
       user.organizationId,
       buffer,
-      fileEntry.name || "resume",
+      filename,
       fileEntry.type,
+    );
+    console.log(
+      `[api/parse-resume] result: textChars=${result.text.length} hasStructured=${!!result.data} skills="${result.skills ?? ""}" exp="${result.totalExperience ?? ""}"`,
     );
 
     return apiSuccess({ result });
   } catch (err) {
     console.error("[api/parse-resume] error:", err);
-    return apiError("Failed to parse resume", 500);
+    return apiError(
+      err instanceof Error ? err.message : "Failed to parse resume",
+      500,
+    );
   }
 }

@@ -8,6 +8,7 @@
  */
 
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   useGetEmployeeReferralsQuery,
@@ -47,6 +48,7 @@ import {
   Briefcase,
   Layers,
   Users as UsersIcon,
+  ExternalLink,
 } from "lucide-react";
 import {
   WorkspaceShell,
@@ -842,10 +844,15 @@ function PreviewHeader({
         {STATUS_LABEL[r.status]}
       </Badge>
       <span className="font-semibold truncate text-sm">{r.applicantName}</span>
+      <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
+        <Link href={`/hr/recruitment/employee-referral/${r.id}`} title="Open full details">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
       <Button
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 ml-auto"
+        className="h-7 w-7 shrink-0"
         title="Edit"
         onClick={onEdit}
       >
