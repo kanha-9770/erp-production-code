@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,15 +26,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2 } from "lucide-react";
+import { Settings2, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { JobApplication } from "@/lib/api/job-applications";
 import type { JobOffer, JobOfferStatus } from "@/lib/api/job-offers";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
-const JOB_OFFER_BUILDER_FORM_ID = "";
-
-const customizeHref = JOB_OFFER_BUILDER_FORM_ID
-  ? `/builder/${JOB_OFFER_BUILDER_FORM_ID}`
-  : "/forms";
+async function ensureJobOfferBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-job-offer-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 const NONE = "__none__";
 
@@ -59,6 +72,7 @@ export interface JobOfferFormValues {
   jobOfferTerm: string;
   valueDescription: string;
   termsAndConditions: string;
+  customFields: CustomFieldValues;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -72,6 +86,7 @@ const EMPTY: JobOfferFormValues = {
   jobOfferTerm: "",
   valueDescription: "",
   termsAndConditions: "",
+  customFields: {},
 };
 
 export function fromOffer(o: JobOffer): JobOfferFormValues {
@@ -84,6 +99,7 @@ export function fromOffer(o: JobOffer): JobOfferFormValues {
     jobOfferTerm: o.jobOfferTerm ?? "",
     valueDescription: o.valueDescription ?? "",
     termsAndConditions: o.termsAndConditions ?? "",
+    customFields: ((o as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -97,6 +113,7 @@ export function toApiPayload(v: JobOfferFormValues): Record<string, any> {
     jobOfferTerm: v.jobOfferTerm.trim() || null,
     valueDescription: v.valueDescription.trim() || null,
     termsAndConditions: v.termsAndConditions.trim() || null,
+    customFields: v.customFields ?? {},
   };
 }
 
@@ -118,10 +135,41 @@ export function JobOfferForm({
   submitLabel,
   jobApplications = [],
 }: JobOfferFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [openingBuilder, setOpeningBuilder] = useState(false);
   const [values, setValues] = useState<JobOfferFormValues>(() =>
     initial ? fromOffer(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
+
+  const { sections: customSections } = useCustomFormFields("jobOffer");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureJobOfferBuilderHref();
+      if (created) {
+        toast({
+          title: "Job Offer form created",
+          description: "Add or rearrange fields here — they'll appear in the form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
 
   useEffect(() => {
     if (initial) setValues(fromOffer(initial));
@@ -341,6 +389,12 @@ export function JobOfferForm({
         </CardContent>
       </Card>
 
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
+
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {error}
@@ -348,11 +402,21 @@ export function JobOfferForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (

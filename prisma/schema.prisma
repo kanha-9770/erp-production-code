@@ -1468,6 +1468,10 @@ model Employee {
   createdAt                  DateTime        @default(now()) @map("created_at")
   updatedAt                  DateTime        @updatedAt @map("updated_at")
 
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields               Json?           @map("custom_fields")
+
   @@index([userId])
   @@index([createdById])
   @@index([department])
@@ -1717,6 +1721,10 @@ model StaffingPlan {
   jobApplications       JobApplication[]
   jobOffers             JobOffer[]
 
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields          Json?               @map("custom_fields")
+
   createdAt             DateTime            @default(now()) @map("created_at")
   updatedAt             DateTime            @updatedAt @map("updated_at")
 
@@ -1760,6 +1768,10 @@ model JobOpening {
 
   applications      JobApplication[]
   offers            JobOffer[]
+
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields      Json?            @map("custom_fields")
 
   @@index([organizationId])
   @@index([staffingPlanId])
@@ -1825,6 +1837,10 @@ model JobApplication {
   offers              JobOffer[]
   appointmentLetters  AppointmentLetter[]
 
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields      Json?                  @map("custom_fields")
+
   @@index([organizationId])
   @@index([jobOpeningId])
   @@index([staffingPlanId])
@@ -1869,6 +1885,10 @@ model JobOffer {
   updatedAt           DateTime         @updatedAt @map("updated_at")
 
   appointmentLetters  AppointmentLetter[]
+
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields        Json?            @map("custom_fields")
 
   @@index([organizationId])
   @@index([jobApplicationId])
@@ -1917,6 +1937,10 @@ model AppointmentLetter {
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields        Json?                    @map("custom_fields")
+
   @@index([organizationId])
   @@index([jobOfferId])
   @@index([jobApplicationId])
@@ -1960,6 +1984,10 @@ model EmployeeReferral {
 
   createdAt             DateTime                @default(now()) @map("created_at")
   updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  // Free-form values for non-core fields added in the form-builder. Keyed by
+  // FormField.id; rendered alongside the static fields by the React form.
+  customFields          Json?                   @map("custom_fields")
 
   @@index([organizationId])
   @@index([referringEmployeeId])

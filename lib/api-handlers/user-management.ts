@@ -886,7 +886,11 @@ export const UserManagementHandlers = {
       if (!existing) {
         return NextResponse.json({ error: "Employee not found" }, { status: 404 });
       }
-      await prisma.employee.delete({ where: { id } });
+      await moveToTrash("Employee", id, {
+        userId: authUser.id,
+        userName: authUser.email,
+        organizationId: authUser.organizationId,
+      });
       // Drop the live payroll cache so the deleted row disappears from the
       // dashboard on the next fetch.
       if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
@@ -1088,6 +1092,18 @@ function sanitizeEmployeePayload(
   boolField("isOvertimeApplicable");
   boolField("noticeServed");
   boolField("permanentSameAsCurrent");
+
+  // Pass-through for builder-added field values. Keyed by FormField.id.
+  if ("customFields" in body) {
+    const v = body.customFields;
+    if (v === null || v === undefined) {
+      data.customFields = null;
+    } else if (typeof v === "object" && !Array.isArray(v)) {
+      data.customFields = v;
+    } else {
+      throw new Error("customFields must be an object");
+    }
+  }
 
   return data;
 }

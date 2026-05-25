@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
+import { moveToTrash } from "@/lib/trash";
 import {
   calculateCommission,
   closeTransaction,
@@ -668,7 +669,11 @@ export const TransactionHandlers = {
       });
       if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      await prisma.transactionDocument.delete({ where: { id: documentId } });
+      await moveToTrash("TransactionDocument", documentId, {
+        userId: auth.id,
+        userName: auth.email,
+        organizationId: auth.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "removeDocument");
   },

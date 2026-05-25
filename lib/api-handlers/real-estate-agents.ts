@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 import { getAgentSlabHistory } from "@/lib/real-estate/slab-engine";
+import { moveToTrash } from "@/lib/trash";
 
 async function requireAuth(request: NextRequest) {
   const user = await getAuthenticatedUser(request);
@@ -813,7 +814,11 @@ export const RankHandlers = {
           { status: 409 },
         );
 
-      await prisma.rank.delete({ where: { id } });
+      await moveToTrash("Rank", id, {
+        userId: auth.id,
+        userName: auth.email,
+        organizationId: auth.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "remove");
   },

@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
+import { moveToTrash } from "@/lib/trash";
 
 async function requireAuth(request: NextRequest) {
   const user = await getAuthenticatedUser(request);
@@ -368,9 +369,13 @@ export const PropertyHandlers = {
       if (!existing)
         return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      // Pure draft with no activity → safe to delete outright.
+      // Pure draft with no activity → safe to delete outright (to trash).
       if (existing.status === "DRAFT" && existing._count.viewings === 0) {
-        await prisma.property.delete({ where: { id } });
+        await moveToTrash("Property", id, {
+          userId: auth.id,
+          userName: auth.email,
+          organizationId: auth.organizationId,
+        });
         return NextResponse.json({ success: true, deleted: true });
       }
 
@@ -517,7 +522,11 @@ export const PropertyHandlers = {
       if (!doc)
         return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      await prisma.propertyDocument.delete({ where: { id: documentId } });
+      await moveToTrash("PropertyDocument", documentId, {
+        userId: auth.id,
+        userName: auth.email,
+        organizationId: auth.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "removeDocument");
   },

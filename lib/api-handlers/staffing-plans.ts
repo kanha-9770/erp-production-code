@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
+import { moveToTrash } from "@/lib/trash";
 
 const EMPLOYMENT_TYPES = [
   "FULL_TIME",
@@ -157,6 +158,21 @@ function sanitize(body: Record<string, any>, opts: { partial?: boolean } = {}) {
     }
   }
 
+  // Pass-through for builder-added field values. Keyed by FormField.id.
+  if ("customFields" in body) {
+    const v = body.customFields;
+    if (v === null || v === undefined) {
+      data.customFields = null;
+    } else if (typeof v === "object" && !Array.isArray(v)) {
+      data.customFields = v;
+    } else {
+      throw NextResponse.json(
+        { error: "customFields must be an object" },
+        { status: 400 },
+      );
+    }
+  }
+
   return data;
 }
 
@@ -295,7 +311,11 @@ export const StaffingPlanHandlers = {
           { error: "Staffing plan not found" },
           { status: 404 },
         );
-      await (prisma as any).staffingPlan.delete({ where: { id } });
+      await moveToTrash("StaffingPlan", id, {
+        userId: authUser.id,
+        userName: authUser.email,
+        organizationId: authUser.organizationId,
+      });
       if (authUser.organizationId) {
         fireWorkflow({
           moduleName: "Staffing Plan",

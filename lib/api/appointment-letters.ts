@@ -53,6 +53,8 @@ export interface AppointmentLetter {
 
   createdAt: string;
   updatedAt: string;
+  // Values for non-core fields added via the form-builder. Keyed by FormField.id.
+  customFields?: Record<string, unknown> | null;
 }
 
 interface ListResponse {

@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2, Star, Upload, FileText, X } from "lucide-react";
+import { Settings2, Star, Upload, FileText, X, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { EMPLOYMENT_TYPE_OPTIONS } from "@/components/staffing-plan/staffing-plan-form";
 import type { EmploymentType } from "@/lib/api/staffing-plans";
 import type { JobOpening } from "@/lib/api/job-openings";
@@ -42,12 +43,24 @@ import {
   useParseResumeMutation,
   type ParsedResume,
 } from "@/lib/api/resume";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
-const JOB_APPLICATION_BUILDER_FORM_ID = "";
-
-const customizeHref = JOB_APPLICATION_BUILDER_FORM_ID
-  ? `/builder/${JOB_APPLICATION_BUILDER_FORM_ID}`
-  : "/forms";
+async function ensureJobApplicationBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-job-application-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 const NONE = "__none__";
 
@@ -109,6 +122,10 @@ export interface JobApplicationFormValues {
 
   applicantRating: number; // 0 means unrated
   status: JobApplicationStatus;
+
+  // Values for admin-added builder fields. Keyed by FormField.id; rendered
+  // by <CustomFieldsRenderer/> at the bottom of the form.
+  customFields: CustomFieldValues;
 }
 
 const EMPTY: JobApplicationFormValues = {
@@ -139,6 +156,7 @@ const EMPTY: JobApplicationFormValues = {
 
   applicantRating: 0,
   status: "NEW",
+  customFields: {},
 };
 
 export function fromApplication(a: JobApplication): JobApplicationFormValues {
@@ -170,6 +188,7 @@ export function fromApplication(a: JobApplication): JobApplicationFormValues {
 
     applicantRating: a.applicantRating ?? 0,
     status: (a.status ?? "NEW") as JobApplicationStatus,
+    customFields: ((a as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -202,6 +221,7 @@ export function toApiPayload(v: JobApplicationFormValues): Record<string, any> {
 
     applicantRating: v.applicantRating > 0 ? v.applicantRating : null,
     status: v.status,
+    customFields: v.customFields ?? {},
   };
 }
 
@@ -223,11 +243,44 @@ export function JobApplicationForm({
   submitLabel,
   jobOpenings = [],
 }: JobApplicationFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [openingBuilder, setOpeningBuilder] = useState(false);
   const [values, setValues] = useState<JobApplicationFormValues>(() =>
     initial ? fromApplication(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
   const [scanWarning, setScanWarning] = useState<string | null>(null);
+
+  // Fields admins have added via "Customize form". Refetched on window focus
+  // so adding a new field in the builder shows up here on tab-back.
+  const { sections: customSections } = useCustomFormFields("jobApplication");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureJobApplicationBuilderHref();
+      if (created) {
+        toast({
+          title: "Job Application form created",
+          description: "Add or rearrange fields here — they'll appear in the form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
   const [uploadFile, { isLoading: uploading }] = useUploadFileMutation();
   const [parseResume, { isLoading: scanning }] = useParseResumeMutation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -721,6 +774,12 @@ export function JobApplicationForm({
         </CardContent>
       </Card>
 
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
+
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {error}
@@ -728,11 +787,21 @@ export function JobApplicationForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (

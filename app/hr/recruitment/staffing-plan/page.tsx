@@ -59,6 +59,7 @@ import {
   ViewsBar,
   useSavedViews,
   InlineEditCell,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import {
   StaticFilterSidebar,
@@ -521,6 +522,11 @@ export default function StaffingPlanListPage() {
                 </span>
               )}
             </Button>
+            <ManageColumnsButton
+              tableId="staffing-plans-list"
+              columns={columns}
+              variant="dialog"
+            />
             <Button
               size="sm"
               className="h-8"

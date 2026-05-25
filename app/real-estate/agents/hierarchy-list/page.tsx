@@ -29,6 +29,7 @@ import {
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import type { AgentTreeNode } from "@/lib/api/real-estate/types";
 import { cn } from "@/lib/utils";
@@ -246,6 +247,10 @@ export default function HierarchyListPage() {
               className="pl-8 h-8 w-56 text-sm"
             />
           </div>
+          <ManageColumnsButton
+            tableId="rebm-hierarchy-list"
+            columns={columns}
+          />
         </WorkspaceHeader>
       }
       list={

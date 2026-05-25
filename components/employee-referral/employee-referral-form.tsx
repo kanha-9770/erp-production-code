@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,19 +28,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2, Upload, FileText, X } from "lucide-react";
+import { Settings2, Upload, FileText, X, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { useUploadFileMutation } from "@/lib/api/upload";
 import type { EmployeeListItem } from "@/lib/api/employees";
 import type {
   EmployeeReferral,
   EmployeeReferralStatus,
 } from "@/lib/api/employee-referrals";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
-const EMPLOYEE_REFERRAL_BUILDER_FORM_ID = "";
-
-const customizeHref = EMPLOYEE_REFERRAL_BUILDER_FORM_ID
-  ? `/builder/${EMPLOYEE_REFERRAL_BUILDER_FORM_ID}`
-  : "/forms";
+async function ensureEmployeeReferralBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-employee-referral-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 const NONE = "__none__";
 
@@ -72,6 +85,7 @@ export interface EmployeeReferralFormValues {
 
   remark: string;
   status: EmployeeReferralStatus;
+  customFields: CustomFieldValues;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -90,6 +104,7 @@ const EMPTY: EmployeeReferralFormValues = {
   referrerDepartment: "",
   remark: "",
   status: "NEW",
+  customFields: {},
 };
 
 export function fromReferral(r: EmployeeReferral): EmployeeReferralFormValues {
@@ -107,6 +122,7 @@ export function fromReferral(r: EmployeeReferral): EmployeeReferralFormValues {
     referrerDepartment: r.referrerDepartment ?? "",
     remark: r.remark ?? "",
     status: (r.status ?? "NEW") as EmployeeReferralStatus,
+    customFields: ((r as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -127,6 +143,7 @@ export function toApiPayload(
     referrerDepartment: v.referrerDepartment.trim() || null,
     remark: v.remark.trim() || null,
     status: v.status,
+    customFields: v.customFields ?? {},
   };
 }
 
@@ -148,10 +165,41 @@ export function EmployeeReferralForm({
   submitLabel,
   employees = [],
 }: EmployeeReferralFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [openingBuilder, setOpeningBuilder] = useState(false);
   const [values, setValues] = useState<EmployeeReferralFormValues>(() =>
     initial ? fromReferral(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
+
+  const { sections: customSections } = useCustomFormFields("employeeReferral");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureEmployeeReferralBuilderHref();
+      if (created) {
+        toast({
+          title: "Employee Referral form created",
+          description: "Add or rearrange fields here — they'll appear in the form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
   const [uploadFile, { isLoading: uploading }] = useUploadFileMutation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -466,6 +514,12 @@ export function EmployeeReferralForm({
         </CardContent>
       </Card>
 
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
+
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {error}
@@ -473,11 +527,21 @@ export function EmployeeReferralForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (

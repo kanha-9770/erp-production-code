@@ -68,6 +68,9 @@ export interface JobApplication {
   applicantRating: number | null;
   status: JobApplicationStatus;
 
+  // Values for non-core fields added via the form-builder. Keyed by FormField.id.
+  customFields?: Record<string, unknown> | null;
+
   organizationId: string | null;
   createdById: string | null;
   createdBy?: {

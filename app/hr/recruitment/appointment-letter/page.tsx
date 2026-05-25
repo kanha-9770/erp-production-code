@@ -60,6 +60,7 @@ import {
   ViewsBar,
   useSavedViews,
   InlineEditCell,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import {
   StaticFilterSidebar,
@@ -785,6 +786,11 @@ export default function AppointmentLetterListPage() {
                   </span>
                 )}
               </Button>
+              <ManageColumnsButton
+                tableId="appointment-letters-list"
+                columns={columns}
+                variant="dialog"
+              />
               <Button
                 size="sm"
                 className="h-8"

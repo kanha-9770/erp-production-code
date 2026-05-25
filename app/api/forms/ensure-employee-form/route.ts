@@ -244,55 +244,60 @@ export async function POST(request: NextRequest) {
 
     // 3. Create the form and seed every section/field from FORM_SECTIONS in a
     //    single transaction so a partial failure doesn't leave a half-built
-    //    form behind.
-    const result = await prisma.$transaction(async (tx) => {
-      const form = await tx.form.create({
-        data: {
-          moduleId: module!.id,
-          name: DEFAULT_FORM_NAME,
-          description:
-            "Master record for every employee. Add custom fields here to extend the employee profile across the app.",
-          settings: {},
-          isEmployeeForm: true,
-          isPublished: false,
-        },
-      });
-
-      for (let sIdx = 0; sIdx < FORM_SECTIONS.length; sIdx++) {
-        const sectionSpec = FORM_SECTIONS[sIdx];
-        const section = await tx.formSection.create({
+    //    form behind. Fields go in via createMany per section so a section
+    //    with 9 fields is one INSERT instead of 9 — keeps us under the
+    //    (bumped) transaction budget on slow dev DBs that used to throw
+    //    P2028 "Transaction not found" after the 5s default elapsed.
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const form = await tx.form.create({
           data: {
-            formId: form.id,
-            title: sectionSpec.title,
-            order: sIdx,
-            columns: sectionSpec.columns,
-            visible: true,
-            collapsible: false,
+            moduleId: module!.id,
+            name: DEFAULT_FORM_NAME,
+            description:
+              "Master record for every employee. Add custom fields here to extend the employee profile across the app.",
+            settings: {},
+            isEmployeeForm: true,
+            isPublished: false,
           },
         });
 
-        for (let fIdx = 0; fIdx < sectionSpec.fields.length; fIdx++) {
-          const spec = sectionSpec.fields[fIdx];
-          await tx.formField.create({
+        for (let sIdx = 0; sIdx < FORM_SECTIONS.length; sIdx++) {
+          const sectionSpec = FORM_SECTIONS[sIdx];
+          const section = await tx.formSection.create({
             data: {
-              sectionId: section.id,
-              type: spec.type,
-              label: spec.label,
-              placeholder: spec.placeholder,
-              options: spec.options ?? [],
-              validation: spec.required ? { required: true } : {},
-              order: fIdx,
-              properties: {
-                isCore: true,
-                coreKey: spec.coreKey,
-              },
+              formId: form.id,
+              title: sectionSpec.title,
+              order: sIdx,
+              columns: sectionSpec.columns,
+              visible: true,
+              collapsible: false,
             },
           });
-        }
-      }
 
-      return form;
-    });
+          if (sectionSpec.fields.length > 0) {
+            await tx.formField.createMany({
+              data: sectionSpec.fields.map((spec, fIdx) => ({
+                sectionId: section.id,
+                type: spec.type,
+                label: spec.label,
+                placeholder: spec.placeholder,
+                options: spec.options ?? [],
+                validation: spec.required ? { required: true } : {},
+                order: fIdx,
+                properties: {
+                  isCore: true,
+                  coreKey: spec.coreKey,
+                },
+              })),
+            });
+          }
+        }
+
+        return form;
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
 
     return NextResponse.json({
       success: true,

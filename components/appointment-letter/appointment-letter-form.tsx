@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,19 +25,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2 } from "lucide-react";
+import { Settings2, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { JobApplication } from "@/lib/api/job-applications";
 import type { JobOffer } from "@/lib/api/job-offers";
 import type {
   AppointmentLetter,
   AppointmentLetterStatus,
 } from "@/lib/api/appointment-letters";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
-const APPOINTMENT_LETTER_BUILDER_FORM_ID = "";
-
-const customizeHref = APPOINTMENT_LETTER_BUILDER_FORM_ID
-  ? `/builder/${APPOINTMENT_LETTER_BUILDER_FORM_ID}`
-  : "/forms";
+async function ensureAppointmentLetterBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-appointment-letter-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 const NONE = "__none__";
 
@@ -70,6 +83,7 @@ export interface AppointmentLetterFormValues {
 
   signed: boolean;
   signedDate: string;
+  customFields: CustomFieldValues;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -89,6 +103,7 @@ const EMPTY: AppointmentLetterFormValues = {
   closingNotes: "",
   signed: false,
   signedDate: "",
+  customFields: {},
 };
 
 export function fromLetter(l: AppointmentLetter): AppointmentLetterFormValues {
@@ -107,6 +122,7 @@ export function fromLetter(l: AppointmentLetter): AppointmentLetterFormValues {
     closingNotes: l.closingNotes ?? "",
     signed: !!l.signed,
     signedDate: l.signedDate ? l.signedDate.slice(0, 10) : "",
+    customFields: ((l as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -128,6 +144,7 @@ export function toApiPayload(
     closingNotes: v.closingNotes.trim() || null,
     signed: v.signed,
     signedDate: v.signedDate || null,
+    customFields: v.customFields ?? {},
   };
 }
 
@@ -152,9 +169,40 @@ export function AppointmentLetterForm({
   jobOffers = [],
   jobApplications = [],
 }: AppointmentLetterFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [openingBuilder, setOpeningBuilder] = useState(false);
   const [values, setValues] = useState<AppointmentLetterFormValues>(() =>
     initial ? fromLetter(initial) : EMPTY,
   );
+
+  const { sections: customSections } = useCustomFormFields("appointmentLetter");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureAppointmentLetterBuilderHref();
+      if (created) {
+        toast({
+          title: "Appointment Letter form created",
+          description: "Add or rearrange fields here — they'll appear in the form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -455,6 +503,12 @@ export function AppointmentLetterForm({
         </CardContent>
       </Card>
 
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
+
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {error}
@@ -462,11 +516,21 @@ export function AppointmentLetterForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (

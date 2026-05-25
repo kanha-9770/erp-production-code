@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,18 +24,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Settings2, Calculator } from "lucide-react";
+import { Settings2, Calculator, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type {
   EmploymentType,
   StaffingPlan,
   StaffingPlanStatus,
 } from "@/lib/api/staffing-plans";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
-const STAFFING_BUILDER_FORM_ID = "";
-
-const customizeHref = STAFFING_BUILDER_FORM_ID
-  ? `/builder/${STAFFING_BUILDER_FORM_ID}`
-  : "/forms";
+async function ensureStaffingPlanBuilderHref(): Promise<{ href: string; created: boolean }> {
+  const res = await fetch("/api/forms/ensure-staffing-plan-form", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success || !json?.formId) {
+    throw new Error(json?.error ?? `Failed to open form builder (${res.status})`);
+  }
+  return { href: `/builder/${json.formId}`, created: !!json.created };
+}
 
 export const EMPLOYMENT_TYPE_OPTIONS: Array<{
   value: EmploymentType;
@@ -69,6 +82,7 @@ export interface StaffingPlanFormValues {
   estimatedCostPerPerson: string;
   status: StaffingPlanStatus;
   notes: string;
+  customFields: CustomFieldValues;
 }
 
 const EMPTY: StaffingPlanFormValues = {
@@ -80,6 +94,7 @@ const EMPTY: StaffingPlanFormValues = {
   estimatedCostPerPerson: "",
   status: "DRAFT",
   notes: "",
+  customFields: {},
 };
 
 export function fromPlan(p: StaffingPlan): StaffingPlanFormValues {
@@ -94,6 +109,7 @@ export function fromPlan(p: StaffingPlan): StaffingPlanFormValues {
     estimatedCostPerPerson: numStr(p.estimatedCostPerPerson),
     status: (p.status ?? "DRAFT") as StaffingPlanStatus,
     notes: p.notes ?? "",
+    customFields: ((p as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -107,6 +123,7 @@ export function toApiPayload(v: StaffingPlanFormValues): Record<string, any> {
     estimatedCostPerPerson: v.estimatedCostPerPerson,
     status: v.status,
     notes: v.notes.trim() || null,
+    customFields: v.customFields ?? {},
   };
 }
 
@@ -133,10 +150,41 @@ export function StaffingPlanForm({
   submitLabel,
   departmentOptions,
 }: StaffingPlanFormProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [openingBuilder, setOpeningBuilder] = useState(false);
   const [values, setValues] = useState<StaffingPlanFormValues>(() =>
     initial ? fromPlan(initial) : EMPTY,
   );
   const [error, setError] = useState<string | null>(null);
+
+  const { sections: customSections } = useCustomFormFields("staffingPlan");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
+
+  const openCustomizeBuilder = async () => {
+    setOpeningBuilder(true);
+    try {
+      const { href, created } = await ensureStaffingPlanBuilderHref();
+      if (created) {
+        toast({
+          title: "Staffing Plan form created",
+          description: "Add or rearrange fields here — they'll appear in the form automatically.",
+        });
+      }
+      router.push(href);
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't open form builder",
+        description: err?.message ?? "Unknown error",
+      });
+      setOpeningBuilder(false);
+    }
+  };
   const [deptMode, setDeptMode] = useState<"select" | "custom">(() => {
     if (!initial) return "select";
     if (!departmentOptions || departmentOptions.length === 0) return "custom";
@@ -365,6 +413,12 @@ export function StaffingPlanForm({
         </CardContent>
       </Card>
 
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
+
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {error}
@@ -372,11 +426,21 @@ export function StaffingPlanForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button asChild type="button" variant="link" className="px-0 self-start">
-          <Link href={customizeHref} className="gap-1.5">
+        <Button
+          type="button"
+          variant="link"
+          className="px-0 self-start gap-1.5"
+          disabled={openingBuilder}
+          onClick={openCustomizeBuilder}
+        >
+          {openingBuilder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
             <Settings2 className="h-3.5 w-3.5" />
-            Customize form — add custom fields in builder
-          </Link>
+          )}
+          {openingBuilder
+            ? "Opening builder…"
+            : "Customize form — add custom fields in builder"}
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (

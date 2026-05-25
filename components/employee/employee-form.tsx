@@ -37,6 +37,11 @@ import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { useToast } from "@/hooks/use-toast";
 import { computeDescriptorFromBlobWithTimeout } from "@/lib/face/descriptor";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
+import {
+  useCustomFormFields,
+  type CustomFieldValues,
+} from "@/lib/forms/use-custom-form-fields";
+import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
 
 /**
  * Resolve the org's Employee form id, seeding one if it doesn't exist yet.
@@ -208,6 +213,8 @@ export interface EmployeeFormValues {
   reasonOfLeaving: string;
   noticeServed: boolean;
 
+  // Values for non-core fields added via the form-builder.
+  customFields: CustomFieldValues;
 }
 
 const EMPTY: EmployeeFormValues = {
@@ -298,6 +305,8 @@ const EMPTY: EmployeeFormValues = {
   dateOfLeaving: "",
   reasonOfLeaving: "",
   noticeServed: false,
+
+  customFields: {},
 };
 
 export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
@@ -414,6 +423,8 @@ export function fromEmployee(e: EmployeeDetail): EmployeeFormValues {
     dateOfLeaving: dateStr(e.dateOfLeaving),
     reasonOfLeaving: e.reasonOfLeaving ?? "",
     noticeServed: !!e.noticeServed,
+
+    customFields: ((e as any).customFields as CustomFieldValues) ?? {},
   };
 }
 
@@ -566,6 +577,8 @@ export function toApiPayload(values: EmployeeFormValues): Record<string, any> {
     dateOfLeaving: values.dateOfLeaving || null,
     reasonOfLeaving: trimOrNull(values.reasonOfLeaving),
     noticeServed: values.noticeServed,
+
+    customFields: values.customFields ?? {},
   };
 }
 
@@ -608,6 +621,15 @@ export function EmployeeForm({
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [openingBuilder, setOpeningBuilder] = useState(false);
+
+  // Fields admins have added via "Customize form". Refetched on window focus
+  // so adding a new field in the builder shows up here on tab-back.
+  const { sections: customSections } = useCustomFormFields("employee");
+  const setCustomField = (id: string, v: unknown) =>
+    setValues((prev) => ({
+      ...prev,
+      customFields: { ...prev.customFields, [id]: v },
+    }));
 
   // Engagement teams — populated once so the team picker dropdown can render
   // a curated list (managed at Settings → Employee Engagement) instead of a
@@ -1906,6 +1928,12 @@ export function EmployeeForm({
           </Field>
         </CardContent>
       </Card>
+
+      <CustomFieldsRenderer
+        sections={customSections}
+        values={values.customFields}
+        onChange={setCustomField}
+      />
 
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

@@ -48,6 +48,7 @@ import {
   ViewsBar,
   useSavedViews,
   InlineEditCell,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import { useToast } from "@/hooks/use-toast";
 import type { InventoryProduct } from "@/lib/api/inventory/types";
@@ -282,6 +283,11 @@ export default function InventoryListPage() {
                 className="pl-8 h-8 w-56 text-sm"
               />
             </div>
+            <ManageColumnsButton
+              tableId="inventory-products"
+              columns={columns}
+              variant="dialog"
+            />
             <Button asChild size="sm" className="h-8">
               <Link href="/inventory/new">
                 <Plus className="h-3.5 w-3.5 mr-1" /> New product

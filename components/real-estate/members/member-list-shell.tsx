@@ -35,6 +35,7 @@ import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
   InlineEditCell,
+  ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import type { AgentProfile } from "@/lib/api/real-estate/types";
 import { useToast } from "@/hooks/use-toast";
@@ -204,6 +205,10 @@ export function MemberListShell({
               className="pl-8 h-8 w-56 text-sm"
             />
           </div>
+          <ManageColumnsButton
+            tableId={`rebm-${scope}`}
+            columns={columns}
+          />
           <Button asChild size="sm" className="h-8">
             <Link href="/real-estate/agents/new"><Plus className="h-3.5 w-3.5 mr-1" /> Onboard</Link>
           </Button>

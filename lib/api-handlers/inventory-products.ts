@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
+import { moveToTrash } from "@/lib/trash";
 
 async function requireAuth(request: NextRequest) {
   const user = await getAuthenticatedUser(request);
@@ -283,7 +284,11 @@ export const InventoryHandlers = {
         select: { id: true },
       });
       if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
-      await (prisma as any).inventoryProduct.delete({ where: { id } });
+      await moveToTrash("InventoryProduct", id, {
+        userId: auth.id,
+        userName: auth.email,
+        organizationId: auth.organizationId,
+      });
       return NextResponse.json({ success: true, deleted: true });
     }, "remove");
   },

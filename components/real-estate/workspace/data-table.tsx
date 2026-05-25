@@ -388,6 +388,7 @@ export function DataTable<T>({
                 return (
                   <th
                     key={col.id}
+                    data-col-id={col.id}
                     className={cn(
                       "h-9 border-b border-r border-border select-none",
                       "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
@@ -447,15 +448,12 @@ export function DataTable<T>({
                       )}
                     </div>
                     <ResizeHandle
-                      onResize={(delta) =>
-                        setWidth(
-                          col.id,
-                          Math.max(
-                            col.minWidth ?? 60,
-                            (prefs.width[col.id] ?? col.width ?? 140) + delta,
-                          ),
-                        )
+                      colId={col.id}
+                      minWidth={col.minWidth ?? 60}
+                      getStartWidth={() =>
+                        prefs.width[col.id] ?? col.width ?? 140
                       }
+                      setWidth={(px) => setWidth(col.id, px)}
                     />
                   </th>
                 );
@@ -543,6 +541,7 @@ export function DataTable<T>({
                       return (
                         <td
                           key={col.id}
+                          data-col-id={col.id}
                           onMouseDown={(e) => {
                             // Don't hijack clicks landing on form controls etc.
                             if ((e.target as HTMLElement).closest(
@@ -655,18 +654,30 @@ export function DataTable<T>({
 
 // ─── Resize handle (right edge of header) ────────────────────────────────────
 
-function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
+function ResizeHandle({
+  colId,
+  minWidth,
+  getStartWidth,
+  setWidth,
+}: {
+  colId: string;
+  minWidth: number;
+  getStartWidth: () => number;
+  setWidth: (px: number) => void;
+}) {
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture(e.pointerId);
 
-    let lastX = e.clientX;
+    // Snapshot the start width at drag-start. Each pointermove computes
+    // `startWidth + cumulativeDelta` so the column tracks the cursor in
+    // real time, no matter how fast it moves.
+    const startX = e.clientX;
+    const startWidth = getStartWidth();
     const onMove = (ev: PointerEvent) => {
-      const delta = ev.clientX - lastX;
-      lastX = ev.clientX;
-      if (delta !== 0) onResize(delta);
+      setWidth(Math.max(minWidth, startWidth + (ev.clientX - startX)));
     };
     const onUp = () => {
       target.releasePointerCapture(e.pointerId);
@@ -680,12 +691,45 @@ function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
     target.addEventListener("pointercancel", onUp);
   };
 
+  // Double-click auto-fits the column to its widest visible content, the
+  // same affordance Excel/Sheets put on the column-divider. We walk every
+  // `data-col-id` cell in the table, recurse through descendants, and take
+  // the largest scrollWidth — that's the natural width of truncated text
+  // (`truncate` sets overflow:hidden, so scrollWidth = un-clipped width)
+  // and the rendered width of badges/icons. Capped at 800px so a single
+  // pathological cell can't blow the column out across the viewport.
+  const onDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const table = (e.currentTarget as HTMLElement).closest("table");
+    if (!table) return;
+    const cells = table.querySelectorAll<HTMLElement>(
+      `[data-col-id="${CSS.escape(colId)}"]`,
+    );
+    let maxContent = 0;
+    cells.forEach((cell) => {
+      const stack: HTMLElement[] = [cell];
+      while (stack.length) {
+        const node = stack.pop()!;
+        if (node.scrollWidth > maxContent) maxContent = node.scrollWidth;
+        for (let i = 0; i < node.children.length; i++) {
+          stack.push(node.children[i] as HTMLElement);
+        }
+      }
+    });
+    // +32 covers cell padding (px-3 = 24px) plus a small visual buffer so
+    // text doesn't sit flush against the column divider.
+    setWidth(Math.max(minWidth, Math.min(800, maxContent + 32)));
+  };
+
   return (
     <span
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
       onClick={(e) => e.stopPropagation()}
       className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
       aria-hidden
+      title="Drag to resize · double-click to auto-fit"
     />
   );
 }

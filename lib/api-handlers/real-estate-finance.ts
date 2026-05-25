@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { Prisma } from "@prisma/client";
 import { WalletService } from "@/lib/real-estate/wallet-service";
+import { moveToTrash } from "@/lib/trash";
 import {
   calculateCommission,
   releaseDueCommissions,
@@ -772,7 +773,11 @@ export const BankAccountHandlers = {
           { error: "Cannot delete: this account is referenced by past withdrawals" },
           { status: 409 },
         );
-      await prisma.bankAccount.delete({ where: { id } });
+      await moveToTrash("BankAccount", id, {
+        userId: auth.id,
+        userName: auth.email,
+        organizationId: auth.organizationId,
+      });
       return NextResponse.json({ success: true });
     }, "remove");
   },

@@ -371,6 +371,36 @@ const CONFIGS: Record<string, TrashConfig> = {
   ChatConversation: { model: "chatConversation", orgField: "organizationId", nameOf: (r) => r.title ?? r.id },
   AIProvider: { model: "aIProvider", orgField: "organizationId", nameOf: (r) => r.displayName ?? r.name },
   AIProviderKey: { model: "aIProviderKey", orgField: "organizationId", nameOf: (r) => r.label ?? r.id },
+
+  // HR / Recruitment
+  JobApplication: { model: "jobApplication", orgField: "organizationId", nameOf: (r) => r.applicantName ?? r.id },
+  JobOpening: { model: "jobOpening", orgField: "organizationId", nameOf: (r) => r.profileName ?? r.id },
+  JobOffer: { model: "jobOffer", orgField: "organizationId", nameOf: (r) => r.applicantName ?? r.id },
+  StaffingPlan: { model: "staffingPlan", orgField: "organizationId", nameOf: (r) => r.profileName ?? r.id },
+  EmployeeReferral: { model: "employeeReferral", orgField: "organizationId", nameOf: (r) => r.applicantName ?? r.id },
+  AppointmentLetter: { model: "appointmentLetter", orgField: "organizationId", nameOf: (r) => r.applicantName ?? r.id },
+  // Employee has no direct `organizationId` column — it's scoped via User.
+  // Skipping orgField means snapshot.organizationId is null and moveToTrash
+  // falls back to ctx.organizationId, which the handler passes from auth.
+  Employee: { model: "employee", nameOf: (r) => r.employeeName ?? r.id },
+
+  // Inventory
+  InventoryProduct: { model: "inventoryProduct", orgField: "organizationId", nameOf: (r) => r.name ?? r.id },
+
+  // Real-estate
+  Lead: { model: "lead", orgField: "organizationId", nameOf: (r) => r.name ?? r.id },
+  PropertyViewing: { model: "propertyViewing", orgField: "organizationId", nameOf: (r) => `Viewing ${r.id}` },
+  Rank: { model: "rank", orgField: "organizationId", nameOf: (r) => r.name ?? r.id },
+  BankAccount: {
+    model: "bankAccount",
+    orgField: "organizationId",
+    nameOf: (r) => r.label ?? (`${r.bankName ?? ""} ${r.accountHolderName ?? ""}`.trim() || r.id),
+  },
+  Property: { model: "property", orgField: "organizationId", nameOf: (r) => r.title ?? r.id },
+  // Documents are scoped via their parent (no orgId column). moveToTrash
+  // falls back to ctx.organizationId, which the handler passes from auth.
+  PropertyDocument: { model: "propertyDocument", nameOf: (r) => r.name ?? r.id },
+  TransactionDocument: { model: "transactionDocument", nameOf: (r) => r.name ?? r.id },
 };
 
 export function getTrashConfig(resourceType: string): TrashConfig | null {
