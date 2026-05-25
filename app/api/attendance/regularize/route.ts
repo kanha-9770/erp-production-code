@@ -6,6 +6,7 @@ import {
   RegularizationError,
   createRegularization,
 } from '@/lib/hr/attendance-regularization';
+import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,6 +144,19 @@ export async function GET(request: NextRequest) {
     // The latter covers admins who submitted on behalf — they still see
     // the request in their own list.
     where.OR = [{ userId: authUser.id }, { requestedById: authUser.id }];
+  } else {
+    // scope === 'all': non-admin approvers (e.g. a Sales Head configured as
+    // an attendance approver) must only see regularizations from users at
+    // or below them in the role tree. Admins get `null` and skip the
+    // filter. Returning [] for an approver with no descendants narrows the
+    // list to nothing, which is correct — they have no one to approve.
+    const visibleUserIds = await getVisibleUserIdsForHierarchy(
+      authUser.id,
+      authUser.organizationId,
+    );
+    if (visibleUserIds) {
+      where.userId = { in: visibleUserIds };
+    }
   }
   if (status && /^(PENDING|APPROVED|REJECTED|CANCELLED)$/.test(status)) {
     where.status = status;

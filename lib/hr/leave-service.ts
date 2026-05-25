@@ -928,13 +928,22 @@ export async function getApprovedLeavesForRange(
 export async function listRequests(opts: {
   organizationId: string;
   userId?: string;
+  // Caller-supplied allow-list. When present, results are restricted to
+  // these user ids (intersected with `userId` if both are provided).
+  // Used by callers that pre-resolve role-hierarchy visibility.
+  userIds?: string[];
   status?: LeaveRequestStatus;
   from?: string;
   to?: string;
   limit?: number;
 }): Promise<LeaveRequestRow[]> {
   const where: any = { organizationId: opts.organizationId };
-  if (opts.userId) where.userId = opts.userId;
+  if (opts.userId) {
+    where.userId = opts.userId;
+  } else if (opts.userIds) {
+    // Empty allow-list → return nothing rather than fall through to org-wide.
+    where.userId = { in: opts.userIds };
+  }
   if (opts.status) where.status = opts.status;
   if (opts.from || opts.to) {
     where.AND = [];

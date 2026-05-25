@@ -547,3 +547,50 @@ export async function getInheritedUserIds(
   writeCache(inheritedUserIdsCache, cacheKey, userIds);
   return userIds;
 }
+
+/**
+ * Hierarchy-scoped visibility for HR / management surfaces (team attendance,
+ * leave lists, approver dashboards). Mirrors the rule already used by the
+ * Employee Master list in `lib/api-handlers/user-management.ts`:
+ *
+ *   - Admin       → null  (sentinel: "no filter — see everyone in the org")
+ *   - Non-admin   → caller's own id + every user assigned to a role that sits
+ *                   strictly below the caller in the org's role tree.
+ *
+ * Unlike `getInheritedUserIds()` there is intentionally NO shared-unit
+ * guard. An IT Head and a Sr. Developer don't necessarily share an org
+ * unit, but the IT Head must still see their attendance/leave because the
+ * Sr. Developer's role sits beneath the IT Head's role. The role-tree walk
+ * is what enforces department isolation: IT Head's role has no Sales
+ * children, so Sales users never appear in the result.
+ *
+ * The caller's own id is always included so a leaf-level Head still sees
+ * themselves on the team view.
+ */
+export async function getVisibleUserIdsForHierarchy(
+  userId: string,
+  organizationId: string,
+): Promise<string[] | null> {
+  const ctx = await getCallerRoleContext(userId, organizationId);
+  if (ctx.isAdmin) return null;
+  if (ctx.roleIds.length === 0) return [userId];
+
+  const descendantRoleIds = await getDescendantRoleIds(
+    organizationId,
+    ctx.roleIds,
+  );
+  if (descendantRoleIds.length === 0) return [userId];
+
+  const assignments = await prisma.userUnitAssignment.findMany({
+    where: {
+      roleId: { in: descendantRoleIds },
+      role: { organizationId },
+    },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+
+  return Array.from(
+    new Set<string>([userId, ...assignments.map((a) => a.userId)]),
+  );
+}

@@ -9,6 +9,7 @@ import {
 } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { userHasRouteAccess } from '@/lib/auth/route-meta';
+import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,13 +99,36 @@ export async function GET(request: NextRequest) {
     new Date(),
   );
 
+  // Role-hierarchy scoping: non-admins see only themselves + every user
+  // sitting strictly below them in the role tree (e.g. IT Head sees the IT
+  // subtree, not Sales). Admins get `null` and skip the filter entirely.
+  // The same rule is used by Employee Master so the visibility surfaces stay
+  // consistent.
+  const visibleUserIds = await getVisibleUserIdsForHierarchy(
+    authUser.id,
+    authUser.organizationId,
+  );
+
+  // If a non-admin caller has no inherited users (leaf role with no
+  // assignments below it) we still let them see their own row.
+  if (visibleUserIds && userIdFilter && !visibleUserIds.includes(userIdFilter)) {
+    return NextResponse.json(
+      { success: false, error: 'You cannot view attendance for that user.' },
+      { status: 403 },
+    );
+  }
+
   // Pull every active user in the org. We left-join attendance per (user,
   // date) below in JS — tractable for the dashboards we expect (≤500 users
   // × ≤92 days). Anything bigger should paginate at the API.
   const users = await prisma.user.findMany({
     where: {
       organizationId: authUser.organizationId,
-      ...(userIdFilter ? { id: userIdFilter } : {}),
+      ...(userIdFilter
+        ? { id: userIdFilter }
+        : visibleUserIds
+          ? { id: { in: visibleUserIds } }
+          : {}),
     },
     select: {
       id: true,

@@ -22,6 +22,7 @@ import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { canApproveLeave } from '@/lib/hr/leave-service';
+import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,6 +86,9 @@ export async function GET(request: NextRequest) {
     : Array.from(ALL_STATUSES);
 
   // Authorize "org" scope: only admins or approvers may pull org-wide.
+  // For non-admin approvers (e.g. a Sales Head) we also narrow `org` to
+  // their role-tree subtree so heads can't see sibling departments.
+  let orgVisibleUserIds: string[] | null = null;
   if (scope === 'org') {
     const [admin, approver] = await Promise.all([
       isUserAdmin(authUser.id, authUser.organizationId),
@@ -96,6 +100,11 @@ export async function GET(request: NextRequest) {
         { status: 403, headers: NO_STORE },
       );
     }
+    // null = admin (no filter); a list = restrict to caller + descendants.
+    orgVisibleUserIds = await getVisibleUserIdsForHierarchy(
+      authUser.id,
+      authUser.organizationId,
+    );
   }
 
   const withDetails = url.searchParams.get('withDetails') === '1';
@@ -117,7 +126,11 @@ export async function GET(request: NextRequest) {
         status: { in: statuses },
         startDate: { lte: to },
         endDate: { gte: from },
-        ...(scope === 'mine' ? { userId: authUser.id } : {}),
+        ...(scope === 'mine'
+          ? { userId: authUser.id }
+          : orgVisibleUserIds
+            ? { userId: { in: orgVisibleUserIds } }
+            : {}),
       },
       orderBy: { startDate: 'asc' },
     }),

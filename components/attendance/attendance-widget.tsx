@@ -104,11 +104,11 @@ interface AttendanceStatusPayload {
 
 const REFRESH_MS = 60_000;
 // Two-stage geo budget: try GPS-grade accuracy first with a tight timeout,
-// then fall back to coarse positioning. Total upper bound stays close to the
-// original 15s so the UI doesn't feel hung.
-const GEO_HIGH_ACCURACY_TIMEOUT_MS = 8_000;
-const GEO_LOW_ACCURACY_TIMEOUT_MS = 12_000;
-const GEO_TIMEOUT_MS = GEO_HIGH_ACCURACY_TIMEOUT_MS;
+// then fall back to coarse positioning. The previous budget (8s + 12s = 20s)
+// felt like a hard freeze on indoor punches; trimmed to 5s + 5s so the upper
+// bound is 10s and the user sees a marked-attendance response sooner.
+const GEO_HIGH_ACCURACY_TIMEOUT_MS = 5_000;
+const GEO_LOW_ACCURACY_TIMEOUT_MS = 5_000;
 // Anything worse than this means the device is using cell-tower / IP / Wi-Fi
 // triangulation, not real GPS, so we surface a warning before the user trusts
 // the reading for a punch.
@@ -491,11 +491,12 @@ function useAttendance(enabled: boolean): UseAttendanceState {
       const previous = status;
       if (optimistic) setStatus(optimistic);
 
-      let geo: { lat: number; lng: number } | null = preCapturedGeo;
-      if (!geo) {
-        const r = await captureGeo();
-        geo = r.ok ? { lat: r.lat, lng: r.lng } : null;
-      }
+      // Trust the geo passed in by the caller. The only path into punch() is
+      // through punchWithGeoCheck, which has already attempted captureGeo();
+      // re-trying here would double the GPS wait on indoor punches (up to
+      // another 10s for nothing — the second attempt almost always fails the
+      // same way the first did).
+      const geo: { lat: number; lng: number } | null = preCapturedGeo;
 
       try {
         const res = await fetch("/api/attendance/punch", {
@@ -633,6 +634,7 @@ export function AttendanceWidget({
       photoUrl: string | null,
       faceMatch: number | null = null,
       livenessPassed: boolean | null = null,
+      preCapturedGeoResult: GeoResult | null = null,
     ) => {
       const fence = status?.geofence;
       const inFenceMode =
@@ -642,7 +644,10 @@ export function AttendanceWidget({
         fence.lng != null &&
         fence.radiusM != null;
 
-      const geoResult = await captureGeo();
+      // Caller can hand us a geo reading that was captured in parallel with
+      // the photo upload (face-capture flow). Avoids running geolocation
+      // twice and serially when we already have a fresh fix.
+      const geoResult = preCapturedGeoResult ?? (await captureGeo());
       const geo = geoResult.ok
         ? { lat: geoResult.lat, lng: geoResult.lng }
         : null;
@@ -731,7 +736,7 @@ export function AttendanceWidget({
         toast({
           title: "Your face is not enrolled yet",
           description:
-            "Ask your admin to add your profile photo from Employee Master, then try again.",
+            "Go to Profile → Personal info and upload (or take) a clear, front-facing photo. Your admin can also add it from Employee Master.",
           variant: "destructive",
         });
         return;
@@ -764,6 +769,11 @@ export function AttendanceWidget({
       if (!type) return;
       setCaptureBusy(true);
       try {
+        // Kick off GPS in parallel with the FTP photo upload. The photo
+        // upload to Hostinger and the geolocation lookup are independent —
+        // serializing them was the main reason check-in felt slow on
+        // indoor (weak GPS) punches.
+        const geoPromise = captureGeo();
         const result = await uploadFacePhoto(
           blob,
           type,
@@ -786,11 +796,13 @@ export function AttendanceWidget({
             description: `Match score ${result.faceMatch.toFixed(2)} (lower is better).`,
           });
         }
+        const geoResult = await geoPromise;
         await punchWithGeoCheck(
           type,
           result.url,
           result.faceMatch,
           livenessPassed,
+          geoResult,
         );
       } catch (e: any) {
         // Tailor the message for the structured error codes the photo
@@ -801,7 +813,7 @@ export function AttendanceWidget({
         if (code === "FACE_NOT_ENROLLED") {
           title = "Please enroll your face first";
           description =
-            "Ask your admin to add a profile photo, or capture one from your settings.";
+            "Go to Profile → Personal info and upload (or take) a clear, front-facing photo.";
         } else if (code === "FACE_MISMATCH") {
           title = "Face does not match enrollment";
           description =

@@ -3,15 +3,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
-import { writeFile, mkdir } from "fs/promises";
+import { uploadToHostinger } from "@/lib/hostinger-upload";
 import path from "path";
+
+export const runtime = "nodejs";
+
+const ALLOWED_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
 
 export async function POST(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request);
-    if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    if (!authUser)
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    // Parse form data
     const formData = await request.formData();
     const file = formData.get("avatar") as File | null;
 
@@ -19,47 +28,63 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // Validate file type
-    if (!file.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Invalid file type. Please upload an image." }, { status: 400 });
+    const mime = (file.type || "").toLowerCase();
+    if (!ALLOWED_MIME.has(mime)) {
+      return NextResponse.json(
+        { error: "Invalid file type. Use JPG, PNG, or WebP." },
+        { status: 415 },
+      );
     }
 
-    // Convert to buffer
+    if (file.size === 0) {
+      return NextResponse.json({ error: "Empty file" }, { status: 400 });
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: "Image too large. Max 5 MB." },
+        { status: 413 },
+      );
+    }
+
+    // Push to the same Hostinger bucket the rest of the app uses for user
+    // uploads (employee photos, attendance captures, form attachments). Two
+    // benefits over writing into public/avatars/:
+    //   1. Returns a real CDN URL that's fetchable from any environment,
+    //      including `next dev` — public/ files created at runtime are not
+    //      reliably served by the dev server, which is why uploads here
+    //      appeared "successful" but never previewed.
+    //   2. Survives redeploys / multi-instance hosting where the per-instance
+    //      filesystem isn't a persistent store.
     const buffer = Buffer.from(await file.arrayBuffer());
-
-    // Generate unique filename
     const ext = path.extname(file.name) || ".jpg";
-    const filename = `${authUser.id}-${Date.now()}${ext}`;
-    
-    // Define path
-    const avatarsDir = path.join(process.cwd(), "public", "avatars");
-    const filepath = path.join(avatarsDir, filename);
+    const filename = `avatar_${authUser.id}_${Date.now()}${ext}`;
 
-    // Ensure directory exists
-    await mkdir(avatarsDir, { recursive: true });
+    let avatarUrl: string;
+    try {
+      avatarUrl = await uploadToHostinger(buffer, filename);
+    } catch (err) {
+      console.error("[upload-avatar] FTP upload failed:", err);
+      return NextResponse.json(
+        { error: "Photo upload failed. Try again." },
+        { status: 502 },
+      );
+    }
 
-    // Save file
-    await writeFile(filepath, buffer);
-
-    // Generate public URL
-    const avatarUrl = `/avatars/${filename}`;
-
-    // Update user in database
     await prisma.user.update({
       where: { id: authUser.id },
       data: { avatar: avatarUrl },
     });
 
-    // Mirror the photo onto the linked Employee record (employeeImage).
+    // Mirror the photo onto the linked Employee record (employeeImage) so
+    // Employee Master shows the same image the user just picked.
     await syncUserToEmployee(authUser.id, { avatar: avatarUrl });
 
-    // Return `url` to match the client mutation contract (PersonalTab reads res.url).
     return NextResponse.json({ success: true, url: avatarUrl });
   } catch (error) {
     console.error("Avatar upload error:", error);
     return NextResponse.json(
       { error: "Failed to upload avatar. Please try again." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

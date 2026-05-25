@@ -23,6 +23,7 @@ import {
 } from '@/lib/hr/leave-service';
 import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
+import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,9 +65,23 @@ export async function GET(request: NextRequest) {
     userIdFilter = authUser.id;
   }
 
+  // Approvers see the org by default, but a non-admin approver (e.g. a
+  // department Head configured as an attendance approver) must only see
+  // leaves from users at or below them in the role tree. Admins get `null`
+  // and skip this filter. If the approver explicitly requested a userId
+  // outside their subtree, return 403 rather than silently broadening.
+  const visibleUserIds = await getVisibleUserIdsForHierarchy(
+    authUser.id,
+    authUser.organizationId,
+  );
+  if (visibleUserIds && userIdFilter && !visibleUserIds.includes(userIdFilter)) {
+    return err('You cannot view leaves for that user.', 403);
+  }
+
   const rows = await listRequests({
     organizationId: authUser.organizationId,
     userId: userIdFilter,
+    userIds: userIdFilter ? undefined : visibleUserIds ?? undefined,
     status,
     from,
     to,
