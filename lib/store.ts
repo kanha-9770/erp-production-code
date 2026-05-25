@@ -20,6 +20,7 @@ import "./api/job-applications"
 import "./api/job-offers"
 import "./api/appointment-letters"
 import "./api/employee-referrals"
+import "./api/dashboard"
 
 export const store = configureStore({
   reducer: {

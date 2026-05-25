@@ -7,45 +7,31 @@
  *   1. Hero strip   — gradient banner with key contact info + a prominent
  *                      profile-completion bar and a primary "Edit profile"
  *                      action. Anchors the page.
- *   2. KPI tiles    — four substantial cards (completeness, security,
- *                      sessions, last sign-in) with iconography, tone
- *                      colours and trend captions.
- *   3. Cards row    — a Setup-Checklist (left, wider) and an Employment
+ *   2. Cards row    — a Setup-Checklist (left, wider) and an Employment
  *                      details panel (right).
- *   4. Activity     — recent login attempts with status, IP and time.
  *
  * Pure read-only; mutations live on the per-section tabs.
  */
 
-import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import {
   CheckCircle2,
   ChevronRight,
-  Clock,
   Mail,
   Phone,
   MapPin,
   ShieldCheck,
-  ShieldAlert,
   Briefcase,
   Building2,
-  Activity as ActivityIcon,
-  TrendingUp,
   ArrowUpRight,
   CalendarDays,
-  Network,
   Edit3,
-  Sparkles,
   Hash,
   IdCard,
   ListChecks,
-  Wallet,
-  ReceiptText,
 } from "lucide-react"
 import type { ProfileUser, ProfileTabId } from "./types"
 import { getProfileCompleteness, formatDate } from "./profile-utils"
@@ -59,7 +45,6 @@ export default function OverviewTab({ user, onJumpTab }: OverviewTabProps) {
   return (
     <div className="space-y-6">
       <HeroCard user={user} onJumpTab={onJumpTab} />
-      <KpiGrid user={user} />
       <div className="grid gap-5 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <SetupChecklistCard user={user} onJumpTab={onJumpTab} />
@@ -68,8 +53,6 @@ export default function OverviewTab({ user, onJumpTab }: OverviewTabProps) {
           <EmploymentCard user={user} onJumpTab={onJumpTab} />
         </div>
       </div>
-      <SalarySummaryCard onJumpTab={onJumpTab} />
-      <RecentActivityCard onJumpTab={onJumpTab} />
     </div>
   )
 }
@@ -237,17 +220,10 @@ function Chip({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KPI grid — the "exec dashboard" row.
+// Tone palette — shared by HeroCard + SetupChecklistCard.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ToneKey = "success" | "warn" | "danger" | "info"
-
-const TONE_RING: Record<ToneKey, string> = {
-  success: "ring-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  warn: "ring-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  danger: "ring-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  info: "ring-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
-}
 
 const TONE_TEXT: Record<ToneKey, string> = {
   success: "text-emerald-600 dark:text-emerald-400",
@@ -261,155 +237,6 @@ const TONE_BAR: Record<ToneKey, string> = {
   warn: "bg-amber-500",
   danger: "bg-rose-500",
   info: "bg-blue-500",
-}
-
-function KpiGrid({ user }: { user: ProfileUser }) {
-  const [stats, setStats] = useState<{
-    sessionsCount: number | null
-    lastSuccess: string | null
-    lastFailed: string | null
-  }>({ sessionsCount: null, lastSuccess: null, lastFailed: null })
-
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      fetch("/api/auth/sessions", { credentials: "include", cache: "no-store" })
-        .then((r) => r.json())
-        .catch(() => ({ sessions: [] })),
-      fetch("/api/auth/activity?limit=20", { credentials: "include", cache: "no-store" })
-        .then((r) => r.json())
-        .catch(() => ({ events: [] })),
-    ]).then(([s, a]) => {
-      if (cancelled) return
-      const events: Array<{ status: string; createdAt: string }> = a.events ?? []
-      const lastSuccess = events.find((e) => e.status === "Success")?.createdAt ?? null
-      const lastFailed = events.find((e) => e.status === "Failed")?.createdAt ?? null
-      setStats({
-        sessionsCount: Array.isArray(s.sessions) ? s.sessions.length : 0,
-        lastSuccess,
-        lastFailed,
-      })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const { pct } = getProfileCompleteness(user)
-  const completionTone: ToneKey =
-    pct >= 80 ? "success" : pct >= 50 ? "warn" : "danger"
-
-  return (
-    <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-      <Kpi
-        icon={<Sparkles className="h-4 w-4" />}
-        label="Profile complete"
-        value={`${pct}%`}
-        tone={completionTone}
-        trend={pct === 100 ? "All set" : `${100 - pct}% to go`}
-        progress={pct}
-      />
-      <Kpi
-        icon={
-          user.email_verified ? (
-            <ShieldCheck className="h-4 w-4" />
-          ) : (
-            <ShieldAlert className="h-4 w-4" />
-          )
-        }
-        label="Security"
-        value={user.email_verified ? "Healthy" : "At risk"}
-        tone={user.email_verified ? "success" : "danger"}
-        trend={user.email_verified ? "Email verified" : "Verify your email"}
-      />
-      <Kpi
-        icon={<Network className="h-4 w-4" />}
-        label="Active sessions"
-        value={stats.sessionsCount === null ? "—" : String(stats.sessionsCount)}
-        tone="info"
-        trend="Across all devices"
-        loading={stats.sessionsCount === null}
-      />
-      <Kpi
-        icon={<Clock className="h-4 w-4" />}
-        label="Last sign-in"
-        value={stats.lastSuccess ? relativeTime(stats.lastSuccess) : "—"}
-        tone="info"
-        trend={
-          stats.lastFailed
-            ? `Last failed ${relativeTime(stats.lastFailed)}`
-            : "No failures recorded"
-        }
-        loading={stats.lastSuccess === null && stats.lastFailed === null}
-      />
-    </div>
-  )
-}
-
-function Kpi({
-  icon,
-  label,
-  value,
-  tone,
-  trend,
-  loading,
-  progress,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  tone: ToneKey
-  trend: string
-  loading?: boolean
-  progress?: number
-}) {
-  return (
-    <Card className="border-border/70 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {label}
-          </span>
-          <span
-            className={cn(
-              "h-9 w-9 rounded-lg flex items-center justify-center ring-1",
-              TONE_RING[tone],
-            )}
-            aria-hidden
-          >
-            {icon}
-          </span>
-        </div>
-        {loading ? (
-          <Skeleton className="h-8 w-24" />
-        ) : (
-          <div
-            className={cn(
-              "text-[1.65rem] font-bold tabular-nums tracking-tight leading-none",
-              TONE_TEXT[tone],
-            )}
-          >
-            {value}
-          </div>
-        )}
-        {progress !== undefined && (
-          <div className="mt-3 h-1 w-full bg-muted rounded-full overflow-hidden">
-            <div
-              className={cn(
-                "h-full transition-all duration-700 ease-out",
-                TONE_BAR[tone],
-              )}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        )}
-        <div className="text-[11px] text-muted-foreground truncate mt-2 flex items-center gap-1">
-          <TrendingUp className="h-3 w-3 opacity-60" />
-          {trend}
-        </div>
-      </CardContent>
-    </Card>
-  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -626,337 +453,3 @@ function Row({
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Recent activity — log rows with status dot, IP and time.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function RecentActivityCard({
-  onJumpTab,
-}: {
-  onJumpTab: (tab: ProfileTabId) => void
-}) {
-  const [rows, setRows] = useState<Array<{
-    id: number
-    status: string
-    reason: string | null
-    createdAt: string
-    ipAddress: string | null
-  }> | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/auth/activity?limit=5", { credentials: "include", cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return
-        if (j.success) setRows(j.events ?? [])
-      })
-      .catch(() => setRows([]))
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return (
-    <Card className="border-border/70 shadow-sm">
-      <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle className="text-base flex items-center gap-2">
-            <ActivityIcon className="h-4 w-4 text-primary" />
-            Recent activity
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Last 5 sign-in events on your account.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onJumpTab("security")}
-          className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-0.5"
-        >
-          View all
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
-      </CardHeader>
-      <CardContent className="pt-0">
-        {rows === null ? (
-          <div className="space-y-2">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-12" />
-            ))}
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">
-            No recent activity.
-          </p>
-        ) : (
-          <ul className="divide-y border rounded-lg overflow-hidden">
-            {rows.map((r) => {
-              const ok = r.status === "Success"
-              return (
-                <li
-                  key={r.id}
-                  className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors"
-                >
-                  <span
-                    className={cn(
-                      "h-7 w-7 rounded-full flex items-center justify-center ring-4",
-                      ok
-                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/10"
-                        : "bg-rose-500/10 text-rose-600 dark:text-rose-400 ring-rose-500/10",
-                    )}
-                  >
-                    {ok ? (
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    ) : (
-                      <ShieldAlert className="h-3.5 w-3.5" />
-                    )}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">
-                      {ok
-                        ? "Successful sign-in"
-                        : `Failed sign-in${r.reason ? ` · ${r.reason}` : ""}`}
-                    </div>
-                    {r.ipAddress && (
-                      <div className="text-[11px] text-muted-foreground truncate">
-                        IP {r.ipAddress}
-                      </div>
-                    )}
-                  </div>
-                  <span
-                    className={cn(
-                      "hidden sm:inline-flex text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md tabular-nums",
-                      ok
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                        : "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-                    )}
-                  >
-                    {ok ? "OK" : "Fail"}
-                  </span>
-                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                    {relativeTime(r.createdAt)}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Salary summary — last 3 payslips with totals, "View all" jumps to the
-// dedicated Salary tab.
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface SalaryRecord {
-  id: string
-  month: number
-  year: number
-  grossSalary: number
-  deductions: number
-  netSalary: number
-  status: string
-  paidAt: string | null
-}
-
-const MONTHS_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-]
-
-function SalarySummaryCard({
-  onJumpTab,
-}: {
-  onJumpTab: (tab: ProfileTabId) => void
-}) {
-  const [state, setState] = useState<{
-    loading: boolean
-    records: SalaryRecord[]
-    noEmployee: boolean
-    error: string | null
-  }>({ loading: true, records: [], noEmployee: false, error: null })
-
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/profile/salary", { credentials: "include", cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return
-        if (!j.success) {
-          setState({
-            loading: false,
-            records: [],
-            noEmployee: false,
-            error: j.error ?? "Failed to load",
-          })
-          return
-        }
-        setState({
-          loading: false,
-          records: (j.records ?? []) as SalaryRecord[],
-          noEmployee: j.reason === "no-employee-record",
-          error: null,
-        })
-      })
-      .catch((e: Error) => {
-        if (cancelled) return
-        setState({ loading: false, records: [], noEmployee: false, error: e.message })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const fmt = useMemo(
-    () =>
-      new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 0,
-      }),
-    [],
-  )
-
-  const latest = state.records[0]
-  const recent = state.records.slice(0, 3)
-  const ytd = state.records
-    .filter((r) => r.year === new Date().getFullYear())
-    .reduce((s, r) => s + r.netSalary, 0)
-
-  return (
-    <Card className="border-border/70 shadow-sm">
-      <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-primary" />
-            Salary records
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Your most recent monthly pay slips.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onJumpTab("salary")}
-          className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-0.5 shrink-0"
-        >
-          View all
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
-      </CardHeader>
-      <CardContent className="pt-0">
-        {state.loading ? (
-          <div className="space-y-2">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-12" />
-            ))}
-          </div>
-        ) : state.error ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">
-            Couldn&apos;t load salary records.
-          </p>
-        ) : state.noEmployee ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">
-            No HR record linked yet. Salary records will appear here once your
-            admin attaches one.
-          </p>
-        ) : recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">
-            No payroll records yet for your account.
-          </p>
-        ) : (
-          <>
-            {/* Summary band */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Latest net pay
-                </div>
-                <div className="text-base font-bold tabular-nums tracking-tight mt-0.5">
-                  {latest ? fmt.format(latest.netSalary) : "—"}
-                </div>
-                <div className="text-[11px] text-muted-foreground">
-                  {latest
-                    ? `${MONTHS_SHORT[latest.month - 1] ?? latest.month} ${latest.year}`
-                    : ""}
-                </div>
-              </div>
-              <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Earned this year
-                </div>
-                <div className="text-base font-bold tabular-nums tracking-tight mt-0.5">
-                  {fmt.format(ytd)}
-                </div>
-                <div className="text-[11px] text-muted-foreground">
-                  {state.records.length} slip
-                  {state.records.length === 1 ? "" : "s"} on file
-                </div>
-              </div>
-            </div>
-
-            <ul className="divide-y border rounded-lg overflow-hidden">
-              {recent.map((r) => {
-                const paid = r.status === "paid"
-                return (
-                  <li
-                    key={r.id}
-                    className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors"
-                  >
-                    <span className="h-7 w-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                      <ReceiptText className="h-3.5 w-3.5" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">
-                        {MONTHS_SHORT[r.month - 1] ?? r.month} {r.year}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground truncate">
-                        Gross {fmt.format(r.grossSalary)} · Deductions{" "}
-                        {fmt.format(r.deductions)}
-                      </div>
-                    </div>
-                    <span
-                      className={cn(
-                        "hidden sm:inline-flex text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md tabular-nums",
-                        paid
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                          : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-                      )}
-                    >
-                      {r.status}
-                    </span>
-                    <span className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 shrink-0">
-                      {fmt.format(r.netSalary)}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function relativeTime(iso: string): string {
-  const d = new Date(iso)
-  const diff = Date.now() - d.getTime()
-  const secs = Math.round(diff / 1000)
-  if (secs < 60) return "just now"
-  const mins = Math.round(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  if (days < 30) return `${days}d ago`
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-}

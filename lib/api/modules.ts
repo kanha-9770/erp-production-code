@@ -40,6 +40,27 @@ interface OrgModuleForm {
   isPublished: boolean
 }
 
+// Lite shape — what the sidebar's first paint needs. Excludes forms[]
+// and per-form record counts (which require scanning 15 partition
+// tables). The sidebar reconstructs the tree client-side via parentId.
+export interface OrgModuleLite {
+  id: string
+  name: string
+  parentId: string | null
+  icon: string | null
+  color: string | null
+  moduleType: string
+  sortOrder: number
+  hasForms: boolean
+}
+
+interface OrgModulesLiteResponse {
+  success: boolean
+  data: OrgModuleLite[]
+  meta?: { moduleCount: number }
+  error?: string
+}
+
 interface PermissionModulesResponse {
   success: boolean
   data: PermissionModule[]
@@ -73,6 +94,17 @@ export const modulesApi = baseApi.injectEndpoints({
       query: (organizationId) => `/modules?organizationId=${organizationId}`,
       providesTags: ["OrgModules"],
       keepUnusedDataFor: 120,
+    }),
+
+    // Lite modules feed — flat list, no forms, no record counts. Used by
+    // the sidebar for first paint. Shares the "OrgModules" tag with the
+    // full query so any module mutation (create/update/delete) refetches
+    // this too, keeping the sidebar in sync without extra wiring.
+    getOrgModulesLite: builder.query<OrgModulesLiteResponse, string>({
+      query: (organizationId) =>
+        `/modules/lite?organizationId=${encodeURIComponent(organizationId)}`,
+      providesTags: ["OrgModules"],
+      keepUnusedDataFor: 300,
     }),
 
     // Permission modules tree (used by use-modules hook)
@@ -292,6 +324,7 @@ export const {
   useGetModuleByIdQuery,
   useLazyGetModuleByIdQuery,
   useGetOrgModulesQuery,
+  useGetOrgModulesLiteQuery,
   useGetPermissionModulesQuery,
   usePublishFormMutation,
   useCreateModuleMutation,

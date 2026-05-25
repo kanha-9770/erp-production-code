@@ -76,7 +76,10 @@ import { useGetUserQuery } from "@/lib/api/auth";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { AttendanceWidget } from "@/components/attendance/attendance-widget";
 
-import { useOptimisticModules } from "@/hooks/useOptimisticModules";
+import {
+  useGetOrgModulesLiteQuery,
+  useCreateModuleMutation,
+} from "@/lib/api/modules";
 import { usePermissionContext } from "@/context/PermissionContext";
 import { useRouteAccess } from "@/hooks/use-route-access";
 import { STATIC_PAGES, type StaticPage } from "@/lib/static-pages";
@@ -94,7 +97,9 @@ interface FormModule {
   sort_order?: number;
   module_type?: string;
   children?: FormModule[];
-  forms?: { id: string; name: string; isPublished: boolean }[];
+  // Sidebar only needs the boolean: does this module have any forms?
+  // The full forms list is fetched by the admin module-management UI.
+  hasForms?: boolean;
 }
 
 type ViewType =
@@ -330,8 +335,38 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const organizationId = userData?.user?.organization?.id ?? null;
 
-  const { modules, isLoading, error, createModuleOptimistic } =
-    useOptimisticModules(organizationId);
+  // Lite modules feed — minimal payload (flat list, no forms, no record
+  // counts) so first paint is fast. The admin module-management UI uses
+  // the full /api/modules feed; mutations there share the "OrgModules"
+  // RTK tag, so this lite query stays in sync automatically.
+  const {
+    data: liteResp,
+    isLoading,
+    error,
+  } = useGetOrgModulesLiteQuery(organizationId as string, {
+    skip: !organizationId,
+  });
+
+  const [createModuleApi] = useCreateModuleMutation();
+
+  // Map the lite shape onto the FormModule the sidebar's tree builder
+  // expects. Each entry carries `hasForms` (boolean) instead of a forms
+  // list — handleModuleClick only needs to know "does clicking this row
+  // open a records page" anyway.
+  const modules = useMemo<FormModule[]>(() => {
+    const lite = liteResp?.data ?? [];
+    return lite.map((m) => ({
+      id: m.id,
+      name: m.name,
+      parentId: m.parentId,
+      icon: m.icon ?? undefined,
+      color: m.color ?? undefined,
+      module_type: m.moduleType,
+      sort_order: m.sortOrder,
+      level: 0,
+      hasForms: m.hasForms,
+    }));
+  }, [liteResp]);
 
   const { hasPermission: checkPermission } = usePermissionContext();
 
@@ -501,7 +536,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       return;
     }
     const hasChildren = !!module.children?.length;
-    const hasForms = !!module.forms?.length;
+    const hasForms = !!module.hasForms;
 
     // Modules with no forms are pure containers — the module page would
     // render an empty record list, so we just toggle expand/collapse to
@@ -919,12 +954,16 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     setIsSubmitting(true);
 
     try {
-      await createModuleOptimistic({
+      await createModuleApi({
         name: moduleData.name.trim(),
         description: moduleData.description || "",
         parentId: moduleData.parentId || null,
         organizationId: organizationId,
-      });
+      }).unwrap();
+
+      // The "OrgModules" tag invalidation triggered by createModule
+      // refetches the lite query automatically, so the new row appears
+      // in the sidebar without any extra work here.
 
       toast({
         title: "Success",

@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
   getOrganizationKPIs, getFormModules, getSubmissionTimeSeries,
-  getOrganizationSetupMetrics, getUserDashboardData, checkIsAdmin,
+  getOrganizationSetupMetrics, checkIsAdmin,
 } from '@/app/actions/analytics';
 import { DashboardContent } from '@/components/dashboard/dashboard-content';
 import { UserDashboardContent } from '@/components/dashboard/user-dashboard-content';
@@ -77,7 +77,10 @@ async function AdminDashboard() {
   );
 }
 
-async function UserDashboard() {
-  const userData = await getUserDashboardData('30days');
-  return <UserDashboardContent userData={userData} />;
+function UserDashboard() {
+  // No server-side data fetch — the user landing page renders a thin
+  // shell and the client triggers /api/dashboard/summary on mount via
+  // RTK Query. Heavy panels (modules, time series, recent activity) are
+  // skipped until the user opens them, which keeps first paint snappy.
+  return <UserDashboardContent />;
 }
