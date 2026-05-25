@@ -865,7 +865,9 @@ export default function EmployeeMasterListPage() {
               title="Employee Master"
               subtitle={`${total.toLocaleString()} record${total === 1 ? "" : "s"}${isFetching ? " · syncing…" : ""}`}
             >
-              <div className="relative">
+              {/* Search takes the full row on mobile so the label is legible
+                  and the action buttons can wrap underneath cleanly. */}
+              <div className="relative w-full sm:w-auto order-1 sm:order-none">
                 <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="Search name, dept, designation..."
@@ -875,7 +877,7 @@ export default function EmployeeMasterListPage() {
                     if (e.key === "Enter") updateFilter("search", searchInput.trim());
                     if (e.key === "Escape") { setSearchInput(""); updateFilter("search", ""); }
                   }}
-                  className="pl-8 h-8 w-64 text-sm"
+                  className="pl-8 h-8 w-full sm:w-64 text-sm"
                 />
               </div>
               <AdvancedFilter
@@ -888,8 +890,14 @@ export default function EmployeeMasterListPage() {
                 columns={columns}
                 variant="dialog"
               />
-              <Button size="sm" className="h-8" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> New employee
+              <Button
+                size="sm"
+                className="h-8 flex-1 sm:flex-none min-w-[140px] sm:min-w-0"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                <span className="hidden sm:inline">New employee</span>
+                <span className="sm:hidden">New</span>
               </Button>
             </WorkspaceHeader>
 
@@ -919,20 +927,21 @@ export default function EmployeeMasterListPage() {
                 onChange={(v) => updateFilter("department", v)}
                 options={departments}
               />
-              <div className="flex items-center gap-1">
+              {/* Salary range — fills the row on mobile, fixed on desktop. */}
+              <div className="flex items-center gap-1 w-full sm:w-auto">
                 <Input
                   type="number"
                   placeholder="Min Salary"
                   value={filters.minSalary}
                   onChange={(e) => updateFilter("minSalary", e.target.value)}
-                  className="h-7 w-24 text-xs"
+                  className="h-7 flex-1 sm:w-24 sm:flex-none text-xs"
                 />
                 <Input
                   type="number"
                   placeholder="Max Salary"
                   value={filters.maxSalary}
                   onChange={(e) => updateFilter("maxSalary", e.target.value)}
-                  className="h-7 w-24 text-xs"
+                  className="h-7 flex-1 sm:w-24 sm:flex-none text-xs"
                 />
               </div>
               <ActiveFilterPills

@@ -836,8 +836,8 @@ function SubmissionDetailBody({ submission }: { submission: EmployeeSubmission }
   const mediaSlots: { label: string; value: string | null | undefined }[] =
     submission.type === "Kaizen"
       ? [
-          { label: "Before Media", value: submission.beforeMedia ?? submission.referenceImage },
-          { label: "After Media", value: submission.afterMedia },
+          { label: "Before Kaizen", value: submission.beforeMedia ?? submission.referenceImage },
+          { label: "After Kaizen", value: submission.afterMedia },
         ]
       : [{ label: "Reference Image", value: submission.referenceImage }];
   const hasAnyMedia = mediaSlots.some((m) => !!m.value);

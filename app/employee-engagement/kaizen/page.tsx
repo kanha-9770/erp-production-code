@@ -348,8 +348,8 @@ export default function KaizenPage() {
 
       // ── Section 2: Problem & Analysis ─────────────────────────────────
       { id: "description", header: "Problem", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.description || "—"}</span> },
-      { id: "beforeMedia", header: "Before Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "beforeMedia") },
-      { id: "afterMedia", header: "After Media", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "afterMedia") },
+      { id: "beforeMedia", header: "Before Kaizen", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "beforeMedia") },
+      { id: "afterMedia", header: "After Kaizen", width: 160, group: "Problem & Analysis", defaultHidden: true, cell: (k) => mediaCell(k, "afterMedia") },
       { id: "currentState", header: "Why Analysis", width: 240, group: "Problem & Analysis", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.currentState || "—"}</span> },
 
       // ── Section 3: Result & Benefits ──────────────────────────────────
@@ -525,6 +525,7 @@ export default function KaizenPage() {
               initial={kaizens.find(k => k.id === editingId)}
               currentEmployee={currentEmployee}
               isAdmin={isAdmin}
+              teamMembers={teamMembers}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -595,8 +596,8 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, review, onEdit, onDele
       s.startsWith("/")
     );
   const mediaSlots = [
-    { label: "Before Media", value: beforeMedia ?? null },
-    { label: "After Media", value: afterMedia ?? null },
+    { label: "Before Kaizen", value: beforeMedia ?? null },
+    { label: "After Kaizen", value: afterMedia ?? null },
   ];
   const hasAnyMedia = mediaSlots.some((m) => !!m.value);
 
@@ -763,8 +764,8 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, review, onEdit, onDele
           <FieldRow label="Employee ID" value={k.employeeId || "—"} mono />
           <FieldRow label="User ID" value={(k as any).userId || "—"} mono />
           <FieldRow label="Has Voted (by you)" value={k.hasVoted ? "Yes" : "No"} />
-          <FieldRow label="Before Media" value={summarizeMedia(beforeMedia)} mono />
-          <FieldRow label="After Media" value={summarizeMedia(afterMedia)} mono />
+          <FieldRow label="Before Kaizen" value={summarizeMedia(beforeMedia)} mono />
+          <FieldRow label="After Kaizen" value={summarizeMedia(afterMedia)} mono />
           <FieldRow label="Reference Image (legacy)" value={summarizeMedia(refImg)} mono />
           <FieldRow label="Raw Benefits" value={k.benefits || "—"} wide />
           {extraEntries.map(([key, value]) => (
@@ -841,12 +842,15 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSubmit }: {
+function KaizenForm({ initial, currentEmployee, isAdmin = false, teamMembers = [], onCancel, onSubmit }: {
   initial?: Kaizen,
   currentEmployee?: any,
   // Points-related fields ("Employee Engagement Points", final "Status")
   // are filled by Admin / HR. Regular employees see them but as read-only.
   isAdmin?: boolean,
+  // Members of the current user's engagement team (self excluded) — used
+  // by the Employee Contributor multi-select.
+  teamMembers?: any[],
   onCancel: () => void,
   onSubmit: (data: any) => void
 }) {
@@ -1065,7 +1069,7 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSub
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Before Media" hint="Take a photo or upload">
+            <FieldWrapper label="Before Kaizen" hint="Take a photo or upload">
               <FileFieldStub
                 value={formData.beforeMedia}
                 onChange={v => setFormData({ ...formData, beforeMedia: v })}
@@ -1073,7 +1077,7 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSub
               />
             </FieldWrapper>
 
-            <FieldWrapper label="After Media" hint="Take a photo or upload">
+            <FieldWrapper label="After Kaizen" hint="Take a photo or upload">
               <FileFieldStub
                 value={formData.afterMedia}
                 onChange={v => setFormData({ ...formData, afterMedia: v })}
@@ -1171,11 +1175,15 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, onCancel, onSub
               </FieldWrapper>
             </div>
 
-            <FieldWrapper label="Employee Contributor">
-              <Input
+            <FieldWrapper
+              label="Employee Contributor"
+              hint="Pick up to 4 team-mates who contributed to this Kaizen."
+            >
+              <ContributorPicker
                 value={formData.employeeContributor}
-                onChange={e => setFormData({ ...formData, employeeContributor: e.target.value })}
-                placeholder="Other contributors"
+                onChange={(v) => setFormData({ ...formData, employeeContributor: v })}
+                teamMembers={teamMembers}
+                max={4}
               />
             </FieldWrapper>
 
@@ -1273,6 +1281,118 @@ function FieldWrapper({ label, required, error, hint, children }: {
 // as <img> by the dashboard detail dialog (see employee-awards-view.tsx
 // → MediaSlot). A live preview is shown so the user knows the upload
 // worked.
+// Multi-select for "Employee Contributor" — picks up to `max` team-mates
+// from the engagement team. Selected contributors render as removable
+// badges; the stored value is a comma-separated string of names so the
+// existing free-text storage path keeps working.
+function ContributorPicker({
+  value,
+  onChange,
+  teamMembers,
+  max = 4,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  teamMembers: any[];
+  max?: number;
+}) {
+  const selectedNames = (value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Display name fallback chain — employee record shape varies a bit.
+  const nameOf = (e: any): string =>
+    e?.employeeName ||
+    [e?.firstName, e?.middleName, e?.lastName].filter(Boolean).join(" ") ||
+    e?.email ||
+    e?.id ||
+    "Unknown";
+
+  const remaining = Math.max(0, max - selectedNames.length);
+  const atLimit = remaining === 0;
+
+  const availableMembers = teamMembers.filter(
+    (e) => !selectedNames.includes(nameOf(e)),
+  );
+
+  const addMember = (name: string) => {
+    if (!name || atLimit) return;
+    const next = [...selectedNames, name].join(", ");
+    onChange(next);
+  };
+
+  const removeMember = (name: string) => {
+    const next = selectedNames.filter((n) => n !== name).join(", ");
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      {/* Selected badges */}
+      <div className="flex flex-wrap items-center gap-1.5 min-h-[2rem]">
+        {selectedNames.length === 0 && (
+          <span className="text-xs text-muted-foreground italic">No contributors added yet.</span>
+        )}
+        {selectedNames.map((n) => (
+          <Badge
+            key={n}
+            variant="secondary"
+            className="gap-1 pl-2 pr-1 py-1 text-xs font-medium"
+          >
+            {n}
+            <button
+              type="button"
+              onClick={() => removeMember(n)}
+              className="ml-1 rounded hover:bg-muted p-0.5"
+              title={`Remove ${n}`}
+              aria-label={`Remove ${n}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+
+      {/* Picker */}
+      <div className="flex items-center gap-2">
+        <Select
+          value=""
+          onValueChange={addMember}
+          disabled={atLimit || availableMembers.length === 0}
+        >
+          <SelectTrigger className="h-9 flex-1">
+            <SelectValue
+              placeholder={
+                atLimit
+                  ? `Limit reached (${max}/${max})`
+                  : availableMembers.length === 0
+                    ? teamMembers.length === 0
+                      ? "No team members available"
+                      : "All team members added"
+                    : "Add a team member…"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {availableMembers.map((e) => (
+              <SelectItem key={e.id} value={nameOf(e)}>
+                {nameOf(e)}
+                {e.department && (
+                  <span className="text-muted-foreground"> · {e.department}</span>
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+          {selectedNames.length}/{max}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function FileFieldStub({ value, onChange, placeholder, capture }: {
   value: string;
   onChange: (v: string) => void;
