@@ -13,7 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import * as XLSX from "xlsx";
+// xlsx is dynamically imported inside parseFile (~300 KB gzipped) so it
+// doesn't ship in the initial page bundle. Only the WorkBook type — erased
+// at compile time — is needed up here for the closure-scoped declaration.
+import type { WorkBook } from "xlsx";
 import { cn } from "@/lib/utils";
 
 /* ============================================================
@@ -72,6 +75,11 @@ export function FileUpload({
     setIsParsing(true);
     setError(null);
 
+    // Lazy-load xlsx (~300 KB gzipped) only when the user actually uploads
+    // a file. Keeping it out of the initial page bundle is the main reason
+    // /data-migration/import shrinks dramatically on first load.
+    const XLSX = await import("xlsx");
+
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
@@ -80,7 +88,7 @@ export function FileUpload({
           const result = e.target?.result;
           if (!result) throw new Error("File read failed");
 
-          let workbook: XLSX.WorkBook;
+          let workbook: WorkBook;
 
           if (file.name.toLowerCase().endsWith(".csv")) {
             workbook = XLSX.read(result as string, { type: "string" });

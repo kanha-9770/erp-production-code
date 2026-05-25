@@ -7,6 +7,7 @@ import { sendOTPEmail } from "@/lib/email"
 import { LoginSchema } from "@/lib/utils/validations"
 import { getRequestMeta, logAudit } from "@/lib/api-helpers"
 import { computeRouteMeta } from "@/lib/auth/route-meta"
+import { signAuthMeta } from "@/lib/auth/auth-meta-cookie"
 import {
   checkIpRate,
   clearIpFailures,
@@ -375,18 +376,26 @@ export async function POST(request: NextRequest) {
       path: "/",
     })
 
-    // Set auth-meta cookie for lightweight middleware permission checks
-    response.cookies.set(
-      "auth-meta",
-      JSON.stringify({ v: 2, ts: Date.now(), isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds, selectedModules }),
-      {
-        httpOnly: false, // Client-side RoutePermissionGuard needs to read this
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: "/",
-      }
-    )
+    // Set HMAC-signed auth-meta cookie for middleware permission checks.
+    // httpOnly: the client never reads this directly — it gets permission
+    // data from /api/auth/me which validates the session server-side.
+    const signedMeta = await signAuthMeta({
+      v: 2,
+      ts: Date.now(),
+      isAdmin,
+      roleNames,
+      deniedRoutes,
+      allowedRoutes,
+      allowedModuleIds,
+      selectedModules,
+    })
+    response.cookies.set("auth-meta", signedMeta, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: "/",
+    })
 
     console.log(
       `[login] auth-meta set for user=${user.email} isAdmin=${isAdmin} roles=[${roleNames}] allowedModules=${allowedModuleIds.length} denied=[${deniedRoutes}]`

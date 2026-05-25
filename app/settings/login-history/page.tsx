@@ -12,8 +12,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Search, Download, Filter } from "lucide-react"
 import PageBackLink from "@/components/shared/page-back-link"
-import { jsPDF } from "jspdf"
-import autoTable from "jspdf-autotable"
+// jspdf (~150 KB) + jspdf-autotable (~50 KB) are dynamically imported
+// inside exportToPDF so they stay out of the initial page bundle. The
+// libraries only load when the user actually clicks Export.
 
 interface LoginEntry {
   id: number
@@ -62,7 +63,11 @@ export default function LoginHistoryPage() {
     return "Other Browser"
   }
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ])
     const doc = new jsPDF()
     doc.setFontSize(18)
     doc.text("Login History", 14, 20)

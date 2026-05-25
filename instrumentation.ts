@@ -12,15 +12,22 @@
  * replica but one when scaling horizontally to avoid duplicate fires.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return
-  if (process.env.DISABLE_WORKFLOW_SCHEDULER === "1") {
-    console.log("[instrumentation] workflow scheduler disabled via env")
-    return
-  }
-  try {
-    const { startWorkflowScheduler } = await import("@/lib/workflow/scheduler")
-    await startWorkflowScheduler()
-  } catch (err) {
-    console.error("[instrumentation] workflow scheduler boot failed:", err)
+  // The positive `if (NEXT_RUNTIME === "nodejs")` check (instead of an early
+  // `return` guard) is load-bearing: webpack's DefinePlugin replaces the env
+  // var with a literal at compile time, so the entire block — including the
+  // dynamic import target — is dead-code-eliminated from the Edge bundle.
+  // An early-return guard collapses the function body but webpack still emits
+  // the import()'d chunk, dragging Prisma + scheduler deps into middleware.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    if (process.env.DISABLE_WORKFLOW_SCHEDULER === "1") {
+      console.log("[instrumentation] workflow scheduler disabled via env")
+      return
+    }
+    try {
+      const { startWorkflowScheduler } = await import("@/lib/workflow/scheduler")
+      await startWorkflowScheduler()
+    } catch (err) {
+      console.error("[instrumentation] workflow scheduler boot failed:", err)
+    }
   }
 }

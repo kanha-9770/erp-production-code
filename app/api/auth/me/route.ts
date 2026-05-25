@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic';
 import { type NextRequest, NextResponse } from "next/server"
 import { validateSession } from "@/lib/auth"
+import { verifyAuthMeta } from "@/lib/auth/auth-meta-cookie"
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,22 +24,16 @@ export async function GET(request: NextRequest) {
     )
     const isAdmin = isOrgOwner || hasAdminRole
 
-    // Read route permissions from auth-meta cookie so client can gate UI features
+    // Read route permissions from signed auth-meta cookie. If verification
+    // fails (missing cookie, bad signature, tampered payload), we fall back
+    // to empty arrays — the next page navigation will trigger middleware to
+    // refresh through /api/auth/refresh-meta and mint a valid cookie.
     let allowedRoutes: string[] = []
     let deniedRoutes: string[] = []
-    try {
-      const authMetaRaw = request.cookies.get("auth-meta")?.value
-      if (authMetaRaw) {
-        const authMeta = JSON.parse(authMetaRaw)
-        allowedRoutes = Array.isArray(authMeta.allowedRoutes)
-          ? authMeta.allowedRoutes
-          : []
-        deniedRoutes = Array.isArray(authMeta.deniedRoutes)
-          ? authMeta.deniedRoutes
-          : []
-      }
-    } catch {
-      // ignore parse errors
+    const authMeta = await verifyAuthMeta(request.cookies.get("auth-meta")?.value)
+    if (authMeta) {
+      allowedRoutes = Array.isArray(authMeta.allowedRoutes) ? authMeta.allowedRoutes : []
+      deniedRoutes = Array.isArray(authMeta.deniedRoutes) ? authMeta.deniedRoutes : []
     }
 
     return NextResponse.json({

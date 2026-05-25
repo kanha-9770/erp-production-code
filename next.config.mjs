@@ -1,4 +1,10 @@
 import { builtinModules } from 'node:module';
+import bundleAnalyzer from '@next/bundle-analyzer';
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+  openAnalyzer: false,
+});
 
 const SERVER_ONLY_EXTERNALS = [
   'node-cron',
@@ -38,6 +44,17 @@ const nextConfig = {
     },
     instrumentationHook: true,
     serverComponentsExternalPackages: SERVER_ONLY_EXTERNALS,
+    // Tells the compiler to tree-shake these barrel packages so importing
+    // one icon / helper doesn't pull the entire library into the chunk.
+    // Biggest win on `lucide-react` (hundreds of icons) — present in nearly
+    // every page chunk in this app.
+    optimizePackageImports: [
+      'lucide-react',
+      'date-fns',
+      'react-icons',
+      '@radix-ui/react-icons',
+      'recharts',
+    ],
   },
   // serverComponentsExternalPackages doesn't cover the instrumentation bundle,
   // so externalize the same packages at the webpack layer for the server build.
@@ -66,4 +83,4 @@ const nextConfig = {
   },
 }
 
-export default nextConfig
+export default withBundleAnalyzer(nextConfig)

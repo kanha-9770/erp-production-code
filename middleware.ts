@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { patternToRegex, resolveRouteAccess } from "@/lib/route-permissions";
 import { isPathBlockedByModules } from "@/lib/erp-modules";
+import { verifyAuthMeta } from "@/lib/auth/auth-meta-cookie";
 
 /**
  * Detect if a path segment looks like a Prisma CUID (module ID).
@@ -14,7 +15,7 @@ const CUID_REGEX = /^c[a-z0-9]{15,}$/;
  */
 const AUTH_META_MAX_AGE = 5 * 60 * 1000; // 5 minutes
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── 1. Always allow internals, API, static files, /form/ pages ─────────────
@@ -68,29 +69,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── 4. Read auth-meta cookie ───────────────────────────────────────────────
+  // ── 4. Read auth-meta cookie (HMAC-signed; tampering → null) ──────────────
+  // verifyAuthMeta returns null for: missing cookie, malformed envelope, bad
+  // signature, or non-object payload. In every case the answer is the same —
+  // bounce through /api/auth/refresh-meta to mint a fresh signed cookie.
   const authMetaRaw = request.cookies.get("auth-meta")?.value;
+  const authMeta = await verifyAuthMeta(authMetaRaw);
 
-  if (!authMetaRaw) {
-    const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
-    refreshUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(refreshUrl);
-  }
-
-  let authMeta: {
-    v?: number;
-    ts?: number;
-    isAdmin?: boolean;
-    roleNames?: string[];
-    deniedRoutes?: string[];
-    allowedRoutes?: string[];
-    allowedModuleIds?: string[];
-    selectedModules?: string[];
-  };
-
-  try {
-    authMeta = JSON.parse(authMetaRaw);
-  } catch {
+  if (!authMeta) {
     const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);

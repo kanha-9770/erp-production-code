@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateSession } from "@/lib/auth";
 import { computeRouteMeta } from "@/lib/auth/route-meta";
+import { signAuthMeta, type AuthMeta } from "@/lib/auth/auth-meta-cookie";
 
 /**
  * Shared: fetch user roles and compute the full auth-meta payload.
@@ -68,22 +69,17 @@ async function buildAuthMeta(token: string) {
   };
 }
 
-/** Set the auth-meta cookie on a response */
-function setAuthMetaCookie(
-  response: NextResponse,
-  meta: {
-    v: number;
-    ts: number;
-    isAdmin: boolean;
-    roleNames: string[];
-    deniedRoutes: string[];
-    allowedRoutes: string[];
-    allowedModuleIds: string[];
-    selectedModules: string[];
-  }
-) {
-  response.cookies.set("auth-meta", JSON.stringify(meta), {
-    httpOnly: false, // Client-side RoutePermissionGuard needs to read this
+/**
+ * Set the HMAC-signed auth-meta cookie on a response.
+ *
+ * httpOnly is `true`: the client never reads this cookie directly. Permission
+ * data flows to the client via `/api/auth/me` and the POST response body of
+ * this same endpoint, both of which validate the session server-side.
+ */
+async function setAuthMetaCookie(response: NextResponse, meta: AuthMeta) {
+  const signed = await signAuthMeta(meta);
+  response.cookies.set("auth-meta", signed, {
+    httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60,
@@ -118,7 +114,7 @@ export async function GET(request: NextRequest) {
     }
 
     const response = NextResponse.redirect(new URL(callbackUrl, request.url));
-    setAuthMetaCookie(response, meta);
+    await setAuthMetaCookie(response, meta);
 
     console.log(
       `[refresh-meta/GET] set cookie isAdmin=${meta.isAdmin} roles=[${meta.roleNames}] allowedModules=${meta.allowedModuleIds.length} denied=${meta.deniedRoutes.length}`
@@ -163,7 +159,7 @@ export async function POST(request: NextRequest) {
         selectedModules: meta.selectedModules,
       },
     });
-    setAuthMetaCookie(response, meta);
+    await setAuthMetaCookie(response, meta);
 
     console.log(
       `[refresh-meta/POST] set cookie isAdmin=${meta.isAdmin} roles=[${meta.roleNames}] allowedModules=${meta.allowedModuleIds.length} denied=${meta.deniedRoutes.length}`

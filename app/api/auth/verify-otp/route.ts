@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { createSession } from "@/lib/auth"
 import { VerifyOTPSchema } from "@/lib/utils/validations"
 import { computeRouteMeta } from "@/lib/auth/route-meta"
+import { signAuthMeta } from "@/lib/auth/auth-meta-cookie"
 import { getRequestMeta } from "@/lib/api-helpers"
 import {
   checkIpRate,
@@ -172,11 +173,14 @@ export async function POST(request: NextRequest) {
       path: "/",
     })
 
-    // Set auth-meta cookie for middleware route permission checks
+    // Set HMAC-signed auth-meta cookie for middleware route permission checks.
+    // Include selectedModules so the middleware's module-gate (step 4c) works
+    // for users who land here via the OTP flow instead of password login.
     const userWithRoles = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         organizationId: true,
+        organization: { select: { selectedModules: true } },
         unitAssignments: {
           select: {
             role: { select: { id: true, name: true, isAdmin: true } },
@@ -190,22 +194,31 @@ export async function POST(request: NextRequest) {
     ) ?? false
     const roleNames = userWithRoles?.unitAssignments?.map((ua) => ua.role.name) ?? []
     const roleIds = userWithRoles?.unitAssignments?.map((ua) => ua.role.id) ?? []
+    const selectedModules: string[] = Array.isArray(userWithRoles?.organization?.selectedModules)
+      ? (userWithRoles!.organization!.selectedModules as string[])
+      : []
 
     const { deniedRoutes, allowedRoutes, allowedModuleIds } = isAdmin
       ? { deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] }
       : await computeRouteMeta(userId, userWithRoles?.organizationId ?? null, roleIds)
 
-    response.cookies.set(
-      "auth-meta",
-      JSON.stringify({ v: 2, ts: Date.now(), isAdmin, roleNames, deniedRoutes, allowedRoutes, allowedModuleIds }),
-      {
-        httpOnly: false, // Client-side RoutePermissionGuard needs to read this
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60,
-        path: "/",
-      }
-    )
+    const signedMeta = await signAuthMeta({
+      v: 2,
+      ts: Date.now(),
+      isAdmin,
+      roleNames,
+      deniedRoutes,
+      allowedRoutes,
+      allowedModuleIds,
+      selectedModules,
+    })
+    response.cookies.set("auth-meta", signedMeta, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60,
+      path: "/",
+    })
 
     console.log(
       `[verify-otp] auth-meta set for user=${userId} isAdmin=${isAdmin} roles=[${roleNames}] allowedModules=${allowedModuleIds.length} denied=[${deniedRoutes}]`
