@@ -46,7 +46,7 @@ export default async function HomePage() {
   return (
     <div className="flex h-screen  bg-background">
       <div className="w-full">
-        <AdminNav user={user} />
+        {/* <AdminNav user={user} /> */}
         <main className="overflow-auto p-3 sm:p-4 lg:p-8">
           {isAdmin ? (
             <AdminDashboard />
