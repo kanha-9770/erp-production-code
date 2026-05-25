@@ -64,14 +64,6 @@ import {
   dateToYmd,
 } from '@/components/leave/leave-calendar';
 import { LeaveDateRangePicker } from '@/components/leave/leave-date-range-picker';
-import {
-  WorkspaceShell,
-  WorkspaceHeader,
-  DataTable,
-  type ColumnDef,
-  FilterChips,
-} from '@/components/real-estate/workspace';
-
 
 type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type Duration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
@@ -141,18 +133,14 @@ export default function LeavePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
-  
-  const [view, setView] = useState<'calendar' | 'list'>('calendar');
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [timeFilter, setTimeFilter] = useState<'all' | 'upcoming' | 'past'>('all');
-  
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [shortenTarget, setShortenTarget] = useState<LeaveRequest | null>(null);
-  const [shortenDate, setShortenDate] = useState('');
-  const [shortenReason, setShortenReason] = useState('');
+  // Monthly short-leave allowance pulled from Attendance Configuration. `null`
+  // means we haven't fetched it yet (don't gate); a number is the cap and
+  // gates the Apply form's dropdown / submit when this month's usage hits it.
+  const [monthlyShortLeaveQuota, setMonthlyShortLeaveQuota] = useState<
+    number | null
+  >(null);
 
-  const [monthlyShortLeaveQuota, setMonthlyShortLeaveQuota] = useState<number | null>(null);
-
+  // Calendar state — month being viewed + the month's calendar data.
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date();
     d.setDate(1);
@@ -175,6 +163,7 @@ export default function LeavePage() {
           cache: 'no-store',
           credentials: 'include',
         }),
+        // Attendance config — used here only for the monthly short-leave cap.
         fetch('/api/attendance-config', {
           cache: 'no-store',
           credentials: 'include',
@@ -214,6 +203,26 @@ export default function LeavePage() {
     refresh();
   }, [refresh]);
 
+  const today = todayStr();
+  const upcoming = useMemo(
+    () =>
+      (requests ?? []).filter(
+        (r) => r.endDate >= today && (r.status === 'PENDING' || r.status === 'APPROVED'),
+      ),
+    [requests, today],
+  );
+  const past = useMemo(
+    () =>
+      (requests ?? []).filter(
+        (r) => r.endDate < today || r.status === 'CANCELLED' || r.status === 'REJECTED',
+      ),
+    [requests, today],
+  );
+
+  // Short-leave occurrences applied this calendar month (PENDING + APPROVED).
+  // Compared against `monthlyShortLeaveQuota` in the Apply sheet to gate the
+  // Short Leave option once the cap is reached. Counted by the leave's
+  // startDate, which mirrors the server-side check.
   const shortLeaveUsedThisMonth = useMemo(() => {
     const shortIds = new Set(
       (balances ?? [])
@@ -232,6 +241,8 @@ export default function LeavePage() {
     }).length;
   }, [balances, requests]);
 
+  // Used by the Apply form to flag overlap; covers a wide window so picking
+  // a date 6 months out still detects an existing leave there.
   const allMyActiveLeaves = useMemo<CalendarLeave[]>(
     () =>
       (requests ?? [])
@@ -246,396 +257,176 @@ export default function LeavePage() {
     [requests],
   );
 
-  const typeName = useCallback((id: string) => balances?.find((b) => b.leaveType.id === id)?.leaveType.name ?? '—', [balances]);
-
-  const openShorten = useCallback((r: LeaveRequest) => {
-    setShortenTarget(r);
-    const t = todayStr();
-    const defaultDate =
-      t >= r.startDate && t < r.endDate
-        ? t
-        : (() => {
-            const [y, m, d] = r.endDate.split('-').map(Number);
-            const prev = new Date(y, m - 1, d - 1);
-            return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
-          })();
-    setShortenDate(defaultDate);
-    setShortenReason('');
-  }, []);
-
-  const closeShorten = useCallback(() => {
-    setShortenTarget(null);
-    setShortenDate('');
-    setShortenReason('');
-  }, []);
-
-  const submitShorten = useCallback(async () => {
-    if (!shortenTarget) return;
-    if (!shortenDate) {
-      toast({ title: 'Pick a new end date', variant: 'destructive' });
-      return;
-    }
-    setBusyId(shortenTarget.id);
-    try {
-      const res = await fetch(`/api/leaves/${shortenTarget.id}/shorten`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ newEndDate: shortenDate, reason: shortenReason || null }),
-      });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || 'Failed to request early return');
-      toast({
-        title: 'Early-return requested',
-        description: 'Your approver will review the request.',
-      });
-      closeShorten();
-      refresh();
-    } catch (e: any) {
-      toast({
-        title: 'Could not request early return',
-        description: e?.message,
-        variant: 'destructive',
-      });
-    } finally {
-      setBusyId(null);
-    }
-  }, [shortenTarget, shortenDate, shortenReason, toast, closeShorten, refresh]);
-
-  const cancel = useCallback(async (id: string) => {
-    if (!confirm('Cancel this leave request?')) return;
-    setBusyId(id);
-    try {
-      const res = await fetch(`/api/leaves/${id}/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({}),
-      });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || 'Cancel failed');
-      toast({ title: 'Leave cancelled' });
-      refresh();
-    } catch (e: any) {
-      toast({ title: 'Could not cancel', description: e?.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
-  }, [refresh, toast]);
-
-  const columns: ColumnDef<LeaveRequest>[] = useMemo(
-    () => [
-      {
-        id: "type",
-        header: "Type",
-        width: 180,
-        pinned: true,
-        sortKey: "leaveTypeId",
-        cell: (r) => (
-          <div className="flex items-center gap-1.5 font-medium">
-            <span>{typeName(r.leaveTypeId)}</span>
-            {r.isEmergency && (
-              <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 shrink-0">
-                Emergency
-              </Badge>
-            )}
-          </div>
-        ),
-      },
-      {
-        id: "dates",
-        header: "Dates",
-        width: 200,
-        sortKey: "startDate",
-        cell: (r) => (
-          <div className="text-sm tabular-nums flex flex-col">
-            <span>
-              {r.startDate}
-              {r.startDate !== r.endDate ? ` → ${r.endDate}` : ''}
-            </span>
-            {r.originalEndDate && r.originalEndDate !== r.endDate && (
-              <span className="text-[11px] text-muted-foreground mt-0.5">
-                shortened from <span className="line-through">{r.originalEndDate}</span>
-              </span>
-            )}
-          </div>
-        ),
-      },
-      {
-        id: "days",
-        header: "Days",
-        width: 80,
-        cell: (r) => <span className="tabular-nums text-sm">{r.totalDays.toFixed(1)}</span>,
-      },
-      {
-        id: "duration",
-        header: "Duration",
-        width: 130,
-        cell: (r) => <span className="text-sm">{durationLabel(r.duration)}</span>,
-      },
-      {
-        id: "status",
-        header: "Status",
-        width: 150,
-        sortKey: "status",
-        cell: (r) => (
-          <div>
-            <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
-            {r.shortenStatus === 'PENDING' && r.shortenRequestedEndDate && (
-              <div className="text-[11px] text-amber-700 mt-1">
-                Early-return pending → {r.shortenRequestedEndDate}
-              </div>
-            )}
-            {r.shortenStatus === 'REJECTED' && (
-              <div className="text-[11px] text-muted-foreground mt-1">
-                Early-return rejected
-              </div>
-            )}
-          </div>
-        ),
-      },
-      {
-        id: "reason",
-        header: "Reason",
-        width: 250,
-        cell: (r) => (
-          <div className="text-sm truncate" title={r.reason ?? ''}>
-            {r.reason || <span className="text-muted-foreground">—</span>}
-          </div>
-        ),
-      },
-      {
-        id: "actions",
-        header: "",
-        width: 200,
-        align: "right",
-        cell: (r) => {
-          const cancellable = r.status === 'PENDING' || (r.status === 'APPROVED' && r.startDate > todayStr());
-          const shortenable = r.status === 'APPROVED' && r.endDate > todayStr() && r.shortenStatus !== 'PENDING';
-          return (
-            <div className="flex justify-end gap-1">
-              {shortenable && (
-                <Button size="sm" variant="ghost" disabled={busyId === r.id} onClick={() => openShorten(r)}>
-                  <LogOut className="h-3 w-3 mr-1" /> Early return
-                </Button>
-              )}
-              {cancellable && (
-                <Button size="sm" variant="ghost" disabled={busyId === r.id} onClick={() => cancel(r.id)}>
-                  <X className="h-3 w-3 mr-1" /> Cancel
-                </Button>
-              )}
-            </div>
-          );
-        },
-      },
-    ],
-    [typeName, busyId, cancel, openShorten]
-  );
-
-  const filteredRequests = useMemo(() => {
-    if (!requests) return [];
-    let res = requests;
-    if (statusFilter) res = res.filter(r => r.status === statusFilter);
-    const today = todayStr();
-    if (timeFilter === 'upcoming') {
-      res = res.filter(r => r.endDate >= today && (r.status === 'PENDING' || r.status === 'APPROVED'));
-    } else if (timeFilter === 'past') {
-      res = res.filter(r => r.endDate < today || r.status === 'CANCELLED' || r.status === 'REJECTED');
-    }
-    return res;
-  }, [requests, statusFilter, timeFilter]);
-
-  const STATUS_OPTIONS = [
-    { value: "PENDING", label: "Pending", tint: "#eab308" },
-    { value: "APPROVED", label: "Approved", tint: "#22c55e" },
-    { value: "REJECTED", label: "Rejected", tint: "#ef4444" },
-    { value: "CANCELLED", label: "Cancelled", tint: "#94a3b8" },
-  ];
-
-  const TIME_OPTIONS = [
-    { value: "upcoming", label: "Upcoming" },
-    { value: "past", label: "Past" },
-  ];
-
   return (
-    <>
-      <WorkspaceShell
-        scope="leaves"
-        selectedId={null}
-        onCloseSelection={() => {}}
-        header={
-          <WorkspaceHeader
-            icon={<CalendarDays className="h-5 w-5" />}
-            title="My Leaves"
-            subtitle="Apply, track balance, and view your leave history."
+    <div className="container mx-auto p-4 sm:p-6 space-y-5 sm:space-y-6 max-w-6xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2 sm:gap-3">
+            <CalendarDays className="h-6 w-6 sm:h-8 sm:w-8 text-primary shrink-0" />
+            <span className="truncate">My Leaves</span>
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Apply, track balance, and view your leave history.
+          </p>
+        </div>
+        <div className="flex gap-2 sm:shrink-0">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={refresh}
+            disabled={refreshing}
+            aria-label="Refresh"
+            className="shrink-0"
           >
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refresh}
-                disabled={refreshing}
-                title="Refresh"
-                className="h-9 px-3 shrink-0"
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button onClick={() => setApplyOpen(true)} className="flex-1 sm:flex-none">
+            <Plus className="h-4 w-4 mr-2" />
+            Apply Leave
+          </Button>
+        </div>
+      </div>
+
+      {/* Balance cards */}
+      {loading ? (
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+      ) : balances && balances.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-50" />
+            <p>No leave types are configured yet.</p>
+            <p className="text-sm mt-1">Ask your admin to set up leave types.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          {balances
+            ?.filter(
+              (b) =>
+                b.leaveType.category !== 'HOURLY' &&
+                b.leaveType.code !== 'HOURLY_LEAVE',
+            )
+            .map((b) => {
+            const total = b.allocated + b.carriedForward;
+            const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
+            const accent = b.leaveType.color || '#94a3b8';
+            const low = total > 0 && b.available <= total * 0.2;
+            return (
+              <Card
+                key={b.leaveType.id}
+                className="relative overflow-hidden hover:shadow-md transition-shadow"
               >
-                <RefreshCw className={`h-4 w-4 sm:mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">Refresh</span>
-              </Button>
-              <Button onClick={() => setApplyOpen(true)} size="sm" className="h-9">
-                <Plus className="h-4 w-4 mr-2" />
-                Apply Leave
-              </Button>
-            </div>
-          </WorkspaceHeader>
-        }
-        list={
-          <div className="flex flex-col h-full bg-muted/10">
-            <div className="p-4 sm:p-6 pb-2 space-y-4 sm:space-y-6">
-              {/* Balance cards */}
-              {loading ? (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                  {[0, 1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-32 bg-background border rounded-xl" />
-                  ))}
-                </div>
-              ) : balances && balances.length === 0 ? (
-                <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                    <p>No leave types are configured yet.</p>
-                    <p className="text-sm mt-1">Ask your admin to set up leave types.</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                  {balances
-                    ?.filter(
-                      (b) =>
-                        b.leaveType.category !== 'HOURLY' &&
-                        b.leaveType.code !== 'HOURLY_LEAVE',
-                    )
-                    .map((b) => {
-                    const total = b.allocated + b.carriedForward;
-                    const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
-                    const accent = b.leaveType.color || '#94a3b8';
-                    const low = total > 0 && b.available <= total * 0.2;
-                    return (
-                      <Card
-                        key={b.leaveType.id}
-                        className="relative overflow-hidden hover:shadow-md transition-shadow bg-background"
+                {/* color stripe */}
+                <span
+                  className="absolute left-0 top-0 bottom-0 w-1"
+                  style={{ backgroundColor: accent }}
+                  aria-hidden
+                />
+                <CardHeader className="pb-2 pl-5">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
+                    <span className="truncate">{b.leaveType.name}</span>
+                    {b.isPaid ? (
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] shrink-0 px-1.5 py-0 h-5"
                       >
-                        <span
-                          className="absolute left-0 top-0 bottom-0 w-1"
-                          style={{ backgroundColor: accent }}
-                          aria-hidden
-                        />
-                        <CardHeader className="pb-2 pl-5">
-                          <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
-                            <span className="truncate">{b.leaveType.name}</span>
-                            {b.isPaid ? (
-                              <Badge
-                                variant="secondary"
-                                className="text-[9px] shrink-0 px-1.5 py-0 h-4"
-                              >
-                                Paid
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] shrink-0 px-1.5 py-0 h-4"
-                              >
-                                Unpaid
-                              </Badge>
-                            )}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pl-5 space-y-2">
-                          <div className="flex items-baseline gap-1">
-                            <span
-                              className={`text-2xl font-bold tabular-nums leading-none ${low ? 'text-destructive' : ''}`}
-                            >
-                              {b.available.toFixed(b.available % 1 === 0 ? 0 : 1)}
-                            </span>
-                            <span className="text-xs text-muted-foreground tabular-nums font-medium">
-                              / {total.toFixed(0)}
-                            </span>
-                          </div>
-                          <Progress value={pct} className="h-1 bg-muted/50" />
-                          <div className="text-[10px] text-muted-foreground flex justify-between tabular-nums font-medium">
-                            <span>Used {b.used.toFixed(1)}</span>
-                            {b.pending > 0 && (
-                              <span className="text-amber-600 dark:text-amber-400">
-                                Pending {b.pending.toFixed(1)}
-                              </span>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* View Tabs & Filters */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <Tabs value={view} onValueChange={(v) => setView(v as any)} className="w-full sm:w-auto">
-                  <TabsList className="w-full sm:w-auto grid grid-cols-2 h-9">
-                    <TabsTrigger value="calendar" className="text-xs">Calendar</TabsTrigger>
-                    <TabsTrigger value="list" className="text-xs">List View</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                
-                {view === 'list' && (
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-1 sm:pl-3 sm:border-l">
-                    <FilterChips 
-                      value={timeFilter} 
-                      onChange={(v) => setTimeFilter(v as any || 'all')} 
-                      options={TIME_OPTIONS} 
-                    />
-                    <FilterChips 
-                      value={statusFilter} 
-                      onChange={setStatusFilter} 
-                      options={STATUS_OPTIONS} 
-                    />
+                        Paid
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] shrink-0 px-1.5 py-0 h-5"
+                      >
+                        Unpaid
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pl-5 space-y-2">
+                  <div className="flex items-baseline gap-1">
+                    <span
+                      className={`text-3xl font-bold tabular-nums leading-none ${low ? 'text-destructive' : ''}`}
+                    >
+                      {b.available.toFixed(b.available % 1 === 0 ? 0 : 1)}
+                    </span>
+                    <span className="text-sm text-muted-foreground tabular-nums">
+                      / {total.toFixed(0)}
+                    </span>
                   </div>
-                )}
-              </div>
-            </div>
+                  <Progress value={pct} className="h-1" />
+                  <div className="text-[11px] text-muted-foreground flex justify-between tabular-nums">
+                    <span>Used {b.used.toFixed(1)}</span>
+                    {b.pending > 0 && (
+                      <span className="text-amber-600 dark:text-amber-400">
+                        Pending {b.pending.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
-            <div className="flex-1 min-h-0 px-4 sm:px-6 pb-6">
-              {view === 'calendar' ? (
-                <div className="h-full bg-background border rounded-xl shadow-sm overflow-hidden flex flex-col">
-                  <CalendarTab
-                    month={calendarMonth}
-                    onMonthChange={setCalendarMonth}
-                    data={calendarData}
-                    loading={loading}
-                  />
-                </div>
-              ) : (
-                <div className="h-full bg-background border rounded-xl shadow-sm overflow-hidden flex flex-col">
-                  <DataTable<LeaveRequest>
-                    tableId="my-leaves"
-                    columns={columns}
-                    rows={filteredRequests}
-                    rowId={(r) => r.id}
-                    isLoading={loading && !requests}
-                    selectedId={null}
-                    onRowClick={() => {}}
-                    emptyState={
-                      <div className="py-16 text-center text-muted-foreground">
-                        <FileText className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                        No leave records found.
-                      </div>
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        }
-        preview={null}
-      />
+      {/* Tabs */}
+      <Tabs defaultValue="calendar">
+        <TabsList className="w-full sm:w-auto overflow-x-auto justify-start sm:justify-center">
+          <TabsTrigger value="calendar" className="flex-1 sm:flex-none">Calendar</TabsTrigger>
+          <TabsTrigger value="upcoming" className="flex-1 sm:flex-none">
+            <span className="sm:hidden">Up</span>
+            <span className="hidden sm:inline">Upcoming</span>
+            <span className="ml-1">({upcoming.length})</span>
+          </TabsTrigger>
+          <TabsTrigger value="past" className="flex-1 sm:flex-none">
+            Past ({past.length})
+          </TabsTrigger>
+          <TabsTrigger value="all" className="flex-1 sm:flex-none">
+            All ({requests?.length ?? 0})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="calendar">
+          <CalendarTab
+            month={calendarMonth}
+            onMonthChange={setCalendarMonth}
+            data={calendarData}
+            loading={loading}
+          />
+        </TabsContent>
+
+        <TabsContent value="upcoming">
+          <RequestTable
+            requests={upcoming}
+            balances={balances ?? []}
+            onChanged={refresh}
+            loading={loading}
+            emptyHint="You have no upcoming leaves. Click Apply Leave to request one."
+          />
+        </TabsContent>
+        <TabsContent value="past">
+          <RequestTable
+            requests={past}
+            balances={balances ?? []}
+            onChanged={refresh}
+            loading={loading}
+            emptyHint="No past leave records."
+          />
+        </TabsContent>
+        <TabsContent value="all">
+          <RequestTable
+            requests={requests ?? []}
+            balances={balances ?? []}
+            onChanged={refresh}
+            loading={loading}
+            emptyHint="No leave records yet."
+          />
+        </TabsContent>
+      </Tabs>
 
       <ApplyLeaveSheet
         open={applyOpen}
@@ -651,69 +442,7 @@ export default function LeavePage() {
           refresh();
         }}
       />
-      
-      <Dialog open={!!shortenTarget} onOpenChange={(o) => !o && closeShorten()}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Request early return</DialogTitle>
-            <DialogDescription>
-              Submit a request to end this leave earlier. Your approver will
-              decide; on approval, the unused days will be returned to your
-              balance.
-            </DialogDescription>
-          </DialogHeader>
-          {shortenTarget && (
-            <div className="space-y-3">
-              <div className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
-                Current leave:{' '}
-                <span className="font-medium tabular-nums">
-                  {shortenTarget.startDate} → {shortenTarget.endDate}
-                </span>{' '}
-                · {shortenTarget.totalDays.toFixed(1)} day
-                {shortenTarget.totalDays === 1 ? '' : 's'}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="shorten-date" className="text-xs">
-                  New end date
-                </Label>
-                <Input
-                  id="shorten-date"
-                  type="date"
-                  value={shortenDate}
-                  onChange={(e) => setShortenDate(e.target.value)}
-                  min={shortenTarget.startDate}
-                  max={(() => {
-                    const [y, m, d] = shortenTarget.endDate.split('-').map(Number);
-                    const prev = new Date(y, m - 1, d - 1);
-                    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
-                  })()}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="shorten-reason" className="text-xs">
-                  Reason (optional)
-                </Label>
-                <Textarea
-                  id="shorten-reason"
-                  value={shortenReason}
-                  onChange={(e) => setShortenReason(e.target.value)}
-                  placeholder="e.g. recovered early and ready to come back"
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={closeShorten} disabled={busyId !== null}>
-              Cancel
-            </Button>
-            <Button onClick={submitShorten} disabled={busyId !== null || !shortenDate}>
-              {busyId !== null ? 'Submitting…' : 'Submit request'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    </div>
   );
 }
 
@@ -828,6 +557,389 @@ function CalendarTab({
           </div>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Request table
+// ─────────────────────────────────────────────────────────────────────────────
+
+function RequestTable({
+  requests,
+  balances,
+  onChanged,
+  loading,
+  emptyHint,
+}: {
+  requests: LeaveRequest[];
+  balances: BalanceRow[];
+  onChanged: () => void;
+  loading: boolean;
+  emptyHint: string;
+}) {
+  const { toast } = useToast();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [shortenTarget, setShortenTarget] = useState<LeaveRequest | null>(null);
+  const [shortenDate, setShortenDate] = useState('');
+  const [shortenReason, setShortenReason] = useState('');
+  const today = todayStr();
+
+  const typeName = (id: string) =>
+    balances.find((b) => b.leaveType.id === id)?.leaveType.name ?? '—';
+
+  const openShorten = (r: LeaveRequest) => {
+    setShortenTarget(r);
+    // Default to today if it falls inside the leave; otherwise to the day
+    // before the current end so we never propose an end date outside [start,
+    // end-1].
+    const t = todayStr();
+    const defaultDate =
+      t >= r.startDate && t < r.endDate
+        ? t
+        : (() => {
+            const [y, m, d] = r.endDate.split('-').map(Number);
+            const prev = new Date(y, m - 1, d - 1);
+            return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+          })();
+    setShortenDate(defaultDate);
+    setShortenReason('');
+  };
+
+  const closeShorten = () => {
+    setShortenTarget(null);
+    setShortenDate('');
+    setShortenReason('');
+  };
+
+  const submitShorten = async () => {
+    if (!shortenTarget) return;
+    if (!shortenDate) {
+      toast({ title: 'Pick a new end date', variant: 'destructive' });
+      return;
+    }
+    setBusyId(shortenTarget.id);
+    try {
+      const res = await fetch(`/api/leaves/${shortenTarget.id}/shorten`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ newEndDate: shortenDate, reason: shortenReason || null }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || 'Failed to request early return');
+      toast({
+        title: 'Early-return requested',
+        description: 'Your approver will review the request.',
+      });
+      closeShorten();
+      onChanged();
+    } catch (e: any) {
+      toast({
+        title: 'Could not request early return',
+        description: e?.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancel = async (id: string) => {
+    if (!confirm('Cancel this leave request?')) return;
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/leaves/${id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || 'Cancel failed');
+      toast({ title: 'Leave cancelled' });
+      onChanged();
+    } catch (e: any) {
+      toast({ title: 'Could not cancel', description: e?.message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-12" />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (requests.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-muted-foreground">
+          <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          {emptyHint}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        {/* Mobile: card list — tables don't fit on phones without horizontal scroll. */}
+        <ul className="divide-y md:hidden">
+          {requests.map((r) => {
+            const cancellable =
+              r.status === 'PENDING' || (r.status === 'APPROVED' && r.startDate > today);
+            // Early-return is only meaningful while the leave hasn't fully
+            // ended (so a return-earlier-than-end still saves at least one
+            // day) and only on APPROVED requests with no in-flight shorten.
+            const shortenable =
+              r.status === 'APPROVED' &&
+              r.endDate > today &&
+              r.shortenStatus !== 'PENDING';
+            return (
+              <li key={r.id} className="p-3 space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-medium truncate flex items-center gap-1.5">
+                    {typeName(r.leaveTypeId)}
+                    {r.isEmergency && (
+                      <Badge
+                        variant="destructive"
+                        className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                      >
+                        Emergency
+                      </Badge>
+                    )}
+                  </div>
+                  <Badge variant={STATUS_VARIANT[r.status]} className="shrink-0">
+                    {r.status}
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground tabular-nums">
+                  {r.startDate}
+                  {r.startDate !== r.endDate ? ` → ${r.endDate}` : ''} · {r.totalDays.toFixed(1)}{' '}
+                  day{r.totalDays === 1 ? '' : 's'} · {durationLabel(r.duration)}
+                </div>
+                {r.reason && (
+                  <div className="text-xs text-muted-foreground line-clamp-2">{r.reason}</div>
+                )}
+                {r.shortenStatus === 'PENDING' && r.shortenRequestedEndDate && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    Early-return pending — new end:{' '}
+                    <span className="font-medium tabular-nums">{r.shortenRequestedEndDate}</span>
+                  </div>
+                )}
+                {r.shortenStatus === 'REJECTED' && (
+                  <div className="text-xs text-muted-foreground">
+                    Early-return rejected{r.shortenDecisionNote ? ` · ${r.shortenDecisionNote}` : ''}
+                  </div>
+                )}
+                {r.originalEndDate && r.originalEndDate !== r.endDate && (
+                  <div className="text-xs text-muted-foreground">
+                    Shortened from <span className="line-through">{r.originalEndDate}</span> →{' '}
+                    {r.endDate}
+                  </div>
+                )}
+                {(cancellable || shortenable) && (
+                  <div className="pt-1 flex gap-2 flex-wrap">
+                    {shortenable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === r.id}
+                        onClick={() => openShorten(r)}
+                        className="h-8"
+                      >
+                        <LogOut className="h-3 w-3 mr-1" /> Early return
+                      </Button>
+                    )}
+                    {cancellable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === r.id}
+                        onClick={() => cancel(r.id)}
+                        className="h-8"
+                      >
+                        <X className="h-3 w-3 mr-1" /> Cancel
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        {/* Tablet+: table view. */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full">
+            <thead className="border-b text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="text-left p-3">Type</th>
+                <th className="text-left p-3">Dates</th>
+                <th className="text-left p-3">Days</th>
+                <th className="text-left p-3">Duration</th>
+                <th className="text-left p-3">Status</th>
+                <th className="text-left p-3">Reason</th>
+                <th className="text-right p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((r) => {
+                const cancellable =
+                  r.status === 'PENDING' ||
+                  (r.status === 'APPROVED' && r.startDate > today);
+                const shortenable =
+                  r.status === 'APPROVED' &&
+                  r.endDate > today &&
+                  r.shortenStatus !== 'PENDING';
+                return (
+                  <tr key={r.id} className="border-b hover:bg-muted/40">
+                    <td className="p-3 font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <span>{typeName(r.leaveTypeId)}</span>
+                        {r.isEmergency && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[9px] px-1.5 py-0 h-4 shrink-0"
+                          >
+                            Emergency
+                          </Badge>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-sm tabular-nums">
+                      {r.startDate}
+                      {r.startDate !== r.endDate ? ` → ${r.endDate}` : ''}
+                      {r.originalEndDate && r.originalEndDate !== r.endDate && (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          shortened from <span className="line-through">{r.originalEndDate}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-3 text-sm tabular-nums">{r.totalDays.toFixed(1)}</td>
+                    <td className="p-3 text-sm">{durationLabel(r.duration)}</td>
+                    <td className="p-3">
+                      <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
+                      {r.shortenStatus === 'PENDING' && r.shortenRequestedEndDate && (
+                        <div className="text-[11px] text-amber-700 mt-1">
+                          Early-return pending → {r.shortenRequestedEndDate}
+                        </div>
+                      )}
+                      {r.shortenStatus === 'REJECTED' && (
+                        <div className="text-[11px] text-muted-foreground mt-1">
+                          Early-return rejected
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-3 text-sm max-w-[300px] truncate" title={r.reason ?? ''}>
+                      {r.reason || <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="p-3 text-right whitespace-nowrap">
+                      {shortenable && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyId === r.id}
+                          onClick={() => openShorten(r)}
+                        >
+                          <LogOut className="h-3 w-3 mr-1" /> Early return
+                        </Button>
+                      )}
+                      {cancellable && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyId === r.id}
+                          onClick={() => cancel(r.id)}
+                        >
+                          <X className="h-3 w-3 mr-1" /> Cancel
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+
+      {/* Early-return dialog — appears when an APPROVED leave's "Early return"
+          button is clicked. Date input is bounded to (startDate, endDate-1)
+          so the user can't pick a date that doesn't actually shorten the
+          leave. */}
+      <Dialog open={!!shortenTarget} onOpenChange={(o) => !o && closeShorten()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Request early return</DialogTitle>
+            <DialogDescription>
+              Submit a request to end this leave earlier. Your approver will
+              decide; on approval, the unused days will be returned to your
+              balance.
+            </DialogDescription>
+          </DialogHeader>
+          {shortenTarget && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+                Current leave:{' '}
+                <span className="font-medium tabular-nums">
+                  {shortenTarget.startDate} → {shortenTarget.endDate}
+                </span>{' '}
+                · {shortenTarget.totalDays.toFixed(1)} day
+                {shortenTarget.totalDays === 1 ? '' : 's'}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="shorten-date" className="text-xs">
+                  New end date
+                </Label>
+                <Input
+                  id="shorten-date"
+                  type="date"
+                  value={shortenDate}
+                  onChange={(e) => setShortenDate(e.target.value)}
+                  min={shortenTarget.startDate}
+                  max={(() => {
+                    // endDate - 1, so the picked date is strictly before
+                    // the original end.
+                    const [y, m, d] = shortenTarget.endDate.split('-').map(Number);
+                    const prev = new Date(y, m - 1, d - 1);
+                    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(prev.getDate()).padStart(2, '0')}`;
+                  })()}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="shorten-reason" className="text-xs">
+                  Reason (optional)
+                </Label>
+                <Textarea
+                  id="shorten-reason"
+                  value={shortenReason}
+                  onChange={(e) => setShortenReason(e.target.value)}
+                  placeholder="e.g. recovered early and ready to come back"
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeShorten} disabled={busyId !== null}>
+              Cancel
+            </Button>
+            <Button onClick={submitShorten} disabled={busyId !== null || !shortenDate}>
+              {busyId !== null ? 'Submitting…' : 'Submit request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
