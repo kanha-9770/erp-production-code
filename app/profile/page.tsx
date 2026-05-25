@@ -1,20 +1,32 @@
 "use client"
 
 /**
- * /profile — production-grade profile center.
+ * /profile — Instagram-style profile with drill-down navigation.
  *
- * Layout: vertical sidebar tabs on desktop (≥lg), horizontal scrollable tabs
- * on mobile. The active tab is reflected in `location.hash` so deep-links
- * (e.g. `/profile#security`) work and the browser back-button restores tab
- * state without a full reload.
+ * Mobile UX (the design the user actually asked for):
+ *   - Default view: identity card + a vertical LIST of sections
+ *     (Overview, Personal, Employment, …). No tab bar. No "second
+ *     header" floating beneath the global top bar.
+ *   - Tap a section → drill into it. The page swaps to show ONLY that
+ *     section, with a small inline back chevron at the top of the
+ *     content (NOT a fixed header bar). Tapping back returns to the
+ *     list. Behaves like iOS Settings or Instagram's settings menu.
+ *   - State is encoded in `location.hash`:
+ *        no hash          → list view
+ *        #personal etc.   → section view
+ *     so back/forward + deep-links still work.
+ *   - The global mobile top bar (in ConditionalLayout) is the ONLY
+ *     header. The bottom nav is the ONLY bottom navigation. Nothing
+ *     in this page is `position: fixed` or `position: sticky`.
  *
- * Tabs:
- *   #overview      OverviewTab
- *   #personal      PersonalTab     (replaces /profile/update-profile)
- *   #employment    EmploymentTab
- *   #notifications NotificationsTab
- *   #preferences   PreferencesTab
- *   #security      SecurityTab     (re-uses the page we shipped at /profile/security)
+ * Desktop UX (≥lg):
+ *   - Side-by-side: vertical section list on the left, content on the
+ *     right. Same hash routing.
+ *   - When no hash, defaults to Overview so the content area isn't
+ *     blank.
+ *
+ * Tabs preserved exactly — DO NOT change the set/order without also
+ * updating routing in components that deep-link to /profile#<id>.
  */
 
 import { useEffect, useState, useCallback, useMemo } from "react"
@@ -32,9 +44,10 @@ import {
   Settings,
   Shield,
   LogOut,
-  ChevronRight,
   Building2,
   Wallet,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react"
 import { useGetUserQuery, useLogoutMutation } from "@/lib/api/auth"
 import OverviewTab from "@/components/profile/OverviewTab"
@@ -47,74 +60,28 @@ import SecurityTab from "@/components/profile/SecurityTab"
 import OrganizationTab from "@/components/profile/OrganizationTab"
 import type { ProfileTabId, ProfileUser } from "@/components/profile/types"
 import { displayName, initialsOf } from "@/components/profile/profile-utils"
+import { cn } from "@/lib/utils"
 
 interface TabDef {
   id: ProfileTabId
   label: string
   icon: React.ReactNode
-  description: string
-  // When true, the tab only renders for org admins / owners. The
-  // sidebar entry is hidden for everyone else, and a deep-link to the
-  // hash silently falls back to the overview tab.
+  // adminOnly tabs are hidden from non-admins; a deep-link to a hidden
+  // tab silently falls back to the list (mobile) / overview (desktop).
   adminOnly?: boolean
 }
 
 const TABS: Array<TabDef> = [
-  {
-    id: "overview",
-    label: "Overview",
-    icon: <LayoutDashboard className="h-4 w-4" />,
-    description: "Profile health at a glance",
-  },
-  {
-    id: "personal",
-    label: "Personal info",
-    icon: <UserIcon className="h-4 w-4" />,
-    description: "Name, photo, contact",
-  },
-  {
-    id: "employment",
-    label: "Employment",
-    icon: <Briefcase className="h-4 w-4" />,
-    description: "Org, role, HR record",
-  },
-  {
-    id: "salary",
-    label: "Salary",
-    icon: <Wallet className="h-4 w-4" />,
-    description: "Monthly pay & slips",
-  },
-  {
-    id: "notifications",
-    label: "Notifications",
-    icon: <Bell className="h-4 w-4" />,
-    description: "Email, in-app, push",
-  },
-  {
-    id: "preferences",
-    label: "Preferences",
-    icon: <Settings className="h-4 w-4" />,
-    description: "Theme, language, timezone",
-  },
-  {
-    id: "security",
-    label: "Security",
-    icon: <Shield className="h-4 w-4" />,
-    description: "Password, sessions, activity",
-  },
-  {
-    id: "organization",
-    label: "Organization",
-    icon: <Building2 className="h-4 w-4" />,
-    description: "Currency, org-wide settings",
-    adminOnly: true,
-  },
+  { id: "overview", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
+  { id: "personal", label: "Personal info", icon: <UserIcon className="h-4 w-4" /> },
+  { id: "employment", label: "Employment", icon: <Briefcase className="h-4 w-4" /> },
+  { id: "salary", label: "Salary", icon: <Wallet className="h-4 w-4" /> },
+  { id: "notifications", label: "Notifications", icon: <Bell className="h-4 w-4" /> },
+  { id: "preferences", label: "Preferences", icon: <Settings className="h-4 w-4" /> },
+  { id: "security", label: "Security", icon: <Shield className="h-4 w-4" /> },
+  { id: "organization", label: "Organization", icon: <Building2 className="h-4 w-4" />, adminOnly: true },
 ]
 
-// Used by the hash-routing effect which runs before user data is loaded.
-// Admin gating is enforced separately at render time, so a non-admin
-// landing on /profile#organization will momentarily set tab state but
-// the post-load re-validation below snaps them back to overview.
 const ALL_TAB_IDS = new Set<ProfileTabId>(TABS.map((t) => t.id))
 
 export default function ProfilePage() {
@@ -122,26 +89,34 @@ export default function ProfilePage() {
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useGetUserQuery()
   const [logout, { isLoading: isLoggingOut }] = useLogoutMutation()
-  const [tab, setTab] = useState<ProfileTabId>("overview")
 
-  // Hash-routing: read on mount + react to back/forward navigation.
+  // null = no section selected. On mobile this means "show the list";
+  // on desktop we fall back to "overview" so the content area isn't blank.
+  const [tab, setTab] = useState<ProfileTabId | null>(null)
+
   useEffect(() => {
     const sync = () => {
       const h = (window.location.hash || "").replace(/^#/, "") as ProfileTabId
-      setTab(ALL_TAB_IDS.has(h) ? h : "overview")
+      setTab(ALL_TAB_IDS.has(h) ? h : null)
     }
     sync()
     window.addEventListener("hashchange", sync)
     return () => window.removeEventListener("hashchange", sync)
   }, [])
 
-  const switchTab = useCallback((id: ProfileTabId) => {
+  const switchTab = useCallback((id: ProfileTabId | null) => {
     setTab(id)
     if (typeof window !== "undefined") {
-      const next = `${window.location.pathname}#${id}`
-      if (window.location.hash !== `#${id}`) {
-        window.history.replaceState({}, "", next)
+      if (id === null) {
+        if (window.location.hash) {
+          window.history.replaceState({}, "", window.location.pathname)
+        }
+      } else if (window.location.hash !== `#${id}`) {
+        window.history.replaceState({}, "", `${window.location.pathname}#${id}`)
       }
+      // Scroll to top so the new view starts at the top regardless of
+      // where the user was scrolled in the previous view.
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior })
     }
   }, [])
 
@@ -163,8 +138,6 @@ export default function ProfilePage() {
   }
 
   const user = data?.user as ProfileUser | undefined
-
-  // Admin status — owners count as admins for tab visibility.
   const isAdmin = !!user?.isAdmin || !!user?.isOrgOwner
   const visibleTabs = useMemo(
     () => TABS.filter((t) => !t.adminOnly || isAdmin),
@@ -175,120 +148,238 @@ export default function ProfilePage() {
     [visibleTabs],
   )
 
-  // If a non-admin somehow lands on an admin-only tab (deep-link, stale
-  // hash, role demotion mid-session), snap them back to a tab they can
-  // actually see. Runs once per relevant change.
+  // Snap a non-admin back to the list if they deep-linked into an
+  // admin-only section.
   useEffect(() => {
-    if (user && !visibleTabIds.has(tab)) {
-      setTab("overview")
+    if (user && tab !== null && !visibleTabIds.has(tab)) {
+      setTab(null)
       if (typeof window !== "undefined" && window.location.hash) {
         window.history.replaceState({}, "", window.location.pathname)
       }
     }
   }, [tab, visibleTabIds, user])
 
-  const activeTab = useMemo(
-    () => visibleTabs.find((t) => t.id === tab) ?? TABS[0],
-    [tab, visibleTabs],
-  )
-
   if (isLoading || !user) {
     return <LoadingShell />
   }
 
-  return (
-    <div className="min-h-screen bg-muted/20">
-      <div className="container mx-auto p-4 sm:p-6 max-w-6xl">
-        {/* Identity header */}
-        <ProfileHeader
-          user={user}
-          onLogout={handleLogout}
-          loggingOut={isLoggingOut}
-        />
+  const primaryRole = user.unitAssignments[0]?.role?.name
+  const accessTier: "Owner" | "Admin" | "Member" = user.isOrgOwner
+    ? "Owner"
+    : user.isAdmin
+      ? "Admin"
+      : "Member"
 
-        {/* Mobile tab strip — sticky so navigation stays available while scrolling. */}
-        <div className="lg:hidden sticky top-0 -mx-4 px-4 py-2 bg-background/95 backdrop-blur border-b z-10 mt-4">
-          <nav className="flex gap-1 overflow-x-auto scrollbar-hide">
-            {visibleTabs.map((t) => (
+  // On desktop the content panel always shows something — fall back to
+  // overview when the user hasn't picked a section yet.
+  const desktopTab: ProfileTabId = tab ?? "overview"
+  const activeMobileDef = tab ? visibleTabs.find((t) => t.id === tab) : null
+
+  // Single source of truth for rendering a tab's content. Re-used by
+  // both the mobile section view and the desktop content panel.
+  const renderTabContent = (id: ProfileTabId): React.ReactNode => {
+    switch (id) {
+      case "overview":
+        return <OverviewTab user={user} onJumpTab={(next) => switchTab(next)} />
+      case "personal":
+        return <PersonalTab user={user} />
+      case "employment":
+        return <EmploymentTab user={user} />
+      case "salary":
+        return <SalaryTab user={user} />
+      case "notifications":
+        return <NotificationsTab />
+      case "preferences":
+        return <PreferencesTab />
+      case "security":
+        return <SecurityTab />
+      case "organization":
+        return isAdmin ? <OrganizationTab user={user} /> : null
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="min-h-full bg-background">
+      <div className="container mx-auto px-4 sm:px-6 max-w-4xl pt-5 sm:pt-8">
+        {/* ── Identity section ─────────────────────────────────────────
+            Always shown on desktop. On mobile, hidden when the user
+            has drilled into a specific section — the section view
+            replaces it entirely so the section content gets the full
+            viewport. */}
+        <div className={cn(tab !== null && "hidden lg:block")}>
+          <div className="flex flex-col items-center sm:flex-row sm:items-center gap-4 sm:gap-8">
+            <Avatar className="h-24 w-24 sm:h-28 sm:w-28 ring-2 ring-border shadow-sm shrink-0">
+              {user.avatar ? (
+                <AvatarImage src={user.avatar} alt={displayName(user)} />
+              ) : null}
+              <AvatarFallback className="text-2xl font-semibold bg-primary/10 text-primary">
+                {initialsOf(user)}
+              </AvatarFallback>
+            </Avatar>
+
+            <div className="flex-1 min-w-0 w-full text-center sm:text-left">
+              <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
+                  {displayName(user)}
+                </h1>
+                {accessTier !== "Member" && (
+                  <Badge className="text-[10px] px-2 h-5 bg-primary/15 text-primary hover:bg-primary/15 border-transparent">
+                    {accessTier}
+                  </Badge>
+                )}
+              </div>
+
+              <div className="mt-1 text-sm text-muted-foreground space-y-0.5">
+                {primaryRole ? (
+                  <p className="font-medium text-foreground/80">{primaryRole}</p>
+                ) : null}
+                <p className="truncate">
+                  {user.email}
+                  {user.organization?.name ? (
+                    <span className="text-muted-foreground/80">
+                      {" · "}
+                      {user.organization.name}
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 mt-4">
+                <Button
+                  type="button"
+                  onClick={() => switchTab("personal")}
+                  className="h-9 px-4"
+                  size="sm"
+                >
+                  Edit profile
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                  className="h-9 px-4"
+                  size="sm"
+                >
+                  <LogOut className="h-3.5 w-3.5 mr-1.5" />
+                  Sign out
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── MOBILE LIST VIEW (drill-down menu) ─────────────────────
+            iOS Settings / Instagram menu style. Each row: icon tile +
+            label + chevron. Tapping a row hashes into that section,
+            which the section view below picks up.
+            Wrapped in a single border-t / border-b stack so the rows
+            form a clean grouped list, edge-to-edge on mobile via
+            negative margin. */}
+        <div className={cn("lg:hidden mt-6 -mx-4", tab !== null && "hidden")}>
+          <div className="bg-card border-y border-border">
+            {visibleTabs.map((t, idx) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => switchTab(t.id)}
-                className={`flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                  tab === t.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-3.5 text-left",
+                  "active:bg-muted/60 transition-colors duration-100",
+                  "select-none touch-manipulation",
+                  // Internal divider between rows (last row gets no divider).
+                  idx !== visibleTabs.length - 1 && "border-b border-border",
+                )}
               >
-                {t.icon}
-                {t.label}
+                <span className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  {t.icon}
+                </span>
+                <span className="flex-1 text-[15px] font-medium truncate">
+                  {t.label}
+                </span>
+                <ChevronRight className="h-5 w-5 text-muted-foreground/60 shrink-0" />
               </button>
             ))}
-          </nav>
+          </div>
         </div>
 
-        {/* Two-column layout */}
-        <div className="grid lg:grid-cols-[260px_1fr] gap-6 mt-4 lg:mt-6">
-          {/* Sidebar */}
-          <aside className="hidden lg:block">
-            <nav className="sticky top-6 space-y-1">
-              {visibleTabs.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => switchTab(t.id)}
-                  className={`group w-full flex items-center gap-3 rounded-lg p-2.5 text-left transition-colors ${
-                    tab === t.id ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-                  }`}
-                >
-                  <span
-                    className={`h-8 w-8 rounded-md flex items-center justify-center shrink-0 ${
-                      tab === t.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {t.icon}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium truncate">{t.label}</span>
-                    <span className="block text-[11px] text-muted-foreground truncate">
-                      {t.description}
-                    </span>
-                  </span>
-                  <ChevronRight
-                    className={`h-3.5 w-3.5 transition-transform ${
-                      tab === t.id ? "translate-x-0.5 text-primary" : "text-muted-foreground/50"
-                    }`}
-                  />
-                </button>
-              ))}
-            </nav>
-          </aside>
+        {/* ── MOBILE SECTION VIEW (after drill-down) ──────────────────
+            Shown when the user has tapped a row. Layout:
+              [← Back]
+              [Section Name]
+              [section content]
+            The back row and title sit at the top of the SCROLL CONTENT,
+            not in a fixed bar — so there's still only one "header" on
+            screen (the global ConditionalLayout top bar, which shows
+            "Profile"). */}
+        <div className={cn("lg:hidden", tab === null && "hidden")}>
+          <button
+            type="button"
+            onClick={() => switchTab(null)}
+            className={cn(
+              "inline-flex items-center gap-1 -ml-1.5",
+              "text-sm font-medium text-muted-foreground hover:text-foreground",
+              "active:scale-95 transition-all rounded-md",
+              "py-1 pr-2",
+            )}
+            aria-label="Back to profile"
+          >
+            <ChevronLeft className="h-5 w-5" />
+            <span>Back</span>
+          </button>
 
-          {/* Active tab content */}
-          <main className="min-w-0">
-            <div className="flex items-baseline justify-between mb-4">
-              <div>
-                <h2 className="text-lg sm:text-xl font-semibold tracking-tight">
-                  {activeTab.label}
-                </h2>
-                <p className="text-xs text-muted-foreground">{activeTab.description}</p>
-              </div>
-            </div>
+          {activeMobileDef && (
+            <h2 className="text-2xl font-semibold tracking-tight mt-2 mb-4">
+              {activeMobileDef.label}
+            </h2>
+          )}
 
+          {tab && (
             <div
               key={tab}
-              className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200"
+              className="animate-in fade-in-0 slide-in-from-right-3 duration-200"
             >
-              {tab === "overview" && <OverviewTab user={user} onJumpTab={switchTab} />}
-              {tab === "personal" && <PersonalTab user={user} />}
-              {tab === "employment" && <EmploymentTab user={user} />}
-              {tab === "salary" && <SalaryTab user={user} />}
-              {tab === "notifications" && <NotificationsTab />}
-              {tab === "preferences" && <PreferencesTab />}
-              {tab === "security" && <SecurityTab />}
-              {tab === "organization" && isAdmin && (
-                <OrganizationTab user={user} />
-              )}
+              {renderTabContent(tab)}
+            </div>
+          )}
+        </div>
+
+        {/* ── DESKTOP LAYOUT ─────────────────────────────────────────
+            Hidden on mobile; renders the classic "sidebar + content"
+            split. Only one instance of each tab is mounted at a time
+            (the active one) — switching tabs unmounts the previous via
+            `key={desktopTab}`. */}
+        <div className="hidden lg:grid lg:grid-cols-[220px_1fr] gap-6 mt-8">
+          <aside>
+            <nav className="sticky top-4 space-y-0.5" aria-label="Profile sections">
+              {visibleTabs.map((t) => {
+                const active = desktopTab === t.id
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => switchTab(t.id)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "group w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm",
+                      "transition-colors duration-150",
+                      active
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    <span className="shrink-0">{t.icon}</span>
+                    <span className="truncate">{t.label}</span>
+                  </button>
+                )
+              })}
+            </nav>
+          </aside>
+          <main className="min-w-0">
+            <div key={desktopTab} className="animate-in fade-in-0 duration-200">
+              {renderTabContent(desktopTab)}
             </div>
           </main>
         </div>
@@ -298,125 +389,49 @@ export default function ProfilePage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Header card — avatar, name, role chips, sign-out
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ProfileHeader({
-  user,
-  onLogout,
-  loggingOut,
-}: {
-  user: ProfileUser
-  onLogout: () => void
-  loggingOut: boolean
-}) {
-  const primaryRole = user.unitAssignments[0]?.role?.name
-  return (
-    <div className="relative overflow-hidden rounded-xl border bg-background shadow-sm">
-      {/* Soft gradient banner so the identity card has a tasteful accent
-          without leaning on a hard solid colour. */}
-      <div
-        aria-hidden
-        className="absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-primary/10 via-violet-500/10 to-cyan-500/10 dark:from-primary/20 dark:via-violet-500/15 dark:to-cyan-500/15"
-      />
-      <div className="relative flex items-center gap-4 p-4 sm:p-5">
-        <Avatar className="h-16 w-16 sm:h-20 sm:w-20 ring-4 ring-background shadow-md shrink-0">
-          {user.avatar ? (
-            <AvatarImage src={user.avatar} alt={displayName(user)} />
-          ) : null}
-          <AvatarFallback className="text-lg font-bold bg-primary/15 text-primary">
-            {initialsOf(user)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight truncate">
-              {displayName(user)}
-            </h1>
-            {user.isOrgOwner && (
-              <Badge className="text-[10px] px-1.5 h-5 bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-300 border-transparent">
-                Owner
-              </Badge>
-            )}
-            {user.isAdmin && !user.isOrgOwner && (
-              <Badge className="text-[10px] px-1.5 h-5 bg-blue-100 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-300 border-transparent">
-                Admin
-              </Badge>
-            )}
-            {user.email_verified ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 h-5 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 bg-emerald-50/60 dark:bg-emerald-500/10"
-              >
-                Verified
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 h-5 text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10"
-              >
-                Unverified
-              </Badge>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground truncate mt-1">
-            {user.email}
-            {primaryRole ? <> · {primaryRole}</> : null}
-            {user.organization?.name ? <> · {user.organization.name}</> : null}
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          onClick={onLogout}
-          disabled={loggingOut}
-          className="h-9 hidden sm:inline-flex"
-        >
-          <LogOut className="h-3.5 w-3.5 mr-1.5" />
-          Sign out
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onLogout}
-          disabled={loggingOut}
-          className="sm:hidden"
-          aria-label="Sign out"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Loading state — skeleton matches the real layout to reduce CLS.
+// Loading state — matches the real layout proportions to minimize CLS.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function LoadingShell() {
   return (
-    <div className="min-h-screen bg-muted/20">
-      <div className="container mx-auto p-4 sm:p-6 max-w-6xl">
-        <div className="rounded-xl border bg-background p-4 sm:p-5 flex items-center gap-4">
-          <Skeleton className="h-14 w-14 rounded-full" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-3 w-64" />
-          </div>
-        </div>
-        <div className="grid lg:grid-cols-[260px_1fr] gap-6 mt-6">
-          <div className="hidden lg:block space-y-2">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <Skeleton key={i} className="h-12 w-full" />
-            ))}
-          </div>
-          <div className="space-y-4">
-            <Skeleton className="h-32" />
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Skeleton className="h-40" />
-              <Skeleton className="h-40" />
+    <div className="min-h-full bg-background">
+      <div className="container mx-auto px-4 sm:px-6 max-w-4xl pt-5 sm:pt-8">
+        <div className="flex flex-col items-center sm:flex-row sm:items-center gap-4 sm:gap-8">
+          <Skeleton className="h-24 w-24 sm:h-28 sm:w-28 rounded-full shrink-0" />
+          <div className="flex-1 w-full space-y-2">
+            <Skeleton className="h-6 w-40 mx-auto sm:mx-0" />
+            <Skeleton className="h-4 w-56 mx-auto sm:mx-0" />
+            <Skeleton className="h-4 w-48 mx-auto sm:mx-0" />
+            <div className="grid grid-cols-2 sm:flex gap-2 mt-4">
+              <Skeleton className="h-9 sm:w-28" />
+              <Skeleton className="h-9 sm:w-28" />
             </div>
           </div>
+        </div>
+        {/* Mobile list skeleton */}
+        <div className="lg:hidden mt-6 -mx-4 bg-card border-y border-border">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className={cn(
+                "flex items-center gap-3 px-4 py-3.5",
+                i !== 5 && "border-b border-border",
+              )}
+            >
+              <Skeleton className="h-10 w-10 rounded-xl" />
+              <Skeleton className="h-4 flex-1 max-w-[180px]" />
+              <Skeleton className="h-4 w-4" />
+            </div>
+          ))}
+        </div>
+        {/* Desktop skeleton */}
+        <div className="hidden lg:grid lg:grid-cols-[220px_1fr] gap-6 mt-8">
+          <div className="space-y-1.5">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-9 w-full rounded-lg" />
+            ))}
+          </div>
+          <Skeleton className="h-72 w-full rounded-xl" />
         </div>
       </div>
     </div>

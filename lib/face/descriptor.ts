@@ -119,7 +119,7 @@ export async function computeDescriptorFromImage(
   includeDescriptor: boolean = true,
 ): Promise<FaceDetectionResult> {
   await loadFaceModels();
-  
+
   // Yield to the browser's event loop before starting heavy inference.
   // This allows React to paint the "Analyzing..." spinner to the screen
   // instead of freezing the UI immediately.
@@ -221,7 +221,7 @@ export async function computeLivenessFromBlobs(
   const urls = blobs.map((b) => URL.createObjectURL(b));
   try {
     const images = await Promise.all(urls.map(blobUrlToImage));
-    
+
     // Process frames sequentially with yields in between. Promise.all()
     // would dispatch 3 heavy inferences concurrently, which starves the
     // event loop for a very long time and feels like a hard freeze.
