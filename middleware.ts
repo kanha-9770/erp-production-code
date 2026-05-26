@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { patternToRegex, resolveRouteAccess } from "@/lib/route-permissions";
 import { isPathBlockedByModules } from "@/lib/erp-modules";
 import { verifyAuthMeta } from "@/lib/auth/auth-meta-cookie";
+import { buildRedirectUrl } from "@/lib/request-url";
 
 /**
  * Detect if a path segment looks like a Prisma CUID (module ID).
@@ -54,7 +55,7 @@ export async function middleware(request: NextRequest) {
 
   // Logged-in users should NOT see login/register pages
   if (token && isPublicRoute && ["/login", "/register", "/signup"].includes(pathname)) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, "/"));
   }
 
   // Allow public routes for everyone
@@ -64,7 +65,7 @@ export async function middleware(request: NextRequest) {
 
   // Not logged in → redirect to login
   if (!token) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = buildRedirectUrl(request, "/login");
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
@@ -77,14 +78,14 @@ export async function middleware(request: NextRequest) {
   const authMeta = await verifyAuthMeta(authMetaRaw);
 
   if (!authMeta) {
-    const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
+    const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);
   }
 
   // Force refresh if cookie is from an older version (missing v or ts field)
   if (!authMeta.v || authMeta.v < 2) {
-    const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
+    const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);
   }
@@ -94,7 +95,7 @@ export async function middleware(request: NextRequest) {
     console.log(
       `[MW] path=${pathname} auth-meta STALE (age=${Math.round((Date.now() - authMeta.ts) / 1000)}s) → refreshing`
     );
-    const refreshUrl = new URL("/api/auth/refresh-meta", request.url);
+    const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);
   }
@@ -107,7 +108,7 @@ export async function middleware(request: NextRequest) {
   // shipped; in that case we skip gating so legacy sessions still work.
   if (Array.isArray(authMeta.selectedModules)) {
     if (isPathBlockedByModules(pathname, authMeta.selectedModules)) {
-      const url = new URL("/", request.url);
+      const url = buildRedirectUrl(request, "/");
       url.searchParams.set("moduleDisabled", "1");
       return NextResponse.redirect(url);
     }
@@ -133,7 +134,7 @@ export async function middleware(request: NextRequest) {
     isRebmOnly &&
     (pathname === "/" || pathname === "")
   ) {
-    return NextResponse.redirect(new URL("/real-estate", request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, "/real-estate"));
   }
 
   // ── 6. Specificity-based route access check ───────────────────────────────
@@ -161,7 +162,7 @@ export async function middleware(request: NextRequest) {
     console.log(
       `[MW] path=${pathname} DENIED (specificity match) roles=[${authMeta.roleNames}]`
     );
-    return NextResponse.redirect(new URL("/unauthorized", request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, "/unauthorized"));
   }
 
   // ── 7. Dynamic module routes (/[module_name]/[moduleId]/...) ─────────────

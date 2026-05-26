@@ -1,11 +1,10 @@
 import type { Metadata } from 'next';
-import { AdminNav } from '@/components/layout/admin-nav';
 import { validateSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
-  getOrganizationKPIs, getFormModules, getSubmissionTimeSeries,
-  getOrganizationSetupMetrics, checkIsAdmin,
+  getFormModules, getSubmissionTimeSeries,
+  checkIsAdmin, getAdminPulse,
 } from '@/app/actions/analytics';
 import { DashboardContent } from '@/components/dashboard/dashboard-content';
 import { UserDashboardContent } from '@/components/dashboard/user-dashboard-content';
@@ -32,24 +31,14 @@ export default async function HomePage() {
   }
 
   const isAdmin = await checkIsAdmin();
-
-  const user = {
-    email: session.user.email,
-    name: (session.user.first_name && session.user.last_name)
-      ? `${session.user.first_name} ${session.user.last_name}`
-      : session.user.username || session.user.email,
-    avatar: session.user.avatar,
-    organizationName: session.user.organization?.name,
-    role: isAdmin ? 'Admin' : 'User',
-  };
+  const organizationName = session.user.organization?.name ?? '';
 
   return (
     <div className="flex h-screen  bg-background">
       <div className="w-full">
-        {/* <AdminNav user={user} /> */}
         <main className="overflow-auto p-3 sm:p-4 lg:p-8">
           {isAdmin ? (
-            <AdminDashboard />
+            <AdminDashboard organizationName={organizationName} />
           ) : (
             <UserDashboard />
           )}
@@ -59,20 +48,19 @@ export default async function HomePage() {
   );
 }
 
-async function AdminDashboard() {
-  const [kpis, modules, timeSeries, setupMetrics] = await Promise.all([
-    getOrganizationKPIs('30days'),
+async function AdminDashboard({ organizationName }: { organizationName: string }) {
+  const [pulse, modules, timeSeries] = await Promise.all([
+    getAdminPulse(),
     getFormModules(),
     getSubmissionTimeSeries('30days'),
-    getOrganizationSetupMetrics(),
   ]);
 
   return (
     <DashboardContent
-      kpis={kpis}
+      organizationName={organizationName}
+      pulse={pulse}
       modules={modules}
       timeSeries={timeSeries}
-      setupMetrics={setupMetrics}
     />
   );
 }

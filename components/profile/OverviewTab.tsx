@@ -129,36 +129,35 @@ function ProfileSetupSection({
   onJumpTab: (tab: ProfileTabId) => void
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-sm font-medium">Profile setup</h3>
-        <span className="text-sm tabular-nums text-muted-foreground">
-          {pct}%
+    // No card chrome. Same visual language as About / Contact below:
+    // a small uppercase section label, then the content. The progress
+    // bar + button carry their own weight; a surrounding card just
+    // added a soft outline that read as fuzz.
+    <section>
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
+        Profile setup
+      </h3>
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-sm text-muted-foreground">
+          {remaining} more {remaining === 1 ? "detail" : "details"} to finish
         </span>
+        <span className="text-sm tabular-nums font-medium">{pct}%</span>
       </div>
-      {/* Single neutral progress bar — no tone tinting, no gradient.
-          The number above tells you the score; the colour shouldn't. */}
-      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden mb-4">
+      <div className="h-1 w-full bg-muted overflow-hidden mb-4">
         <div
           className="h-full bg-foreground transition-[width] duration-500 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {remaining} more {remaining === 1 ? "detail" : "details"} to
-          finish.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onJumpTab(nextTab)}
-          className="h-8"
-        >
-          Continue
-          <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-        </Button>
-      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onJumpTab(nextTab)}
+        className="h-8"
+      >
+        Continue
+        <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+      </Button>
     </section>
   )
 }

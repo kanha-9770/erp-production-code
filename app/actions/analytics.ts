@@ -1289,6 +1289,108 @@ export async function getUserDashboardData(dateRange: string) {
 }
 
 // ============================================================
+// Admin "today's pulse" — operational signals an admin needs first.
+// ============================================================
+//
+// Returns counts the admin actually cares about on landing:
+//   - presentToday      number of org members who punched in today
+//   - onLeaveToday      number on approved leave that covers today
+//   - totalEmployees    org headcount (Employee rows linked to org users)
+//   - pendingLeaves     leave requests still awaiting decision
+//   - newApplications   job applications in early stages (NEW/SCREENING)
+//   - submissionsThisWeek / submissionsPriorWeek  for a delta widget
+//   - auditEntries7d    audit volume last 7 days (security signal)
+//
+// All counts are org-scoped. Returns zeros if the user isn't in an org —
+// the UI uses that as the empty state.
+export async function getAdminPulse() {
+  const session = await requireAuth();
+  const orgId = session.user.organizationId;
+
+  if (!orgId) {
+    return {
+      presentToday: 0,
+      onLeaveToday: 0,
+      totalEmployees: 0,
+      pendingLeaves: 0,
+      newApplications: 0,
+      submissionsThisWeek: 0,
+      submissionsPriorWeek: 0,
+      auditEntries7d: 0,
+    };
+  }
+
+  // YYYY-MM-DD in the server's locale — matches how Attendance.date and
+  // LeaveRequest.startDate/endDate are stored.
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // [now-7d, now) — "this week"
+  const now = new Date();
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
+  const fourteenDaysAgo = new Date(now);
+  fourteenDaysAgo.setDate(now.getDate() - 14);
+
+  const orgUserIds = await getOrgUserIds(orgId);
+  const orgFormIds = await getOrgFormIds(orgId);
+
+  const [
+    presentToday,
+    onLeaveToday,
+    totalEmployees,
+    pendingLeaves,
+    newApplications,
+    auditEntries7d,
+    submissionsThisWeek,
+    submissionsPriorWeek,
+  ] = await Promise.all([
+    prisma.attendance.count({
+      where: {
+        organizationId: orgId,
+        date: todayStr,
+        checkedIn: true,
+      },
+    }),
+    prisma.leaveRequest.count({
+      where: {
+        organizationId: orgId,
+        status: 'APPROVED',
+        startDate: { lte: todayStr },
+        endDate: { gte: todayStr },
+      },
+    }),
+    orgUserIds.length > 0
+      ? prisma.employee.count({ where: { userId: { in: orgUserIds } } })
+      : Promise.resolve(0),
+    prisma.leaveRequest.count({
+      where: { organizationId: orgId, status: 'PENDING' },
+    }),
+    prisma.jobApplication.count({
+      where: {
+        organizationId: orgId,
+        status: { in: ['NEW', 'SCREENING'] },
+      },
+    }),
+    prisma.auditLog.count({
+      where: { organizationId: orgId, createdAt: { gte: sevenDaysAgo } },
+    }),
+    getFormRecordCounts(sevenDaysAgo, now, orgFormIds).then((r) => r.total),
+    getFormRecordCounts(fourteenDaysAgo, sevenDaysAgo, orgFormIds).then((r) => r.total),
+  ]);
+
+  return {
+    presentToday,
+    onLeaveToday,
+    totalEmployees,
+    pendingLeaves,
+    newApplications,
+    submissionsThisWeek,
+    submissionsPriorWeek,
+    auditEntries7d,
+  };
+}
+
+// ============================================================
 // Check if current user is admin  (server-side helper)
 // ============================================================
 export async function checkIsAdmin(): Promise<boolean> {

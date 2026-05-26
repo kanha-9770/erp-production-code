@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { validateSession } from "@/lib/auth";
 import { computeRouteMeta } from "@/lib/auth/route-meta";
 import { signAuthMeta, type AuthMeta } from "@/lib/auth/auth-meta-cookie";
+import { buildRedirectUrl } from "@/lib/request-url";
 
 /**
  * Shared: fetch user roles and compute the full auth-meta payload.
@@ -100,12 +101,12 @@ export async function GET(request: NextRequest) {
 
     const token = request.cookies.get("auth-token")?.value;
     if (!token) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, "/login"));
     }
 
     const meta = await buildAuthMeta(token);
     if (!meta) {
-      const loginUrl = new URL("/login", request.url);
+      const loginUrl = buildRedirectUrl(request, "/login");
       loginUrl.searchParams.set("callbackUrl", callbackUrl);
       const response = NextResponse.redirect(loginUrl);
       response.cookies.delete("auth-token");
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest) {
       return response;
     }
 
-    const response = NextResponse.redirect(new URL(callbackUrl, request.url));
+    const response = NextResponse.redirect(buildRedirectUrl(request, callbackUrl));
     await setAuthMetaCookie(response, meta);
 
     console.log(
@@ -123,7 +124,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("Refresh meta GET error:", error);
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, "/login"));
   }
 }
 

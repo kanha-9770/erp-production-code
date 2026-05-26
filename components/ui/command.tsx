@@ -214,12 +214,13 @@ const CommandList = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.List
     ref={ref}
-    // ──────────────────────────────────────────────
-    // FIXED: removed overflow-y-auto → let cmdk handle scrolling natively
-    // This is the #1 fix for mouse wheel / trackpad not working
-    // ──────────────────────────────────────────────
+    // cmdk does NOT manage its own scroll container — the list element
+    // must itself be scrollable, otherwise results past the visible
+    // height are unreachable. Use auto so wheel/trackpad/touch all work.
+    // Height: leave room for the input (~3rem) and dialog padding so the
+    // dialog never exceeds the viewport on a phone with the keyboard up.
     className={cn(
-      "max-h-[min(70vh,360px)] overflow-hidden overscroll-contain",
+      "max-h-[min(75dvh,420px)] overflow-y-auto overflow-x-hidden overscroll-contain",
       className
     )}
     {...props}
