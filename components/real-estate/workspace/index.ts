@@ -17,6 +17,11 @@
 export { WorkspaceShell, WorkspaceHeader } from "./workspace-shell";
 export { DataTable, type ColumnDef } from "./data-table";
 export { FilterChips, ActiveFilterPills, type ChipOption } from "./filter-chips";
+export {
+  SelectFilter,
+  type SelectFilterOption,
+  type SelectFilterProps,
+} from "./select-filter";
 export { ViewsBar } from "./views-bar";
 export { InlineEditCell } from "./inline-edit";
 export { useSavedViews, type SavedView } from "./saved-views";

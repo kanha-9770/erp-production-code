@@ -25,19 +25,21 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import {
-  Users, Plus, Search, Mail, Phone, Calendar, MapPin, Building2, User2, 
+  Users, Plus, Search, Mail, Phone, Calendar, MapPin, Building2, User2,
   Briefcase, CreditCard, Pencil, ExternalLink, Trash2, ChevronLeft, ChevronRight,
-  ImageOff, UserCircle
+  ImageOff, UserCircle, X as XIcon,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  ActiveFilterPills,
   ViewsBar, useSavedViews,
   AdvancedFilter,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
+  SelectFilter,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
@@ -210,8 +212,6 @@ export default function EmployeeMasterListPage() {
   const activeFilterPills = useMemo(() => {
     const pills: Array<{ key: string; label: React.ReactNode }> = [];
     if (filters.search) pills.push({ key: "search", label: <>Search: <strong>{filters.search}</strong></> });
-    if (filters.status) pills.push({ key: "status", label: <>Status: <strong>{filters.status}</strong></> });
-    if (filters.department) pills.push({ key: "department", label: <>Dept: <strong>{filters.department}</strong></> });
     if (filters.minSalary) pills.push({ key: "minSalary", label: <>Min ₹{Number(filters.minSalary).toLocaleString()}</> });
     if (filters.maxSalary) pills.push({ key: "maxSalary", label: <>Max ₹{Number(filters.maxSalary).toLocaleString()}</> });
     return pills;
@@ -865,21 +865,60 @@ export default function EmployeeMasterListPage() {
               title="Employee Master"
               subtitle={`${total.toLocaleString()} record${total === 1 ? "" : "s"}${isFetching ? " · syncing…" : ""}`}
             >
-              {/* Search takes the full row on mobile so the label is legible
-                  and the action buttons can wrap underneath cleanly. */}
-              <div className="relative w-full sm:w-auto order-1 sm:order-none">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search name, dept, designation..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") updateFilter("search", searchInput.trim());
-                    if (e.key === "Escape") { setSearchInput(""); updateFilter("search", ""); }
-                  }}
-                  className="pl-8 h-8 w-full sm:w-64 text-sm"
-                />
-              </div>
+              {/* Search collapses to an icon button. Clicking opens a
+                  popover with the actual input so the header stays
+                  compact and the table gets more vertical room. Active
+                  search shows a small dot on the icon as an affordance. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search name, dept, designation..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") updateFilter("search", searchInput.trim());
+                        if (e.key === "Escape") {
+                          setSearchInput("");
+                          updateFilter("search", "");
+                        }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchInput("");
+                          updateFilter("search", "");
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <AdvancedFilter
                 fields={filterFields}
                 value={conditions}
@@ -890,18 +929,20 @@ export default function EmployeeMasterListPage() {
                 columns={columns}
                 variant="dialog"
               />
+              {/* + New collapses to icon + "New" on mobile so the four
+                  action buttons (Search, Filter, Columns, + New) all fit
+                  on one row. */}
               <Button
                 size="sm"
-                className="h-8 flex-1 sm:flex-none min-w-[140px] sm:min-w-0"
+                className="h-8 px-2 sm:px-3 shrink-0"
                 onClick={() => setCreateOpen(true)}
               >
-                <Plus className="h-3.5 w-3.5 mr-1" />
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">New employee</span>
-                <span className="sm:hidden">New</span>
               </Button>
             </WorkspaceHeader>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+            <div className="px-4 sm:px-6 pb-2 flex flex-wrap items-center gap-3">
               <ViewsBar
                 views={views.views}
                 activeId={views.activeId}
@@ -914,14 +955,18 @@ export default function EmployeeMasterListPage() {
               />
             </div>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips
+            {/* Filter row — STATUS and DEPT are click-to-open popover
+                pickers (button shows current value, popover lists every
+                option). Keeps the row compact so the table gets more
+                vertical space. */}
+            <div className="px-4 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter
                 label="Status"
                 value={filters.status}
                 onChange={(v) => updateFilter("status", v)}
                 options={STATUS_OPTIONS}
               />
-              <FilterChips
+              <SelectFilter
                 label="Dept"
                 value={filters.department}
                 onChange={(v) => updateFilter("department", v)}
@@ -1229,3 +1274,5 @@ function Fact({ label, value, icon: Icon }: { label: string; value: React.ReactN
     </div>
   );
 }
+
+

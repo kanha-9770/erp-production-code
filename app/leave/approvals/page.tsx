@@ -265,36 +265,50 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1.5">
+    <div className="container mx-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="space-y-1 min-w-0">
           <PageBackLink href="/leave" label="Leave" />
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Inbox className="h-8 w-8 text-primary" />
+          <h1 className="text-lg sm:text-xl font-bold tracking-tight flex items-center gap-2">
+            <Inbox className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
             Leave Approvals
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Pending leave requests from your team.
-          </p>
         </div>
-        <Button variant="outline" size="icon" onClick={refresh} disabled={refreshing}>
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={refresh}
+          disabled={refreshing}
+          className="h-8 w-8 shrink-0"
+          aria-label="Refresh"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 
       <Tabs defaultValue="list">
-        <TabsList>
-          <TabsTrigger value="list">
-            <Inbox className="h-4 w-4 mr-2" />
-            Pending ({pending?.length ?? 0})
+        {/* Tabs render as an equal 3-column grid so labels fit on mobile
+            without truncation ("Calendar" was being clipped to "Calenc"). */}
+        <TabsList className="grid w-full grid-cols-3 h-8">
+          <TabsTrigger value="list" className="text-xs gap-1 px-1.5">
+            <Inbox className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              <span className="hidden sm:inline">Pending </span>
+              <span className="sm:hidden">Pend </span>
+              ({pending?.length ?? 0})
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="early-returns">
-            <LogOut className="h-4 w-4 mr-2" />
-            Early Returns ({pendingShorten?.length ?? 0})
+          <TabsTrigger value="early-returns" className="text-xs gap-1 px-1.5">
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              <span className="hidden sm:inline">Early Returns </span>
+              <span className="sm:hidden">Early </span>
+              ({pendingShorten?.length ?? 0})
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="calendar">
-            <CalendarDays className="h-4 w-4 mr-2" />
-            Calendar
+          <TabsTrigger value="calendar" className="text-xs gap-1 px-1.5">
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Calendar</span>
           </TabsTrigger>
         </TabsList>
 
@@ -435,78 +449,97 @@ function PendingCard({
   onRejectClick: () => void;
 }) {
   const r = request;
+  const displayName =
+    r.user?.firstName || r.user?.lastName
+      ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
+      : r.user?.email ?? 'Unknown user';
+  const durationLabel =
+    r.duration === 'FULL_DAY'
+      ? 'Full Day'
+      : r.duration === 'HALF_DAY_FIRST'
+        ? '½ — 1st half'
+        : '½ — 2nd half';
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between flex-wrap gap-3">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              {r.user?.firstName || r.user?.lastName
-                ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
-                : r.user?.email ?? 'Unknown user'}
-              <Badge variant="outline" className="text-xs">
-                {r.leaveType?.name ?? '—'}
-              </Badge>
-            </CardTitle>
-            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-              <span className="flex items-center gap-1">
-                <Mail className="h-3 w-3" /> {r.user?.email ?? '—'}
-              </span>
-              {r.user?.department && (
-                <span className="flex items-center gap-1">
-                  <Building2 className="h-3 w-3" /> {r.user.department}
-                </span>
-              )}
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {new Date(r.appliedAt).toLocaleDateString()}
-              </span>
-            </div>
+      <CardContent className="p-3 sm:p-4 space-y-2.5">
+        {/* Identity row — name + leave-type badge, email/dept/applied
+            date as a single muted line below. */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold truncate">{displayName}</span>
+            <Badge variant="outline" className="text-[10px] px-1.5 h-4 shrink-0">
+              {r.leaveType?.name ?? '—'}
+            </Badge>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={busy} onClick={onRejectClick}>
-              <XCircle className="h-4 w-4 mr-1 text-destructive" />
-              Reject
-            </Button>
-            <Button size="sm" disabled={busy} onClick={onApprove}>
-              <CheckCircle2 className="h-4 w-4 mr-1" />
-              Approve
-            </Button>
+          <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+            <span className="flex items-center gap-1 truncate">
+              <Mail className="h-3 w-3 shrink-0" />
+              <span className="truncate">{r.user?.email ?? '—'}</span>
+            </span>
+            {r.user?.department && (
+              <span className="flex items-center gap-1">
+                <Building2 className="h-3 w-3" /> {r.user.department}
+              </span>
+            )}
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {new Date(r.appliedAt).toLocaleDateString()}
+            </span>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <Stat label="Start" value={r.startDate} />
-          <Stat label="End" value={r.endDate} />
-          <Stat label="Days" value={r.totalDays.toFixed(1)} />
-          <Stat
-            label="Duration"
-            value={
-              r.duration === 'FULL_DAY'
-                ? 'Full Day'
-                : r.duration === 'HALF_DAY_FIRST'
-                  ? '½ — 1st half'
-                  : '½ — 2nd half'
-            }
-          />
+
+        {/* Date / duration grid — 4 columns even on mobile so the whole
+            request fits on one line of stats below the identity row. */}
+        <div className="grid grid-cols-4 gap-2 text-xs">
+          <Stat label="Start" value={r.startDate} mono />
+          <Stat label="End" value={r.endDate} mono />
+          <Stat label="Days" value={r.totalDays.toFixed(1)} mono />
+          <Stat label="Duration" value={durationLabel} />
         </div>
+
         {r.reason && (
-          <div className="mt-3 p-3 bg-muted/50 rounded text-sm">
-            <div className="text-xs text-muted-foreground mb-1">Reason</div>
+          <div className="px-2.5 py-1.5 bg-muted/40 rounded text-xs">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1.5">
+              Reason
+            </span>
             {r.reason}
           </div>
         )}
+
+        {/* Approve / Reject — primary actions sit at the bottom and span
+            the full row on mobile so they're always easy to tap. */}
+        <div className="flex gap-2 pt-0.5">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onRejectClick}
+            className="h-8 flex-1"
+          >
+            <XCircle className="h-3.5 w-3.5 mr-1 text-destructive" />
+            Reject
+          </Button>
+          <Button size="sm" disabled={busy} onClick={onApprove} className="h-8 flex-1">
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+            Approve
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div>
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="font-medium">{value}</div>
+    <div className="min-w-0">
+      <div className="text-muted-foreground text-[10px] uppercase tracking-wider leading-tight">
+        {label}
+      </div>
+      <div
+        className={`font-medium text-xs truncate ${mono ? 'tabular-nums font-mono' : ''}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }

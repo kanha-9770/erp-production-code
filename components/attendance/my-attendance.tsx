@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   CalendarClock, Clock, Search, RefreshCcw, Loader2, AlertTriangle,
-  Edit3, MapPin, MoreHorizontal, Check, Info,
+  Edit3, MapPin, Info,
 } from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
@@ -31,12 +31,12 @@ import { useUserTimezone } from "@/lib/user-timezone";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  ActiveFilterPills,
+  FilterChips, ActiveFilterPills,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { cn } from "@/lib/utils";
+import {
+  HoverCard, HoverCardContent, HoverCardTrigger,
+} from "@/components/ui/hover-card";
 
 interface HistoryResponse {
   success: boolean;
@@ -181,24 +181,47 @@ export function MyAttendance() {
   const columns: ColumnDef<AttendanceRecord>[] = useMemo(
     () => [
       {
+        // Avatar column — mirrors the Employee Master "image field". Shows
+        // the check-in selfie when present (so the row carries the proof
+        // visually), otherwise a calendar icon. Pinned so it stays visible
+        // when the table scrolls horizontally.
+        id: "avatar",
+        header: "",
+        width: 56,
+        pinned: true,
+        cell: (r) => {
+          if (r.checkInPhoto) {
+            return (
+              <div onClick={(e) => e.stopPropagation()}>
+                <PhotoThumb
+                  src={r.checkInPhoto}
+                  alt="Check-in selfie"
+                  title="Check-in proof"
+                />
+              </div>
+            );
+          }
+          return (
+            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <CalendarClock className="h-4 w-4 text-primary/60" />
+            </div>
+          );
+        },
+      },
+      {
         id: "date",
         header: "Date",
-        width: 200,
+        width: 180,
         pinned: true,
         sortKey: "date",
         copyValue: (r) => fmtShortDate(r.date),
         cell: (r) => (
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-              <CalendarClock className="h-4 w-4 text-primary/70" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate">{fmtShortDate(r.date)}</div>
-              <div className="text-[11px] text-muted-foreground">
-                {workedMinutesFor(r) > 0
-                  ? `Worked ${formatHM(workedMinutesFor(r))}`
-                  : "—"}
-              </div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium truncate">{fmtShortDate(r.date)}</div>
+            <div className="text-[11px] text-muted-foreground">
+              {workedMinutesFor(r) > 0
+                ? `Worked ${formatHM(workedMinutesFor(r))}`
+                : "—"}
             </div>
           </div>
         ),
@@ -296,6 +319,30 @@ export function MyAttendance() {
             )}
           </div>
         ),
+      },
+      {
+        id: "proof",
+        header: "Proof",
+        width: 100,
+        // Selfies captured at punch-in / punch-out. Both shown when
+        // present; HoverCard pops a larger preview on hover so HR can
+        // verify the face without leaving the row.
+        cell: (r) => {
+          const hasPhoto = !!(r.checkInPhoto || r.checkOutPhoto);
+          if (!hasPhoto) {
+            return <span className="text-xs text-muted-foreground">—</span>;
+          }
+          return (
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              {r.checkInPhoto && (
+                <PhotoThumb src={r.checkInPhoto} alt="Check-in selfie" title="Check-in proof" />
+              )}
+              {r.checkOutPhoto && (
+                <PhotoThumb src={r.checkOutPhoto} alt="Check-out selfie" title="Check-out proof" />
+              )}
+            </div>
+          );
+        },
       },
       {
         id: "worked",
@@ -422,46 +469,59 @@ export function MyAttendance() {
               title="My Attendance"
               subtitle={subtitle}
             >
-              {/* Row 1 on mobile: search (grows) + Columns + Refresh icons.
-                  All three share one row so the header doesn't sprawl. */}
-              <div className="flex items-center gap-2 w-full sm:contents order-first sm:order-none">
-                <div className="relative flex-1 sm:flex-none">
-                  <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search date or status…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-8 h-8 w-full sm:w-56 text-sm"
-                  />
-                </div>
-                <ManageColumnsButton
-                  tableId="my-attendance"
-                  columns={columns}
-                  variant="dialog"
+              {/* Search takes the full row on mobile (same as Employee
+                  Master) so the placeholder text stays legible and the
+                  action buttons can wrap underneath cleanly. */}
+              <div className="relative w-full sm:w-auto order-1 sm:order-none">
+                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search date or status…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 h-8 w-full sm:w-64 text-sm"
                 />
-                <Button
-                  size="sm"
-                  className="h-8 px-2 sm:px-3 shrink-0"
-                  onClick={fetchHistory}
-                  disabled={loading}
-                  title="Refresh"
-                >
-                  {loading ? (
-                    <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-3.5 w-3.5 sm:mr-1" />
-                  )}
-                  <span className="hidden sm:inline">Refresh</span>
-                </Button>
               </div>
-              {/* Row 2 on mobile: From + To inputs side-by-side, full width. */}
-              <div className="flex items-center gap-2 w-full sm:contents">
+              <ManageColumnsButton
+                tableId="my-attendance"
+                columns={columns}
+                variant="dialog"
+              />
+              <Button
+                size="sm"
+                className="h-8 flex-1 sm:flex-none min-w-[140px] sm:min-w-0"
+                onClick={fetchHistory}
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-3.5 w-3.5 mr-1" />
+                )}
+                <span className="hidden sm:inline">Refresh</span>
+                <span className="sm:hidden">Refresh</span>
+              </Button>
+            </WorkspaceHeader>
+
+            {/* Filter chip row — STATUS chips wrap naturally onto a second
+                row on narrow screens (same as Employee Master's STATUS/DEPT
+                chip wrapping). Date range and quick-range chips sit beside
+                the status chips like Min/Max Salary in Employee Master. */}
+            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
+              <FilterChips
+                label="Status"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={STATUS_OPTIONS}
+              />
+              {/* Date range — fills the row on mobile (matches Min/Max
+                  Salary's `w-full sm:w-auto` layout in Employee Master). */}
+              <div className="flex items-center gap-1 w-full sm:w-auto">
                 <Input
                   type="date"
                   value={from}
                   max={to}
                   onChange={(e) => setFrom(e.target.value)}
-                  className="h-8 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
+                  className="h-7 flex-1 sm:w-32 sm:flex-none text-xs"
                   aria-label="From date"
                 />
                 <Input
@@ -470,22 +530,12 @@ export function MyAttendance() {
                   min={from}
                   max={today}
                   onChange={(e) => setTo(e.target.value)}
-                  className="h-8 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
+                  className="h-7 flex-1 sm:w-32 sm:flex-none text-xs"
                   aria-label="To date"
                 />
               </div>
-            </WorkspaceHeader>
-
-            {/* Filter chip row — single line on mobile too. Shows All +
-                first 2 statuses + a "…" popover with the rest, plus the
-                quick-range buttons on the right. */}
-            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-2">
-              <StatusFilter
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={STATUS_OPTIONS}
-              />
-              <div className="flex flex-nowrap gap-1.5 ml-auto">
+              {/* Quick range chips */}
+              <div className="flex flex-nowrap gap-1.5">
                 <Button
                   variant="outline"
                   className="h-7 px-2 text-xs"
@@ -528,24 +578,20 @@ export function MyAttendance() {
                   Year
                 </Button>
               </div>
-              {(activePills.length > 0) && (
-                <div className="w-full">
-                  <ActiveFilterPills
-                    filters={activePills}
-                    onClear={(k) => {
-                      if (k === "status") setStatusFilter("");
-                      if (k === "search") setSearch("");
-                    }}
-                    onClearAll={() => {
-                      setStatusFilter("");
-                      setSearch("");
-                    }}
-                  />
-                </div>
-              )}
+              <ActiveFilterPills
+                filters={activePills}
+                onClear={(k) => {
+                  if (k === "status") setStatusFilter("");
+                  if (k === "search") setSearch("");
+                }}
+                onClearAll={() => {
+                  setStatusFilter("");
+                  setSearch("");
+                }}
+              />
               <Link
                 href="/attendance/regularizations"
-                className="w-full sm:w-auto text-xs text-blue-700 hover:underline shrink-0"
+                className="w-full sm:w-auto sm:ml-auto text-xs text-blue-700 hover:underline shrink-0"
               >
                 My regularization requests →
               </Link>
@@ -608,123 +654,57 @@ export function MyAttendance() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Inline status filter — shows All + the first 2 status options as chips,
-// and tucks the remaining 6 behind a "…" popover so the chip row never
-// wraps onto a second line. The active selection always appears as a
-// visible chip even if it lives in the overflow set, so users always see
-// what's currently filtered.
+// PhotoThumb — small selfie thumb shown in the avatar / Proof columns.
+// Hovering or focusing pops a larger preview via Radix HoverCard so HR
+// can verify the face without leaving the row. Native <img> (not
+// next/image) because the URLs are admin-uploaded blobs from our own
+// uploader.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface StatusFilterProps {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}
-
-function StatusFilter({ value, onChange, options }: StatusFilterProps) {
-  const VISIBLE_LIMIT = 2;
-  const [overflowOpen, setOverflowOpen] = useState(false);
-
-  // Always-visible options (the first N). If the active selection is in
-  // the overflow set, promote it into the visible row so the chip
-  // representing the current filter is never hidden behind the "…".
-  const baseVisible = options.slice(0, VISIBLE_LIMIT);
-  const overflow = options.slice(VISIBLE_LIMIT);
-  const activeOverflow = overflow.find((o) => o.value === value) ?? null;
-  const visibleOptions = activeOverflow
-    ? [...baseVisible.slice(0, VISIBLE_LIMIT - 1), activeOverflow]
-    : baseVisible;
-  const overflowOptions = overflow.filter(
-    (o) => !visibleOptions.some((v) => v.value === o.value),
-  );
-
-  return (
-    <div className="flex flex-nowrap items-center gap-1.5">
-      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mr-0.5">
-        Status
-      </span>
-      <StatusChip active={value === ""} onClick={() => onChange("")}>
-        All
-      </StatusChip>
-      {visibleOptions.map((o) => (
-        <StatusChip
-          key={o.value}
-          active={value === o.value}
-          onClick={() => onChange(value === o.value ? "" : o.value)}
-        >
-          {o.label}
-        </StatusChip>
-      ))}
-      {overflowOptions.length > 0 && (
-        <Popover open={overflowOpen} onOpenChange={setOverflowOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center h-7 w-7 rounded-full border bg-background hover:bg-muted transition-colors shrink-0"
-              aria-label="More status options"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-44 p-1" sideOffset={4}>
-            <ul className="space-y-0.5">
-              {overflowOptions.map((o) => {
-                const active = value === o.value;
-                return (
-                  <li key={o.value}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onChange(active ? "" : o.value);
-                        setOverflowOpen(false);
-                      }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-left transition-colors",
-                        active
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "hover:bg-muted",
-                      )}
-                    >
-                      <Check
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          active ? "opacity-100" : "opacity-0",
-                        )}
-                      />
-                      {o.label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </PopoverContent>
-        </Popover>
-      )}
-    </div>
-  );
-}
-
-function StatusChip({
-  active,
-  onClick,
-  children,
+function PhotoThumb({
+  src,
+  alt,
+  title,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
+  src: string;
+  alt: string;
+  title: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center h-7 px-2.5 rounded-full border text-xs whitespace-nowrap transition-colors shrink-0",
-        active
-          ? "bg-primary text-primary-foreground border-primary"
-          : "bg-background hover:bg-muted",
-      )}
-    >
-      {children}
-    </button>
+    <HoverCard openDelay={120} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          aria-label={alt}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={alt}
+            loading="lazy"
+            className="h-7 w-7 rounded-full object-cover border border-gray-200 hover:ring-2 hover:ring-blue-400 transition-shadow"
+          />
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="top"
+        align="center"
+        sideOffset={8}
+        collisionPadding={12}
+        className="w-auto p-2 rounded-lg border border-gray-200 bg-white shadow-xl"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt=""
+          className="block h-48 w-48 object-cover rounded-md"
+        />
+        <div className="mt-1.5 text-center text-[11px] font-medium text-gray-600">
+          {title}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
