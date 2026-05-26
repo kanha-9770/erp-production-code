@@ -50,19 +50,21 @@ import {
   Briefcase,
   Star,
   ExternalLink,
+  X as XIcon,
 } from "lucide-react";
 import {
   WorkspaceShell,
   WorkspaceHeader,
   DataTable,
   type ColumnDef,
-  FilterChips,
+  SelectFilter,
   ActiveFilterPills,
   ViewsBar,
   useSavedViews,
   InlineEditCell,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   StaticFilterSidebar,
   applyStaticFilters,
@@ -609,23 +611,61 @@ export default function JobApplicationListPage() {
                 total === 1 ? "" : "s"
               }${isFetching ? " · syncing…" : ""}`}
             >
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search name, email, phone…"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter")
-                      updateFilter("search", searchInput.trim());
-                    if (e.key === "Escape") {
-                      setSearchInput("");
-                      updateFilter("search", "");
-                    }
-                  }}
-                  className="pl-8 h-8 w-56 text-sm"
-                />
-              </div>
+              {/* Search collapses to an icon button. Clicking opens a
+                  popover with the actual input so the header stays
+                  compact and the table gets more vertical room. Active
+                  search shows a small dot on the icon as an affordance. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search name, email, phone…"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")
+                          updateFilter("search", searchInput.trim());
+                        if (e.key === "Escape") {
+                          setSearchInput("");
+                          updateFilter("search", "");
+                        }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchInput("");
+                          updateFilter("search", "");
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <Button
                 size="sm"
                 variant="outline"
@@ -646,10 +686,11 @@ export default function JobApplicationListPage() {
               />
               <Button
                 size="sm"
-                className="h-8"
+                className="h-8 px-2 sm:px-3 shrink-0"
                 onClick={() => setCreateOpen(true)}
               >
-                <Plus className="h-3.5 w-3.5 mr-1" /> New application
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">New application</span>
               </Button>
             </WorkspaceHeader>
 
@@ -669,7 +710,7 @@ export default function JobApplicationListPage() {
             </div>
 
             <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips
+              <SelectFilter
                 label="Status"
                 value={filters.status}
                 onChange={(v) => updateFilter("status", v)}
@@ -679,7 +720,7 @@ export default function JobApplicationListPage() {
                   tint: STATUS_TINT[o.value],
                 }))}
               />
-              <FilterChips
+              <SelectFilter
                 label="Source"
                 value={filters.source}
                 onChange={(v) => updateFilter("source", v)}

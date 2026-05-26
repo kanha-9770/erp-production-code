@@ -122,11 +122,14 @@ export function TeamAttendance() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Card>
-        <CardContent className="p-4 flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="t-from" className="text-xs text-gray-600">
+        <CardContent className="p-2.5 flex flex-wrap items-center gap-2">
+          {/* From / To share a single row — labels sit inline-left of
+              each date input. Compact h-7 sizing to keep the toolbar
+              tight on mobile. */}
+          <div className="flex items-center gap-1.5 w-full sm:w-auto">
+            <Label htmlFor="t-from" className="text-[11px] text-gray-600 shrink-0">
               From
             </Label>
             <Input
@@ -135,11 +138,9 @@ export function TeamAttendance() {
               value={from}
               max={to}
               onChange={(e) => setFrom(e.target.value)}
-              className="h-9 w-44"
+              className="h-7 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="t-to" className="text-xs text-gray-600">
+            <Label htmlFor="t-to" className="text-[11px] text-gray-600 shrink-0 ml-1">
               To
             </Label>
             <Input
@@ -149,37 +150,46 @@ export function TeamAttendance() {
               min={from}
               max={today}
               onChange={(e) => setTo(e.target.value)}
-              className="h-9 w-44"
+              className="h-7 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
             />
           </div>
-          <div className="space-y-1.5 ml-auto w-full sm:w-72">
-            <Label htmlFor="t-search" className="text-xs text-gray-600">
-              Search
-            </Label>
+          <div className="ml-auto w-full sm:w-64">
             <Input
               id="t-search"
-              placeholder="Filter by name, email, status…"
+              placeholder="Search by name, email, status…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-9"
+              className="h-7 text-xs"
             />
           </div>
-          <Button size="sm" onClick={fetchTeam} disabled={loading}>
-            {loading ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4 mr-1.5" />
-            )}
-            Refresh
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setManualOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            Manual entry
-          </Button>
+          <div className="flex flex-nowrap gap-1.5 w-full sm:w-auto">
+            <Button
+              size="sm"
+              className="h-7 px-2 text-xs flex-1 sm:flex-none"
+              onClick={fetchTeam}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-3.5 w-3.5 mr-1" />
+              )}
+              Refresh
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs flex-1 sm:flex-none"
+              onClick={() => setManualOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Manual
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end -mt-2">
+      <div className="flex justify-end -mt-1">
         <Link
           href="/attendance/regularizations"
           className="text-xs text-blue-700 hover:underline"
@@ -234,40 +244,36 @@ function GeofenceStatus({
 
   if (!configured) {
     return (
-      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+      <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 leading-snug">
+        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
         <div className="flex-1">
-          <div className="font-semibold">Geofence not configured</div>
-          <div className="text-amber-800 mt-0.5">
-            Set Latitude, Longitude and Radius in{" "}
-            <Link
-              href="/settings/attendance-config"
-              className="underline hover:no-underline"
-            >
-              Settings → Attendance Configuration → Capture &amp; security
-            </Link>{" "}
-            so out-of-radius punches get flagged here.
-          </div>
+          <span className="font-semibold">Geofence not configured.</span>{" "}
+          <Link
+            href="/settings/attendance-config"
+            className="underline hover:no-underline"
+          >
+            Configure in Settings
+          </Link>
+          {" "}so out-of-radius punches get flagged here.
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-      <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
+    <div className="flex items-start gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] text-blue-900 leading-snug">
+      <MapPin className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
       <div className="flex-1">
-        <div className="font-semibold">
-          Geofence active · {geofence.radiusM}m radius
-        </div>
-        <div className="text-blue-800 mt-0.5">
-          Centre {geofence.lat?.toFixed(5)}, {geofence.lng?.toFixed(5)} ·
-          mode <span className="font-mono">{geofence.mode.toLowerCase()}</span>.
-          Punches outside this radius are highlighted red below; punches with
-          no GPS show as amber.
-        </div>
+        <span className="font-semibold">
+          Geofence · {geofence.radiusM}m
+        </span>
+        {" · "}
+        <span className="text-blue-800">
+          {geofence.lat?.toFixed(4)}, {geofence.lng?.toFixed(4)} · mode{" "}
+          <span className="font-mono">{geofence.mode.toLowerCase()}</span>
+        </span>
       </div>
-      <Info className="h-3.5 w-3.5 mt-0.5 text-blue-500" />
+      <Info className="h-3 w-3 mt-0.5 text-blue-500" />
     </div>
   );
 }

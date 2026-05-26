@@ -42,6 +42,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  UserCircle,
 } from 'lucide-react';
 import {
   LeaveCalendar,
@@ -184,54 +185,77 @@ export default function LeaveAdminPage() {
       .map((b) => b.leaveType) ?? [];
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="space-y-1.5">
-          <PageBackLink href="/leave" label="Leave" />
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Wallet className="h-8 w-8 text-primary" />
-            Leave Administration
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Set annual balances and view org-wide leave timelines.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
-                <SelectItem key={y} value={String(y)}>
-                  {y}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="icon" onClick={refresh} disabled={refreshing}>
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button onClick={() => setBulkOpen(true)}>
-            <Sparkles className="h-4 w-4 mr-2" />
-            Bulk Allocate
-          </Button>
+    <div className="container mx-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4">
+      <div className="space-y-2">
+        <PageBackLink href="/leave" label="Leave" />
+        <div className="flex items-start justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <Wallet className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
+                Leave Administration
+              </h1>
+              {employees && (
+                <div className="text-xs text-muted-foreground truncate">
+                  {employees.length} employee{employees.length === 1 ? '' : 's'} · year {year}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+              <SelectTrigger className="w-[90px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={refresh}
+              disabled={refreshing}
+              className="h-8 w-8"
+              aria-label="Refresh"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button size="sm" onClick={() => setBulkOpen(true)} className="h-8 px-2 sm:px-3">
+              <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">Bulk Allocate</span>
+              <span className="sm:hidden">Bulk</span>
+            </Button>
+          </div>
         </div>
       </div>
 
       <Tabs defaultValue="allocations">
-        <TabsList>
-          <TabsTrigger value="allocations">
-            <Wallet className="h-4 w-4 mr-2" />
-            Allocations
+        {/* Equal-width grid so labels don't truncate on mobile. */}
+        <TabsList className="grid w-full grid-cols-3 h-8">
+          <TabsTrigger value="allocations" className="text-xs gap-1 px-1.5">
+            <Wallet className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              <span className="hidden sm:inline">Allocations</span>
+              <span className="sm:hidden">Alloc.</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="calendar">
-            <CalendarDays className="h-4 w-4 mr-2" />
-            Org Calendar
+          <TabsTrigger value="calendar" className="text-xs gap-1 px-1.5">
+            <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              <span className="hidden sm:inline">Org Calendar</span>
+              <span className="sm:hidden">Calendar</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="usage">
-            <Users className="h-4 w-4 mr-2" />
-            Usage
+          <TabsTrigger value="usage" className="text-xs gap-1 px-1.5">
+            <Users className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Usage</span>
           </TabsTrigger>
         </TabsList>
 
@@ -319,33 +343,60 @@ function AllocationsGrid({
   return (
     <Card>
       <CardContent className="p-0 overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b text-xs uppercase text-muted-foreground bg-muted/30">
+        {/* Spreadsheet-style table — mirrors the Employee Master layout:
+            row-number gutter, avatar column, then employee name/email,
+            then one cell per leave type. The first three columns are
+            sticky so they stay visible while horizontal-scrolling the
+            leave-type cells on mobile. */}
+        <table className="w-full border-separate border-spacing-0">
+          <thead className="text-[10px] uppercase text-muted-foreground bg-muted tracking-wider">
             <tr>
-              <th className="text-left p-3 sticky left-0 bg-muted/30">Employee</th>
+              <th className="text-center px-2 py-2 w-10 sticky left-0 bg-muted z-20 font-semibold border-b border-r">
+                #
+              </th>
+              <th className="text-left px-2 py-2 w-14 sticky left-10 bg-muted z-20 font-semibold border-b border-r">
+                {/* avatar column — no label */}
+              </th>
+              <th className="text-left px-3 py-2 sticky left-24 bg-muted z-20 font-semibold border-b border-r min-w-[180px]">
+                Employee
+              </th>
               {allTypes.map((t) => (
-                <th key={t.id} className="text-left p-3 min-w-[160px]">
+                <th
+                  key={t.id}
+                  className="text-left px-3 py-2 min-w-[140px] font-semibold border-b"
+                >
                   {t.name}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {employees.map((e) => (
-              <tr key={e.id} className="border-b hover:bg-muted/20">
-                <td className="p-3 sticky left-0 bg-background">
-                  <div className="font-medium">
+            {employees.map((e, idx) => (
+              <tr key={e.id} className="hover:bg-muted/20 group">
+                <td className="px-2 py-2 w-10 text-center text-[10px] tabular-nums text-muted-foreground sticky left-0 bg-background group-hover:bg-muted/20 z-10 border-b border-r">
+                  {idx + 1}
+                </td>
+                <td className="px-2 py-2 w-14 sticky left-10 bg-background group-hover:bg-muted/20 z-10 border-b border-r">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <UserCircle className="h-5 w-5 text-primary/60" />
+                  </div>
+                </td>
+                <td className="px-3 py-2 sticky left-24 bg-background group-hover:bg-muted/20 z-10 border-b border-r min-w-[180px]">
+                  <div className="text-sm font-medium leading-tight truncate uppercase">
                     {e.firstName || e.lastName
                       ? `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim()
                       : e.email}
                   </div>
-                  <div className="text-xs text-muted-foreground">{e.email}</div>
+                  <div className="text-[11px] text-muted-foreground truncate leading-tight">
+                    {e.email}
+                    {e.department ? ` · ${e.department}` : ''}
+                  </div>
                 </td>
                 {allTypes.map((t) => {
                   const b = e.balances.find((bb) => bb.leaveType.id === t.id);
                   const cellId = `${e.id}:${t.id}`;
                   return (
-                    <td key={t.id} className="p-3">
+                    <td key={t.id} className="px-3 py-2 border-b">
                       <BalanceCell
                         available={b?.available ?? 0}
                         used={b?.used ?? 0}
@@ -422,11 +473,11 @@ function BalanceCell({
       className="text-left hover:bg-muted/40 px-2 py-1 rounded -mx-2 -my-1 w-full"
       title="Click to edit allocated"
     >
-      <div className="font-medium">
+      <div className="text-sm font-medium tabular-nums leading-tight">
         {available.toFixed(1)}
         <span className="text-muted-foreground font-normal"> / {allocated.toFixed(0)}</span>
       </div>
-      <div className="text-xs text-muted-foreground">
+      <div className="text-[10px] text-muted-foreground tabular-nums leading-tight mt-0.5">
         used {used.toFixed(1)} · pending {pending.toFixed(1)}
       </div>
     </button>
@@ -678,9 +729,9 @@ function UsageSummary({
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-6 space-y-2">
+        <CardContent className="p-3 space-y-2">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-16" />
+            <Skeleton key={i} className="h-14" />
           ))}
         </CardContent>
       </Card>
@@ -690,7 +741,7 @@ function UsageSummary({
   if (allTypes.length === 0) {
     return (
       <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
           No leave types configured.
         </CardContent>
       </Card>
@@ -698,32 +749,38 @@ function UsageSummary({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-2 sm:gap-3 md:grid-cols-2 lg:grid-cols-3">
       {allTypes.map((t) => {
         const v = totals.get(t.id)!;
         const usedPct = v.allocated > 0 ? (v.used / v.allocated) * 100 : 0;
         return (
           <Card key={t.id}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">{t.name}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {v.used.toFixed(1)}
-                <span className="text-sm font-normal text-muted-foreground">
-                  {' '}
-                  / {v.allocated.toFixed(0)} days used
+            <CardContent className="p-3 space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+                  {t.name}
+                </span>
+                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                  {v.allocated.toFixed(0)} allocated
                 </span>
               </div>
-              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold tabular-nums leading-none">
+                  {v.used.toFixed(1)}
+                </span>
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  used
+                </span>
+              </div>
+              <div className="h-1 bg-muted rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all"
                   style={{ width: `${Math.min(100, usedPct)}%` }}
                 />
               </div>
-              <div className="text-xs text-muted-foreground mt-2 flex justify-between">
-                <span>Pending: {v.pending.toFixed(1)}</span>
-                <span>Available: {v.available.toFixed(1)}</span>
+              <div className="text-[10px] text-muted-foreground flex justify-between tabular-nums leading-tight">
+                <span>Pending {v.pending.toFixed(1)}</span>
+                <span>Available {v.available.toFixed(1)}</span>
               </div>
             </CardContent>
           </Card>

@@ -467,142 +467,86 @@ export default function LeavePage() {
           <WorkspaceHeader
             icon={<CalendarDays className="h-5 w-5" />}
             title="My Leaves"
-            subtitle="Apply, track balance, and view your leave history."
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={refresh}
                 disabled={refreshing}
                 title="Refresh"
-                className="h-9 px-3 shrink-0"
+                className="h-8 px-2 shrink-0"
               >
-                <RefreshCw className={`h-4 w-4 sm:mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-3.5 w-3.5 sm:mr-1 ${refreshing ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">Refresh</span>
               </Button>
-              <Button onClick={() => setApplyOpen(true)} size="sm" className="h-9">
-                <Plus className="h-4 w-4 mr-2" />
-                Apply Leave
+              <Button onClick={() => setApplyOpen(true)} size="sm" className="h-8 px-2 sm:px-3">
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Apply Leave</span>
+                <span className="sm:hidden">Apply</span>
               </Button>
             </div>
           </WorkspaceHeader>
         }
         list={
           <div className="flex flex-col h-full bg-muted/10">
-            <div className="p-4 sm:p-6 pb-2 space-y-4 sm:space-y-6">
+            <div className="p-3 sm:p-4 pb-2 space-y-3">
               {/* Balance cards */}
               {loading ? (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   {[0, 1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-32 bg-background border rounded-xl" />
+                    <Skeleton key={i} className="h-20 bg-background border rounded-lg" />
                   ))}
                 </div>
               ) : balances && balances.length === 0 ? (
                 <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    <AlertCircle className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                    <p>No leave types are configured yet.</p>
-                    <p className="text-sm mt-1">Ask your admin to set up leave types.</p>
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No leave types are configured yet.</p>
+                    <p className="text-xs mt-1">Ask your admin to set up leave types.</p>
                   </CardContent>
                 </Card>
               ) : (
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                   {balances
                     ?.filter(
                       (b) =>
                         b.leaveType.category !== 'HOURLY' &&
                         b.leaveType.code !== 'HOURLY_LEAVE',
                     )
-                    .map((b) => {
-                    const total = b.allocated + b.carriedForward;
-                    const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
-                    const accent = b.leaveType.color || '#94a3b8';
-                    const low = total > 0 && b.available <= total * 0.2;
-                    return (
-                      <Card
-                        key={b.leaveType.id}
-                        className="relative overflow-hidden hover:shadow-md transition-shadow bg-background"
-                      >
-                        <span
-                          className="absolute left-0 top-0 bottom-0 w-1"
-                          style={{ backgroundColor: accent }}
-                          aria-hidden
-                        />
-                        <CardHeader className="pb-2 pl-5">
-                          <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
-                            <span className="truncate">{b.leaveType.name}</span>
-                            {b.isPaid ? (
-                              <Badge
-                                variant="secondary"
-                                className="text-[9px] shrink-0 px-1.5 py-0 h-4"
-                              >
-                                Paid
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] shrink-0 px-1.5 py-0 h-4"
-                              >
-                                Unpaid
-                              </Badge>
-                            )}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pl-5 space-y-2">
-                          <div className="flex items-baseline gap-1">
-                            <span
-                              className={`text-2xl font-bold tabular-nums leading-none ${low ? 'text-destructive' : ''}`}
-                            >
-                              {b.available.toFixed(b.available % 1 === 0 ? 0 : 1)}
-                            </span>
-                            <span className="text-xs text-muted-foreground tabular-nums font-medium">
-                              / {total.toFixed(0)}
-                            </span>
-                          </div>
-                          <Progress value={pct} className="h-1 bg-muted/50" />
-                          <div className="text-[10px] text-muted-foreground flex justify-between tabular-nums font-medium">
-                            <span>Used {b.used.toFixed(1)}</span>
-                            {b.pending > 0 && (
-                              <span className="text-amber-600 dark:text-amber-400">
-                                Pending {b.pending.toFixed(1)}
-                              </span>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
+                    .map((b) => (
+                      <BalanceCard key={b.leaveType.id} b={b} />
+                    ))}
                 </div>
               )}
 
               {/* View Tabs & Filters */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <Tabs value={view} onValueChange={(v) => setView(v as any)} className="w-full sm:w-auto">
-                  <TabsList className="w-full sm:w-auto grid grid-cols-2 h-9">
+                  <TabsList className="w-full sm:w-auto grid grid-cols-2 h-7">
                     <TabsTrigger value="calendar" className="text-xs">Calendar</TabsTrigger>
                     <TabsTrigger value="list" className="text-xs">List View</TabsTrigger>
                   </TabsList>
                 </Tabs>
-                
+
                 {view === 'list' && (
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-1 sm:pl-3 sm:border-l">
-                    <FilterChips 
-                      value={timeFilter} 
-                      onChange={(v) => setTimeFilter(v as any || 'all')} 
-                      options={TIME_OPTIONS} 
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-1 sm:pl-3 sm:border-l">
+                    <FilterChips
+                      value={timeFilter}
+                      onChange={(v) => setTimeFilter(v as any || 'all')}
+                      options={TIME_OPTIONS}
                     />
-                    <FilterChips 
-                      value={statusFilter} 
-                      onChange={setStatusFilter} 
-                      options={STATUS_OPTIONS} 
+                    <FilterChips
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={STATUS_OPTIONS}
                     />
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 px-4 sm:px-6 pb-6">
+            <div className="flex-1 min-h-0 px-3 sm:px-4 pb-4">
               {view === 'calendar' ? (
                 <div className="h-full bg-background border rounded-xl shadow-sm overflow-hidden flex flex-col">
                   <CalendarTab
@@ -718,6 +662,91 @@ export default function LeavePage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Balance card — collapsed by default (just type + available count + badge),
+// taps to expand revealing the progress bar and Used / Pending stats. Cuts
+// vertical space in half on first paint; full details are one tap away.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function BalanceCard({ b }: { b: BalanceRow }) {
+  const [expanded, setExpanded] = useState(false);
+  const total = b.allocated + b.carriedForward;
+  const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
+  const accent = b.leaveType.color || '#94a3b8';
+  const low = total > 0 && b.available <= total * 0.2;
+  return (
+    <Card
+      className="relative overflow-hidden hover:shadow-md transition-shadow bg-background cursor-pointer"
+      role="button"
+      tabIndex={0}
+      onClick={() => setExpanded((v) => !v)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded((v) => !v);
+        }
+      }}
+      aria-expanded={expanded}
+    >
+      <span
+        className="absolute left-0 top-0 bottom-0 w-1"
+        style={{ backgroundColor: accent }}
+        aria-hidden
+      />
+      <CardContent className="pl-3.5 pr-3 py-2.5 space-y-1.5">
+        {/* Collapsed-state row — type + available count + badge + chevron */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1 flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+              {b.leaveType.name}
+            </span>
+            <span className="flex items-baseline gap-1 shrink-0">
+              <span
+                className={`text-lg font-bold tabular-nums leading-none ${low ? 'text-destructive' : ''}`}
+              >
+                {b.available.toFixed(b.available % 1 === 0 ? 0 : 1)}
+              </span>
+              <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                / {total.toFixed(0)}
+              </span>
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {b.isPaid ? (
+              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
+                Paid
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">
+                Unpaid
+              </Badge>
+            )}
+            <ChevronRight
+              className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                expanded ? 'rotate-90' : ''
+              }`}
+            />
+          </div>
+        </div>
+        {/* Expanded details — progress bar + Used / Pending counters. */}
+        {expanded && (
+          <>
+            <Progress value={pct} className="h-1 bg-muted/50" />
+            <div className="text-[10px] text-muted-foreground flex justify-between tabular-nums font-medium leading-tight">
+              <span>Used {b.used.toFixed(1)}</span>
+              {b.pending > 0 && (
+                <span className="text-amber-600 dark:text-amber-400">
+                  Pending {b.pending.toFixed(1)}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Calendar tab
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -764,29 +793,13 @@ function CalendarTab({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <CardTitle className="text-base">{monthLabel}</CardTitle>
-          <div className="flex items-center justify-between sm:justify-end gap-2">
-            <LeaveCalendarLegend className="gap-2" />
-            <div className="flex shrink-0">
-              <Button size="icon" variant="outline" onClick={prev} aria-label="Previous month">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={next}
-                className="ml-1"
-                aria-label="Next month"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
+      {/* Month nav lives inside the LeaveCalendar widget itself
+          (react-day-picker chevrons), so the outer header now shows only
+          the legend — no duplicate prev/next buttons. */}
+      <CardHeader className="pb-2 pt-3 px-3 sm:px-4">
+        <LeaveCalendarLegend className="gap-2 flex-wrap" />
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-3 sm:px-4 pb-3">
         {loading ? (
           <Skeleton className="h-72" />
         ) : (
