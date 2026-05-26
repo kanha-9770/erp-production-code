@@ -106,12 +106,12 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
 
           {/* Main content area */}
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {/* Mobile app bar. iOS-style: hamburger left, page title
-                centred, invisible spacer right to keep the title
-                visually centred regardless of title length.
-                h-14 (vs h-12) gives a more app-native tap target on
-                the menu button and breathing room around the title. */}
-            <div className="md:hidden flex items-center justify-between h-14 px-3 border-b bg-white/95 dark:bg-gray-900/95 backdrop-blur-md dark:border-gray-800 shrink-0">
+            {/* Mobile app bar. Hamburger left, page title centred,
+                invisible spacer right to keep the title visually
+                centred regardless of length. Solid background (no
+                backdrop blur) keeps content behind it crisp instead
+                of fuzzed-out. h-14 gives a comfortable tap target. */}
+            <div className="md:hidden flex items-center justify-between h-14 px-3 border-b bg-background dark:border-gray-800 shrink-0">
               <button
                 onClick={() => setMobileSidebarOpen(true)}
                 className="flex items-center justify-center h-9 w-9 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors active:scale-95"
@@ -143,8 +143,11 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
             </main>
           </div>
 
-          {/* Mobile-only floating tab bar (Home / Check In / Check Out / Profile). */}
-          <MobileBottomNav />
+          {/* Mobile-only floating tab bar. The grid icon inside opens
+              the same sidebar drawer the hamburger does — wiring the
+              setter through here keeps the bottom nav self-contained
+              (no global context needed). */}
+          <MobileBottomNav onOpenMenu={() => setMobileSidebarOpen(true)} />
         </div>
       </RoutePermissionGuard>
     </PermissionProvider>

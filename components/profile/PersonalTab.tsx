@@ -1,18 +1,35 @@
 "use client"
 
 /**
- * PersonalTab — inline edit for the user's identity & contact fields.
+ * PersonalTab — Instagram-style profile edit.
  *
- * Replaces the standalone /profile/update-profile page. Avatar upload is on
- * the left, fields on the right. Uses the same RTK Query mutations the old
- * page used so the API contract is unchanged.
+ * Visual contract (vs the previous card-heavy version):
+ *   - Centred avatar at the top of the form, ~h-20 sm:h-24
+ *   - "Change profile photo" link directly under the avatar (primary,
+ *     semibold) — taps the file picker
+ *   - A smaller "Take photo" link next to it for the camera path,
+ *     and a "Remove" link under both if a photo exists
+ *   - Single-column form below, with plain labels above each input.
+ *     No card wrappers. No icons inside the inputs. No descriptions
+ *     like "How you appear across the app" — the field labels speak
+ *     for themselves.
+ *   - Sticky save bar at the bottom (full-width on mobile, right-
+ *     aligned on desktop) so the action is always reachable.
  *
- * Phone fields use react-phone-number-input with strict client-side
- * validation (must be a possible AND valid number for the selected country).
+ * Functional contract (UNCHANGED — same hooks, same APIs, same dialogs):
+ *   - useUploadAvatarMutation / useRemoveAvatarMutation / useUpdateProfileMutation
+ *   - File picker + camera capture + face enrollment on /api/face/enroll
+ *   - Phone validation via react-phone-number-input
+ *   - Preview dialog (with camera mode toggle) — unchanged
+ *   - Remove-photo AlertDialog — unchanged
+ *   - Form dirty detection + diff-only save — unchanged
+ *
+ * Only the visible layout changed. Every mutation, validation and
+ * dialog hook is the same as before, so the API contract and UX of
+ * actions (upload, take, remove, save) are identical.
  */
 
 import { useEffect, useRef, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,19 +52,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
-import {
-  Loader2,
-  Camera,
-  X,
-  Save,
-  MapPin,
-  Briefcase,
-  AtSign,
-  Mail,
-  BadgeCheck,
-  Upload,
-  Trash2,
-} from "lucide-react"
+import { Loader2, Camera, Save, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import PhoneInput, {
   isPossiblePhoneNumber,
@@ -61,6 +66,7 @@ import {
 } from "@/lib/api/auth"
 import type { ProfileUser } from "./types"
 import { displayName, initialsOf } from "./profile-utils"
+import { DailyBanner } from "./DailyBanner"
 
 interface PersonalTabProps {
   user: ProfileUser
@@ -138,12 +144,10 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     }
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        // Front camera on phones, default camera on laptops.
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       streamRef.current = s
-      // Wait a tick so the <video> element is mounted (cameraMode just flipped).
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = s
@@ -181,8 +185,6 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     const file = new File([blob], `selfie_${Date.now()}.jpg`, {
       type: "image/jpeg",
     })
-    // Hand off to the existing upload pipeline — handles preview, avatar
-    // upload, employee-master sync, and face enrollment in one shot.
     setCameraMode(false)
     setPreviewOpen(false)
     await onAvatarFile(file)
@@ -215,7 +217,6 @@ export default function PersonalTab({ user }: PersonalTabProps) {
       toast({ title: "Image too large", description: "Max 5 MB.", variant: "destructive" })
       return
     }
-    // Optimistic local preview while we wait for the server.
     setAvatarPreview(URL.createObjectURL(file))
     const fd = new FormData()
     fd.append("avatar", file)
@@ -223,17 +224,12 @@ export default function PersonalTab({ user }: PersonalTabProps) {
       const res: any = await uploadAvatar(fd).unwrap()
       if (res?.url) setAvatarPreview(res.url)
 
-      // Also register the photo as the user's reference face so attendance
-      // check-in can match against it later. This does NOT mark attendance —
-      // it only saves the 128-dim descriptor + reference image so future
-      // /api/attendance/photo calls have something to compare to. Without
-      // this step the attendance widget refuses to check in with the
-      // "Your face is not enrolled yet" toast.
-      //
-      // Best-effort: failures here never block the avatar update. face-api
-      // weights (~7 MB) are lazy-loaded only when a photo is actually
-      // picked, so the profile page stays light for users who never change
-      // their photo.
+      // Also register the photo as the user's reference face so
+      // attendance check-in can match against it later. Best-effort:
+      // failures never block the avatar update. face-api weights (~7
+      // MB) are lazy-loaded only when a photo is actually picked, so
+      // the profile page stays light for users who never change their
+      // photo.
       let faceMessage: string | undefined
       try {
         const { computeDescriptorFromBlobWithTimeout, descriptorToBase64 } =
@@ -316,10 +312,13 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     }
   }
 
+  const photoBusy = isUploading || isRemoving
+
   return (
-    <div className="space-y-6">
-      {/* Click-to-preview dialog. Doubles as the camera-capture surface so
-          the user can take a fresh selfie without leaving the page. */}
+    <div className="max-w-xl mx-auto">
+      {/* ── Preview / camera dialog ─────────────────────────────────
+          Same dialog as before — image preview AND camera capture in
+          one surface, toggled by `cameraMode`. Unchanged behavior. */}
       <Dialog
         open={previewOpen}
         onOpenChange={(open) => {
@@ -334,14 +333,14 @@ export default function PersonalTab({ user }: PersonalTabProps) {
             </DialogTitle>
             <DialogDescription>
               {cameraMode
-                ? "Look straight at the camera, then tap Capture."
-                : "This is how your photo appears across the app."}
+                ? "Look at the camera, then tap Capture."
+                : "How your photo appears across the app."}
             </DialogDescription>
           </DialogHeader>
 
           {cameraMode ? (
             <div className="px-6 pb-6 space-y-4">
-              <div className="relative aspect-square w-full bg-black rounded-xl overflow-hidden ring-1 ring-border shadow-inner">
+              <div className="relative aspect-square w-full bg-black rounded-xl overflow-hidden ring-1 ring-border">
                 <video
                   ref={videoRef}
                   playsInline
@@ -383,43 +382,34 @@ export default function PersonalTab({ user }: PersonalTabProps) {
             </div>
           ) : (
             <div className="px-6 pb-6">
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-primary/10 via-violet-500/5 to-cyan-500/10 ring-1 ring-border">
-                {/* Soft top band gives the card depth so the photo doesn't
-                    sit flat against the dialog background. */}
-                <div
-                  aria-hidden
-                  className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-primary/15 to-transparent"
-                />
-                <div className="relative pt-8 pb-6 px-6 flex flex-col items-center">
-                  {avatarPreview ? (
-                    <div className="h-48 w-48 sm:h-56 sm:w-56 rounded-full overflow-hidden bg-background ring-4 ring-background shadow-xl">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={avatarPreview}
-                        alt={displayName(user)}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  ) : (
-                    <div className="h-48 w-48 sm:h-56 sm:w-56 rounded-full bg-primary/10 text-primary flex items-center justify-center text-6xl font-semibold ring-4 ring-background shadow-xl">
-                      {initialsOf(user)}
-                    </div>
-                  )}
-                  <p className="mt-5 text-base font-semibold tracking-tight text-center truncate max-w-full">
-                    {displayName(user)}
-                  </p>
-                  <p className="text-xs text-muted-foreground text-center truncate max-w-full">
-                    {user.email}
-                  </p>
-                </div>
+              <div className="rounded-2xl bg-muted/30 ring-1 ring-border p-6 flex flex-col items-center">
+                {avatarPreview ? (
+                  <div className="h-48 w-48 sm:h-56 sm:w-56 rounded-full overflow-hidden bg-background ring-4 ring-background shadow-xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={avatarPreview}
+                      alt={displayName(user)}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="h-48 w-48 sm:h-56 sm:w-56 rounded-full bg-primary/10 text-primary flex items-center justify-center text-6xl font-semibold ring-4 ring-background shadow-xl">
+                    {initialsOf(user)}
+                  </div>
+                )}
+                <p className="mt-5 text-base font-semibold tracking-tight text-center truncate max-w-full">
+                  {displayName(user)}
+                </p>
+                <p className="text-xs text-muted-foreground text-center truncate max-w-full">
+                  {user.email}
+                </p>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Styled confirmation for "Remove photo" — replaces the OS-level
-          window.confirm popup so the look matches the rest of the app. */}
+      {/* ── Remove-photo confirmation (unchanged) ───────────────── */}
       <AlertDialog open={removeConfirmOpen} onOpenChange={setRemoveConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -452,152 +442,152 @@ export default function PersonalTab({ user }: PersonalTabProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Avatar + identity card */}
-      <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="text-base">Profile photo</CardTitle>
-          <CardDescription>
-            A square JPG or PNG up to 5 MB. Visible to your team.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-5">
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setCameraMode(false)
-                  setCameraError(null)
-                  setPreviewOpen(true)
-                }}
-                className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-transform hover:scale-[1.02]"
-                aria-label={avatarPreview ? "Preview profile photo" : "Add profile photo"}
-              >
-                <Avatar className="h-20 w-20 sm:h-24 sm:w-24 border cursor-pointer">
-                  {avatarPreview ? (
-                    <AvatarImage src={avatarPreview} alt={displayName(user)} />
-                  ) : null}
-                  <AvatarFallback className="text-xl font-semibold bg-primary/10 text-primary">
-                    {initialsOf(user)}
-                  </AvatarFallback>
-                </Avatar>
-              </button>
-              {(isUploading || isRemoving) && (
-                <span className="absolute inset-0 rounded-full bg-background/70 flex items-center justify-center pointer-events-none">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </span>
-              )}
-              {avatarPreview && !isRemoving && (
-                <button
-                  type="button"
-                  onClick={() => setRemoveConfirmOpen(true)}
-                  className="absolute -top-1 -right-1 h-6 w-6 rounded-full bg-background border shadow-sm flex items-center justify-center hover:bg-muted"
-                  aria-label="Remove photo"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-            <div className="space-y-2 min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <label
-                  htmlFor="avatar-upload"
-                  className="inline-flex items-center gap-1.5 cursor-pointer rounded-md border bg-background px-3 h-9 text-sm font-medium hover:bg-muted transition-colors"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  {avatarPreview ? "Replace photo" : "Upload photo"}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewOpen(true)
-                    setCameraMode(true)
-                    setCameraError(null)
-                    void startCamera()
-                  }}
-                  disabled={isUploading}
-                  className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 h-9 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Camera className="h-3.5 w-3.5" />
-                  Take photo
-                </button>
-              </div>
-              <input
-                id="avatar-upload"
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) onAvatarFile(f)
-                  e.currentTarget.value = ""
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Square images look best. We&apos;ll auto-crop.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* ── Daily banner — matches the cover on /profile so the edit
+            page feels like a continuation of the same surface, not a
+            different screen. Tucked behind the avatar block so the
+            avatar overlaps its bottom edge. */}
+      <DailyBanner className="h-28 sm:h-36 rounded-2xl" />
 
-      {/* Identity */}
-      <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="text-base">Identity</CardTitle>
-          <CardDescription>How you appear across the app.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+      {/* ── Avatar block — overlaps the banner above (-mt) so the
+            page reads as a single composition: banner → avatar →
+            actions → fields. */}
+      <div className="flex flex-col items-center pb-6 -mt-12 sm:-mt-14">
+        <button
+          type="button"
+          onClick={() => {
+            setCameraMode(false)
+            setCameraError(null)
+            setPreviewOpen(true)
+          }}
+          className="relative rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+          aria-label={avatarPreview ? "Preview profile photo" : "No photo"}
+        >
+          <Avatar className="h-24 w-24 sm:h-28 sm:w-28 ring-4 ring-background shadow-md">
+            {avatarPreview ? (
+              <AvatarImage src={avatarPreview} alt={displayName(user)} />
+            ) : null}
+            <AvatarFallback className="text-2xl font-semibold bg-muted text-foreground/70">
+              {initialsOf(user)}
+            </AvatarFallback>
+          </Avatar>
+          {photoBusy && (
+            <span className="absolute inset-0 rounded-full bg-background/70 flex items-center justify-center pointer-events-none">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </span>
+          )}
+        </button>
+
+        {/* Primary action — IG's "Change profile photo" link. The label
+            triggers the hidden <input type="file"> so the OS picker
+            opens directly with no intermediate dialog. */}
+        <label
+          htmlFor="avatar-upload"
+          className={cn(
+            "mt-3 text-[15px] font-semibold text-primary cursor-pointer",
+            "hover:underline active:opacity-70 transition-opacity",
+            photoBusy && "opacity-50 pointer-events-none",
+          )}
+        >
+          Change profile photo
+        </label>
+        <input
+          id="avatar-upload"
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) onAvatarFile(f)
+            e.currentTarget.value = ""
+          }}
+        />
+
+        {/* Secondary actions — camera + remove. Smaller text, muted by
+            default; the user can still find them but they don't compete
+            with the primary "Change profile photo" link above. */}
+        <div className="mt-1.5 flex items-center gap-4 text-xs">
+          <button
+            type="button"
+            onClick={() => {
+              setPreviewOpen(true)
+              setCameraMode(true)
+              setCameraError(null)
+              void startCamera()
+            }}
+            disabled={photoBusy}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+          >
+            Take photo
+          </button>
+          {avatarPreview && (
+            <button
+              type="button"
+              onClick={() => setRemoveConfirmOpen(true)}
+              disabled={photoBusy}
+              className="text-destructive/80 hover:text-destructive disabled:opacity-50 transition-colors"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Form fields — grouped into three intent-buckets so the
+            user can find what they need without scanning a flat list:
+            Identity (who you are), Contact (how to reach you), and
+            Work (where you sit in the org). Each group sits inside a
+            soft-bordered card with a small header label, which gives
+            the page visual structure without resorting to heavy card
+            chrome. Extra bottom padding leaves room for the sticky
+            save bar so the last field is never covered. */}
+      <div className="space-y-5 pb-24">
+        <FieldGroup title="Identity">
           <Field label="First name">
             <Input
               value={form.first_name}
-              onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, first_name: e.target.value })
+              }
               placeholder="Jane"
-              className="h-10"
+              className="h-11"
             />
           </Field>
+
           <Field label="Last name">
             <Input
               value={form.last_name}
-              onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, last_name: e.target.value })
+              }
               placeholder="Doe"
-              className="h-10"
+              className="h-11"
             />
           </Field>
-          <Field label="Username">
-            <div className="relative">
-              <AtSign className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                placeholder="janedoe"
-                className="h-10 pl-9"
-              />
-            </div>
-          </Field>
-          <Field label="Email" hint="Contact admin to change.">
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={user.email}
-                disabled
-                className="h-10 pl-9 bg-muted/30"
-              />
-              {user.email_verified && (
-                <BadgeCheck className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-500" />
-              )}
-            </div>
-          </Field>
-        </CardContent>
-      </Card>
 
-      {/* Contact */}
-      <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="text-base">Contact</CardTitle>
-          <CardDescription>How we reach you.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <Field label="Username">
+            <Input
+              value={form.username}
+              onChange={(e) =>
+                setForm({ ...form, username: e.target.value })
+              }
+              placeholder="janedoe"
+              className="h-11"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          </Field>
+        </FieldGroup>
+
+        <FieldGroup title="Contact">
+          <Field label="Email" hint="Contact your admin to change.">
+            <Input
+              value={user.email}
+              disabled
+              className="h-11 bg-muted/40"
+            />
+          </Field>
+
           <Field label="Phone" error={phoneError}>
             <div className="profile-phone">
               <PhoneInput
@@ -609,7 +599,8 @@ export default function PersonalTab({ user }: PersonalTabProps) {
                   validatePhone(v ?? "", "phone")
                 }}
                 className={cn(
-                  "h-10 rounded-md border px-3 flex items-center gap-2 bg-background",
+                  "h-11 rounded-md border border-input px-3 flex items-center gap-2 bg-background text-sm",
+                  "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
                   phoneError && "border-destructive",
                 )}
                 numberInputProps={{
@@ -619,7 +610,12 @@ export default function PersonalTab({ user }: PersonalTabProps) {
               />
             </div>
           </Field>
-          <Field label="Mobile" error={mobileError} hint={user.mobile_verified ? "Verified" : undefined}>
+
+          <Field
+            label="Mobile"
+            error={mobileError}
+            hint={user.mobile_verified ? "Verified" : undefined}
+          >
             <div className="profile-phone">
               <PhoneInput
                 international
@@ -630,7 +626,8 @@ export default function PersonalTab({ user }: PersonalTabProps) {
                   validatePhone(v ?? "", "mobile")
                 }}
                 className={cn(
-                  "h-10 rounded-md border px-3 flex items-center gap-2 bg-background",
+                  "h-11 rounded-md border border-input px-3 flex items-center gap-2 bg-background text-sm",
+                  "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
                   mobileError && "border-destructive",
                 )}
                 numberInputProps={{
@@ -640,48 +637,62 @@ export default function PersonalTab({ user }: PersonalTabProps) {
               />
             </div>
           </Field>
-          <Field label="Location">
-            <div className="relative">
-              <MapPin className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
-                placeholder="City, country"
-                className="h-10 pl-9"
-              />
-            </div>
-          </Field>
-          <Field label="Department">
-            <div className="relative">
-              <Briefcase className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={form.department}
-                onChange={(e) => setForm({ ...form, department: e.target.value })}
-                placeholder="Engineering"
-                className="h-10 pl-9"
-              />
-            </div>
-          </Field>
-        </CardContent>
-      </Card>
+        </FieldGroup>
 
-      {/* Save bar — sticks to the bottom on mobile so the action is always reachable. */}
-      <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-background/95 backdrop-blur border-t flex items-center justify-end gap-2">
+        <FieldGroup title="Work">
+          <Field label="Location">
+            <Input
+              value={form.location}
+              onChange={(e) =>
+                setForm({ ...form, location: e.target.value })
+              }
+              placeholder="City, country"
+              className="h-11"
+            />
+          </Field>
+
+          <Field label="Department">
+            <Input
+              value={form.department}
+              onChange={(e) =>
+                setForm({ ...form, department: e.target.value })
+              }
+              placeholder="Engineering"
+              className="h-11"
+            />
+          </Field>
+        </FieldGroup>
+      </div>
+
+      {/* ── Sticky save bar ─────────────────────────────────────────
+          Sits at the bottom of the scroll container so it's always
+          reachable. `bottom-16 md:bottom-0` lifts it above the mobile
+          bottom nav (h-14 + safe-area) — without this offset the bar
+          parks UNDER the fixed bottom nav and looks half-cut.
+          `-mx-4 sm:-mx-6` cancels the page's horizontal padding so the
+          bar can span edge-to-edge. Solid background (no backdrop
+          blur) keeps content above it crisp. */}
+      <div className="sticky bottom-16 md:bottom-0 -mx-4 sm:-mx-6 mt-8 px-4 sm:px-6 py-3 bg-background border-t flex items-center justify-end gap-2 z-10">
         <Button
           variant="ghost"
           onClick={() => setForm(initial)}
           disabled={!dirty || isSaving}
+          className="h-10"
         >
           Reset
         </Button>
-        <Button onClick={submit} disabled={!dirty || isSaving} className="h-10">
+        <Button
+          onClick={submit}
+          disabled={!dirty || isSaving}
+          className="h-10"
+        >
           {isSaving ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…
             </>
           ) : (
             <>
-              <Save className="h-4 w-4 mr-2" /> Save changes
+              <Save className="h-4 w-4 mr-2" /> Save
             </>
           )}
         </Button>
@@ -689,6 +700,34 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     </div>
   )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FieldGroup — a soft-bordered card with a small label header. Used to
+// bucket related fields (Identity, Contact, Work) so the form reads as
+// three small sections rather than one long list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FieldGroup({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="rounded-2xl border border-border bg-card/60 px-4 sm:px-5 py-4 sm:py-5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+        {title}
+      </h3>
+      <div className="space-y-4">{children}</div>
+    </section>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Field — plain label above input, optional hint or error line below.
+// No icons, no descriptions, no card chrome. The label *is* the affordance.
+// ─────────────────────────────────────────────────────────────────────────────
 
 function Field({
   label,
@@ -703,12 +742,15 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-        <span>{label}</span>
-        {hint && !error && <span className="text-muted-foreground/70 normal-case font-normal">· {hint}</span>}
+      <Label className="text-sm font-medium text-foreground/90">
+        {label}
       </Label>
       {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : hint ? (
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   )
 }

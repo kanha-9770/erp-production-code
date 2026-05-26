@@ -82,6 +82,19 @@ const DENSITY_MIN = 0.85
 const DENSITY_MAX = 1
 const DENSITY_DEFAULT_COMPACT = 0.92
 
+// Mobile gets a tighter UI by default (compact @ 85%) — matches the
+// bootstrap script in app/layout.tsx so the first-paint density and the
+// React-applied density agree before the user ever saves a preference.
+// Mirrors hooks/use-mobile.tsx (MOBILE_BREAKPOINT = 768).
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return window.matchMedia("(max-width: 767px)").matches
+  } catch {
+    return false
+  }
+}
+
 function defaultPrefs(): Prefs {
   // Auto-detect timezone once on first render so users on UTC don't need to
   // hunt for their zone in the dropdown.
@@ -91,12 +104,13 @@ function defaultPrefs(): Prefs {
   } catch {
     /* ignore */
   }
+  const mobile = isMobileViewport()
   return {
     language: "en",
     timezone: tz,
     dateFormat: "auto",
-    density: "comfortable",
-    densityScale: 1,
+    density: mobile ? "compact" : "comfortable",
+    densityScale: mobile ? DENSITY_MIN : 1,
   }
 }
 

@@ -60,6 +60,7 @@ import SecurityTab from "@/components/profile/SecurityTab"
 import OrganizationTab from "@/components/profile/OrganizationTab"
 import type { ProfileTabId, ProfileUser } from "@/components/profile/types"
 import { displayName, initialsOf } from "@/components/profile/profile-utils"
+import { DailyBanner } from "@/components/profile/DailyBanner"
 import { cn } from "@/lib/utils"
 
 interface TabDef {
@@ -201,25 +202,50 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-full bg-background">
-      <div className="container mx-auto px-4 sm:px-6 max-w-4xl pt-5 sm:pt-8">
+    <div className="min-h-full bg-background pb-8">
+      {/* ── Hero banner ──────────────────────────────────────────────
+          Daily-rotating purple banner (matches the sidebar accent
+          #5a4d96). Full-bleed — spans the entire page width like a
+          LinkedIn cover, so the avatar that overlaps it from below
+          reads as the focal point of a single composition. Only
+          rendered on the LIST view — when the user has drilled into
+          a specific section on mobile, the banner is hidden so the
+          section gets the full viewport. Edit/Personal renders its
+          own (narrower) banner since users spend the most time there. */}
+      <div className={cn(tab !== null && "hidden lg:block")}>
+        <DailyBanner className="h-32 sm:h-44" />
+      </div>
+
+      <div className="container mx-auto px-4 sm:px-6 max-w-4xl">
         {/* ── Identity section ─────────────────────────────────────────
             Always shown on desktop. On mobile, hidden when the user
             has drilled into a specific section — the section view
             replaces it entirely so the section content gets the full
-            viewport. */}
-        <div className={cn(tab !== null && "hidden lg:block")}>
-          <div className="flex flex-col items-center sm:flex-row sm:items-center gap-4 sm:gap-8">
-            <Avatar className="h-24 w-24 sm:h-28 sm:w-28 ring-2 ring-border shadow-sm shrink-0">
+            viewport.
+
+            The avatar uses a negative top margin to overlap the
+            DailyBanner above. `ring-4 ring-background` separates it
+            visually from the banner pattern. */}
+        <div
+          className={cn(
+            // Negative top margin pulls the row UP into the banner,
+            // creating the LinkedIn-style overlap. Smaller on mobile
+            // (banner is shorter) than desktop.
+            "-mt-12 sm:-mt-14",
+            tab !== null && "hidden lg:block",
+          )}
+        >
+          <div className="flex flex-col items-center sm:flex-row sm:items-end gap-4 sm:gap-8">
+            <Avatar className="h-24 w-24 sm:h-28 sm:w-28 shrink-0 ring-4 ring-background shadow-md">
               {user.avatar ? (
                 <AvatarImage src={user.avatar} alt={displayName(user)} />
               ) : null}
-              <AvatarFallback className="text-2xl font-semibold bg-primary/10 text-primary">
+              <AvatarFallback className="text-2xl font-semibold bg-muted text-foreground/70">
                 {initialsOf(user)}
               </AvatarFallback>
             </Avatar>
 
-            <div className="flex-1 min-w-0 w-full text-center sm:text-left">
+            <div className="flex-1 min-w-0 w-full text-center sm:text-left sm:pb-2">
               <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
                   {displayName(user)}
@@ -272,14 +298,12 @@ export default function ProfilePage() {
         </div>
 
         {/* ── MOBILE LIST VIEW (drill-down menu) ─────────────────────
-            iOS Settings / Instagram menu style. Each row: icon tile +
-            label + chevron. Tapping a row hashes into that section,
-            which the section view below picks up.
-            Wrapped in a single border-t / border-b stack so the rows
-            form a clean grouped list, edge-to-edge on mobile via
-            negative margin. */}
+            iOS Settings style. Flat rows: small monochrome icon, label,
+            chevron. No coloured icon tiles — those read as decorative
+            chrome and made the list look candy-shop. Edge-to-edge on
+            mobile via negative margin. */}
         <div className={cn("lg:hidden mt-6 -mx-4", tab !== null && "hidden")}>
-          <div className="bg-card border-y border-border">
+          <div className="bg-background border-y border-border">
             {visibleTabs.map((t, idx) => (
               <button
                 key={t.id}
@@ -287,19 +311,19 @@ export default function ProfilePage() {
                 onClick={() => switchTab(t.id)}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-3.5 text-left",
-                  "active:bg-muted/60 transition-colors duration-100",
+                  "active:bg-muted/40 transition-colors duration-100",
                   "select-none touch-manipulation",
                   // Internal divider between rows (last row gets no divider).
                   idx !== visibleTabs.length - 1 && "border-b border-border",
                 )}
               >
-                <span className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <span className="text-muted-foreground shrink-0 [&>svg]:h-5 [&>svg]:w-5">
                   {t.icon}
                 </span>
                 <span className="flex-1 text-[15px] font-medium truncate">
                   {t.label}
                 </span>
-                <ChevronRight className="h-5 w-5 text-muted-foreground/60 shrink-0" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
               </button>
             ))}
           </div>
@@ -307,34 +331,38 @@ export default function ProfilePage() {
 
         {/* ── MOBILE SECTION VIEW (after drill-down) ──────────────────
             Shown when the user has tapped a row. Layout:
-              [← Back]
-              [Section Name]
+              [⌫ icon-button]  Section Name
               [section content]
-            The back row and title sit at the top of the SCROLL CONTENT,
-            not in a fixed bar — so there's still only one "header" on
-            screen (the global ConditionalLayout top bar, which shows
-            "Profile"). */}
+            One header row: a proper 40×40 circular back button (real
+            tap target, no more thumb-hunting for a tiny text link)
+            paired with the section title on the same line. Sits at
+            the top of the SCROLL CONTENT, not a fixed bar — still
+            only one "header" on screen (the global ConditionalLayout
+            top bar, which shows "Profile"). */}
         <div className={cn("lg:hidden", tab === null && "hidden")}>
-          <button
-            type="button"
-            onClick={() => switchTab(null)}
-            className={cn(
-              "inline-flex items-center gap-1 -ml-1.5",
-              "text-sm font-medium text-muted-foreground hover:text-foreground",
-              "active:scale-95 transition-all rounded-md",
-              "py-1 pr-2",
-            )}
-            aria-label="Back to profile"
-          >
-            <ChevronLeft className="h-5 w-5" />
-            <span>Back</span>
-          </button>
+          <div className="flex items-center gap-3 pt-1 pb-4">
+            <button
+              type="button"
+              onClick={() => switchTab(null)}
+              aria-label="Back to profile"
+              className={cn(
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                "bg-muted/60 text-foreground hover:bg-muted",
+                "active:scale-90 transition-all",
+                "touch-manipulation select-none",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              )}
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
 
-          {activeMobileDef && (
-            <h2 className="text-2xl font-semibold tracking-tight mt-2 mb-4">
-              {activeMobileDef.label}
-            </h2>
-          )}
+            {activeMobileDef && (
+              <h2 className="text-xl font-semibold tracking-tight truncate min-w-0">
+                {activeMobileDef.label}
+              </h2>
+            )}
+          </div>
+
 
           {tab && (
             <div

@@ -8,27 +8,36 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Search, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, X, UserPlus, MoreHorizontal, UserCheck, UserX, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useGetAdminUsersQuery } from "@/lib/api/users";
+import { useGetAdminUsersQuery, useUpdateUserMutation, type AdminUser } from "@/lib/api/users";
 import AdvancedFilterSidebar from "@/components/modules/AdvancedFilterSidebar";
 import PageBackLink from "@/components/shared/page-back-link";
+import { CreateUserDialog } from "@/components/users/CreateUserDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
 
-interface User {
-  id: string;
-  email: string;
-  username: string;
-  first_name: string | null;
-  last_name: string | null;
-  fullName: string;
-  avatar: string | null;
-  status: string;
-  department: string | null;
-  joinDate: string | null;
-  createdAt: string;
-  unitsAndRoles: Array<{ unit: { name: string }; role: { name: string; isAdmin?: boolean } }>;
-  permissions: Array<{ id: string; name: string; category: string }>;
-}
+// Use the API's AdminUser type directly so this page can't drift from
+// the wire shape. The previous local `User` interface was a subset and
+// caused TS errors as soon as any handler took the row by value.
+type User = AdminUser;
 
 interface FieldFilter {
   fieldId: string;
@@ -63,7 +72,9 @@ const ExcelCell: React.FC<{
 };
 
 export default function AdminUsersTable() {
+  const { toast } = useToast();
   const { data, isLoading, error } = useGetAdminUsersQuery();
+  const [updateUser, { isLoading: isUpdatingUser }] = useUpdateUserMutation();
   const users = data?.success ? data.data : [];
 
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -76,10 +87,51 @@ export default function AdminUsersTable() {
   const [page, setPage] = React.useState(1);
   const perPage = 25;
   const [expandedCells, setExpandedCells] = React.useState<Set<string>>(new Set());
+  // Track in-flight status mutation per row so the affected row shows
+  // a spinner without freezing the whole table.
+  const [pendingId, setPendingId] = React.useState<string | null>(null);
+  // Deactivation goes through an AlertDialog confirm (it logs the user
+  // out and blocks login). Activation is one-tap because the inverse
+  // change is reversible. `confirmDeactivate` holds the user being
+  // deactivated; null = closed.
+  const [confirmDeactivate, setConfirmDeactivate] = React.useState<User | null>(null);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState<Map<string, number>>(() => new Map([
     ["fullName", 280], ["email", 260], ["department", 180], ["status", 140],
-    ["unitsAndRoles", 320], ["joinDate", 160], ["createdAt", 160], ["permissions", 200]
+    ["unitsAndRoles", 320], ["joinDate", 160], ["createdAt", 160], ["permissions", 200],
+    ["actions", 80],
   ]));
+
+  // Flip a user between ACTIVE and INACTIVE via PUT /api/users/[id]
+  // (the same endpoint the rest of the user-edit UIs use). RTK Query
+  // invalidates the AdminUsers cache on success, so the table refetches
+  // automatically — no manual local-state surgery.
+  const toggleStatus = React.useCallback(
+    async (user: User) => {
+      const nextStatus = user.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+      setPendingId(user.id);
+      try {
+        await updateUser({
+          userId: user.id,
+          body: { status: nextStatus },
+        }).unwrap();
+        toast({
+          title: nextStatus === "ACTIVE" ? "User activated" : "User deactivated",
+          description: user.fullName,
+        });
+      } catch (e: any) {
+        toast({
+          title: "Could not update status",
+          description: e?.data?.error ?? "Try again in a moment.",
+          variant: "destructive",
+        });
+      } finally {
+        setPendingId(null);
+        setConfirmDeactivate(null);
+      }
+    },
+    [updateUser, toast],
+  );
 
   // Define fields exactly as your original RecordsDisplay expects
   const fields = [
@@ -91,6 +143,7 @@ export default function AdminUsersTable() {
     { id: "joinDate", originalId: "joinDate", label: "Join Date", type: "date", order: 6, sectionTitle: "Dates", sectionId: "dates", formId: "users", formName: "Users" },
     { id: "createdAt", originalId: "createdAt", label: "Created", type: "date", order: 7, sectionTitle: "Dates", sectionId: "dates", formId: "users", formName: "Users" },
     { id: "permissions", originalId: "permissions", label: "Permissions", type: "text", order: 8, sectionTitle: "Access", sectionId: "access", formId: "users", formName: "Users" },
+    { id: "actions", originalId: "actions", label: "Actions", type: "text", order: 9, sectionTitle: "Info", sectionId: "info", formId: "users", formName: "Users" },
   ];
 
   // Sorting
@@ -179,7 +232,7 @@ export default function AdminUsersTable() {
           <CardContent className="p-6 space-y-6 flex-1 flex flex-col">
             <PageBackLink href="/admin" label="Admin" />
             {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
               <Button variant="outline" onClick={() => setIsFilterOpen(true)} className={cn(activeFilters.length && "border-blue-500 bg-blue-50")}>
                 <Filter className="h-4 w-4 mr-2" />
                 Filters {activeFilters.length ? `(${activeFilters.length})` : ""}
@@ -188,7 +241,14 @@ export default function AdminUsersTable() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input placeholder="Search users..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-              <div className="text-sm font-medium">{filtered.length} users</div>
+              <div className="text-sm font-medium whitespace-nowrap">{filtered.length} users</div>
+              {/* Primary action — provisioning a user is the most
+                  important thing this page does after viewing, so it
+                  gets the only filled button on the toolbar. */}
+              <Button onClick={() => setCreateOpen(true)} className="whitespace-nowrap">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Create user
+              </Button>
             </div>
 
             {/* Active Filters */}
@@ -212,25 +272,36 @@ export default function AdminUsersTable() {
                     <div className="w-12 h-12 border-r flex items-center justify-center"><Checkbox /></div>
                     {fields.map(f => {
                       const width = columnWidths.get(f.id) || 200;
+                      // The Actions column is not a data column — it
+                      // doesn't sort, doesn't filter, and has a fixed
+                      // narrow width. Render it without the sort
+                      // affordance / filter button so it reads as a
+                      // utility column rather than a sortable field.
+                      const isActions = f.id === "actions";
                       return (
                         <div
                           key={f.id}
-                          className="relative h-12 border-r px-3 flex items-center justify-between group cursor-pointer hover:bg-blue-50"
+                          className={cn(
+                            "relative h-12 border-r px-3 flex items-center justify-between group",
+                            !isActions && "cursor-pointer hover:bg-blue-50",
+                          )}
                           style={{ width: `${width}px` }}
-                          onClick={() => toggleSort(f.id)}
+                          onClick={isActions ? undefined : () => toggleSort(f.id)}
                         >
                           <span className="text-xs font-bold truncate pr-6">{f.label}</span>
-                          {sortField === f.id && (sortOrder === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />)}
-                          <Button size="sm" variant="ghost" className="opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); openFilter(f.id); }}>
-                            <Filter className="h-3.5 w-3.5" />
-                          </Button>
+                          {!isActions && sortField === f.id && (sortOrder === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />)}
+                          {!isActions && (
+                            <Button size="sm" variant="ghost" className="opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); openFilter(f.id); }}>
+                              <Filter className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                           <div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500"
                             onMouseDown={(e) => {
                               e.preventDefault();
                               const startX = e.clientX;
                               const startW = width;
                               const move = (ev: MouseEvent) => {
-                                const newW = Math.max(120, startW + ev.clientX - startX);
+                                const newW = Math.max(80, startW + ev.clientX - startX);
                                 setColumnWidths(m => new Map(m).set(f.id, newW));
                               };
                               const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
@@ -271,6 +342,59 @@ export default function AdminUsersTable() {
                       <div className="h-14 border-r px-3 flex items-center text-xs" style={{ width: columnWidths.get("permissions") }}>
                         <ExcelCell content={(user.permissions ?? []).map(p => p.name).join(", ")} isExpanded={expandedCells.has(`${user.id}-permissions`)} onToggleExpand={() => setExpandedCells(s => { const n = new Set(s); n.has(`${user.id}-permissions`) ? n.delete(`${user.id}-permissions`) : n.add(`${user.id}-permissions`); return n; })} />
                       </div>
+                      {/* Actions — dropdown with Activate / Deactivate
+                          for the row. Spinner replaces the kebab while
+                          the status PUT is in flight so users see
+                          their tap registered. */}
+                      <div className="h-14 border-r px-2 flex items-center justify-center" style={{ width: columnWidths.get("actions") }}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              disabled={pendingId === user.id}
+                              aria-label="User actions"
+                            >
+                              {pendingId === user.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <MoreHorizontal className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuLabel className="truncate">
+                              {user.fullName}
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {user.status === "ACTIVE" ? (
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  // Defer state set until after the
+                                  // menu's close animation finishes so
+                                  // the AlertDialog doesn't fight the
+                                  // dropdown's overlay teardown.
+                                  e.preventDefault();
+                                  setConfirmDeactivate(user);
+                                }}
+                                className="text-amber-700 focus:text-amber-700 focus:bg-amber-50"
+                              >
+                                <UserX className="h-4 w-4 mr-2" />
+                                Deactivate
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem
+                                onSelect={() => toggleStatus(user)}
+                                className="text-emerald-700 focus:text-emerald-700 focus:bg-emerald-50"
+                              >
+                                <UserCheck className="h-4 w-4 mr-2" />
+                                Activate
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -290,6 +414,61 @@ export default function AdminUsersTable() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Create user dialog — POSTs to /api/users and the AdminUsers
+          cache invalidation refetches this table. */}
+      <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      {/* Deactivate confirm — protects against accidental clicks since
+          deactivation logs the user out and blocks login until they're
+          reactivated. Activation has no confirm (one-tap revert). */}
+      <AlertDialog
+        open={confirmDeactivate !== null}
+        onOpenChange={(open) => {
+          if (!open && !isUpdatingUser) setConfirmDeactivate(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Deactivate {confirmDeactivate?.fullName}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              They will be signed out of any active sessions and will not
+              be able to log back in until you reactivate the account. All
+              their data — assignments, permissions, history — stays
+              intact and is restored on reactivation.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isUpdatingUser}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                // Prevent the AlertDialog from auto-closing — we close
+                // it after the mutation settles in `toggleStatus`.
+                e.preventDefault();
+                if (confirmDeactivate) toggleStatus(confirmDeactivate);
+              }}
+              disabled={isUpdatingUser}
+              className="bg-amber-600 text-white hover:bg-amber-600/90"
+            >
+              {isUpdatingUser ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deactivating…
+                </>
+              ) : (
+                <>
+                  <UserX className="h-4 w-4 mr-2" />
+                  Deactivate
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
