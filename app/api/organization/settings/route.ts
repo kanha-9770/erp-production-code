@@ -2,30 +2,68 @@
  * Organization-wide settings.
  *
  *   GET  /api/organization/settings    — any authed member of an org
- *   PUT  /api/organization/settings    — admins / org owners only
+ *   PUT  /api/organization/settings    — org OWNER only
  *
- * Currently exposes the org's `currency` field (ISO 4217). Designed to
- * accept additional org-wide settings (locale, fiscal year, address,
- * etc.) without breaking the wire format — the response always returns
- * the full settings object so the client can hydrate every field in one
- * round-trip.
+ * Exposes:
+ *   • `currency`     — ISO 4217 code; drives formatCurrency() app-wide
+ *   • `name`         — display name shown across the app
+ *
+ * Plus read-only context the UI uses to render the identity card:
+ *   • `ownerId`      — null for a legacy org without an explicit owner
+ *   • `createdAt`    — ISO timestamp
+ *   • `memberCount`  — number of users in the org (lightweight count, not the list)
+ *
+ * PUT accepts a partial body — only the supplied fields are updated.
+ * Designed to keep accepting new org-wide settings (address, timezone,
+ * logo, fiscal year, …) without breaking the wire format.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
+import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Validates that a string looks like an ISO 4217 currency code. We
-// don't try to enforce membership in a fixed list because new codes
-// occasionally show up (e.g. UYW, VES) and the UI already validates
-// against its own catalogue — server-side we just need to refuse
-// obviously bogus inputs.
 const CURRENCY_RE = /^[A-Z]{3}$/;
+const NAME_MIN = 1;
+const NAME_MAX = 120;
 
-function settingsResponse(currency: string) {
-  return { success: true, settings: { currency } };
+interface OrgSettings {
+  currency: string;
+  name: string;
+  ownerId: string | null;
+  createdAt: string;
+  memberCount: number;
+  selectedModules: string[];
+}
+
+function settingsResponse(s: OrgSettings) {
+  return { success: true, settings: s };
+}
+
+async function loadSettings(organizationId: string): Promise<OrgSettings | null> {
+  const [org, memberCount] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        currency: true,
+        name: true,
+        ownerId: true,
+        createdAt: true,
+        selectedModules: true,
+      },
+    }),
+    prisma.user.count({ where: { organizationId } }),
+  ]);
+  if (!org) return null;
+  return {
+    currency: org.currency ?? "USD",
+    name: org.name,
+    ownerId: org.ownerId,
+    createdAt: org.createdAt.toISOString(),
+    memberCount,
+    selectedModules: Array.isArray(org.selectedModules) ? org.selectedModules : [],
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -37,20 +75,30 @@ export async function GET(request: NextRequest) {
     );
   }
   if (!authUser.organizationId) {
-    // No org → return defaults rather than 404. Lets the UI render in a
-    // sensible state for users who haven't been added to an org yet.
-    return NextResponse.json(settingsResponse("USD"));
+    // No org yet — return safe defaults so the UI renders.
+    return NextResponse.json(
+      settingsResponse({
+        currency: "USD",
+        name: "",
+        ownerId: null,
+        createdAt: new Date().toISOString(),
+        memberCount: 0,
+        selectedModules: [],
+      }),
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
-  const org = await prisma.organization.findUnique({
-    where: { id: authUser.organizationId },
-    select: { currency: true },
+  const settings = await loadSettings(authUser.organizationId);
+  if (!settings) {
+    return NextResponse.json(
+      { success: false, error: "Organization not found" },
+      { status: 404 },
+    );
+  }
+  return NextResponse.json(settingsResponse(settings), {
+    headers: { "Cache-Control": "no-store" },
   });
-
-  return NextResponse.json(
-    settingsResponse(org?.currency ?? "USD"),
-    { headers: { "Cache-Control": "no-store" } },
-  );
 }
 
 export async function PUT(request: NextRequest) {
@@ -68,10 +116,16 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  const admin = await isUserAdmin(authUser.id, authUser.organizationId);
-  if (!admin) {
+  // Owner-only writes. Admins are allowed to *read* (above) but only the
+  // owner can change org-wide settings. This is intentionally stricter
+  // than isUserAdmin — see the page's permission question on /profile.
+  const org = await prisma.organization.findUnique({
+    where: { id: authUser.organizationId },
+    select: { ownerId: true },
+  });
+  if (!org || org.ownerId !== authUser.id) {
     return NextResponse.json(
-      { success: false, error: "Admin access required" },
+      { success: false, error: "Only the organization owner can change these settings" },
       { status: 403 },
     );
   }
@@ -86,11 +140,7 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  // Build a partial update so we can extend this endpoint with more
-  // fields (locale, address, etc.) without rewriting the validation
-  // pipeline. Each field is parsed into a typed slot or quietly
-  // dropped if the input is malformed.
-  const data: { currency?: string } = {};
+  const data: { currency?: string; name?: string } = {};
 
   if (body.currency !== undefined) {
     if (typeof body.currency !== "string") {
@@ -109,6 +159,23 @@ export async function PUT(request: NextRequest) {
     data.currency = code;
   }
 
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string") {
+      return NextResponse.json(
+        { success: false, error: "name must be a string" },
+        { status: 400 },
+      );
+    }
+    const trimmed = body.name.trim();
+    if (trimmed.length < NAME_MIN || trimmed.length > NAME_MAX) {
+      return NextResponse.json(
+        { success: false, error: `name must be between ${NAME_MIN} and ${NAME_MAX} characters` },
+        { status: 400 },
+      );
+    }
+    data.name = trimmed;
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json(
       { success: false, error: "No supported fields supplied" },
@@ -116,14 +183,19 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  const updated = await prisma.organization.update({
+  await prisma.organization.update({
     where: { id: authUser.organizationId },
     data,
-    select: { currency: true },
   });
 
-  return NextResponse.json(
-    settingsResponse(updated.currency),
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  const fresh = await loadSettings(authUser.organizationId);
+  if (!fresh) {
+    return NextResponse.json(
+      { success: false, error: "Organization vanished after update" },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json(settingsResponse(fresh), {
+    headers: { "Cache-Control": "no-store" },
+  });
 }

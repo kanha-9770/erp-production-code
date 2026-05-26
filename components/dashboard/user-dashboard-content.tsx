@@ -3,14 +3,16 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import {
-  FileText, CalendarCheck, Activity, LogIn, Briefcase, Building2,
+  FileText, CalendarCheck, Activity, LogIn, Building2,
   Clock, TrendingUp, ArrowUpRight, ChevronDown, Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatNumber } from '@/lib/analytics-constants';
+import { cn } from '@/lib/utils';
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -20,17 +22,81 @@ import {
   useGetDashboardTimeSeriesQuery,
   useGetDashboardRecentActivityQuery,
 } from '@/lib/api/dashboard';
+import { AttendanceWidget } from '@/components/attendance/attendance-widget';
 
-// Each card links to the page that owns its detail data — heavy queries
-// (submission history, attendance log, audit trail, login history) stay
-// out of the dashboard payload and only run when the user actually opens
-// the relevant page.
+// Each stat card uses a distinct accent tone so the row reads as four
+// glanceable signals rather than four near-identical white tiles. The
+// tones are kept inside the existing primary/emerald/amber/indigo palette
+// so the page still feels coherent with the rest of the app — no candy
+// colours. Each card links to the page that owns its detail data.
 const statCards = [
-  { key: 'mySubmissions', label: 'My Submissions', icon: FileText, color: 'text-blue-600', href: '/profile#overview' },
-  { key: 'myAttendance', label: 'My Attendance', icon: CalendarCheck, color: 'text-emerald-600', href: '/attendance' },
-  { key: 'myActivityCount', label: 'My Activities', icon: Activity, color: 'text-amber-600', href: '/profile#security' },
-  { key: 'myLoginCount', label: 'My Logins', icon: LogIn, color: 'text-indigo-600', href: '/settings/login-history' },
+  {
+    key: 'mySubmissions',
+    label: 'Submissions',
+    icon: FileText,
+    href: '/profile#overview',
+    tint: 'from-blue-500/10 to-transparent',
+    iconBg: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+    ring: 'hover:border-blue-400/50',
+  },
+  {
+    key: 'myAttendance',
+    label: 'Attendance',
+    icon: CalendarCheck,
+    href: '/attendance',
+    tint: 'from-emerald-500/10 to-transparent',
+    iconBg: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+    ring: 'hover:border-emerald-400/50',
+  },
+  {
+    key: 'myActivityCount',
+    label: 'Activities',
+    icon: Activity,
+    href: '/profile#security',
+    tint: 'from-amber-500/10 to-transparent',
+    iconBg: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+    ring: 'hover:border-amber-400/50',
+  },
+  {
+    key: 'myLoginCount',
+    label: 'Logins',
+    icon: LogIn,
+    href: '/settings/login-history',
+    tint: 'from-indigo-500/10 to-transparent',
+    iconBg: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400',
+    ring: 'hover:border-indigo-400/50',
+  },
 ] as const;
+
+// Time-of-day greeting. Falls back to "Hello" outside daylight hours so
+// late-night users don't get told "good morning" at 2am.
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return 'Hello';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  if (h < 22) return 'Good evening';
+  return 'Hello';
+}
+
+// "Tuesday, May 26" — keeps the page anchored in real time without
+// needing a relative-date library.
+function todayLabel(): string {
+  return new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+// Two-letter initials from a display name. Defensive against empty
+// strings, single-word names, and accidental whitespace.
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export function UserDashboardContent() {
   // First-paint query — fires on mount, light enough to land in tens of ms.
@@ -52,98 +118,129 @@ export function UserDashboardContent() {
   const { user, stats } = data;
 
   return (
-    <div className="space-y-6 sm:space-y-8 py-4 px-3 sm:px-6">
-      {/* Welcome Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-          Welcome, {user.name}
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-          Here&apos;s your personal dashboard overview
-        </p>
-      </div>
-
-      {/* User Profile Card + Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Profile Card */}
-        <Card className="border shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Briefcase className="h-4 w-4 text-primary" />
-              My Profile
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div>
-              <p className="text-sm font-medium">{user.name}</p>
-              <p className="text-xs text-muted-foreground">{user.email}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground">Department</p>
-                <p className="font-medium">{user.department}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Designation</p>
-                <p className="font-medium">{user.designation}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Status</p>
-                <Badge variant={user.status === 'active' ? 'default' : 'secondary'} className="text-xs mt-0.5">
-                  {user.status}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Joined</p>
-                <p className="font-medium">{user.dateOfJoining}</p>
-              </div>
-            </div>
-            {user.roles.length > 0 && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Roles</p>
-                <div className="flex flex-wrap gap-1">
-                  {user.roles.map((r, i) => (
-                    <Badge key={i} variant="outline" className="text-xs">
-                      {r.roleName} — {r.unitName}
+    <div className="space-y-6 sm:space-y-8 py-4 px-3 sm:px-6 max-w-7xl mx-auto">
+      {/* ── Hero ────────────────────────────────────────────────────────
+          Single anchor card: time-of-day greeting + name + role context +
+          today's date. Avatar (initials only — the API doesn't ship an
+          image) gives the page a face. Subtle gradient + primary-tinted
+          ring keep it visually distinct from the plain content cards
+          below without resorting to candy colours. */}
+      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-primary/[0.03] to-transparent">
+        <CardContent className="p-5 sm:p-6">
+          <div className="flex items-start gap-4">
+            <Avatar className="h-14 w-14 sm:h-16 sm:w-16 ring-2 ring-primary/20 shrink-0">
+              <AvatarFallback className="bg-primary/15 text-primary font-semibold text-lg">
+                {initialsOf(user.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                {greeting()}
+              </p>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight mt-0.5 truncate">
+                {user.name}
+              </h1>
+              <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{todayLabel()}</span>
+                {(user.designation || user.department) && (
+                  <>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="font-medium text-foreground/80 truncate">
+                      {[user.designation, user.department].filter(Boolean).join(' · ')}
+                    </span>
+                  </>
+                )}
+              </p>
+              {user.roles.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {user.roles.slice(0, 4).map((r, i) => (
+                    <Badge key={i} variant="secondary" className="text-[11px] font-normal bg-background/70 backdrop-blur-sm">
+                      {r.roleName}
+                      <span className="text-muted-foreground/70 ml-1">· {r.unitName}</span>
                     </Badge>
                   ))}
+                  {user.roles.length > 4 && (
+                    <Badge variant="secondary" className="text-[11px] font-normal bg-background/70">
+                      +{user.roles.length - 4} more
+                    </Badge>
+                  )}
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Stats Grid */}
-        <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 content-start">
-          {statCards.map((item) => {
-            const Icon = item.icon;
-            const value = stats[item.key as keyof typeof stats];
-            return (
-              <Link
-                key={item.key}
-                href={item.href}
-                className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-lg"
-                aria-label={`View ${item.label}`}
+      {/* ── Attendance ──────────────────────────────────────────────────
+          Reuses the same `<AttendanceWidget />` the sidebar and mobile
+          bottom-nav use — punch flow (face capture, geofence,
+          holiday/leave gating) stays centralised. Card itself gets a
+          slim primary border accent on the left so it reads as the
+          page's active action. */}
+      <Card className="border-l-4 border-l-primary shadow-sm overflow-visible">
+        <CardHeader className="pb-3 flex-row items-start justify-between space-y-0 gap-3">
+          <div className="min-w-0">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className="h-4 w-4 text-primary" />
+              Today&apos;s attendance
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Tap to check in or out — shift, geofence, and leave status are handled automatically.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <AttendanceWidget className="w-full max-w-md" />
+        </CardContent>
+      </Card>
+
+      {/* ── Stats row ───────────────────────────────────────────────────
+          Four tinted tiles, one accent each. Per-card gradient lifts the
+          row off the page so the four numbers read as "signals" rather
+          than four identical white cards. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {statCards.map((item) => {
+          const Icon = item.icon;
+          const value = stats[item.key as keyof typeof stats];
+          return (
+            <Link
+              key={item.key}
+              href={item.href}
+              className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-lg"
+              aria-label={`View ${item.label}`}
+            >
+              <Card
+                className={cn(
+                  'group relative overflow-hidden border shadow-sm transition-all',
+                  'hover:shadow-md hover:-translate-y-0.5 cursor-pointer h-full',
+                  'bg-gradient-to-br',
+                  item.tint,
+                  item.ring,
+                )}
               >
-                <Card className="group border shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 hover:border-primary/40 cursor-pointer h-full">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className={`h-4 w-4 ${item.color}`} />
-                      <span className="text-xs text-muted-foreground font-medium truncate flex-1">{item.label}</span>
-                      <ArrowUpRight className="h-3 w-3 text-muted-foreground/40 group-hover:text-primary transition-colors shrink-0" />
+                <CardContent className="p-4 sm:p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className={cn('rounded-md p-2', item.iconBg)}>
+                      <Icon className="h-4 w-4" />
                     </div>
-                    <p className="text-2xl font-bold text-foreground">{formatNumber(value)}</p>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
+                    <ArrowUpRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-foreground/70 transition-colors" />
+                  </div>
+                  <p className="text-xs uppercase tracking-wider font-medium text-muted-foreground">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 text-2xl sm:text-3xl font-bold tabular-nums">
+                    {formatNumber(value)}
+                  </p>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
       </div>
 
-      {/* Submission Trend — click to load */}
+      {/* ── Submission trend (click-to-load) ────────────────────────── */}
       <CollapsibleSection
-        title="My Submission Trend"
+        title="Submission trend"
         description="Your form submissions over the last 30 days"
         icon={<TrendingUp className="h-4 w-4 text-primary" />}
         open={showTrend}
@@ -152,11 +249,11 @@ export function UserDashboardContent() {
         {showTrend && <SubmissionTrendPanel />}
       </CollapsibleSection>
 
-      {/* Modules + Recent Activity — both click to load */}
+      {/* ── Modules + Recent activity (both click-to-load) ──────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         <div className="lg:col-span-2">
           <CollapsibleSection
-            title="Available Modules"
+            title="Available modules"
             description="Modules you have access to"
             icon={<Building2 className="h-4 w-4 text-primary" />}
             open={showModules}
@@ -167,7 +264,7 @@ export function UserDashboardContent() {
         </div>
 
         <CollapsibleSection
-          title="Recent Activity"
+          title="Recent activity"
           description="Your latest actions"
           icon={<Clock className="h-4 w-4 text-primary" />}
           open={showActivity}
@@ -375,18 +472,16 @@ function PanelLoader({ label }: { label: string }) {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6 sm:space-y-8 py-4 px-6">
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-64" />
-        <Skeleton className="h-4 w-80" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        <Skeleton className="h-56" />
-        <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
+    <div className="space-y-6 sm:space-y-8 py-4 px-3 sm:px-6 max-w-7xl mx-auto">
+      {/* Hero placeholder — avatar + greeting + name + chips */}
+      <Skeleton className="h-36 sm:h-40 w-full rounded-xl" />
+      {/* Attendance placeholder */}
+      <Skeleton className="h-32 w-full rounded-xl" />
+      {/* Four stat tiles */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
       </div>
     </div>
   );

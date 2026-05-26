@@ -85,6 +85,70 @@ const TABS: Array<TabDef> = [
 
 const ALL_TAB_IDS = new Set<ProfileTabId>(TABS.map((t) => t.id))
 
+/**
+ * Mobile list layout — Instagram "Settings and activity" style.
+ *
+ * The flat TABS array stays the source of truth for routing / labels /
+ * icons. This structure just decides how those tabs are *grouped* in the
+ * mobile list view:
+ *   - `title: null` is the lead group (no header label above it).
+ *   - Items with `variant: "lead"` render as the big multi-line card at
+ *     the top (avatar-circle icon + description).
+ *   - Items with no variant (default) render as a single-line row.
+ *   - Admin-only tabs are filtered out at render time via visibleTabIds;
+ *     a group whose every item is filtered out is skipped entirely so
+ *     we never render a section header above nothing.
+ */
+interface MobileGroupItem {
+  id: ProfileTabId
+  variant?: "lead"
+  description?: string
+}
+interface MobileGroup {
+  title: string | null
+  items: MobileGroupItem[]
+}
+
+const MOBILE_GROUPS: MobileGroup[] = [
+  {
+    title: null,
+    items: [
+      {
+        id: "personal",
+        variant: "lead",
+        description: "Profile, contact info, addresses, bank details",
+      },
+    ],
+  },
+  {
+    title: "How you use this app",
+    items: [
+      { id: "overview" },
+      { id: "notifications" },
+    ],
+  },
+  {
+    title: "Work",
+    items: [
+      { id: "employment" },
+      { id: "salary" },
+    ],
+  },
+  {
+    title: "Settings",
+    items: [
+      { id: "preferences" },
+      { id: "security" },
+    ],
+  },
+  {
+    title: "For administrators",
+    items: [
+      { id: "organization" },
+    ],
+  },
+]
+
 export default function ProfilePage() {
   const router = useRouter()
   const { toast } = useToast()
@@ -298,35 +362,95 @@ export default function ProfilePage() {
         </div>
 
         {/* ── MOBILE LIST VIEW (drill-down menu) ─────────────────────
-            iOS Settings style. Flat rows: small monochrome icon, label,
-            chevron. No coloured icon tiles — those read as decorative
-            chrome and made the list look candy-shop. Edge-to-edge on
-            mobile via negative margin. */}
-        <div className={cn("lg:hidden mt-6 -mx-4", tab !== null && "hidden")}>
-          <div className="bg-background border-y border-border">
-            {visibleTabs.map((t, idx) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => switchTab(t.id)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3.5 text-left",
-                  "active:bg-muted/40 transition-colors duration-100",
-                  "select-none touch-manipulation",
-                  // Internal divider between rows (last row gets no divider).
-                  idx !== visibleTabs.length - 1 && "border-b border-border",
+            Instagram "Settings and activity" style. A lead "Account" card
+            with an avatar-circle icon and multi-line description sits at
+            the top; subsequent sections render under small uppercase
+            group headers. Each group is its own bordered list with
+            edge-to-edge dividers. Empty groups (e.g. admin-only sections
+            for non-admins) are skipped entirely. */}
+        <div className={cn("lg:hidden mt-6 -mx-4 space-y-6", tab !== null && "hidden")}>
+          {MOBILE_GROUPS.map((group, groupIdx) => {
+            const items = group.items.filter((it) => visibleTabIds.has(it.id))
+            if (items.length === 0) return null
+
+            return (
+              <div key={group.title ?? `__lead-${groupIdx}`}>
+                {group.title && (
+                  <h3 className="px-4 pb-2 text-[13px] font-medium text-muted-foreground">
+                    {group.title}
+                  </h3>
                 )}
-              >
-                <span className="text-muted-foreground shrink-0 [&>svg]:h-5 [&>svg]:w-5">
-                  {t.icon}
-                </span>
-                <span className="flex-1 text-[15px] font-medium truncate">
-                  {t.label}
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
-              </button>
-            ))}
-          </div>
+                <div className="bg-background border-y border-border">
+                  {items.map((it, idx) => {
+                    const def = visibleTabs.find((t) => t.id === it.id)
+                    if (!def) return null
+                    const notLast = idx !== items.length - 1
+
+                    if (it.variant === "lead") {
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          onClick={() => switchTab(it.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-4 text-left",
+                            "active:bg-muted/40 transition-colors duration-100",
+                            "select-none touch-manipulation",
+                            notLast && "border-b border-border",
+                          )}
+                        >
+                          <span
+                            aria-hidden
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-foreground/80 [&>svg]:h-6 [&>svg]:w-6"
+                          >
+                            {def.icon}
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[16px] font-semibold leading-tight">
+                              {def.label === "Personal info" ? "Account" : def.label}
+                            </span>
+                            {it.description && (
+                              <span className="mt-0.5 block text-[13px] text-muted-foreground leading-snug">
+                                {it.description}
+                              </span>
+                            )}
+                          </span>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                        </button>
+                      )
+                    }
+
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        onClick={() => switchTab(it.id)}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-4 py-3.5 text-left",
+                          "active:bg-muted/40 transition-colors duration-100",
+                          "select-none touch-manipulation",
+                          notLast && "border-b border-border",
+                        )}
+                      >
+                        <span className="text-muted-foreground shrink-0 [&>svg]:h-5 [&>svg]:w-5">
+                          {def.icon}
+                        </span>
+                        <span className="flex-1 text-[15px] font-medium truncate">
+                          {def.label}
+                        </span>
+                        {it.id === "organization" && user.organization?.name && (
+                          <span className="text-[13px] text-muted-foreground truncate max-w-[40%]">
+                            {user.organization.name}
+                          </span>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         {/* ── MOBILE SECTION VIEW (after drill-down) ──────────────────
