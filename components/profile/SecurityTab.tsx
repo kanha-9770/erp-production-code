@@ -10,11 +10,18 @@
  */
 
 import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
-import { Lock, Loader2 } from "lucide-react"
+import {
+  Lock,
+  Loader2,
+  ShieldCheck,
+  KeyRound,
+  Sparkles,
+  LogOut,
+} from "lucide-react"
 import { PasswordInput } from "@/components/auth/PasswordInput"
 import { checkPassword } from "@/lib/auth/password-policy"
 
@@ -73,16 +80,31 @@ function ChangePasswordCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Lock className="h-4 w-4 text-primary" />
-          Change password
-        </CardTitle>
-        <CardDescription>
-          Use a unique password — at least 10 characters with a mix of letters,
-          numbers and symbols. Other signed-in devices will be signed out.
-        </CardDescription>
+    <Card className="overflow-hidden">
+      {/* Hero header — colored gradient strip with the lock icon, a punchy
+          one-liner, and the password rules surfaced as visual chips so the
+          requirements feel like progress markers instead of fine print. */}
+      <CardHeader className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border-b space-y-3 pb-4">
+        <div className="flex items-start gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0 ring-1 ring-primary/20">
+            <Lock className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base sm:text-lg leading-tight">
+              Change password
+            </CardTitle>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 leading-snug">
+              Lock things down with something fresh. A few seconds here keeps
+              your account safe.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <RuleChip icon={KeyRound} label="10+ characters" />
+          <RuleChip icon={Sparkles} label="Letters · numbers · symbols" />
+          <RuleChip icon={ShieldCheck} label="Unique — not reused" />
+          <RuleChip icon={LogOut} label="Signs out other devices" />
+        </div>
       </CardHeader>
       <CardContent className="space-y-4 max-w-md">
         <div className="space-y-1.5">
@@ -133,11 +155,31 @@ function ChangePasswordCard() {
               <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Updating…
             </>
           ) : (
-            "Update password"
+            <>
+              <ShieldCheck className="h-4 w-4 mr-2" /> Update password
+            </>
           )}
         </Button>
       </CardContent>
     </Card>
+  )
+}
+
+// Small pill that shows one password rule with an icon. Used in the
+// ChangePasswordCard header so the rules feel like progress markers
+// rather than legalese in a paragraph.
+function RuleChip({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border bg-background/70 backdrop-blur px-2 py-0.5 text-[10px] sm:text-[11px] font-medium text-muted-foreground">
+      <Icon className="h-3 w-3 text-primary/80" />
+      {label}
+    </span>
   )
 }
 

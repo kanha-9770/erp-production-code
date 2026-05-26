@@ -1,24 +1,43 @@
 "use client";
 
+/**
+ * Team Attendance — admin / approver view of org-wide attendance.
+ *
+ * Wears the same WorkspaceShell + WorkspaceHeader clothing as My Attendance
+ * and My Leave so the three sit visually flush: title block on the left,
+ * actions on the right, a sticky page header, and a "list area" below that
+ * scrolls independently. Selecting a row opens the existing detail sheet —
+ * the workspace preview pane stays null because the detail is already a
+ * full-height slide-out.
+ */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Loader2,
-  RefreshCcw,
+  RefreshCw,
   AlertTriangle,
   ShieldAlert,
   Plus,
   MapPin,
   Info,
+  Users,
+  Search,
+  Inbox,
+  FileText,
 } from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordsTable } from "./attendance-records-table";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
 import { ManualEntryDialog } from "./manual-entry-dialog";
 import { todayIso } from "./attendance-format";
+import {
+  WorkspaceShell,
+  WorkspaceHeader,
+} from "@/components/real-estate/workspace";
 
 interface TeamUser {
   id: string;
@@ -106,119 +125,169 @@ export function TeamAttendance() {
       });
   }, [data, search]);
 
-  if (forbidden) {
-    return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 flex items-start gap-3">
-        <ShieldAlert className="h-5 w-5 mt-0.5" />
-        <div>
-          <div className="font-semibold">Admin access required</div>
-          <div className="text-amber-800 mt-1">
-            Team attendance is visible only to org admins. If you should have
-            access, ask the org owner to grant the admin role.
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const totalRecords = data?.records.length ?? 0;
+  const filteredCount = decorated.length;
 
   return (
-    <div className="space-y-3">
-      <Card>
-        <CardContent className="p-2.5 flex flex-wrap items-center gap-2">
-          {/* From / To share a single row — labels sit inline-left of
-              each date input. Compact h-7 sizing to keep the toolbar
-              tight on mobile. */}
-          <div className="flex items-center gap-1.5 w-full sm:w-auto">
-            <Label htmlFor="t-from" className="text-[11px] text-gray-600 shrink-0">
-              From
-            </Label>
-            <Input
-              id="t-from"
-              type="date"
-              value={from}
-              max={to}
-              onChange={(e) => setFrom(e.target.value)}
-              className="h-7 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
-            />
-            <Label htmlFor="t-to" className="text-[11px] text-gray-600 shrink-0 ml-1">
-              To
-            </Label>
-            <Input
-              id="t-to"
-              type="date"
-              value={to}
-              min={from}
-              max={today}
-              onChange={(e) => setTo(e.target.value)}
-              className="h-7 flex-1 min-w-0 sm:flex-none sm:w-36 text-xs"
-            />
+    <>
+      <WorkspaceShell
+        scope="team-attendance"
+        selectedId={null}
+        onCloseSelection={() => {}}
+        header={
+          <WorkspaceHeader
+            icon={<Users className="h-5 w-5" />}
+            title="Team Attendance"
+            subtitle={
+              data && !forbidden
+                ? `${filteredCount}${
+                    filteredCount !== totalRecords ? ` / ${totalRecords}` : ""
+                  } record${filteredCount === 1 ? "" : "s"} · ${from}${
+                    from !== to ? ` → ${to}` : ""
+                  }`
+                : undefined
+            }
+          >
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchTeam}
+                disabled={loading || forbidden}
+                title="Refresh"
+                className="h-8 px-2 shrink-0"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 sm:mr-1 ${loading ? "animate-spin" : ""}`}
+                />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setManualOpen(true)}
+                disabled={forbidden}
+                className="h-8 px-2 sm:px-3"
+              >
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Manual entry</span>
+                <span className="sm:hidden">Manual</span>
+              </Button>
+            </div>
+          </WorkspaceHeader>
+        }
+        list={
+          <div className="flex flex-col h-full bg-muted/10">
+            {forbidden ? (
+              <ForbiddenPanel />
+            ) : (
+              <>
+                {/* ── Toolbar: date range + search ─────────────────────────── */}
+                <div className="p-3 sm:p-4 pb-2 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                    <div className="flex items-center gap-2 flex-1 sm:flex-none">
+                      <Label
+                        htmlFor="team-from"
+                        className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0"
+                      >
+                        From
+                      </Label>
+                      <Input
+                        id="team-from"
+                        type="date"
+                        value={from}
+                        max={to}
+                        onChange={(e) => setFrom(e.target.value)}
+                        className="h-8 text-xs flex-1 sm:flex-none sm:w-40"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 flex-1 sm:flex-none">
+                      <Label
+                        htmlFor="team-to"
+                        className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0"
+                      >
+                        To
+                      </Label>
+                      <Input
+                        id="team-to"
+                        type="date"
+                        value={to}
+                        min={from}
+                        max={today}
+                        onChange={(e) => setTo(e.target.value)}
+                        className="h-8 text-xs flex-1 sm:flex-none sm:w-40"
+                      />
+                    </div>
+                    <div className="relative flex-1 min-w-0">
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Search name, email, status…"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="h-8 pl-7 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Quick link to the regularization queue keeps approvers
+                      one click away from pending requests without leaving
+                      the page chrome. */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    {data?.geofence ? (
+                      <GeofenceStatus geofence={data.geofence} />
+                    ) : (
+                      <span />
+                    )}
+                    <Link
+                      href="/attendance/regularizations"
+                      className="text-xs font-medium text-primary hover:underline shrink-0"
+                    >
+                      Pending regularization requests →
+                    </Link>
+                  </div>
+
+                  {error && (
+                    <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Records table ─────────────────────────────────────── */}
+                {/* AttendanceRecordsTable supplies its own border+rounded
+                    card chrome, so we don't add another wrapper around it
+                    — that produced double borders. The empty/loading state
+                    matches the same card silhouette so the page doesn't
+                    jump as data arrives. */}
+                <div className="flex-1 min-h-0 px-3 sm:px-4 pb-4 overflow-auto">
+                  {loading && !data ? (
+                    <div className="bg-background border rounded-md flex items-center gap-2 py-16 justify-center text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading team attendance…
+                    </div>
+                  ) : decorated.length === 0 ? (
+                    <div className="bg-background border rounded-md py-16 text-center text-muted-foreground">
+                      <Inbox className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">
+                        {search
+                          ? "No records match your search."
+                          : "No attendance records in this range."}
+                      </p>
+                    </div>
+                  ) : (
+                    <AttendanceRecordsTable
+                      records={decorated}
+                      showName
+                      onSelect={(r) => setSelected(r)}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
-          <div className="ml-auto w-full sm:w-64">
-            <Input
-              id="t-search"
-              placeholder="Search by name, email, status…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-7 text-xs"
-            />
-          </div>
-          <div className="flex flex-nowrap gap-1.5 w-full sm:w-auto">
-            <Button
-              size="sm"
-              className="h-7 px-2 text-xs flex-1 sm:flex-none"
-              onClick={fetchTeam}
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-3.5 w-3.5 mr-1" />
-              )}
-              Refresh
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs flex-1 sm:flex-none"
-              onClick={() => setManualOpen(true)}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Manual
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end -mt-1">
-        <Link
-          href="/attendance/regularizations"
-          className="text-xs text-blue-700 hover:underline"
-        >
-          Pending regularization requests →
-        </Link>
-      </div>
-
-      {error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          <AlertTriangle className="h-4 w-4 mt-0.5" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {data?.geofence && <GeofenceStatus geofence={data.geofence} />}
-
-      {loading && !data ? (
-        <div className="flex items-center gap-2 py-12 justify-center text-sm text-gray-500">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading…
-        </div>
-      ) : (
-        <AttendanceRecordsTable
-          records={decorated}
-          showName
-          onSelect={(r) => setSelected(r)}
-        />
-      )}
+        }
+        preview={null}
+      />
 
       <AttendanceRecordDetail record={selected} onClose={() => setSelected(null)} />
       <ManualEntryDialog
@@ -226,14 +295,51 @@ export function TeamAttendance() {
         onOpenChange={setManualOpen}
         onSuccess={fetchTeam}
       />
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Forbidden panel — shown when the API returns 403. Kept as a centered card
+// inside the list area so the WorkspaceShell chrome (header + back nav) stays
+// usable instead of leaving the user on an empty page with no way out.
+// ─────────────────────────────────────────────────────────────────────────
+
+function ForbiddenPanel() {
+  return (
+    <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+      <div className="max-w-md w-full rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="h-5 w-5 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <div className="font-semibold text-base">Admin access required</div>
+            <p className="text-amber-800 dark:text-amber-300/90 leading-relaxed">
+              Team attendance is visible only to org admins and assigned
+              attendance approvers. Ask the org owner to grant the role if you
+              should have access.
+            </p>
+            <div className="pt-2 flex flex-wrap gap-2">
+              <Link
+                href="/attendance"
+                className="inline-flex items-center gap-1.5 text-xs font-medium underline hover:no-underline"
+              >
+                <FileText className="h-3.5 w-3.5" /> Back to My Attendance
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Compact strip that surfaces the org's saved geofence settings so admins
-// can immediately see whether out-of-radius / no-location flags will fire,
-// instead of staring at an empty "Where" column wondering if the config
-// even saved.
+// ─────────────────────────────────────────────────────────────────────────
+// Geofence status — surfaces the org's saved geofence settings inline so
+// admins can see at a glance whether out-of-radius / no-location flags will
+// fire. Rendered as a soft chip inside the toolbar (was a bigger banner
+// before) to match the My Attendance look.
+// ─────────────────────────────────────────────────────────────────────────
+
 function GeofenceStatus({
   geofence,
 }: {
@@ -244,8 +350,8 @@ function GeofenceStatus({
 
   if (!configured) {
     return (
-      <div className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 leading-snug">
-        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+      <div className="inline-flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 leading-snug dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <div className="flex-1">
           <span className="font-semibold">Geofence not configured.</span>{" "}
           <Link
@@ -254,26 +360,22 @@ function GeofenceStatus({
           >
             Configure in Settings
           </Link>
-          {" "}so out-of-radius punches get flagged here.
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-start gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] text-blue-900 leading-snug">
-      <MapPin className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-      <div className="flex-1">
-        <span className="font-semibold">
-          Geofence · {geofence.radiusM}m
-        </span>
-        {" · "}
-        <span className="text-blue-800">
-          {geofence.lat?.toFixed(4)}, {geofence.lng?.toFixed(4)} · mode{" "}
-          <span className="font-mono">{geofence.mode.toLowerCase()}</span>
-        </span>
-      </div>
-      <Info className="h-3 w-3 mt-0.5 text-blue-500" />
+    <div className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-[11px] leading-snug">
+      <MapPin className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+      <span className="font-semibold">Geofence · {geofence.radiusM}m</span>
+      <span className="text-muted-foreground">
+        ({geofence.lat?.toFixed(4)}, {geofence.lng?.toFixed(4)})
+      </span>
+      <Badge variant="outline" className="text-[9px] uppercase ml-0.5">
+        {geofence.mode.toLowerCase()}
+      </Badge>
+      <Info className="h-3 w-3 text-muted-foreground" />
     </div>
   );
 }

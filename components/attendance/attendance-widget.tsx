@@ -1043,13 +1043,13 @@ export function AttendanceWidget({
                     {liveGeo.inside === true && (
                       <>
                         <CheckCircle2 className="h-3.5 w-3.5" />
-                        You are inside the office radius
+                        You are within the office
                       </>
                     )}
                     {liveGeo.inside === false && (
                       <>
                         <MapPinOff className="h-3.5 w-3.5" />
-                        You are outside the office radius
+                        You are Off-site
                       </>
                     )}
                     {liveGeo.inside === null && (
@@ -1196,7 +1196,7 @@ export function AttendanceWidget({
                       c.type === "IN"
                         ? "You are checked in successfully"
                         : "You are checked out successfully",
-                    description: "Recorded outside the office radius",
+                    description: "Recorded Off-site",
                   });
                 } catch (e: any) {
                   toast({

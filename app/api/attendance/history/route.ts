@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
   });
 
   // Per-org geofence centre, so each historical row can be flagged as
-  // inside/outside the office radius. We deliberately ignore
+  // inside/Off-site. We deliberately ignore
   // `geofenceMode` — visibility is decoupled from enforcement so admins
   // can see out-of-radius punches even when mode is still OFF.
   const cfg = await getAttendanceConfig(authUser.organizationId);
