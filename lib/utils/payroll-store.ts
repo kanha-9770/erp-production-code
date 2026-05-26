@@ -65,6 +65,16 @@ export interface SampleAttendance {
   /** True when the employee actually toggled OT on for this row. Lets the
    *  payroll calculator distinguish "did real OT" from "long workday". */
   overtimeOptedIn?: boolean;
+  /** Minutes the check-in was late past the configured shift start +
+   *  grace period. When > 0, the payroll classifier downgrades the day to
+   *  half-day even if hours worked would otherwise qualify as full — the
+   *  tardiness penalty is intentional and deterrent. */
+  lateMinutes?: number;
+  /** True when the row was closed by the auto-checkout sweep (the user
+   *  forgot to punch out and the nightly / 24h cap closed the day for
+   *  them). The payroll classifier treats these as zero-pay days so the
+   *  employee has a concrete reason to remember the out-punch tomorrow. */
+  isAutoCheckedOut?: boolean;
 }
 
 export interface SampleLeave {
@@ -98,6 +108,10 @@ export interface PayrollPolicy {
    *  the engine can detect short-leave days uniformly even when the
    *  classifier's internal constants drift. */
   fullDayMinHours?: number;
+  /** Hours-worked floor below which the day is counted as absent (no
+   *  pay) rather than half-day. Mirrors AttendanceConfiguration so the
+   *  payroll classifier and the UI badge stay in lockstep. */
+  halfDayMinHours?: number;
   /** When true, OT minutes count only on rows the employee toggled OT on. */
   overtimeRequiresOptIn?: boolean;
   /** Labour-law daily cap (hours) the payroll engine clamps OT to. 0 / unset
@@ -112,6 +126,7 @@ const DEFAULT_POLICY: PayrollPolicy = {
   monthlyShortLeaveQuota: 0,
   shortLeaveHours: 2,
   fullDayMinHours: 8,
+  halfDayMinHours: 4,
   overtimeRequiresOptIn: true,
   overtimeMaxHoursPerDay: 4,
 };
@@ -914,6 +929,9 @@ export async function getPayrollPolicy(organizationId: string): Promise<PayrollP
         fullDayMinHours: Number.isFinite(cfg.fullDayMinHours)
           ? Math.max(0, Number(cfg.fullDayMinHours))
           : 8,
+        halfDayMinHours: Number.isFinite(cfg.halfDayMinHours)
+          ? Math.max(0, Number(cfg.halfDayMinHours))
+          : 4,
         overtimeRequiresOptIn:
           cfg.overtimeRequiresOptIn === undefined
             ? true
@@ -1001,6 +1019,10 @@ async function getNativeAttendanceForMonth(
           ? Number((row as any).overtimeMinutes)
           : 0,
         overtimeOptedIn: !!(row as any).overtimeOptedIn,
+        lateMinutes: Number.isFinite((row as any).lateMinutes)
+          ? Number((row as any).lateMinutes)
+          : 0,
+        isAutoCheckedOut: !!(row as any).isAutoCheckedOut,
       };
       // Primary key: userId (always reliable — Attendance.userId is a FK).
       if (userId) {

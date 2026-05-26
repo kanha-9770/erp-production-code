@@ -19,14 +19,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   CalendarClock, Clock, Search, RefreshCcw, Loader2, AlertTriangle,
-  Edit3, MapPin, MoreHorizontal, Check,
+  Edit3, MapPin, MoreHorizontal, Check, Info,
 } from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
 import { RegularizationDialog } from "./regularization-dialog";
 import {
-  formatHM, shiftDays, todayIso, workedMinutesFor,
+  formatHM, formatTimeShort, shiftDays, todayIso, workedMinutesFor,
 } from "./attendance-format";
+import { useUserTimezone } from "@/lib/user-timezone";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
@@ -34,6 +35,7 @@ import {
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 
 interface HistoryResponse {
@@ -54,10 +56,11 @@ interface HistoryResponse {
 // Status options for the chip filter — same set the records table maps
 // to badges, plus "Working" for live in-progress punches.
 const STATUS_OPTIONS = [
-  { value: "PRESENT",     label: "Present" },
-  { value: "WORKING",     label: "Working" },
-  { value: "HALF_DAY",    label: "Half Day" },
-  { value: "ABSENT",      label: "Absent" },
+  { value: "PRESENT",       label: "Present" },
+  { value: "WORKING",       label: "Working" },
+  { value: "HALF_DAY",      label: "Half Day" },
+  { value: "AUTO_CHECKOUT", label: "Auto Checkout" },
+  { value: "ABSENT",        label: "Absent" },
   { value: "ON_LEAVE",    label: "On Leave" },
   { value: "HOLIDAY",     label: "Holiday" },
   { value: "WEEKLY_OFF",  label: "Weekly Off" },
@@ -65,21 +68,28 @@ const STATUS_OPTIONS = [
 ];
 
 const STATUS_BADGE: Record<string, string> = {
-  PRESENT:     "bg-emerald-100 text-emerald-800 border-emerald-200",
-  WORKING:     "bg-emerald-100 text-emerald-800 border-emerald-200",
-  HALF_DAY:    "bg-amber-100 text-amber-800 border-amber-200",
-  ABSENT:      "bg-red-100 text-red-700 border-red-200",
-  ON_LEAVE:    "bg-blue-100 text-blue-800 border-blue-200",
-  HOLIDAY:     "bg-purple-100 text-purple-800 border-purple-200",
-  WEEKLY_OFF:  "bg-slate-100 text-slate-700 border-slate-200",
-  REGULARIZED: "bg-indigo-100 text-indigo-800 border-indigo-200",
+  PRESENT:       "bg-emerald-100 text-emerald-800 border-emerald-200",
+  WORKING:       "bg-emerald-100 text-emerald-800 border-emerald-200",
+  HALF_DAY:      "bg-amber-100 text-amber-800 border-amber-200",
+  AUTO_CHECKOUT: "bg-red-100 text-red-700 border-red-200",
+  ABSENT:        "bg-red-100 text-red-700 border-red-200",
+  ON_LEAVE:      "bg-blue-100 text-blue-800 border-blue-200",
+  HOLIDAY:       "bg-purple-100 text-purple-800 border-purple-200",
+  WEEKLY_OFF:    "bg-slate-100 text-slate-700 border-slate-200",
+  REGULARIZED:   "bg-indigo-100 text-indigo-800 border-indigo-200",
 };
 
 // Resolve a row's effective status string (matching the chip values).
-// Same precedence as attendance-records-table: live punch wins, then
-// the persisted status, then a fallback derived from checked-out flag.
+// Prefer the server-computed `effectiveStatus` — it already accounts for
+// org thresholds (halfDayMinHours / fullDayMinHours from Attendance
+// Configuration), per-employee shift (via lateMinutes), and auto-
+// checkout. The legacy derivation stays for records without the field
+// (e.g. cached responses from an older API).
 function effectiveStatus(record: AttendanceRecord): string {
+  if (record.effectiveStatus) return record.effectiveStatus;
   if (record.checkedIn && !record.checkedOut) return "WORKING";
+  if (record.isAutoCheckedOut) return "AUTO_CHECKOUT";
+  if (record.checkedOut && (record.lateMinutes ?? 0) > 0) return "HALF_DAY";
   const s = (record.status ?? "").toUpperCase();
   if (s === "HALF") return "HALF_DAY";
   if (s) return s;
@@ -99,6 +109,11 @@ function fmtShortDate(iso: string): string {
 }
 
 export function MyAttendance() {
+  // Subscribe so check-in / check-out cells re-render when the user
+  // changes timezone in Profile → Preferences. Without this, the cells
+  // would still show the ISO converted via the *previous* zone until
+  // the next mount.
+  useUserTimezone();
   const today = useMemo(() => todayIso(), []);
   const [from, setFrom] = useState<string>(() => shiftDays(today, -29));
   const [to, setTo] = useState<string>(today);
@@ -196,16 +211,49 @@ export function MyAttendance() {
         sortKey: "status",
         cell: (r) => {
           const code = effectiveStatus(r);
-          return (
+          // Prefer the server-supplied reason (it knows the exact hours
+          // worked and the configured thresholds). Fall back to the
+          // generic explanations for older records where the API didn't
+          // ship `effectiveStatusReason`.
+          const reason =
+            r.effectiveStatusReason ??
+            (code === "AUTO_CHECKOUT"
+              ? "You forgot to check out — the system closed this day at the cutoff. This day's salary is ₹0."
+              : code === "HALF_DAY" && (r.lateMinutes ?? 0) > 0
+                ? `Late check-in by ${r.lateMinutes}m past grace — counted as half-day.`
+                : null);
+          const badge = (
             <Badge
               variant="outline"
               className={`text-[10px] whitespace-nowrap ${STATUS_BADGE[code] ?? ""}`}
             >
               {statusLabel(code).toUpperCase()}
-              {r.isAutoCheckedOut && (
-                <span className="ml-1 text-[9px] opacity-70">AUTO</span>
-              )}
             </Badge>
+          );
+          if (!reason) return badge;
+          // Pair the badge with a small info icon so the tooltip is
+          // discoverable. The HoverCard opens on hover (desktop) and on
+          // tap (mobile), and we stop propagation so clicking the icon
+          // doesn't accidentally open the row detail panel underneath.
+          return (
+            <HoverCard openDelay={100} closeDelay={100}>
+              <HoverCardTrigger
+                asChild
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="inline-flex items-center gap-1 cursor-help">
+                  {badge}
+                  <Info className="h-3 w-3 text-muted-foreground" />
+                </span>
+              </HoverCardTrigger>
+              <HoverCardContent
+                side="bottom"
+                align="start"
+                className="text-xs w-64 p-3 leading-snug"
+              >
+                {reason}
+              </HoverCardContent>
+            </HoverCard>
           );
         },
       },
@@ -214,11 +262,15 @@ export function MyAttendance() {
         header: "Check-in",
         width: 130,
         sortKey: "checkInAt",
-        copyValue: (r) => r.checkInTime ?? "",
+        // Prefer the ISO `checkInAt` so the cell renders in the user's
+        // chosen timezone — the legacy `checkInTime` HH:mm string is in
+        // server-local time (UTC in prod), which made My Attendance
+        // disagree with Team Attendance for the same row.
+        copyValue: (r) => r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkInTime ?? "—"}</span>
+            <span className="font-mono">{r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? "—")}</span>
             {r.lateMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 +{r.lateMinutes}m
@@ -232,11 +284,11 @@ export function MyAttendance() {
         header: "Check-out",
         width: 130,
         sortKey: "checkOutAt",
-        copyValue: (r) => r.checkOutTime ?? "",
+        copyValue: (r) => r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkOutTime ?? "—"}</span>
+            <span className="font-mono">{r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? "—")}</span>
             {r.earlyOutMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 -{r.earlyOutMinutes}m

@@ -42,7 +42,27 @@ export interface AttendanceRecord {
   earlyOutMinutes: number;
   overtimeMinutes: number;
   isAutoCheckedOut: boolean;
+  /** Did the employee opt into overtime for this row? When true on an
+   *  auto-checkout row, payroll bypasses the zero-pay rule (the OT
+   *  toggle is treated as an "I intend to stay late" signal). */
+  overtimeOptedIn?: boolean;
   status: string | null;
+  /** Server-computed display verdict — already accounts for hours
+   *  worked, lateness, auto-checkout, OT opt-in, and per-org thresholds.
+   *  When present, badge code should prefer this over deriving from
+   *  `status` + flags. Older records (or third-party callers) may
+   *  omit it. */
+  effectiveStatus?:
+    | "WORKING"
+    | "AUTO_CHECKOUT"
+    | "ABSENT"
+    | "HALF_DAY"
+    | "PRESENT"
+    | null;
+  /** Optional short tooltip text explaining why `effectiveStatus` came
+   *  out the way it did (e.g. "Worked 2.5h — below the 4h half-day
+   *  minimum, so this day counts as absent."). */
+  effectiveStatusReason?: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
   // Face-match score recorded at each punch (Euclidean distance — lower is

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { distanceMeters, todayKey } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
+import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +138,14 @@ export async function GET(request: NextRequest) {
         mode: cfg.faceVerifyMode,
         threshold: cfg.faceMatchThreshold,
       },
+      // Threshold knobs surfaced to the client so the status filter chip
+      // can display the right options and the badge stays in sync with the
+      // payroll classifier. Mirrors the values the server uses for the
+      // per-row `effectiveStatus` field below.
+      thresholds: {
+        halfDayMinHours: cfg.halfDayMinHours,
+        fullDayMinHours: cfg.fullDayMinHours,
+      },
       records: records.map((r) => {
         const inGeo = annotateGeo(
           (r as any).checkInLat ?? null,
@@ -147,6 +156,33 @@ export async function GET(request: NextRequest) {
           (r as any).checkOutLat ?? null,
           (r as any).checkOutLng ?? null,
           !!r.checkedOut,
+        );
+        // Worked-time figure that drives the status verdict. Wall-clock
+        // checkOut − checkIn (in minutes) to match the "Worked" column;
+        // break-time deduction is payroll's concern, not the badge's.
+        const checkInMs = (r as any).checkInAt
+          ? new Date((r as any).checkInAt).getTime()
+          : null;
+        const checkOutMs = (r as any).checkOutAt
+          ? new Date((r as any).checkOutAt).getTime()
+          : null;
+        const workedMinutes =
+          checkInMs !== null && checkOutMs !== null && checkOutMs > checkInMs
+            ? Math.round((checkOutMs - checkInMs) / 60_000)
+            : 0;
+        const verdict = computeEffectiveStatus(
+          {
+            checkedIn: !!r.checkedIn,
+            checkedOut: !!r.checkedOut,
+            isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
+            overtimeOptedIn: !!(r as any).overtimeOptedIn,
+            workedMinutes,
+            lateMinutes: (r as any).lateMinutes ?? 0,
+          },
+          {
+            halfDayMinHours: cfg.halfDayMinHours,
+            fullDayMinHours: cfg.fullDayMinHours,
+          },
         );
         return {
           id: r.id,
@@ -160,8 +196,14 @@ export async function GET(request: NextRequest) {
           lateMinutes: (r as any).lateMinutes ?? 0,
           earlyOutMinutes: (r as any).earlyOutMinutes ?? 0,
           overtimeMinutes: (r as any).overtimeMinutes ?? 0,
+          overtimeOptedIn: !!(r as any).overtimeOptedIn,
           isAutoCheckedOut: !!(r as any).isAutoCheckedOut,
           status: (r as any).status ?? null,
+          // Server-computed display status — single source of truth that
+          // already accounts for hours, lateness, and auto-checkout per
+          // the org's AttendanceConfiguration thresholds.
+          effectiveStatus: verdict.status,
+          effectiveStatusReason: verdict.reason ?? null,
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInFaceMatch: (r as any).checkInFaceMatch ?? null,

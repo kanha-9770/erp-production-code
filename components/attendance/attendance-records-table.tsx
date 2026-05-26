@@ -15,7 +15,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { MapPin, Edit3, AlertTriangle } from "lucide-react";
+import { MapPin, Edit3, AlertTriangle, Info } from "lucide-react";
 import {
   formatDateLong,
   formatHM,
@@ -38,7 +38,51 @@ interface Props {
 function statusBadge(record: AttendanceRecord): {
   label: string;
   className: string;
+  /** When set, shown via tooltip so the employee understands why this
+   *  day was scored the way it was — especially useful for zero-pay
+   *  rows like auto-checkout where the table would otherwise look like
+   *  a normal absence. */
+  reason?: string;
 } {
+  // Server-computed verdict (when present) is the single source of truth.
+  // It already accounts for hours worked vs. the org's half/full-day
+  // thresholds, lateness against the per-employee shift, and auto-
+  // checkout. Falling through to the legacy switch only happens for
+  // records that pre-date this field (e.g. cached responses).
+  switch (record.effectiveStatus) {
+    case "WORKING":
+      return {
+        label: "Working",
+        className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      };
+    case "AUTO_CHECKOUT":
+      return {
+        label: "Auto Checkout",
+        className: "bg-red-100 text-red-700 border-red-200",
+        reason:
+          record.effectiveStatusReason ??
+          "You forgot to check out — the system closed this day at the cutoff. This day's salary is ₹0.",
+      };
+    case "ABSENT":
+      return {
+        label: "Absent",
+        className: "bg-red-100 text-red-700 border-red-200",
+        reason: record.effectiveStatusReason ?? undefined,
+      };
+    case "HALF_DAY":
+      return {
+        label: "Half Day",
+        className: "bg-amber-100 text-amber-800 border-amber-200",
+        reason: record.effectiveStatusReason ?? undefined,
+      };
+    case "PRESENT":
+      return {
+        label: "Present",
+        className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      };
+  }
+
+  // ── Legacy path (records without `effectiveStatus`) ──────────────────
   // A live punch (checked in, not yet checked out) is always "Working" —
   // the persisted status only gets stamped at checkout, so during the day
   // it would otherwise read as the previous run's value (or null).
@@ -46,6 +90,21 @@ function statusBadge(record: AttendanceRecord): {
     return {
       label: "Working",
       className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    };
+  }
+  if (record.isAutoCheckedOut) {
+    return {
+      label: "Auto Checkout",
+      className: "bg-red-100 text-red-700 border-red-200",
+      reason:
+        "You forgot to check out — the system closed this day at the cutoff. This day's salary is ₹0.",
+    };
+  }
+  if (record.checkedOut && (record.lateMinutes ?? 0) > 0) {
+    return {
+      label: "Half Day",
+      className: "bg-amber-100 text-amber-800 border-amber-200",
+      reason: `Late check-in by ${record.lateMinutes}m past grace — counted as half-day.`,
     };
   }
   switch ((record.status ?? "").toUpperCase()) {
@@ -165,13 +224,37 @@ export function AttendanceRecordsTable({
                   </TableCell>
                 )}
                 <TableCell>
-                  <Badge variant="outline" className={badge.className}>
-                    {badge.label}
-                  </Badge>
-                  {r.isAutoCheckedOut && (
-                    <span className="ml-1 text-[10px] uppercase tracking-wide text-gray-500">
-                      auto
-                    </span>
+                  {badge.reason ? (
+                    // Info icon makes the tooltip discoverable — without
+                    // it, employees don't realise the badge is hoverable.
+                    // side=bottom + align=start keeps the popup below the
+                    // badge so it doesn't fight the sticky table header.
+                    // Radix flips it to top automatically near the bottom
+                    // of the viewport via collisionPadding in HoverCardContent.
+                    <HoverCard openDelay={100} closeDelay={100}>
+                      <HoverCardTrigger
+                        asChild
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="inline-flex items-center gap-1 cursor-help">
+                          <Badge variant="outline" className={badge.className}>
+                            {badge.label}
+                          </Badge>
+                          <Info className="h-3 w-3 text-muted-foreground" />
+                        </span>
+                      </HoverCardTrigger>
+                      <HoverCardContent
+                        side="bottom"
+                        align="start"
+                        className="text-xs w-64 p-3 leading-snug"
+                      >
+                        {badge.reason}
+                      </HoverCardContent>
+                    </HoverCard>
+                  ) : (
+                    <Badge variant="outline" className={badge.className}>
+                      {badge.label}
+                    </Badge>
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
