@@ -340,27 +340,34 @@ function findLeaveForToday(
 
 // ---- Status ---------------------------------------------------------------
 
-// 24-hour cap auto-checkout — always on, no admin toggle. When a user is
-// still checked in 24 hours after their checkInAt, close the row at exactly
-// checkInAt + 24h. This guarantees:
+// Midnight auto-checkout — always on, no admin toggle. When a user is still
+// checked in past midnight following their check-in, close the row at exactly
+// 00:00 the day after checkInAt (server-local time). This guarantees:
 //   1. Stale rows from prior days (user forgot to check out) get closed,
 //      freeing the next day's (userId, date) slot for a fresh check-in.
 //   2. The recorded `checkOutAt` reflects what payroll should see — capped
-//      at 24h, not whenever the lazy sweep happened to run. So a user who
-//      logs in two days later doesn't get credited for the gap.
+//      at end-of-day, not whenever the lazy sweep happened to run. So a
+//      user who logs in two days later doesn't get credited for the gap.
 //
 // Runs at the top of getStatus and recordPunch (per-user sweep) AND at the
 // top of the team-attendance GET (org-wide sweep) — without the latter, an
 // admin viewing /attendance/team would see "Working" rows from prior days
 // because the row's owner hasn't loaded their widget yet to trigger the
 // per-user sweep.
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+/** Midnight (00:00) of the day immediately after checkInAt, in server-local
+ *  time. `setHours(24, ...)` normalises to start-of-next-day. */
+function midnightAfter(checkInAt: Date): Date {
+  const d = new Date(checkInAt);
+  d.setHours(24, 0, 0, 0);
+  return d;
+}
 
 /**
- * Sweep stale (checkedIn-but-not-checkedOut > 24h) Attendance rows and
- * close them at checkInAt + 24h. Filter by either a single userId or an
- * entire organizationId; passing neither is a no-op (defence against
- * accidental table-wide sweeps).
+ * Sweep stale (checkedIn-but-not-checkedOut past midnight) Attendance rows
+ * and close them at 00:00 the day after checkInAt. Filter by either a
+ * single userId or an entire organizationId; passing neither is a no-op
+ * (defence against accidental table-wide sweeps).
  *
  * Exported so the team-attendance API can run the org-wide variant before
  * it reads rows — otherwise its query returns stale "Working" rows from
@@ -371,14 +378,17 @@ export async function applyDayCapAutoCheckouts(
   now: Date,
 ): Promise<void> {
   if (!filter.userId && !filter.organizationId) return;
-  const cutoff = new Date(now.getTime() - TWENTY_FOUR_HOURS_MS);
-  // Only rows where checkInAt is older than 24h ago AND user hasn't already
-  // checked out. The `not: null` guard avoids matching legacy rows that
-  // never recorded a server-stamped checkInAt.
+  // Cutoff = start of today (local). A row qualifies when its check-in is
+  // from a prior calendar day, regardless of how long ago that was — so a
+  // user who checked in at 11:55 PM yesterday gets closed at 00:00 today,
+  // and a user who checked in three days ago gets closed at 00:00 of the
+  // day after their check-in.
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
   const where: any = {
     checkedIn: true,
     checkedOut: false,
-    checkInAt: { lt: cutoff, not: null },
+    checkInAt: { lt: startOfToday, not: null },
   };
   if (filter.userId) where.userId = filter.userId;
   if (filter.organizationId) {
@@ -414,7 +424,7 @@ export async function applyDayCapAutoCheckouts(
       cfgByOrg.set(orgId, cfg);
     }
 
-    const checkOutAt = new Date(checkInAt.getTime() + TWENTY_FOUR_HOURS_MS);
+    const checkOutAt = midnightAfter(checkInAt);
     const workedMinutes = Math.max(
       0,
       diffMinutes(checkOutAt, checkInAt) - cfg.breakMinutes,
@@ -431,10 +441,10 @@ export async function applyDayCapAutoCheckouts(
         checkedOut: true,
         checkOutAt,
         checkOutTime: formatHHmm(checkOutAt),
-        checkOutSource: 'AUTO_24H',
+        checkOutSource: 'AUTO_MIDNIGHT',
         isAutoCheckedOut: true,
-        // earlyOut is meaningless for a 24h cap — the user worked way past
-        // shift end. overtimeMinutes carries the excess.
+        // earlyOut is meaningless for a midnight cap — the user worked
+        // past shift end. overtimeMinutes carries the excess.
         earlyOutMinutes: 0,
         overtimeMinutes,
         status: 'PRESENT',

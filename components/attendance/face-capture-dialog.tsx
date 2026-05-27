@@ -534,7 +534,7 @@ export function FaceCaptureDialog({
               </Button>
             )}
           </div>
-          <div className="flex gap-2 sm:justify-end">
+          <div className="flex gap-2 justify-end">
             {capturedBlob ? (
               <>
                 <Button
