@@ -6,6 +6,7 @@ import { UserPermission, RolePermission } from "@/lib/auth-middleware";
 import { prisma } from "@/lib/prisma";
 import { isUserAdmin } from "@/lib/api-helpers";
 import { getAnchorHostModuleIds } from "@/lib/hr/anchor-hosts";
+import { invalidateFormCache, resolveFormIdFromField } from "@/lib/forms/form-cache";
 
 export class DatabaseService {
   // ────────────────────────────────────────────────────────────────
@@ -61,6 +62,9 @@ export class DatabaseService {
         },
       });
 
+      const formId = await resolveFormIdFromField(fieldId);
+      if (formId) await invalidateFormCache(formId);
+
       return updated;
     } catch (err: any) {
       console.error("[DatabaseService.updateField] ERROR:", err.message);
@@ -74,9 +78,12 @@ export class DatabaseService {
   // ────────────────────────────────────────────────────────────────
   static async deleteField(fieldId: string) {
     try {
+      // Resolve formId BEFORE delete — the field row is gone after.
+      const formId = await resolveFormIdFromField(fieldId);
       await prisma.formField.delete({
         where: { id: fieldId },
       });
+      if (formId) await invalidateFormCache(formId);
     } catch (err: any) {
       console.error("[DatabaseService.deleteField] Error:", err);
       throw err;

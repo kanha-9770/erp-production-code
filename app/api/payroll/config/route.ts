@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
+import { invalidatePayrollConfigCache } from "@/lib/utils/payroll-store";
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,8 @@ export async function POST(request: NextRequest) {
         isActive: true,
       },
     });
+
+    await invalidatePayrollConfigCache(authUser.organizationId);
 
     return NextResponse.json({ success: true, config });
   } catch (error) {

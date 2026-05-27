@@ -1,6 +1,7 @@
 // app/api/auth/change-password/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { assertStrongPassword } from "@/lib/auth/password-policy";
@@ -101,6 +102,10 @@ export async function POST(request: NextRequest) {
     // session can no longer be silently kept alive. We keep the current one.
     const currentToken = request.cookies.get("auth-token")?.value;
     if (currentToken) {
+      // Invalidate Redis cache for ALL sessions of this user BEFORE the DB
+      // delete, while the tokens are still readable. Cache entries for the
+      // current token will be repopulated on the next request — cheap.
+      await invalidateAllSessionsForUser(authUser.id).catch(() => null);
       await prisma.userSession.deleteMany({
         where: { userId: authUser.id, NOT: { token: currentToken } },
       }).catch(() => null);

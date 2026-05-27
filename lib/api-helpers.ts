@@ -7,6 +7,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateSession } from "@/lib/auth";
+import { buildKey, cacheGet, cacheSet, cacheInvalidate } from "@/lib/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -40,26 +41,47 @@ export interface RequestMeta {
 // Auth helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Request-scoped cache so multiple calls within the same request (handler +
+// nested helpers) don't repeat the session lookup. WeakMap keys on the
+// request object so entries are garbage-collected with the request.
+const authUserCache = new WeakMap<NextRequest, AuthenticatedUser | null>();
+
 /**
  * Reads the auth-token cookie, validates the session, and returns the user
- * record (id, email, organizationId) from the database.
+ * record (id, email, organizationId).
  * Returns `null` when the request is unauthenticated or the user is not found.
+ *
+ * Performance: cached per-request, and reuses the user already loaded by
+ * `validateSession` (which does a deep include) instead of re-querying.
  */
 export async function getAuthenticatedUser(
   request: NextRequest
 ): Promise<AuthenticatedUser | null> {
+  if (authUserCache.has(request)) {
+    return authUserCache.get(request) ?? null;
+  }
+
   const token = request.cookies.get("auth-token")?.value;
-  if (!token) return null;
+  if (!token) {
+    authUserCache.set(request, null);
+    return null;
+  }
 
   const session = await validateSession(token);
-  if (!session?.user) return null;
+  if (!session?.user) {
+    authUserCache.set(request, null);
+    return null;
+  }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { id: true, email: true, organizationId: true },
-  });
-
-  return user ?? null;
+  // session.user is already loaded with id/email/organizationId — no second
+  // query needed.
+  const result: AuthenticatedUser = {
+    id: session.user.id,
+    email: session.user.email,
+    organizationId: session.user.organizationId ?? null,
+  };
+  authUserCache.set(request, result);
+  return result;
 }
 
 /**
@@ -104,6 +126,76 @@ export async function isUserAdmin(
   );
 }
 
+// Permission rows are looked up by name on every `hasFormPermission` call.
+// Permission.name is globally unique in the schema, so a two-tier cache is
+// safe AND fast:
+//
+//   L1: in-process Map (sub-microsecond). Keeps a process hot without
+//       touching the network. 60s TTL.
+//   L2: Redis / Upstash (~5-50ms over the wire). Shared across all Node
+//       instances, so a new process starts warm. 5min TTL.
+//   L3: Postgres `permissions` table — source of truth.
+//
+// A freshly-created permission propagates within 60s on the same process and
+// 5min across the cluster. A deleted permission only delays "no access",
+// which is the safe direction. Write paths that mutate Permission rows
+// should call `invalidatePermissionCache(name)` to drop both tiers.
+const permissionIdByNameCache = new Map<
+  string,
+  { id: string | null; cachedAt: number }
+>();
+const PERMISSION_ID_TTL_MS = 60_000;
+const PERMISSION_ID_REDIS_TTL_S = 300;
+
+// Auth-namespace key. Today shares the default Upstash DB; the day you add
+// REDIS_URL_AUTH to .env it transparently moves to a dedicated DB.
+const permissionIdKey = (name: string) =>
+  buildKey("auth", "perm-id", name);
+
+export async function getPermissionIdByName(name: string): Promise<string | null> {
+  const target = name.toUpperCase();
+
+  // L1 — in-process
+  const l1 = permissionIdByNameCache.get(target);
+  if (l1 && Date.now() - l1.cachedAt < PERMISSION_ID_TTL_MS) {
+    return l1.id;
+  }
+
+  // L2 — Redis (returns null on miss OR on Redis error — both fall through)
+  const l2 = await cacheGet<{ id: string | null }>("auth", permissionIdKey(target));
+  if (l2) {
+    permissionIdByNameCache.set(target, { id: l2.id, cachedAt: Date.now() });
+    return l2.id;
+  }
+
+  // L3 — Postgres
+  const row = await prisma.permission.findFirst({
+    where: { name: target },
+    select: { id: true },
+  });
+  const id = row?.id ?? null;
+
+  // Populate both tiers (fire-and-forget L2 write)
+  permissionIdByNameCache.set(target, { id, cachedAt: Date.now() });
+  void cacheSet("auth", permissionIdKey(target), { id }, PERMISSION_ID_REDIS_TTL_S);
+
+  return id;
+}
+
+/**
+ * Clears the cached permission-id for a name from both tiers. Call this from
+ * any handler that creates, updates, or deletes a Permission row.
+ *
+ *   await prisma.permission.update({ where: { id }, data: { name: newName } });
+ *   await invalidatePermissionCache(oldName);
+ *   await invalidatePermissionCache(newName);
+ */
+export async function invalidatePermissionCache(name: string): Promise<void> {
+  const target = name.toUpperCase();
+  permissionIdByNameCache.delete(target);
+  await cacheInvalidate("auth", permissionIdKey(target));
+}
+
 /**
  * Returns `true` if the user has `permissionName` on the given form, merging
  * role-level and user-level rows. Mirrors the form-level check used by the
@@ -113,6 +205,10 @@ export async function isUserAdmin(
  *  - An active user-level deny (granted:false) overrides a role grant.
  *  - An active user-level grant, or any role grant on the form (or
  *    module-level row with no formId), returns true.
+ *
+ * Performance: the permission row is fetched from a 60s in-memory cache, and
+ * the (permission lookup) and (role assignments lookup) run in parallel
+ * since they're independent.
  */
 export async function hasFormPermission(
   userId: string,
@@ -123,20 +219,22 @@ export async function hasFormPermission(
   if (!userId || !formId || !permissionName) return false;
   if (await isUserAdmin(userId, organizationId)) return true;
 
-  const target = permissionName.toUpperCase();
-
-  // Permission row (by name, scoped to `form` resource)
-  const permission = await prisma.permission.findFirst({
-    where: { name: target },
-    select: { id: true },
-  });
-  if (!permission) return false;
+  // Permission lookup (cached) and assignments lookup are independent — run in
+  // parallel so the slower of the two determines latency, not their sum.
+  const [permissionId, assignments] = await Promise.all([
+    getPermissionIdByName(permissionName),
+    prisma.userUnitAssignment.findMany({
+      where: { userId },
+      select: { roleId: true },
+    }),
+  ]);
+  if (!permissionId) return false;
 
   // Active user-level overrides for this permission + form-level scope
   const userOverrides = await prisma.userPermission.findMany({
     where: {
       userId,
-      permissionId: permission.id,
+      permissionId,
       isActive: true,
       resourceType: null,
       resourceId: null,
@@ -147,18 +245,13 @@ export async function hasFormPermission(
   if (userOverrides.some((o) => o.granted === false)) return false;
   if (userOverrides.some((o) => o.granted === true)) return true;
 
-  // Role-level rows for any of the user's assigned roles
-  const assignments = await prisma.userUnitAssignment.findMany({
-    where: { userId },
-    select: { roleId: true },
-  });
   const roleIds = assignments.map((a) => a.roleId);
   if (roleIds.length === 0) return false;
 
   const rolePerm = await prisma.rolePermission.findFirst({
     where: {
       roleId: { in: roleIds },
-      permissionId: permission.id,
+      permissionId,
       granted: true,
       sectionId: null,
       formFieldId: null,

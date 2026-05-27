@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, getRequestMeta, logAudit } from "@/lib/api-helpers";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -60,6 +61,10 @@ export async function DELETE(request: NextRequest) {
 
   const { ipAddress, userAgent } = getRequestMeta(request);
 
+  // Invalidate Redis cache for every session BEFORE the DB delete, while the
+  // tokens are still readable. The current session's cache entry will be
+  // repopulated on the next request.
+  await invalidateAllSessionsForUser(user.id).catch(() => null);
   const result = await prisma.userSession.deleteMany({
     where: { userId: user.id, NOT: { token: currentToken } },
   });

@@ -1,0 +1,177 @@
+/**
+ * Multi-namespace Redis client registry.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * MENTAL MODEL
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Every cache write lives in a *namespace* — `auth`, `hr`, `forms`, etc.
+ * A namespace can either:
+ *   (a) point at its own dedicated Upstash DB (set `REDIS_URL_<NAME>` in .env), or
+ *   (b) share the default Upstash DB (no per-namespace env var = falls back).
+ *
+ * This lets you START with one Upstash DB (cheap, simple) and LATER split out
+ * a hot or sensitive namespace onto its own DB without touching any code —
+ * just add the env var.
+ *
+ * Example (.env):
+ *
+ *   # Default DB used by every namespace that doesn't have its own
+ *   REDIS_URL=rediss://default:...@upstash.io:6379
+ *
+ *   # Phase B — dedicate a separate DB to auth/session/permissions
+ *   # REDIS_URL_AUTH=rediss://...
+ *
+ *   # Phase C — further isolate HR
+ *   # REDIS_URL_HR=rediss://...
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * RELIABILITY CONTRACT
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * - A Redis outage MUST NEVER crash a request. All callers go through
+ *   `lib/cache.ts` which catches every error and falls through to the DB.
+ * - `lazyConnect: true` — never block app boot on Redis.
+ * - `maxRetriesPerRequest: 2` and `connectTimeout: 5000` — cap stall time.
+ * - `enableOfflineQueue: false` — fail fast instead of queueing commands
+ *   during a sustained outage.
+ * - One client per namespace, cached on globalThis so Next.js dev hot-reload
+ *   doesn't spawn duplicates.
+ */
+
+import Redis, { type RedisOptions } from "ioredis";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Namespace registry
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Add a new namespace here when introducing a new service-area cache. The
+// `envVar` is checked FIRST; if unset, we fall back to the default `REDIS_URL`.
+
+export type Namespace =
+  | "default"  // shared bucket — use this when a namespace isn't worth defining
+  | "auth"     // sessions, user lookups, permission resolution
+  | "forms"    // form structure, field metadata, lookup-source data
+  | "hr"       // employee + payroll + attendance reference data
+  | "lookup"   // form-builder lookup tables (rarely change)
+  | "workflow"; // workflow rule definitions
+
+interface NamespaceConfig {
+  envVar: string;          // e.g., "REDIS_URL_AUTH"
+  fallbackToDefault: true; // every namespace falls back to REDIS_URL
+}
+
+const NAMESPACES: Record<Exclude<Namespace, "default">, NamespaceConfig> = {
+  auth:     { envVar: "REDIS_URL_AUTH",     fallbackToDefault: true },
+  forms:    { envVar: "REDIS_URL_FORMS",    fallbackToDefault: true },
+  hr:       { envVar: "REDIS_URL_HR",       fallbackToDefault: true },
+  lookup:   { envVar: "REDIS_URL_LOOKUP",   fallbackToDefault: true },
+  workflow: { envVar: "REDIS_URL_WORKFLOW", fallbackToDefault: true },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client factory
+// ─────────────────────────────────────────────────────────────────────────────
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __erpRedisClients: Map<string, Redis | null> | undefined;
+}
+
+const clientRegistry: Map<string, Redis | null> =
+  globalThis.__erpRedisClients ?? new Map();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__erpRedisClients = clientRegistry;
+}
+
+function buildClient(url: string, label: string): Redis {
+  const options: RedisOptions = {
+    lazyConnect: true,
+    maxRetriesPerRequest: 2,
+    connectTimeout: 5_000,
+    enableReadyCheck: true,
+    enableOfflineQueue: false,
+    keepAlive: 10_000,
+    retryStrategy(times) {
+      if (times > 10) return null;
+      return Math.min(times * 200, 10_000);
+    },
+  };
+
+  const client = new Redis(url, options);
+
+  let loggedError = false;
+  client.on("error", (err) => {
+    if (!loggedError) {
+      console.error(`[redis:${label}] connection error: ${err.message}`);
+      loggedError = true;
+    }
+  });
+  client.on("ready", () => {
+    loggedError = false;
+    console.log(`[redis:${label}] connected`);
+  });
+
+  return client;
+}
+
+function resolveUrl(namespace: Namespace): string | null {
+  if (namespace === "default") {
+    return process.env.REDIS_URL?.trim() || null;
+  }
+  const cfg = NAMESPACES[namespace];
+  const specific = process.env[cfg.envVar]?.trim();
+  if (specific) return specific;
+  if (cfg.fallbackToDefault) return process.env.REDIS_URL?.trim() || null;
+  return null;
+}
+
+/**
+ * Returns the Redis client for a namespace, or `null` if no URL is configured.
+ *
+ * Clients are lazily created on first request and cached for the lifetime of
+ * the process. Two namespaces sharing the same URL produce ONE shared client
+ * (de-duped by URL) so we don't open extra TCP connections.
+ */
+export function getRedis(namespace: Namespace = "default"): Redis | null {
+  const url = resolveUrl(namespace);
+  if (!url) {
+    if (process.env.NODE_ENV !== "test" && !clientRegistry.has(namespace)) {
+      console.warn(
+        `[redis:${namespace}] no URL configured — cache layer disabled for this namespace.`
+      );
+      clientRegistry.set(namespace, null);
+    }
+    return null;
+  }
+
+  // De-dupe by URL: if multiple namespaces share the default DB, they share
+  // one TCP connection. Cheaper and avoids fanning out connection counts.
+  if (clientRegistry.has(url)) {
+    return clientRegistry.get(url) ?? null;
+  }
+  const client = buildClient(url, namespace);
+  clientRegistry.set(url, client);
+  return client;
+}
+
+/**
+ * Backwards-compatible export: the default-namespace client. Older callers
+ * that imported `redis` directly keep working unchanged.
+ */
+export const redis: Redis | null = getRedis("default");
+
+/**
+ * Best-effort PING for a namespace. Use to validate connectivity at boot or
+ * from a /health endpoint. Never throws.
+ */
+export async function redisPing(namespace: Namespace = "default"): Promise<boolean> {
+  const client = getRedis(namespace);
+  if (!client) return false;
+  try {
+    return (await client.ping()) === "PONG";
+  } catch {
+    return false;
+  }
+}

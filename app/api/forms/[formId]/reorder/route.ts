@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { DatabaseService } from "@/lib/database/database-service"
+import { invalidateFormCache } from "@/lib/forms/form-cache"
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -32,6 +33,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         },
       },
     })
+
+    // Module / sort order shifted — drop cached structure.
+    await invalidateFormCache(id)
 
     return NextResponse.json({
       success: true,

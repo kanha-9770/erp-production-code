@@ -8,6 +8,11 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import { buildKey, cached, cacheInvalidate } from '@/lib/cache';
+
+const ATTENDANCE_CONFIG_TTL_S = 600; // 10 minutes — config only changes on admin save
+const attendanceConfigKey = (orgId: string) =>
+  buildKey('hr', 'attendance-config', orgId);
 
 export type GeofenceMode = 'OFF' | 'CAPTURE' | 'ENFORCE';
 export type PayableBasis = 'monthDays' | 'fixed26' | 'fixed30';
@@ -192,6 +197,20 @@ export async function getAttendanceConfig(
     return { ...DEFAULT_ATTENDANCE_CONFIG };
   }
 
+  // Cached in the `hr` namespace (dedicated Upstash DB). On a Redis outage
+  // `cached` falls through to the loader, which preserves the original
+  // try/catch + defaults safety net below.
+  return cached(
+    'hr',
+    attendanceConfigKey(organizationId),
+    ATTENDANCE_CONFIG_TTL_S,
+    () => loadAttendanceConfigFromDb(organizationId),
+  );
+}
+
+async function loadAttendanceConfigFromDb(
+  organizationId: string,
+): Promise<AttendanceConfig> {
   try {
     const row = await (prisma as any).attendanceConfiguration.findFirst({
       where: { organizationId, isActive: true },
@@ -361,6 +380,8 @@ export async function upsertAttendanceConfig(
           )}. Run \`npx prisma generate\` to enable them.`,
         );
       }
+      // Invalidate cache BEFORE re-reading so the read repopulates from DB.
+      await cacheInvalidate('hr', attendanceConfigKey(organizationId));
       return getAttendanceConfig(organizationId);
     } catch (err) {
       const field = unknownArgumentField(err);
