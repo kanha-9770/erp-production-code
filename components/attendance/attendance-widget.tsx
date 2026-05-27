@@ -573,7 +573,7 @@ export function AttendanceWidget({
   const [geoConfirm, setGeoConfirm] = useState<{
     type: "IN" | "OUT";
     photoUrl: string | null;
-    geo: { lat: number; lng: number } | null;
+    geo: { lat: number; lng: number };
     faceMatch: number | null;
     livenessPassed: boolean | null;
     message: string;
@@ -648,22 +648,23 @@ export function AttendanceWidget({
       // the photo upload (face-capture flow). Avoids running geolocation
       // twice and serially when we already have a fresh fix.
       const geoResult = preCapturedGeoResult ?? (await captureGeo());
-      const geo = geoResult.ok
-        ? { lat: geoResult.lat, lng: geoResult.lng }
-        : null;
+
+      // Location is mandatory for every punch — in-office or off-site —
+      // regardless of geofenceMode. Without a successful fix we refuse the
+      // punch outright (no "continue anyway" escape) so attendance rows
+      // always carry coordinates.
+      if (!geoResult.ok) {
+        toast({
+          title: `Location is required to check ${type === "IN" ? "in" : "out"}`,
+          description: geoResult.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const geo = { lat: geoResult.lat, lng: geoResult.lng };
 
       if (inFenceMode) {
-        if (!geo) {
-          setGeoConfirm({
-            type,
-            photoUrl,
-            geo: null,
-            faceMatch,
-            livenessPassed,
-            message: `${geoResult.ok ? "" : geoResult.message + " "}Do you want to continue with check-${type === "IN" ? "in" : "out"} anyway?`,
-          });
-          return;
-        }
         const dist = distanceMeters(geo.lat, geo.lng, fence!.lat!, fence!.lng!);
         if (dist > fence!.radiusM!) {
           setGeoConfirm({
@@ -1168,9 +1169,7 @@ export function AttendanceWidget({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {geoConfirm?.geo
-                ? "You are not in the office radius"
-                : "Location unavailable"}
+              You are not in the office radius
             </AlertDialogTitle>
             <AlertDialogDescription>
               {geoConfirm?.message}
