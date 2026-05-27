@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToday } from "@/lib/attendance";
 import { prisma } from "@/lib/prisma";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
+import { formatHHmm, orgTimezone } from "@/lib/hr/attendance-service";
+import { getAttendanceConfig } from "@/lib/hr/attendance-config";
 
 // Get attendance records
 
@@ -72,11 +74,18 @@ export async function POST(request: NextRequest) {
     }
 
     const today = getToday();
-    // HH:mm (24-hour, server-local). Matches `formatHHmm()` used by the
-    // new punch endpoint so both writers store the same shape of string
-    // in Attendance.checkInTime / checkOutTime.
-    const nowLocal = new Date();
-    const currentTime = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`;
+    // Resolve the user's org once so we can render the HH:mm in the org's
+    // configured timezone — otherwise the legacy endpoint stores UTC times
+    // on a UTC-deployed server, which is what produced the wrong
+    // notification times.
+    const userForTz = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+    const cfg = userForTz?.organizationId
+      ? await getAttendanceConfig(userForTz.organizationId)
+      : null;
+    const currentTime = formatHHmm(new Date(), orgTimezone(cfg));
 
     let record;
 
@@ -160,19 +169,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // The legacy endpoint doesn't receive `organizationId`, so look it up
-    // from the user once we know we wrote a row. Without this the live
-    // payroll cache would stay stale until its TTL expired (5s) and the
-    // user would see a brief "wrong" reading on the payroll page.
-    if (record) {
+    // The legacy endpoint doesn't receive `organizationId`, so we reuse the
+    // `userForTz` lookup above. Without this the live payroll cache would
+    // stay stale until its TTL expired (5s) and the user would see a brief
+    // "wrong" reading on the payroll page.
+    if (record && userForTz?.organizationId) {
       try {
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { organizationId: true },
-        });
-        if (user?.organizationId) {
-          invalidatePayrollCache(user.organizationId);
-        }
+        invalidatePayrollCache(userForTz.organizationId);
       } catch (err) {
         // Cache invalidation is best-effort. The TTL inside the live
         // engine will catch up on its own within a few seconds.

@@ -156,8 +156,34 @@ export function todayKey(now: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-export function formatHHmm(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+// Default IANA timezone used when neither the org config nor the env
+// supplies one. The product is shipped primarily to India-based orgs, so
+// IST is the safest fallback — the original implementation used the
+// server's local TZ which on Vercel/Supabase is UTC and produced wrong
+// notification times by +5:30.
+const FALLBACK_TZ = process.env.DEFAULT_TIMEZONE || 'Asia/Kolkata';
+
+export function orgTimezone(
+  cfg: { reportTimezone?: string | null } | null | undefined,
+): string {
+  const tz = cfg?.reportTimezone?.trim();
+  return tz && tz.length > 0 ? tz : FALLBACK_TZ;
+}
+
+export function formatHHmm(d: Date, tz: string = FALLBACK_TZ): string {
+  // Intl.DateTimeFormat respects the IANA tz, so this returns "09:30"
+  // for an Indian user even when the Node process is running in UTC.
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: tz,
+    }).format(d);
+  } catch {
+    // Bad TZ name — fall back to a UTC-local read so we never throw mid-punch.
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  }
 }
 
 function dateAtHHmm(base: Date, hhmm: string): Date {
@@ -440,7 +466,7 @@ export async function applyDayCapAutoCheckouts(
       data: {
         checkedOut: true,
         checkOutAt,
-        checkOutTime: formatHHmm(checkOutAt),
+        checkOutTime: formatHHmm(checkOutAt, orgTimezone(cfg)),
         checkOutSource: 'AUTO_MIDNIGHT',
         isAutoCheckedOut: true,
         // earlyOut is meaningless for a midnight cap — the user worked
@@ -490,7 +516,7 @@ async function applyAutoCheckoutIfNeeded(
     data: {
       checkedOut: true,
       checkOutAt,
-      checkOutTime: formatHHmm(checkOutAt),
+      checkOutTime: formatHHmm(checkOutAt, orgTimezone(cfg)),
       checkOutSource: 'ADMIN',
       isAutoCheckedOut: true,
       earlyOutMinutes,
@@ -654,8 +680,8 @@ export async function getStatus(
     canCheckOut: checkedIn && !checkedOut,
     checkInAt: checkInAt?.toISOString() ?? null,
     checkOutAt: checkOutAt?.toISOString() ?? null,
-    checkInTime: row?.checkInTime ?? (checkInAt ? formatHHmm(checkInAt) : null),
-    checkOutTime: row?.checkOutTime ?? (checkOutAt ? formatHHmm(checkOutAt) : null),
+    checkInTime: row?.checkInTime ?? (checkInAt ? formatHHmm(checkInAt, orgTimezone(cfg)) : null),
+    checkOutTime: row?.checkOutTime ?? (checkOutAt ? formatHHmm(checkOutAt, orgTimezone(cfg)) : null),
     expectedInAt: expectedInAt.toISOString(),
     expectedOutAt: expectedOutAt.toISOString(),
     graceMinutes: cfg.graceMinutes,
@@ -1101,7 +1127,7 @@ export async function recordPunch(
     const punchData = {
       checkedIn: true,
       checkInAt: now,
-      checkInTime: formatHHmm(now),
+      checkInTime: formatHHmm(now, orgTimezone(cfg)),
       checkInLat: input.geo?.lat ?? null,
       checkInLng: input.geo?.lng ?? null,
       checkInIp: input.ip ?? null,
@@ -1236,7 +1262,7 @@ export async function recordPunch(
       data: {
         checkedOut: true,
         checkOutAt: now,
-        checkOutTime: formatHHmm(now),
+        checkOutTime: formatHHmm(now, orgTimezone(cfg)),
         checkOutLat: input.geo?.lat ?? null,
         checkOutLng: input.geo?.lng ?? null,
         checkOutIp: input.ip ?? null,
@@ -1518,7 +1544,7 @@ export async function setOvertimeOptIn(
     if (now < availableAt) {
       throw new AttendanceError(
         'OT_NOT_AVAILABLE',
-        `Overtime starts at ${formatHHmm(availableAt)}. Try again then.`,
+        `Overtime starts at ${formatHHmm(availableAt, orgTimezone(cfg))}. Try again then.`,
         409,
       );
     }

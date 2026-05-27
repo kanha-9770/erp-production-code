@@ -19,7 +19,7 @@ import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/api-helpers';
 import { triggerWorkflowsForRecord } from '@/lib/workflow/trigger';
 import { getAttendanceConfig } from './attendance-config';
-import { formatHHmm, todayKey, getEffectiveShift } from './attendance-service';
+import { formatHHmm, orgTimezone, todayKey, getEffectiveShift } from './attendance-service';
 
 export type RegularizationStatus =
   | 'PENDING'
@@ -348,8 +348,8 @@ export async function approveRegularization(input: ReviewInput): Promise<void> {
     checkedOut: !!requestedOut,
     checkInAt: requestedIn,
     checkOutAt: requestedOut,
-    checkInTime: requestedIn ? formatHHmm(requestedIn) : null,
-    checkOutTime: requestedOut ? formatHHmm(requestedOut) : null,
+    checkInTime: requestedIn ? formatHHmm(requestedIn, orgTimezone(cfg)) : null,
+    checkOutTime: requestedOut ? formatHHmm(requestedOut, orgTimezone(cfg)) : null,
     checkInSource: requestedIn ? 'ADMIN' : null,
     checkOutSource: requestedOut ? 'ADMIN' : null,
     lateMinutes,
