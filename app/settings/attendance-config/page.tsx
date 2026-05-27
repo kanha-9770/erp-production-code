@@ -1,25 +1,48 @@
+"use client";
+
+/**
+ * Attendance Configuration — settings form for the org's attendance policy
+ * (shifts, grace, half/full-day thresholds, geofence, face capture, etc.).
+ *
+ * Wears the same WorkspaceShell + WorkspaceHeader chrome as My Attendance,
+ * My Leave, and Team Attendance so the whole HR surface feels uniform. The
+ * underlying form keeps its own Save / Reset footer because the dirty-state
+ * logic + tab routing already lives inside it — lifting the buttons up
+ * would require threading callbacks through the entire 1300-line form.
+ */
+
 import { AttendanceConfigForm } from "@/components/attendance/attendance-config-form";
-import PageBackLink from "@/components/shared/page-back-link";
+import { Settings } from "lucide-react";
+import {
+  WorkspaceShell,
+  WorkspaceHeader,
+} from "@/components/real-estate/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default function AttendanceConfigPage() {
   return (
-    <div className="h-full max-w-5xl mx-auto px-4 py-4 sm:px-6 sm:py-5 lg:px-8 flex flex-col gap-3 min-h-0">
-      <header className="shrink-0 flex items-center justify-between gap-3 flex-wrap">
-        <div className="space-y-1">
-          <PageBackLink href="/settings" label="Settings" />
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.06em] font-medium text-gray-500">
-            <span>Settings</span>
-            <span className="text-gray-300">›</span>
-            <span>HR &amp; Attendance</span>
+    <WorkspaceShell
+      scope="attendance-config"
+      selectedId={null}
+      onCloseSelection={() => {}}
+      header={
+        <WorkspaceHeader
+          icon={<Settings className="h-5 w-5" />}
+          title="Attendance Configuration"
+          subtitle="Shift, grace, half/full-day thresholds, geofence, face capture, approvals"
+        />
+      }
+      list={
+        <div className="h-full overflow-y-auto bg-muted/10">
+          <div className="max-w-5xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-5">
+            <div className="bg-background border rounded-xl shadow-sm p-3 sm:p-4">
+              <AttendanceConfigForm />
+            </div>
           </div>
-          <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-gray-900 leading-tight mt-0.5">
-            Attendance Configuration
-          </h1>
         </div>
-      </header>
-      <AttendanceConfigForm />
-    </div>
+      }
+      preview={null}
+    />
   );
 }
