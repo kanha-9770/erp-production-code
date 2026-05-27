@@ -540,7 +540,7 @@ export default function PersonalTab({ user }: PersonalTabProps) {
             the page visual structure without resorting to heavy card
             chrome. Extra bottom padding leaves room for the sticky
             save bar so the last field is never covered. */}
-      <div className="space-y-5 pb-24">
+      <div className="space-y-5">
         <FieldGroup title="Identity">
           <Field label="First name">
             <Input
@@ -664,15 +664,15 @@ export default function PersonalTab({ user }: PersonalTabProps) {
         </FieldGroup>
       </div>
 
-      {/* ── Sticky save bar ─────────────────────────────────────────
-          Sits at the bottom of the scroll container so it's always
-          reachable. `bottom-16 md:bottom-0` lifts it above the mobile
-          bottom nav (h-14 + safe-area) — without this offset the bar
-          parks UNDER the fixed bottom nav and looks half-cut.
-          `-mx-4 sm:-mx-6` cancels the page's horizontal padding so the
-          bar can span edge-to-edge. Solid background (no backdrop
-          blur) keeps content above it crisp. */}
-      <div className="sticky bottom-16 md:bottom-0 -mx-4 sm:-mx-6 mt-8 px-4 sm:px-6 py-3 bg-background border-t flex items-center justify-end gap-2 z-10">
+      {/* ── Save bar ─────────────────────────────────────────────────
+          Sits at the natural bottom of the form. Users scroll down to
+          save. Previously this was `position: sticky bottom-16` so it
+          would float above the mobile bottom nav, but the sticky
+          containing-block behavior was anchoring the bar mid-viewport
+          on some mobile screens. Plain flow + a `mb-16` bottom margin
+          (so the mobile bottom nav doesn't cover it) is simpler and
+          bullet-proof. */}
+      <div className="mt-8 mb-16 md:mb-0 px-1 py-3 border-t flex items-center justify-end gap-2">
         <Button
           variant="ghost"
           onClick={() => setForm(initial)}

@@ -253,8 +253,11 @@ export const STATIC_PAGES: StaticPage[] = [
     path: '/performance/appraisal',
     label: 'Performance Appraisal',
     group: 'Performance',
+    // Visible to all employees so each user can view their OWN appraisal
+    // records (the page filters rows by employeeId for non-HR/Admin).
+    // Create / edit / delete actions are gated client-side in the page
+    // itself via the `canManage` check.
     description: 'Quarterly / annual review with rating, strengths, growth areas',
-    adminOnly: true,
     icon: 'trending-up',
   },
 

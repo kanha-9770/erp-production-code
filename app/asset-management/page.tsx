@@ -12,17 +12,18 @@ import {
   Headphones, HardDrive, Calendar, User, IndianRupee, Tag, Info,
   MoreVertical, Filter, Smartphone as SimIcon, ShieldCheck,
   Computer, Tablet, Keyboard, Mouse, Printer, Camera, Car, Armchair,
-  IdCard, ExternalLink,
+  IdCard, ExternalLink, X as XIcon,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  SelectFilter, ActiveFilterPills,
   ViewsBar, useSavedViews,
   AdvancedFilter, applyAdvancedFilters,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -765,28 +766,68 @@ export default function AssetManagementPage() {
               title="Asset Management"
               subtitle={`${filteredItems.length} assets registered`}
             >
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search assets..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && setFilters(f => ({ ...f, search: searchInput }))}
-                  className="pl-8 h-8 w-64 text-sm"
-                />
-              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search assets..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setFilters(f => ({ ...f, search: searchInput }));
+                        if (e.key === "Escape") { setSearchInput(""); setFilters(f => ({ ...f, search: "" })); }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); setFilters(f => ({ ...f, search: "" })); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
               <ManageColumnsButton
                 tableId="asset-management"
                 columns={columns}
                 variant="dialog"
               />
-              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
-                <Plus className="h-4 w-4 mr-1.5" /> Add Asset
+              <Button
+                size="sm"
+                className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                onClick={() => { setEditingId(null); setFormOpen(true); }}
+              >
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">Add Asset</span>
+                <span className="sm:hidden">Add</span>
               </Button>
             </WorkspaceHeader>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2">
               <ViewsBar
                 views={views.views}
                 activeId={views.activeId}
@@ -802,9 +843,9 @@ export default function AssetManagementPage() {
               />
             </div>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips label="Type" value={filters.type} onChange={(v) => setFilters(f => ({ ...f, type: v }))} options={TYPE_OPTIONS} />
-              <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter label="Type" value={filters.type} onChange={(v) => setFilters(f => ({ ...f, type: v }))} options={TYPE_OPTIONS} />
+              <SelectFilter label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", type: "", status: "" }); setSearchInput(""); }} />
             </div>
           </>

@@ -11,7 +11,7 @@ import {
   TrendingUp, Plus, Search, Pencil, Trash2, Star, StarHalf,
   CheckCircle2, Clock, Eye, Calendar, User, UserCheck, MessageSquare,
   Award, TrendingDown, ClipboardCheck, ArrowRight, AlertCircle, Save, Info,
-  ExternalLink,
+  ExternalLink, X as XIcon,
 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -20,12 +20,13 @@ import { SubmitterDetails } from "@/components/employee-engagement/submitter-det
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  SelectFilter, ActiveFilterPills,
   ViewsBar, useSavedViews,
   AdvancedFilter, applyAdvancedFilters,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,6 +155,14 @@ export default function PerformanceAppraisalPage() {
   const { toast } = useToast();
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  // Appraisals are started by Admin/HR for a given employee. Regular
+  // employees can only VIEW appraisals where they are the subject —
+  // they can't start, edit, or delete anything here.
+  const canManage = isAdmin || (
+    (user as any)?.unitAssignments?.some(
+      (ua: any) => /\bHR\b/i.test(ua?.role?.name ?? ""),
+    ) ?? false
+  );
   const { data: empData } = useGetEmployeeListQuery();
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
@@ -205,6 +214,14 @@ export default function PerformanceAppraisalPage() {
 
   const filteredItems = useMemo(() => {
     let result = items;
+    // Non-manager users only see appraisals where they're the subject.
+    // Admin/HR see everything.
+    if (!canManage) {
+      const myId = currentEmployee?.id;
+      result = myId
+        ? result.filter((a) => a.employeeId === myId)
+        : [];
+    }
     if (filters.search) {
       const q = filters.search.toLowerCase();
       result = result.filter(a =>
@@ -218,7 +235,7 @@ export default function PerformanceAppraisalPage() {
     if (filters.status) result = result.filter(a => a.status === filters.status);
     if (filters.department) result = result.filter(a => a.department === filters.department);
     return applyAdvancedFilters(result, conditions, filterFields);
-  }, [items, filters, conditions, filterFields]);
+  }, [items, filters, conditions, filterFields, canManage, currentEmployee?.id]);
 
   const columns: ColumnDef<Appraisal>[] = useMemo(() => [
     {
@@ -308,28 +325,70 @@ export default function PerformanceAppraisalPage() {
               title="Performance Appraisal"
               subtitle={`${filteredItems.length} reviews in cycle`}
             >
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search employee, reviewer..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && setFilters(f => ({ ...f, search: searchInput }))}
-                  className="pl-8 h-8 w-64 text-sm"
-                />
-              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search employee, reviewer..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setFilters(f => ({ ...f, search: searchInput }));
+                        if (e.key === "Escape") { setSearchInput(""); setFilters(f => ({ ...f, search: "" })); }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); setFilters(f => ({ ...f, search: "" })); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
               <ManageColumnsButton
                 tableId="performance-appraisal"
                 columns={columns}
                 variant="dialog"
               />
-              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => { setEditingId(null); setFormOpen(true); }}>
-                <Plus className="h-4 w-4 mr-1.5" /> Start Appraisal
-              </Button>
+              {canManage && (
+                <Button
+                  size="sm"
+                  className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                  onClick={() => { setEditingId(null); setFormOpen(true); }}
+                >
+                  <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Start Appraisal</span>
+                  <span className="sm:hidden">Start</span>
+                </Button>
+              )}
             </WorkspaceHeader>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2">
               <ViewsBar
                 views={views.views}
                 activeId={views.activeId}
@@ -345,10 +404,10 @@ export default function PerformanceAppraisalPage() {
               />
             </div>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips label="Cycle" value={filters.cycle} onChange={(v) => setFilters(f => ({ ...f, cycle: v }))} options={CYCLE_OPTIONS} />
-              <FilterChips label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
-              <FilterChips label="Department" value={filters.department} onChange={(v) => setFilters(f => ({ ...f, department: v }))} options={DEPARTMENT_OPTIONS} />
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter label="Cycle" value={filters.cycle} onChange={(v) => setFilters(f => ({ ...f, cycle: v }))} options={CYCLE_OPTIONS} />
+              <SelectFilter label="Status" value={filters.status} onChange={(v) => setFilters(f => ({ ...f, status: v }))} options={STATUS_OPTIONS} />
+              <SelectFilter label="Department" value={filters.department} onChange={(v) => setFilters(f => ({ ...f, department: v }))} options={DEPARTMENT_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters({ search: "", cycle: "", status: "", department: "" }); setSearchInput(""); }} />
             </div>
           </>
@@ -371,6 +430,7 @@ export default function PerformanceAppraisalPage() {
             items={items}
             employees={employees}
             isAdmin={isAdmin}
+            canManage={canManage}
             onEdit={(id) => { setEditingId(id); setFormOpen(true); }}
             onDelete={(id) => setDeletingId(id)}
           />
@@ -388,6 +448,7 @@ export default function PerformanceAppraisalPage() {
           <AppraisalForm
             initial={editingId ? items.find(i => i.id === editingId) : undefined}
             currentEmployee={currentEmployee}
+            employees={employees}
             onCancel={() => setFormOpen(false)}
             onSubmit={handleSave}
           />
@@ -426,7 +487,7 @@ function PreviewHeader({ id, items }: { id: string, items: Appraisal[] }) {
   );
 }
 
-function AppraisalPreview({ id, items, employees, isAdmin, onEdit, onDelete }: { id: string, items: Appraisal[], employees: any[], isAdmin: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
+function AppraisalPreview({ id, items, employees, isAdmin, canManage, onEdit, onDelete }: { id: string, items: Appraisal[], employees: any[], isAdmin: boolean, canManage: boolean, onEdit: (id: string) => void, onDelete: (id: string) => void }) {
   const a = items.find(x => x.id === id);
   if (!a) return null;
 
@@ -443,10 +504,14 @@ function AppraisalPreview({ id, items, employees, isAdmin, onEdit, onDelete }: {
               </div>
            </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl" onClick={() => onEdit(a.id)}><Pencil className="h-4 w-4" /></Button>
-          <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(a.id)}><Trash2 className="h-4 w-4" /></Button>
-        </div>
+        {/* Edit / Delete are HR / Admin only. Employees viewing their
+            own appraisal see the full read-only detail panel. */}
+        {canManage && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl" onClick={() => onEdit(a.id)}><Pencil className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" className="h-10 w-10 rounded-2xl text-destructive" onClick={() => onDelete(a.id)}><Trash2 className="h-4 w-4" /></Button>
+          </div>
+        )}
       </div>
 
       <SubmitterDetails employeeId={a.employeeId ?? ""} employees={employees} isAdmin={isAdmin} submissionDate={a.submittedAt} />
@@ -494,9 +559,12 @@ function Section({ icon: Icon, title, content, color, bg }: { icon: any, title: 
    );
 }
 
-function AppraisalForm({ initial, currentEmployee, onCancel, onSubmit }: {
+function AppraisalForm({ initial, currentEmployee, employees = [], onCancel, onSubmit }: {
   initial?: Appraisal;
   currentEmployee?: any;
+  /** Full org employee list — used to populate the Employee picker so
+   *  HR/Admin can choose who this appraisal is for. */
+  employees?: any[];
   onCancel: () => void;
   onSubmit: (data: Appraisal) => void;
 }) {
@@ -545,32 +613,90 @@ function AppraisalForm({ initial, currentEmployee, onCancel, onSubmit }: {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-            <FieldWrapper label="Employee ID" required error={showErr("employeeId") ? errors.employeeId : ""}>
-              <Input
+            {/* Employee picker — HR/Admin selects who this appraisal is
+                for. Selection auto-fills the identity fields below. */}
+            <FieldWrapper label="Employee" required error={showErr("employeeId") ? errors.employeeId : ""} className="md:col-span-2">
+              <Select
                 value={formData.employeeId || ""}
-                onChange={e => setFormData({ ...formData, employeeId: e.target.value })}
-                placeholder="e.g. EMP-0001"
-                className={showErr("employeeId") ? "border-red-500" : ""}
-              />
+                onValueChange={(empId) => {
+                  const emp = employees.find((e) => e.id === empId);
+                  if (!emp) {
+                    setFormData({ ...formData, employeeId: empId });
+                    return;
+                  }
+                  setFormData({
+                    ...formData,
+                    employeeId: emp.id,
+                    firstName: emp.firstName ?? "",
+                    middleName: emp.middleName ?? "",
+                    lastName: emp.lastName ?? "",
+                    department: emp.department ?? formData.department,
+                    employeeEngagementTeamName: emp.employeeEngagementTeamName ?? "",
+                    employee: [emp.firstName, emp.middleName, emp.lastName]
+                      .filter(Boolean)
+                      .join(" ")
+                      .trim() || emp.employeeName || "",
+                  });
+                }}
+              >
+                <SelectTrigger className={showErr("employeeId") ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Pick the employee being reviewed…" />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {employees.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                      No employees in this organization.
+                    </div>
+                  ) : (
+                    employees.map((emp) => {
+                      const name = [emp.firstName, emp.middleName, emp.lastName]
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim() || emp.employeeName || emp.email || emp.id;
+                      return (
+                        <SelectItem key={emp.id} value={emp.id}>
+                          <span className="flex items-center gap-2">
+                            <span className="font-medium">{name}</span>
+                            {emp.department && (
+                              <span className="text-[10px] text-muted-foreground">
+                                · {emp.department}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })
+                  )}
+                </SelectContent>
+              </Select>
             </FieldWrapper>
 
+            {/* Identity fields are auto-filled from the picker above —
+                shown read-only so the reviewer can confirm. */}
             <FieldWrapper label="First Name" required error={showErr("firstName") ? errors.firstName : ""}>
               <Input
                 value={formData.firstName || ""}
                 onChange={e => setFormData({ ...formData, firstName: e.target.value })}
-                className={showErr("firstName") ? "border-red-500" : ""}
+                readOnly
+                className={`bg-muted/40 cursor-not-allowed ${showErr("firstName") ? "border-red-500" : ""}`}
               />
             </FieldWrapper>
 
             <FieldWrapper label="Middle Name">
-              <Input value={formData.middleName || ""} onChange={e => setFormData({ ...formData, middleName: e.target.value })} />
+              <Input
+                value={formData.middleName || ""}
+                onChange={e => setFormData({ ...formData, middleName: e.target.value })}
+                readOnly
+                className="bg-muted/40 cursor-not-allowed"
+              />
             </FieldWrapper>
 
             <FieldWrapper label="Last Name" required error={showErr("lastName") ? errors.lastName : ""}>
               <Input
                 value={formData.lastName || ""}
                 onChange={e => setFormData({ ...formData, lastName: e.target.value })}
-                className={showErr("lastName") ? "border-red-500" : ""}
+                readOnly
+                className={`bg-muted/40 cursor-not-allowed ${showErr("lastName") ? "border-red-500" : ""}`}
               />
             </FieldWrapper>
 
@@ -728,14 +854,17 @@ function AppraisalForm({ initial, currentEmployee, onCancel, onSubmit }: {
   );
 }
 
-function FieldWrapper({ label, required, error, children }: {
+function FieldWrapper({ label, required, error, className, children }: {
   label: string;
   required?: boolean;
   error?: string;
+  /** Lets a caller stretch the wrapper across grid columns
+   *  (e.g. `md:col-span-2` for the Employee picker). */
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5 ${className ?? ""}`}>
       <Label className="text-sm font-medium">
         {label} {required && <span className="text-red-500">*</span>}
       </Label>

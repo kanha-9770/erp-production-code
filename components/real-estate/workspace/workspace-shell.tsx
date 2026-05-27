@@ -69,9 +69,19 @@ export function WorkspaceShell({
   const showPreview = !!selectedId && !!preview;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-var(--header-height,4rem))] min-h-0 bg-background">
-      {/* Sticky header */}
-      <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-20">
+    // h-full fills the parent <main> exactly. We previously used
+    // `h-[calc(100vh-var(--header-height,4rem))]` which, on mobile, was
+    // taller than the actual visible viewport (browser URL bar eats into
+    // 100vh) — that pushed the workspace shell past its parent's height
+    // and the *outer* <main> scroll kicked in, dragging the whole shell
+    // (header included) up with the page. With h-full + the parent's
+    // own flex layout the header now stays fixed and only the body
+    // scrolls internally.
+    <div className="flex flex-col h-full min-h-0 bg-background">
+      {/* Header — non-scrolling, always visible at the top. Solid bg +
+          high z so the DataTable thead's bg-muted (sticky z-30 inside
+          the body) can never bleed through. */}
+      <div className="border-b bg-background shrink-0 z-40">
         {header}
       </div>
 
