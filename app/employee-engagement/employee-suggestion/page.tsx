@@ -19,12 +19,13 @@ import {
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  SelectFilter, ActiveFilterPills,
   ViewsBar, useSavedViews,
   AdvancedFilter, applyAdvancedFilters,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -292,28 +293,70 @@ export default function EmployeeSuggestionPage() {
               title="Employee Suggestions"
               subtitle={`${items.length} suggestion${items.length === 1 ? "" : "s"}`}
             >
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search suggestions..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && updateFilter("search", searchInput)}
-                  className="pl-8 h-8 w-64 text-sm"
-                />
-              </div>
+              {/* Search collapses to a 🔍 icon button + popover so the
+                  header stays compact on mobile. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search suggestions..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") updateFilter("search", searchInput);
+                        if (e.key === "Escape") { setSearchInput(""); updateFilter("search", ""); }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); updateFilter("search", ""); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
               <ManageColumnsButton
                 tableId="suggestions"
                 columns={columns}
                 variant="dialog"
               />
-              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4 mr-1.5" /> New Suggestion
+              <Button
+                size="sm"
+                className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">New Suggestion</span>
+                <span className="sm:hidden">New</span>
               </Button>
             </WorkspaceHeader>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2">
               <ViewsBar
                 views={views.views}
                 activeId={views.activeId}
@@ -329,10 +372,10 @@ export default function EmployeeSuggestionPage() {
               />
             </div>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
-              <FilterChips label="Category" value={filters.category} onChange={(v) => updateFilter("category", v)} options={CATEGORY_OPTIONS} />
-              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <SelectFilter label="Category" value={filters.category} onChange={(v) => updateFilter("category", v)} options={CATEGORY_OPTIONS} />
+              <SelectFilter label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
