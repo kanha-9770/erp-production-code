@@ -13,7 +13,8 @@ import {
   MessageSquare, Plus, Search, Mail, Phone, Calendar,
   Briefcase, Pencil, ExternalLink, Trash2, UserCircle,
   Tag, Type, FileText, CheckCircle2, Clock, List,
-  AlertCircle, Info, Save, Paperclip, Upload
+  AlertCircle, Info, Save, Paperclip, Upload,
+  Camera, X,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -639,7 +640,11 @@ function SuggestionForm({ initial, currentEmployee, onCancel, onSubmit }: {
             </FieldWrapper>
 
             <FieldWrapper label="Media">
-              <FileFieldStub value={formData.media} onChange={v => setFormData({ ...formData, media: v })} />
+              <FileFieldStub
+                value={formData.media}
+                onChange={v => setFormData({ ...formData, media: v })}
+                capture="environment"
+              />
             </FieldWrapper>
 
             <FieldWrapper label="Category">
@@ -702,36 +707,121 @@ function FieldWrapper({ label, required, error, children }: {
   );
 }
 
-function FileFieldStub({ value, onChange, placeholder }: {
+function FileFieldStub({ value, onChange, placeholder, capture }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  // When set, adds a dedicated "Camera" button whose file input carries
+  // the HTML `capture` attribute — mobile/tablet browsers open the
+  // device camera directly instead of the file picker. "user" = front
+  // camera (selfies), "environment" = rear camera (site photos).
+  capture?: "user" | "environment";
 }) {
+  const [error, setError] = useState<string | null>(null);
+  // 4MB raw file → ~5.4MB base64. Keeps us under the API's 6MB cap with
+  // headroom for JSON overhead.
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const isDataUrl = value.startsWith("data:image/");
+  const isExternalUrl = value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/");
+  const hasPreview = isDataUrl || isExternalUrl;
+  const filenameLabel = !hasPreview && value ? value : "";
+
+  const handleFile = (f: File) => {
+    setError(null);
+    if (!f.type.startsWith("image/")) {
+      setError("Only image files are supported.");
+      return;
+    }
+    if (f.size > MAX_BYTES) {
+      setError(`Image is too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max 4 MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (result) onChange(result);
+    };
+    reader.onerror = () => setError("Could not read file.");
+    reader.readAsDataURL(f);
+  };
+
   return (
-    <div className="flex items-stretch border rounded-md overflow-hidden">
-      <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
-        <Paperclip className="h-3.5 w-3.5" />
+    <div className="space-y-2">
+      <div className="flex items-stretch border rounded-md overflow-hidden">
+        <div className="flex items-center px-3 text-muted-foreground border-r bg-slate-50">
+          <Paperclip className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 px-3 py-2 text-xs text-muted-foreground truncate flex items-center min-w-0">
+          {hasPreview ? (
+            <span className="text-foreground font-medium truncate">Image attached</span>
+          ) : filenameLabel ? (
+            <span className="text-foreground truncate" title={filenameLabel}>{filenameLabel}</span>
+          ) : (
+            <span>{placeholder || "Choose an image…"}</span>
+          )}
+        </div>
+        {value && (
+          <button
+            type="button"
+            onClick={() => { onChange(""); setError(null); }}
+            className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 hover:bg-slate-100"
+            title="Remove image"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span className="sr-only">Remove image</span>
+          </button>
+        )}
+        {capture && (
+          <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Take a photo with the camera">
+            <Camera className="h-3.5 w-3.5" />
+            <span className="sr-only">Take a photo</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture={capture}
+              aria-label="Take a photo"
+              title="Take a photo"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        )}
+        <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload image">
+          <Upload className="h-3.5 w-3.5" />
+          <span className="sr-only">Upload image</span>
+          <input
+            type="file"
+            accept="image/*"
+            aria-label="Upload image"
+            title="Upload image"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
       </div>
-      <Input
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder || "Choose files..."}
-        className="border-0 rounded-none focus-visible:ring-0"
-      />
-      <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Upload file">
-        <Upload className="h-3.5 w-3.5" />
-        <span className="sr-only">Upload file</span>
-        <input
-          type="file"
-          aria-label="Upload file"
-          title="Upload file"
-          className="hidden"
-          onChange={e => {
-            const f = e.target.files?.[0];
-            if (f) onChange(f.name);
-          }}
+
+      {hasPreview && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={value}
+          alt="Upload preview"
+          className="max-h-32 rounded border bg-white object-contain"
         />
-      </label>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" /> {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import {
   TrendingUp, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   ThumbsUp, CheckCircle2, Lightbulb, Zap, Type, FileText, Layout,
@@ -106,6 +106,13 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", kaizenArea: "", departm
 export default function KaizenPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  // Engagement points are awarded by HR/Admin after reviewing the
+  // submission — they're NOT something the employee fills in themselves.
+  const canSetPoints = isAdmin || (
+    (user as any)?.unitAssignments?.some(
+      (ua: any) => /\bHR\b/i.test(ua?.role?.name ?? ""),
+    ) ?? false
+  );
   const visibility = useEngagementVisibility();
   const { toast } = useToast();
 
@@ -137,6 +144,19 @@ export default function KaizenPage() {
     }
     return m;
   }, [employees]);
+
+  // Other members of the current user's engagement team (self excluded).
+  // Used by KaizenForm's "Employee Contributor" multi-select. Empty array
+  // when the user isn't on an engagement team yet — the form handles that
+  // case with a "no contributors available" hint.
+  const teamMembers = useMemo(() => {
+    if (!currentEmployee) return [];
+    const myTeam = employeeToTeam.get(currentEmployee.id) ?? null;
+    if (!myTeam) return [];
+    return employees.filter(
+      (e) => e.id !== currentEmployee.id && employeeToTeam.get(e.id) === myTeam,
+    );
+  }, [employees, employeeToTeam, currentEmployee]);
 
   const views = useSavedViews<Filters>("kaizens");
 
@@ -356,8 +376,8 @@ export default function KaizenPage() {
       { id: "proposedState", header: "Result", width: 240, group: "Result & Benefits", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.proposedState || "—"}</span> },
       { id: "benefits", header: "Benefits", width: 240, group: "Result & Benefits", defaultHidden: true, cell: (k) => <span className="text-xs truncate">{k.benefits || "—"}</span> },
       { id: "employeeContributor", header: "Employee Contributor", width: 180, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "employeeContributor") },
-      { id: "signature", header: "Signature", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "signature") },
-      { id: "selfie", header: "Selfie", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => plain(k, "selfie") },
+      { id: "signature", header: "Signature", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => mediaCell(k, "signature") },
+      { id: "selfie", header: "Selfie", width: 160, group: "Result & Benefits", defaultHidden: true, cell: (k) => mediaCell(k, "selfie") },
       { id: "employeeEngagementPoints", header: "Employee Engagement Points", width: 180, group: "Result & Benefits", defaultHidden: true, align: "right", cell: (k) => plain(k, "employeeEngagementPoints") },
     ];
   }, [reviewByKaizen]);
@@ -490,7 +510,8 @@ export default function KaizenPage() {
           </SheetHeader>
           <KaizenForm
             currentEmployee={currentEmployee}
-            isAdmin={isAdmin}
+            canSetPoints={canSetPoints}
+            teamMembers={teamMembers}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -524,7 +545,7 @@ export default function KaizenPage() {
             <KaizenForm
               initial={kaizens.find(k => k.id === editingId)}
               currentEmployee={currentEmployee}
-              isAdmin={isAdmin}
+              canSetPoints={canSetPoints}
               teamMembers={teamMembers}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
@@ -608,7 +629,22 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, review, onEdit, onDele
     "id", "title", "description", "currentState", "proposedState",
     "benefits", "status", "submissionDate", "votes", "hasVoted",
     "employeeId", "userId", "referenceImage", "beforeMedia", "afterMedia",
+    // Employee identity + result fields — rendered in their own sections
+    // below so they shouldn't dump as raw strings here too.
+    "firstName", "middleName", "lastName", "department",
+    "employeeEngagementTeamName", "kaizenArea",
+    "employeeContributor", "signature", "selfie", "employeeEngagementPoints",
   ]);
+
+  // Signature + selfie image surface — captured by the form (finger-draw,
+  // camera, or upload), displayed here so the reviewer can verify both
+  // at a glance without opening the full record page.
+  const signature = (k as any).signature as string | null | undefined;
+  const selfie = (k as any).selfie as string | null | undefined;
+  const hasSignature = isImg(signature);
+  const hasSelfie = isImg(selfie);
+  const employeeContributor = (k as any).employeeContributor as string | undefined;
+  const engagementPoints = (k as any).employeeEngagementPoints as number | undefined;
   const extraEntries = Object.entries(k as Record<string, unknown>).filter(
     ([key]) => !KNOWN_KEYS.has(key),
   );
@@ -717,6 +753,71 @@ function KaizenPreview({ id, kaizens, employees, isAdmin, review, onEdit, onDele
                 )}
               </div>
             ))}
+          </div>
+        </Card>
+      )}
+
+      {(hasSignature || hasSelfie) && (
+        <Card className="p-4 space-y-3 border-l-4 border-l-indigo-500 bg-indigo-50/50">
+          <h3 className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
+            <Pencil className="h-3 w-3" /> Signature &amp; Selfie
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-md border bg-white p-2 space-y-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Pencil className="h-3 w-3" /> Signature
+              </div>
+              {hasSignature ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={signature!}
+                  alt={`Signature for ${k.title}`}
+                  className="max-h-40 w-full rounded border bg-white object-contain"
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground italic px-1 py-2">
+                  Not provided.
+                </p>
+              )}
+            </div>
+            <div className="rounded-md border bg-white p-2 space-y-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Camera className="h-3 w-3" /> Selfie
+              </div>
+              {hasSelfie ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={selfie!}
+                  alt={`Selfie for ${k.title}`}
+                  className="max-h-40 w-full rounded border bg-white object-contain"
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground italic px-1 py-2">
+                  Not provided.
+                </p>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {(employeeContributor || (engagementPoints && engagementPoints > 0)) && (
+        <Card className="p-4 space-y-3">
+          <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <ThumbsUp className="h-3 w-3" /> Result &amp; Recognition
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <FieldRow
+              label="Employee Contributor"
+              value={employeeContributor || "—"}
+              wide
+            />
+            <FieldRow
+              label="Engagement Points Awarded"
+              value={
+                engagementPoints && engagementPoints > 0 ? String(engagementPoints) : "—"
+              }
+            />
           </div>
         </Card>
       )}
@@ -842,12 +943,12 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-function KaizenForm({ initial, currentEmployee, isAdmin = false, teamMembers = [], onCancel, onSubmit }: {
+function KaizenForm({ initial, currentEmployee, canSetPoints = false, teamMembers = [], onCancel, onSubmit }: {
   initial?: Kaizen,
   currentEmployee?: any,
   // Points-related fields ("Employee Engagement Points", final "Status")
   // are filled by Admin / HR. Regular employees see them but as read-only.
-  isAdmin?: boolean,
+  canSetPoints?: boolean,
   // Members of the current user's engagement team (self excluded) — used
   // by the Employee Contributor multi-select.
   teamMembers?: any[],
@@ -1187,12 +1288,13 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, teamMembers = [
               />
             </FieldWrapper>
 
-            <FieldWrapper label="Signature" hint="Capture or upload signature">
+            <FieldWrapper label="Signature" hint="Draw with finger, capture, or upload">
               <FileFieldStub
                 value={formData.signature}
                 onChange={v => setFormData({ ...formData, signature: v })}
                 placeholder="Upload signature..."
                 capture="environment"
+                enableDraw
               />
             </FieldWrapper>
 
@@ -1206,17 +1308,17 @@ function KaizenForm({ initial, currentEmployee, isAdmin = false, teamMembers = [
 
             <FieldWrapper
               label="Employee Engagement Points"
-              hint={isAdmin ? "Admin / HR only" : "Filled by Admin / HR (read-only for you)"}
+              hint={canSetPoints ? "Admin / HR only" : "Filled by Admin / HR (read-only for you)"}
             >
               <Input
                 type="number"
                 min={0}
                 value={formData.employeeEngagementPoints}
                 onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
-                readOnly={!isAdmin}
-                disabled={!isAdmin}
-                className={!isAdmin ? "bg-muted/40 cursor-not-allowed" : ""}
-                aria-readonly={!isAdmin}
+                readOnly={!canSetPoints}
+                disabled={!canSetPoints}
+                className={!canSetPoints ? "bg-muted/40 cursor-not-allowed" : ""}
+                aria-readonly={!canSetPoints}
               />
             </FieldWrapper>
 
@@ -1393,7 +1495,7 @@ function ContributorPicker({
   );
 }
 
-function FileFieldStub({ value, onChange, placeholder, capture }: {
+function FileFieldStub({ value, onChange, placeholder, capture, enableDraw }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -1402,8 +1504,14 @@ function FileFieldStub({ value, onChange, placeholder, capture }: {
   // device camera directly instead of the file picker. "user" = front
   // camera (for selfies), "environment" = rear camera (for site photos).
   capture?: "user" | "environment";
+  // When true, adds a "Draw" button that toggles an inline signature
+  // pad below the input. Finger-drawn (or mouse-drawn) strokes are
+  // saved as a PNG data URL, same format as the camera/upload path so
+  // the receiving onChange handler stays unchanged.
+  enableDraw?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [drawOpen, setDrawOpen] = useState(false);
   // 4MB raw file → ~5.4MB base64. Keeps us under the API's 6MB cap with
   // headroom for JSON overhead.
   const MAX_BYTES = 4 * 1024 * 1024;
@@ -1458,6 +1566,18 @@ function FileFieldStub({ value, onChange, placeholder, capture }: {
             <span className="sr-only">Remove image</span>
           </button>
         )}
+        {enableDraw && (
+          <button
+            type="button"
+            onClick={() => { setDrawOpen((v) => !v); setError(null); }}
+            className={`flex items-center px-3 text-muted-foreground border-l bg-slate-50 hover:bg-slate-100 ${drawOpen ? "bg-slate-100" : ""}`}
+            title={drawOpen ? "Close signature pad" : "Draw signature"}
+            aria-pressed={drawOpen}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            <span className="sr-only">{drawOpen ? "Close signature pad" : "Draw signature"}</span>
+          </button>
+        )}
         {capture && (
           <label className="flex items-center px-3 text-muted-foreground border-l bg-slate-50 cursor-pointer hover:bg-slate-100" title="Take a photo with the camera">
             <Camera className="h-3.5 w-3.5" />
@@ -1496,6 +1616,17 @@ function FileFieldStub({ value, onChange, placeholder, capture }: {
         </label>
       </div>
 
+      {drawOpen && (
+        <SignaturePad
+          onSave={(dataUrl) => {
+            onChange(dataUrl);
+            setDrawOpen(false);
+            setError(null);
+          }}
+          onCancel={() => setDrawOpen(false)}
+        />
+      )}
+
       {hasPreview && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -1510,6 +1641,147 @@ function FileFieldStub({ value, onChange, placeholder, capture }: {
           <AlertCircle className="h-3 w-3" /> {error}
         </p>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SignaturePad — finger / pointer drawing surface that saves to a PNG data
+// URL. Used by FileFieldStub when enableDraw is set (the kaizen Signature
+// field). Implementation notes:
+//   - Uses Pointer Events so touch and mouse share one code path.
+//   - touch-action: none on the canvas prevents the browser from
+//     interpreting the drag as a scroll while the user is signing.
+//   - Canvas backing store is sized to devicePixelRatio so strokes look
+//     crisp on retina/HiDPI screens. The CSS size stays fluid (`w-full`)
+//     so the pad fits whichever column it lands in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SignaturePad({
+  onSave,
+  onCancel,
+}: {
+  onSave: (dataUrl: string) => void;
+  onCancel: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const [isEmpty, setIsEmpty] = useState(true);
+
+  // Size the canvas backing store to match its CSS size × DPR so strokes
+  // stay sharp on retina screens. Runs once on mount; if the container
+  // resizes after mount the strokes still render correctly (just with a
+  // softer edge) so we don't bother with a resize observer for now.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+  }, []);
+
+  const pointAt = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    drawingRef.current = true;
+    lastPointRef.current = pointAt(e);
+    canvasRef.current?.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const pt = pointAt(e);
+    const last = lastPointRef.current ?? pt;
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(pt.x, pt.y);
+    ctx.stroke();
+    lastPointRef.current = pt;
+    if (isEmpty) setIsEmpty(false);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    drawingRef.current = false;
+    lastPointRef.current = null;
+    try {
+      canvasRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore — pointer may already be released on touch cancel.
+    }
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // clearRect uses the backing store size (already scaled), so passing
+    // canvas.width / .height is correct here even though we drew in CSS px.
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setIsEmpty(true);
+  };
+
+  const save = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || isEmpty) return;
+    onSave(canvas.toDataURL("image/png"));
+  };
+
+  return (
+    <div className="rounded-md border bg-white p-2 space-y-2">
+      <div className="text-[11px] text-muted-foreground">
+        Sign below using your finger or mouse.
+      </div>
+      <canvas
+        ref={canvasRef}
+        className="w-full h-32 rounded border bg-white touch-none cursor-crosshair select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+      />
+      <div className="flex gap-2 justify-end">
+        <button
+          type="button"
+          onClick={clear}
+          className="text-xs px-3 py-1 border rounded hover:bg-muted"
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-xs px-3 py-1 border rounded hover:bg-muted"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={isEmpty}
+          className="text-xs px-3 py-1 rounded bg-primary text-primary-foreground disabled:opacity-50"
+        >
+          Save
+        </button>
+      </div>
     </div>
   );
 }

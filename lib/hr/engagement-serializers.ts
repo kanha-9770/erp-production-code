@@ -61,6 +61,20 @@ export interface KaizenWire {
   referenceImage: string | null;
   beforeMedia: string | null;
   afterMedia: string | null;
+  // Submitter identity captured at form-fill time (kept on the row so
+  // the detail/print view can show the employee block without an extra
+  // join). Empty string when not provided.
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  department: string;
+  employeeEngagementTeamName: string;
+  kaizenArea: string;
+  // Result / approval payload.
+  employeeContributor: string;
+  signature: string | null;
+  selfie: string | null;
+  employeeEngagementPoints: number;
 }
 
 export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
@@ -86,6 +100,18 @@ export function serializeKaizen(r: any, viewerUserId: string): KaizenWire {
     referenceImage: r.referenceImage ?? null,
     beforeMedia,
     afterMedia: r.afterMedia ?? null,
+    firstName: r.firstName ?? '',
+    middleName: r.middleName ?? '',
+    lastName: r.lastName ?? '',
+    department: r.department ?? '',
+    employeeEngagementTeamName: r.employeeEngagementTeamName ?? '',
+    kaizenArea: r.kaizenArea ?? '',
+    employeeContributor: r.employeeContributor ?? '',
+    signature: r.signature ?? null,
+    selfie: r.selfie ?? null,
+    employeeEngagementPoints: typeof r.employeeEngagementPoints === 'number'
+      ? r.employeeEngagementPoints
+      : Number(r.employeeEngagementPoints ?? 0) || 0,
   };
 }
 

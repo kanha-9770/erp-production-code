@@ -97,6 +97,13 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", category: "", departmen
 export default function SelfInitiativePage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  // Engagement points are awarded by HR/Admin after reviewing the
+  // submission — they're NOT something the employee fills in themselves.
+  const canSetPoints = isAdmin || (
+    (user as any)?.unitAssignments?.some(
+      (ua: any) => /\bHR\b/i.test(ua?.role?.name ?? ""),
+    ) ?? false
+  );
   const visibility = useEngagementVisibility();
   const { toast } = useToast();
 
@@ -350,6 +357,7 @@ export default function SelfInitiativePage() {
           <InitiativeForm
             initial={editingId ? initiatives.find(i => i.id === editingId) : undefined}
             currentEmployee={currentEmployee}
+            canSetPoints={canSetPoints}
             onCancel={() => { setCreateOpen(false); setEditingId(null); }}
             onSubmit={async (data) => {
               try {
@@ -452,9 +460,11 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-function InitiativeForm({ initial, currentEmployee, onCancel, onSubmit }: {
+function InitiativeForm({ initial, currentEmployee, canSetPoints, onCancel, onSubmit }: {
   initial?: SelfInitiative,
   currentEmployee?: any,
+  /** Engagement points are only editable by Admin/HR (passed from parent). */
+  canSetPoints: boolean,
   onCancel: () => void,
   onSubmit: (data: any) => void
 }) {
@@ -616,8 +626,22 @@ function InitiativeForm({ initial, currentEmployee, onCancel, onSubmit }: {
                 type="number"
                 min={0}
                 value={formData.employeeEngagementPoints}
-                onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    employeeEngagementPoints: Number(e.target.value) || 0,
+                  })
+                }
+                readOnly={!canSetPoints}
+                disabled={!canSetPoints}
+                className={!canSetPoints ? "bg-muted/50 cursor-not-allowed" : ""}
               />
+              {!canSetPoints && (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Awarded by HR / Admin after review.
+                </p>
+              )}
             </FieldWrapper>
           </div>
         </Card>

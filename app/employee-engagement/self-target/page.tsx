@@ -9,17 +9,18 @@ import { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Target, Plus, Search, Calendar, Briefcase, Pencil, Trash2,
   CheckCircle2, Type, FileText, Zap, UserCircle, Clock,
-  AlertCircle, Info, Save, ExternalLink,
+  AlertCircle, Info, Save, ExternalLink, X as XIcon,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  SelectFilter, ActiveFilterPills,
   ViewsBar, useSavedViews,
   AdvancedFilter, applyAdvancedFilters,
   type FilterField, type FilterCondition,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -101,6 +102,15 @@ const EMPTY_FILTERS: Filters = { search: "", status: "", targetMonth: "", depart
 export default function SelfTargetPage() {
   const { user } = useCurrentUser();
   const { isAdmin } = usePermissions();
+  // Engagement points are awarded by HR/Admin after reviewing the
+  // submission — they're NOT something the employee fills in themselves.
+  // We let admins and any user whose role name contains "HR" edit the
+  // field; everyone else sees it as a read-only zero.
+  const canSetPoints = isAdmin || (
+    (user as any)?.unitAssignments?.some(
+      (ua: any) => /\bHR\b/i.test(ua?.role?.name ?? ""),
+    ) ?? false
+  );
   const visibility = useEngagementVisibility();
   const { toast } = useToast();
 
@@ -289,28 +299,70 @@ export default function SelfTargetPage() {
               title="Self Target"
               subtitle={`${items.length} target${items.length === 1 ? "" : "s"}`}
             >
-              <div className="relative">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search targets..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && updateFilter("search", searchInput)}
-                  className="pl-8 h-8 w-64 text-sm"
-                />
-              </div>
+              {/* Search collapses to a 🔍 icon button + popover so the
+                  header stays compact on mobile. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {filters.search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search targets..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") updateFilter("search", searchInput);
+                        if (e.key === "Escape") { setSearchInput(""); updateFilter("search", ""); }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); updateFilter("search", ""); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <AdvancedFilter fields={filterFields} value={conditions} onChange={setConditions} />
               <ManageColumnsButton
                 tableId="self-targets"
                 columns={columns}
                 variant="dialog"
               />
-              <Button size="sm" className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm font-semibold transition-all active:scale-95" onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4 mr-1.5" /> New Target
+              <Button
+                size="sm"
+                className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">New Target</span>
+                <span className="sm:hidden">New</span>
               </Button>
             </WorkspaceHeader>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3">
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2">
               <ViewsBar
                 views={views.views}
                 activeId={views.activeId}
@@ -326,10 +378,15 @@ export default function SelfTargetPage() {
               />
             </div>
 
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
-              <FilterChips label="Target Month" value={filters.targetMonth} onChange={(v) => updateFilter("targetMonth", v)} options={TARGET_MONTH_FILTER_OPTIONS} />
-              <FilterChips label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
+            {/* Filter row — 3 compact dropdown pickers instead of inline
+                chip rows. Status / Target Month / Department lists used to
+                wrap across 3-6 rows on mobile; now each is a single
+                LABEL [value ⌄] button that opens the full option list in
+                a popover. */}
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter label="Status" value={filters.status} onChange={(v) => updateFilter("status", v)} options={STATUS_OPTIONS} />
+              <SelectFilter label="Target Month" value={filters.targetMonth} onChange={(v) => updateFilter("targetMonth", v)} options={TARGET_MONTH_FILTER_OPTIONS} />
+              <SelectFilter label="Department" value={filters.department} onChange={(v) => updateFilter("department", v)} options={DEPARTMENT_FILTER_OPTIONS} />
               <ActiveFilterPills filters={[]} onClear={() => {}} onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }} />
             </div>
           </>
@@ -359,6 +416,7 @@ export default function SelfTargetPage() {
           </SheetHeader>
           <TargetForm
             currentEmployee={currentEmployee}
+            canSetPoints={canSetPoints}
             onCancel={() => setCreateOpen(false)}
             onSubmit={async (data) => {
               try {
@@ -392,6 +450,7 @@ export default function SelfTargetPage() {
             <TargetForm
               initial={targets.find(t => t.id === editingId)}
               currentEmployee={currentEmployee}
+              canSetPoints={canSetPoints}
               onCancel={() => setEditingId(null)}
               onSubmit={async (data) => {
                 try {
@@ -503,9 +562,11 @@ const TARGET_MONTH_OPTIONS = [
   { value: "december", label: "December" },
 ];
 
-function TargetForm({ initial, currentEmployee, onCancel, onSubmit }: {
+function TargetForm({ initial, currentEmployee, canSetPoints, onCancel, onSubmit }: {
   initial?: SelfTarget,
   currentEmployee?: any,
+  /** Engagement points are only editable by Admin/HR (passed from parent). */
+  canSetPoints: boolean,
   onCancel: () => void,
   onSubmit: (data: any) => void
 }) {
@@ -637,8 +698,22 @@ function TargetForm({ initial, currentEmployee, onCancel, onSubmit }: {
                 type="number"
                 min={0}
                 value={formData.employeeEngagementPoints}
-                onChange={e => setFormData({ ...formData, employeeEngagementPoints: Number(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    employeeEngagementPoints: Number(e.target.value) || 0,
+                  })
+                }
+                readOnly={!canSetPoints}
+                disabled={!canSetPoints}
+                className={!canSetPoints ? "bg-muted/50 cursor-not-allowed" : ""}
               />
+              {!canSetPoints && (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Awarded by HR / Admin after review.
+                </p>
+              )}
             </FieldWrapper>
 
             <FieldWrapper label="Target Date">
