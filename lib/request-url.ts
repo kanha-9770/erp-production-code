@@ -28,6 +28,13 @@ function publicOriginFromEnv(): string | null {
  *   4. As a last resort, the (possibly private) `request.nextUrl.origin`
  */
 export function getRequestOrigin(request: NextRequest): string {
+  // In development, the request origin (e.g. http://localhost:5001) IS the
+  // public origin — there's no proxy, and falling back to NEXTAUTH_URL /
+  // NEXT_PUBLIC_APP_URL would bounce redirects to the production site.
+  if (process.env.NODE_ENV !== "production") {
+    return request.nextUrl.origin;
+  }
+
   const fwdHost = request.headers.get("x-forwarded-host");
   const fwdProto = request.headers.get("x-forwarded-proto");
   if (fwdHost && !PRIVATE_HOST.test(fwdHost)) {

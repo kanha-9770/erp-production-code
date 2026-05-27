@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
+import { getRequestOrigin } from "@/lib/request-url"
 
-export async function POST(request: Request, { params }: { params: { formId: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { formId: string } }) {
   try {
     let body: any = {}
 
@@ -37,13 +38,17 @@ export async function POST(request: Request, { params }: { params: { formId: str
     }
 
     // ✅ NORMAL PUBLISH FLOW
-    const form = await DatabaseService.publishForm(params.formId, {
-      allowAnonymous: allowAnonymous ?? true,
-      requireLogin: requireLogin ?? false,
-      maxSubmissions: maxSubmissions || null,
-      submissionMessage:
-        submissionMessage || "Thank you for your submission!",
-    })
+    const form = await DatabaseService.publishForm(
+      params.formId,
+      {
+        allowAnonymous: allowAnonymous ?? true,
+        requireLogin: requireLogin ?? false,
+        maxSubmissions: maxSubmissions || null,
+        submissionMessage:
+          submissionMessage || "Thank you for your submission!",
+      },
+      getRequestOrigin(request),
+    )
 
     return NextResponse.json({ success: true, data: form })
   } catch (error: any) {

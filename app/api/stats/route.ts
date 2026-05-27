@@ -1,10 +1,11 @@
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import { getRequestOrigin } from '@/lib/request-url';
 
-const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const baseUrl = getRequestOrigin(request);
+
     // Fetch payroll and attendance data
     const [payrollRes, attendanceRes] = await Promise.all([
       fetch(`${baseUrl}/api/payroll`),

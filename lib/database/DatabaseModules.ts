@@ -744,10 +744,15 @@ export class DatabaseModules {
       requireLogin?: boolean;
       maxSubmissions?: number | null;
       submissionMessage?: string;
-    }
+    },
+    baseUrlOverride?: string,
   ): Promise<Form> {
     try {
-      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const baseUrl = (
+        baseUrlOverride ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        "http://localhost:3000"
+      ).replace(/\/+$/, "");
       const formUrl = `${baseUrl}/form/${id}`;
 
       const form = await this.updateForm(id, {

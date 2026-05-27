@@ -250,8 +250,11 @@ export default function OrganizationTab({ user }: Props) {
         </div>
       )}
 
-      {/* ── 1. Identity card ─────────────────────────────────────────── */}
-      <Card>
+      {/* ── 1. Identity card (hero) ──────────────────────────────────
+          Gradient background + larger primary-tinted "logo" tile gives
+          this card visible weight over the two below it, anchoring the
+          tab the way the dashboard hero anchors that page. */}
+      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-primary/[0.03] to-transparent">
         <CardHeader className="pb-4">
           <CardTitle className="text-base flex items-center gap-2">
             <Building2 className="h-4 w-4 text-primary" />
@@ -263,13 +266,13 @@ export default function OrganizationTab({ user }: Props) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          {/* Logo placeholder + name input row */}
+          {/* "Logo" tile + editable name */}
           <div className="flex items-start gap-4">
             <div
               aria-hidden
-              className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-foreground/60"
+              className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/20"
             >
-              <Building2 className="h-7 w-7" />
+              <Building2 className="h-7 w-7 sm:h-9 sm:w-9" />
             </div>
             <div className="flex-1 min-w-0 space-y-1.5">
               <Label
@@ -288,7 +291,7 @@ export default function OrganizationTab({ user }: Props) {
                 disabled={!isOwner || busy}
                 maxLength={NAME_MAX}
                 aria-invalid={nameTooShort || undefined}
-                className="h-10"
+                className="h-10 bg-background/70 backdrop-blur-sm text-base font-medium"
                 placeholder="Acme Inc."
               />
               <div className="flex items-center justify-between gap-2">
@@ -307,11 +310,13 @@ export default function OrganizationTab({ user }: Props) {
             </div>
           </div>
 
-          {/* Metadata strip */}
+          {/* Metadata strip — tinted chips so each cell reads as a
+              distinct signal rather than three identical grey tiles. */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
             <MetaCell
+              tone="emerald"
               label="Your role"
-              icon={<ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />}
+              icon={<ShieldCheck className="h-3.5 w-3.5" />}
               value={
                 <span className="inline-flex items-center gap-1.5">
                   {isOwner ? "Owner" : "Admin"}
@@ -324,6 +329,7 @@ export default function OrganizationTab({ user }: Props) {
               }
             />
             <MetaCell
+              tone="indigo"
               label="Members"
               icon={<Users className="h-3.5 w-3.5" />}
               value={
@@ -333,6 +339,7 @@ export default function OrganizationTab({ user }: Props) {
               }
             />
             <MetaCell
+              tone="amber"
               label="Created"
               icon={<Calendar className="h-3.5 w-3.5" />}
               value={formatCreatedAt(saved.createdAt)}
@@ -344,14 +351,18 @@ export default function OrganizationTab({ user }: Props) {
       {/* ── 2. Currency card ─────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Coins className="h-4 w-4 text-primary" />
-            Currency
-          </CardTitle>
-          <CardDescription>
-            Every monetary amount across the app — payroll, salary, bonuses,
-            currency form fields — renders in this currency.
-          </CardDescription>
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+              <Coins className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <CardTitle className="text-base leading-tight">Currency</CardTitle>
+              <CardDescription className="mt-0.5">
+                Every monetary amount across the app — payroll, salary,
+                bonuses, currency form fields — renders in this currency.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
@@ -441,13 +452,20 @@ export default function OrganizationTab({ user }: Props) {
               currency. Uses the same formatCurrency() the rest of the
               app uses, so what the admin sees here is exactly what
               members will see on payroll/salary pages. */}
-          <div className="rounded-md border bg-muted/30 px-3 py-2.5 space-y-1.5">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-              Preview
+          <div className="rounded-lg border border-amber-500/20 bg-gradient-to-br from-amber-500/[0.06] to-transparent px-3.5 py-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                Preview
+              </div>
+              {draftCurrency && (
+                <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+                  {draftCurrency.symbol} · {draftCurrency.code}
+                </span>
+              )}
             </div>
             <PreviewRow label="Salary" amount={48500} code={draft.currency} />
             <PreviewRow label="Bonus" amount={2750.5} code={draft.currency} />
-            <div className="border-t pt-1.5">
+            <div className="border-t border-amber-500/20 pt-1.5">
               <PreviewRow
                 label="Total"
                 amount={51250.5}
@@ -462,23 +480,28 @@ export default function OrganizationTab({ user }: Props) {
       {/* ── 3. Modules card (read-only summary) ──────────────────────── */}
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Boxes className="h-4 w-4 text-primary" />
-            Active modules
-          </CardTitle>
-          <CardDescription>
-            ERP modules turned on for your organization.
-            {activeModuleDefs.length > 0 && (
-              <>
-                {" "}
-                <span className="tabular-nums">
-                  {activeModuleDefs.length}
-                </span>{" "}
-                of <span className="tabular-nums">{ERP_MODULES.length}</span>{" "}
-                active.
-              </>
-            )}
-          </CardDescription>
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+              <Boxes className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-base leading-tight">Active modules</CardTitle>
+              <CardDescription className="mt-0.5">
+                ERP modules turned on for your organization.
+                {activeModuleDefs.length > 0 && (
+                  <>
+                    {" "}
+                    <span className="tabular-nums font-medium text-foreground/80">
+                      {activeModuleDefs.length}
+                    </span>{" "}
+                    of{" "}
+                    <span className="tabular-nums">{ERP_MODULES.length}</span>{" "}
+                    active.
+                  </>
+                )}
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {activeModuleDefs.length === 0 ? (
@@ -583,22 +606,54 @@ export default function OrganizationTab({ user }: Props) {
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
+type MetaTone = "emerald" | "indigo" | "amber";
+
+// Per-tone background + icon colour so each cell of the metadata strip
+// reads as a distinct signal. Border stays neutral so the row still feels
+// like one strip rather than three competing chips.
+const META_TONE: Record<MetaTone, { wrap: string; chip: string }> = {
+  emerald: {
+    wrap: "bg-emerald-500/[0.06] border-emerald-500/20",
+    chip: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  },
+  indigo: {
+    wrap: "bg-indigo-500/[0.06] border-indigo-500/20",
+    chip: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
+  },
+  amber: {
+    wrap: "bg-amber-500/[0.06] border-amber-500/20",
+    chip: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  },
+};
+
 function MetaCell({
   label,
   icon,
   value,
+  tone = "indigo",
 }: {
   label: string;
   icon: React.ReactNode;
   value: React.ReactNode;
+  tone?: MetaTone;
 }) {
+  const t = META_TONE[tone];
   return (
-    <div className="rounded-md border bg-muted/20 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold inline-flex items-center gap-1">
-        {icon}
-        {label}
+    <div className={cn("rounded-lg border px-3 py-2.5", t.wrap)}>
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
+            t.chip,
+          )}
+        >
+          {icon}
+        </span>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+          {label}
+        </span>
       </div>
-      <div className="text-sm font-medium mt-0.5 truncate">{value}</div>
+      <div className="text-sm font-medium mt-1.5 truncate">{value}</div>
     </div>
   );
 }
