@@ -185,76 +185,76 @@ enum ExportFormat {
 }
 
 model User {
-  id                  String                   @id @default(cuid())
-  email               String                   @unique
-  username            String?                  @unique
-  password            String?
-  provider            AuthProvider?            @default(EMAIL)
-  status              UserStatus               @default(PENDING)
-  organizationId      String?                  @map("organization_id")
-  organization        Organization?            @relation("UserOrganization", fields: [organizationId], references: [id], onDelete: SetNull)
-  ownedOrganization   Organization?            @relation("Owner")
-  sessions            UserSession[]
-  otpCodes            OTPCode[]
-  permissions         UserPermission[]
-  email_verified      Boolean?                 @map("email_verified")
-  first_name          String?                  @map("first_name")
-  last_name           String?                  @map("last_name")
-  login_attempts      Int?                     @map("login_attempts")
-  mobile              String?                  @map("mobile")
-  mobile_verified     Boolean?                 @map("mobile_verified")
-  avatar              String?
-  department          String?
-  phone               String?
-  location            String?
-  joinDate            DateTime?                @map("join_date")
-  unitAssignments     UserUnitAssignment[]
-  permissionOverrides UserPermissionOverride[]
-  loginHistory        LoginHistory[]
-  auditLogs           AuditLog[]
-  employee            Employee?
-  attendances         Attendance[]             @relation("UserAttendance")
-  faceEnrollment      FaceEnrollment?
-  activities          Activity[]
-  formRecords         FormRecord[]             @relation("FormRecordUser")
-  formRecords1        FormRecord1[]            @relation("FormRecord1User")
-  formRecords2        FormRecord2[]            @relation("FormRecord2User")
-  formRecords3        FormRecord3[]            @relation("FormRecord3User")
-  formRecords4        FormRecord4[]            @relation("FormRecord4User")
-  formRecords5        FormRecord5[]            @relation("FormRecord5User")
-  formRecords6        FormRecord6[]            @relation("FormRecord6User")
-  formRecords7        FormRecord7[]            @relation("FormRecord7User")
-  formRecords8        FormRecord8[]            @relation("FormRecord8User")
-  formRecords9        FormRecord9[]            @relation("FormRecord9User")
-  formRecords10       FormRecord10[]           @relation("FormRecord10User")
-  formRecords11       FormRecord11[]           @relation("FormRecord11User")
-  formRecords12       FormRecord12[]           @relation("FormRecord12User")
-  formRecords13       FormRecord13[]           @relation("FormRecord13User")
-  formRecords14       FormRecord14[]           @relation("FormRecord14User")
-  formRecords15       FormRecord15[]           @relation("FormRecord15User")
-  routeAccess         RouteUserAccess[]
-  lookupTemplates     LookupTemplate[]         @relation("LookupTemplateCreator")
-  savedFilters        SavedFilter[]            @relation("SavedFilterCreator")
-  workflowRules       WorkflowRule[]           @relation("WorkflowRuleCreator")
-  functions           CrmFunction[]            @relation("CrmFunctionCreator")
-  functionExecutions  FunctionExecution[]      @relation("FunctionExecutionActor")
-  notifications       Notification[]           @relation("NotificationRecipient")
-  pushSubscriptions   PushSubscription[]       @relation("UserPushSubscriptions")
-  agentProfile        AgentProfile?
-  reWallet            Wallet?
-  staffingPlans       StaffingPlan[]           @relation("StaffingPlanCreator")
-  jobOpenings         JobOpening[]             @relation("JobOpeningCreator")
-  jobApplications     JobApplication[]         @relation("JobApplicationCreator")
-  jobOffers           JobOffer[]               @relation("JobOfferCreator")
-  appointmentLetters  AppointmentLetter[]      @relation("AppointmentLetterCreator")
-  employeeReferrals   EmployeeReferral[]       @relation("EmployeeReferralCreator")
-  engagementKaizens      EngagementKaizen[]
-  engagementSuggestions  EngagementSuggestion[]
-  engagementProblems     EngagementProblem[]
-  engagementInitiatives  EngagementInitiative[]
-  engagementTargets      EngagementTarget[]
-  createdAt           DateTime                 @default(now()) @map("created_at")
-  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  id                    String                   @id @default(cuid())
+  email                 String                   @unique
+  username              String?                  @unique
+  password              String?
+  provider              AuthProvider?            @default(EMAIL)
+  status                UserStatus               @default(PENDING)
+  organizationId        String?                  @map("organization_id")
+  organization          Organization?            @relation("UserOrganization", fields: [organizationId], references: [id], onDelete: SetNull)
+  ownedOrganization     Organization?            @relation("Owner")
+  sessions              UserSession[]
+  otpCodes              OTPCode[]
+  permissions           UserPermission[]
+  email_verified        Boolean?                 @default(false) @map("email_verified")
+  first_name            String?                  @map("first_name")
+  last_name             String?                  @map("last_name")
+  login_attempts        Int?                     @default(0) @map("login_attempts")
+  mobile                String?                  @map("mobile")
+  mobile_verified       Boolean?                 @default(false) @map("mobile_verified")
+  avatar                String?
+  department            String?
+  phone                 String?
+  location              String?
+  joinDate              DateTime?                @map("join_date")
+  unitAssignments       UserUnitAssignment[]
+  permissionOverrides   UserPermissionOverride[]
+  loginHistory          LoginHistory[]
+  auditLogs             AuditLog[]
+  employee              Employee?
+  attendances           Attendance[]             @relation("UserAttendance")
+  faceEnrollment        FaceEnrollment?
+  activities            Activity[]
+  formRecords           FormRecord[]             @relation("FormRecordUser")
+  formRecords1          FormRecord1[]            @relation("FormRecord1User")
+  formRecords2          FormRecord2[]            @relation("FormRecord2User")
+  formRecords3          FormRecord3[]            @relation("FormRecord3User")
+  formRecords4          FormRecord4[]            @relation("FormRecord4User")
+  formRecords5          FormRecord5[]            @relation("FormRecord5User")
+  formRecords6          FormRecord6[]            @relation("FormRecord6User")
+  formRecords7          FormRecord7[]            @relation("FormRecord7User")
+  formRecords8          FormRecord8[]            @relation("FormRecord8User")
+  formRecords9          FormRecord9[]            @relation("FormRecord9User")
+  formRecords10         FormRecord10[]           @relation("FormRecord10User")
+  formRecords11         FormRecord11[]           @relation("FormRecord11User")
+  formRecords12         FormRecord12[]           @relation("FormRecord12User")
+  formRecords13         FormRecord13[]           @relation("FormRecord13User")
+  formRecords14         FormRecord14[]           @relation("FormRecord14User")
+  formRecords15         FormRecord15[]           @relation("FormRecord15User")
+  routeAccess           RouteUserAccess[]
+  lookupTemplates       LookupTemplate[]         @relation("LookupTemplateCreator")
+  savedFilters          SavedFilter[]            @relation("SavedFilterCreator")
+  workflowRules         WorkflowRule[]           @relation("WorkflowRuleCreator")
+  functions             CrmFunction[]            @relation("CrmFunctionCreator")
+  functionExecutions    FunctionExecution[]      @relation("FunctionExecutionActor")
+  notifications         Notification[]           @relation("NotificationRecipient")
+  pushSubscriptions     PushSubscription[]       @relation("UserPushSubscriptions")
+  agentProfile          AgentProfile?
+  reWallet              Wallet?
+  staffingPlans         StaffingPlan[]           @relation("StaffingPlanCreator")
+  jobOpenings           JobOpening[]             @relation("JobOpeningCreator")
+  jobApplications       JobApplication[]         @relation("JobApplicationCreator")
+  jobOffers             JobOffer[]               @relation("JobOfferCreator")
+  appointmentLetters    AppointmentLetter[]      @relation("AppointmentLetterCreator")
+  employeeReferrals     EmployeeReferral[]       @relation("EmployeeReferralCreator")
+  engagementKaizens     EngagementKaizen[]
+  engagementSuggestions EngagementSuggestion[]
+  engagementProblems    EngagementProblem[]
+  engagementInitiatives EngagementInitiative[]
+  engagementTargets     EngagementTarget[]
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
 
   @@index([email])
   @@index([username])
@@ -271,9 +271,9 @@ model OTPCode {
   type       OTPType
   expiresAt  DateTime @map("expires_at")
   used       Boolean  @default(false)
-  attempts   Int?     @map("attempts")
+  attempts   Int?     @default(0) @map("attempts")
   identifier String?  @map("identifier")
-  verified   Boolean? @map("verified")
+  verified   Boolean? @default(false) @map("verified")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
@@ -303,48 +303,48 @@ model UserSession {
 }
 
 model Organization {
-  id                String             @id @default(cuid())
-  name              String
+  id                 String              @id @default(cuid())
+  name               String
   // ISO 4217 currency code that the whole org bills/pays in. Applied
   // app-wide via the `lib/org-currency` helpers — payroll, salary
   // fields, currency form fields, etc. Only org admins/owners can
   // change it (PUT /api/organization/settings).
-  currency          String             @default("USD")
+  currency           String              @default("USD")
   // Top-level ERP modules this org has opted into ("hr", "real_estate",
   // "inventory", "asset_management"). Drives sidebar visibility and
   // middleware route gating. See lib/erp-modules.ts for the catalog.
   // Empty array means no business modules are active (settings/profile
   // remain reachable so admins can configure).
-  selectedModules   String[]           @default([]) @map("selected_modules")
-  ownerId           String?            @unique @map("owner_id")
-  owner             User?              @relation("Owner", fields: [ownerId], references: [id], onDelete: SetNull)
-  users             User[]             @relation("UserOrganization")
-  organizationUnits OrganizationUnit[]
-  roles             Role[]
-  permissions       Permission[]
-  auditLogs         AuditLog[]
-  dataSharingRules  DataSharingRule[]
-  activities        Activity[]
-  formModules       FormModule[]       @relation("UserOrganization")
-  routePermissions  RoutePermission[]
-  lookupTemplates   LookupTemplate[]
-  savedFilters      SavedFilter[]
-  workflowRules     WorkflowRule[]
+  selectedModules    String[]            @default([]) @map("selected_modules")
+  ownerId            String?             @unique @map("owner_id")
+  owner              User?               @relation("Owner", fields: [ownerId], references: [id], onDelete: SetNull)
+  users              User[]              @relation("UserOrganization")
+  organizationUnits  OrganizationUnit[]
+  roles              Role[]
+  permissions        Permission[]
+  auditLogs          AuditLog[]
+  dataSharingRules   DataSharingRule[]
+  activities         Activity[]
+  formModules        FormModule[]        @relation("UserOrganization")
+  routePermissions   RoutePermission[]
+  lookupTemplates    LookupTemplate[]
+  savedFilters       SavedFilter[]
+  workflowRules      WorkflowRule[]
   workflowExecutions WorkflowExecution[]
-  functions         CrmFunction[]
+  functions          CrmFunction[]
   functionExecutions FunctionExecution[]
-  functionBindings  FunctionBinding[]
-  notifications     Notification[]
-  pushSubscriptions PushSubscription[]
-  staffingPlans     StaffingPlan[]
-  jobOpenings       JobOpening[]
-  jobApplications   JobApplication[]
-  jobOffers           JobOffer[]
-  appointmentLetters  AppointmentLetter[]
-  employeeReferrals   EmployeeReferral[]
-  engagementTeams     EngagementTeam[]
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
+  functionBindings   FunctionBinding[]
+  notifications      Notification[]
+  pushSubscriptions  PushSubscription[]
+  staffingPlans      StaffingPlan[]
+  jobOpenings        JobOpening[]
+  jobApplications    JobApplication[]
+  jobOffers          JobOffer[]
+  appointmentLetters AppointmentLetter[]
+  employeeReferrals  EmployeeReferral[]
+  engagementTeams    EngagementTeam[]
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   @@index([ownerId])
   @@map("organizations")
@@ -771,6 +771,8 @@ model SubformRecord {
   @@index([subformId])
   @@index([employee_id])
   @@index([date])
+  // Audit: subform list page sorted by recency.
+  @@index([subformId, createdAt(sort: Desc)])
   @@map("subform_records")
 }
 
@@ -1264,8 +1266,8 @@ model LookupFieldRelation {
   moduleId       String       @map("module_id")
   displayField   String?      @map("display_field")
   valueField     String?      @map("value_field")
-  multiple       Boolean?
-  searchable     Boolean?
+  multiple       Boolean?     @default(false)
+  searchable     Boolean?     @default(false)
   filters        Json         @default("{}")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
@@ -1424,53 +1426,53 @@ model Employee {
   // FK to EngagementTeam. Engagement pages (Kaizen, Suggestion, etc.) filter
   // by this so members of one team can't see another team's records. HR /
   // Admin bypass the filter and see everything.
-  engagementTeamId           String?         @map("engagement_team_id")
-  engagementTeam             EngagementTeam? @relation(fields: [engagementTeamId], references: [id], onDelete: SetNull)
+  engagementTeamId String?         @map("engagement_team_id")
+  engagementTeam   EngagementTeam? @relation(fields: [engagementTeamId], references: [id], onDelete: SetNull)
 
   // ── 4. Document uploads ────────────────────────────────────────────
-  aadharCardUpload           String?         @map("aadhar_card_upload")
-  aadharCardNo               String?         @map("aadhar_card_no")
-  panCardUpload              String?         @map("pan_card_upload")
-  passportUpload             String?         @map("passport_upload")
+  aadharCardUpload      String?            @map("aadhar_card_upload")
+  aadharCardNo          String?            @map("aadhar_card_no")
+  panCardUpload         String?            @map("pan_card_upload")
+  passportUpload        String?            @map("passport_upload")
   // ── 5. Salary & compensation ───────────────────────────────────────
-  salaryMode                 String?         @map("salary_mode")
-  baseSalary                 Decimal?        @map("base_salary")
-  perHourSalary              Decimal?        @map("per_hour_salary")
-  isOvertimeApplicable       Boolean?        @default(false) @map("is_overtime_applicable")
-  totalSalary                Decimal?        @map("total_salary")
-  givenSalary                Decimal?        @map("given_salary")
-  bonusAmount                Decimal?        @map("bonus_amount")
-  nightAllowance             Decimal?        @map("night_allowance")
-  overTime                   Decimal?        @map("over_time")
-  oneHourExtra               Decimal?        @map("one_hour_extra")
+  salaryMode            String?            @map("salary_mode")
+  baseSalary            Decimal?           @map("base_salary")
+  perHourSalary         Decimal?           @map("per_hour_salary")
+  isOvertimeApplicable  Boolean?           @default(false) @map("is_overtime_applicable")
+  totalSalary           Decimal?           @map("total_salary")
+  givenSalary           Decimal?           @map("given_salary")
+  bonusAmount           Decimal?           @map("bonus_amount")
+  nightAllowance        Decimal?           @map("night_allowance")
+  overTime              Decimal?           @map("over_time")
+  oneHourExtra          Decimal?           @map("one_hour_extra")
   // ── 6. Bank details ────────────────────────────────────────────────
-  bankName                   String?         @map("bank_name")
-  bankAccountNo              String?         @map("bank_account_no")
-  ifscCode                   String?         @map("ifsc_code")
+  bankName              String?            @map("bank_name")
+  bankAccountNo         String?            @map("bank_account_no")
+  ifscCode              String?            @map("ifsc_code")
   // SWIFT / BIC code for international wire transfers (8 or 11 chars).
   // Optional — domestic-only employees won't fill this.
-  swiftCode                  String?         @map("swift_code")
+  swiftCode             String?            @map("swift_code")
   // ── 7. Exit / Resignation ──────────────────────────────────────────
-  resignationLetterDate      DateTime?       @map("resignation_letter_date")
-  reasonOfLeaving            String?         @map("reason_of_leaving")
-  noticeServed               Boolean?        @default(false) @map("notice_served")
+  resignationLetterDate DateTime?          @map("resignation_letter_date")
+  reasonOfLeaving       String?            @map("reason_of_leaving")
+  noticeServed          Boolean?           @default(false) @map("notice_served")
   // Misc
-  companySimIssue            Boolean?        @default(false) @map("company_sim_issue")
+  companySimIssue       Boolean?           @default(false) @map("company_sim_issue")
   // The user who created this employee record (e.g. the HR who onboarded
   // them). Used by the employee-list visibility filter so a creator always
   // sees employees they added, even before a role/unit is assigned and the
   // record joins the role hierarchy. Nullable: legacy rows and self-signups
   // have no creator. Scalar-only (no relation) to keep the migration purely
   // additive.
-  createdById                String?         @map("created_by_id")
-  formRecords14              FormRecord14[]
-  referralsMade              EmployeeReferral[]
-  createdAt                  DateTime        @default(now()) @map("created_at")
-  updatedAt                  DateTime        @updatedAt @map("updated_at")
+  createdById           String?            @map("created_by_id")
+  formRecords14         FormRecord14[]
+  referralsMade         EmployeeReferral[]
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields               Json?           @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([userId])
   @@index([createdById])
@@ -1490,35 +1492,35 @@ model Employee {
 // so the front-end can add new options without a schema migration.
 
 model EngagementKaizen {
-  id              String   @id @default(cuid())
+  id             String   @id @default(cuid())
   // Human-readable per-organization identifier (e.g. "NK-001"). Generated
   // server-side on create and shown everywhere the cuid was previously
   // displayed. Nullable so older rows survive until backfilled.
-  displayId       String?  @map("display_id")
-  organizationId  String   @map("organization_id")
-  userId          String   @map("user_id")
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title           String
+  displayId      String?  @map("display_id")
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
   // Optional completion / implementation deadline in YYYY-MM-DD format,
   // consistent with the other engagement tables' date handling.
-  endDate         String?  @map("end_date")
-  description     String   @db.Text
-  currentState    String   @db.Text @map("current_state")
-  proposedState   String   @db.Text @map("proposed_state")
-  benefits        String   @db.Text
-  status          String   @default("idea") // idea | approved | in-implementation | implemented
-  votes           Int      @default(0)
-  votedByUserIds  String[] @default([]) @map("voted_by_user_ids")
+  endDate        String?  @map("end_date")
+  description    String   @db.Text
+  currentState   String   @map("current_state") @db.Text
+  proposedState  String   @map("proposed_state") @db.Text
+  benefits       String   @db.Text
+  status         String   @default("idea") // idea | approved | in-implementation | implemented
+  votes          Int      @default(0)
+  votedByUserIds String[] @default([]) @map("voted_by_user_ids")
   // `referenceImage` is kept for backward compatibility. New submissions
   // populate `beforeMedia` and `afterMedia` separately so the detail
   // dialog can show them side-by-side in form order. All three are
   // `@db.Text` because the upload UI stores files as base64 `data:` URLs,
   // which can easily exceed the 255-char default for `varchar`.
-  referenceImage  String?  @db.Text @map("reference_image")
-  beforeMedia     String?  @db.Text @map("before_media")
-  afterMedia      String?  @db.Text @map("after_media")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  referenceImage String?  @map("reference_image") @db.Text
+  beforeMedia    String?  @map("before_media") @db.Text
+  afterMedia     String?  @map("after_media") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([organizationId, displayId])
   @@index([organizationId])
@@ -1528,20 +1530,20 @@ model EngagementKaizen {
 }
 
 model EngagementSuggestion {
-  id              String   @id @default(cuid())
-  displayId       String?  @map("display_id") // ES-001 etc.
-  organizationId  String   @map("organization_id")
-  userId          String   @map("user_id")
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title           String
-  suggestion      String   @db.Text
-  category        String
-  status          String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
-  feedback        String?  @db.Text
-  referenceImage  String?  @db.Text @map("reference_image")
-  endDate         String?  @map("end_date") // optional follow-up deadline
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  displayId      String?  @map("display_id") // ES-001 etc.
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  suggestion     String   @db.Text
+  category       String
+  status         String   @default("submitted") // submitted | under-review | accepted | rejected | implemented
+  feedback       String?  @db.Text
+  referenceImage String?  @map("reference_image") @db.Text
+  endDate        String?  @map("end_date") // optional follow-up deadline
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([organizationId, displayId])
   @@index([organizationId])
@@ -1551,21 +1553,21 @@ model EngagementSuggestion {
 }
 
 model EngagementProblem {
-  id                String   @id @default(cuid())
-  displayId         String?  @map("display_id") // PR-001 etc.
-  organizationId    String   @map("organization_id")
-  userId            String   @map("user_id")
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title             String
-  description       String   @db.Text
-  severity          String   @default("medium") // low | medium | high | critical
-  category          String
-  status            String   @default("open")   // open | in-review | resolved | closed
-  proposedSolution  String   @db.Text @map("proposed_solution")
-  referenceImage    String?  @db.Text @map("reference_image")
-  endDate           String?  @map("end_date") // expected resolution date
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(cuid())
+  displayId        String?  @map("display_id") // PR-001 etc.
+  organizationId   String   @map("organization_id")
+  userId           String   @map("user_id")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  description      String   @db.Text
+  severity         String   @default("medium") // low | medium | high | critical
+  category         String
+  status           String   @default("open") // open | in-review | resolved | closed
+  proposedSolution String   @map("proposed_solution") @db.Text
+  referenceImage   String?  @map("reference_image") @db.Text
+  endDate          String?  @map("end_date") // expected resolution date
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@unique([organizationId, displayId])
   @@index([organizationId])
@@ -1576,21 +1578,21 @@ model EngagementProblem {
 }
 
 model EngagementInitiative {
-  id              String   @id @default(cuid())
-  displayId       String?  @map("display_id") // SI-001 etc.
-  organizationId  String   @map("organization_id")
-  userId          String   @map("user_id")
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title           String
-  description     String   @db.Text
+  id             String   @id @default(cuid())
+  displayId      String?  @map("display_id") // SI-001 etc.
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  description    String   @db.Text
   // YYYY-MM-DD strings to match the rest of the app's date handling.
-  startDate       String   @map("start_date")
-  endDate         String   @map("end_date")
-  status          String   @default("planning") // planning | in-progress | completed | on-hold
-  category        String
-  referenceImage  String?  @db.Text @map("reference_image")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  startDate      String   @map("start_date")
+  endDate        String   @map("end_date")
+  status         String   @default("planning") // planning | in-progress | completed | on-hold
+  category       String
+  referenceImage String?  @map("reference_image") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([organizationId, displayId])
   @@index([organizationId])
@@ -1600,22 +1602,22 @@ model EngagementInitiative {
 }
 
 model EngagementTarget {
-  id              String   @id @default(cuid())
-  displayId       String?  @map("display_id") // ST-001 etc.
-  organizationId  String   @map("organization_id")
-  userId          String   @map("user_id")
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title           String
-  description     String   @db.Text
-  targetDate      String   @map("target_date")
+  id             String   @id @default(cuid())
+  displayId      String?  @map("display_id") // ST-001 etc.
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  description    String   @db.Text
+  targetDate     String   @map("target_date")
   // Optional completion deadline distinct from `targetDate` (which is
   // the milestone date the employee committed to).
-  endDate         String?  @map("end_date")
-  status          String   @default("not-started") // not-started | in-progress | completed
-  progress        Int      @default(0) // 0–100, percent
-  referenceImage  String?  @db.Text @map("reference_image")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  endDate        String?  @map("end_date")
+  status         String   @default("not-started") // not-started | in-progress | completed
+  progress       Int      @default(0) // 0–100, percent
+  referenceImage String?  @map("reference_image") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@unique([organizationId, displayId])
   @@index([organizationId])
@@ -1631,10 +1633,10 @@ model EngagementTarget {
 // range change). `reviewStatus` is a free-form string mirroring the
 // other engagement tables' status convention.
 model EngagementAward {
-  id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
-  submissionId   String   @map("submission_id")
-  moduleType     String   @map("module_type") // Kaizen | Suggestion | Problem | Initiative | Target
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  submissionId   String    @map("submission_id")
+  moduleType     String    @map("module_type") // Kaizen | Suggestion | Problem | Initiative | Target
   // 1..12, validated server-side. Nullable so a row can carry just a
   // review without a points award (and vice-versa).
   points         Int?
@@ -1642,22 +1644,22 @@ model EngagementAward {
   // 0..100, validated server-side. Independent of the review decision so
   // admin can spotlight an outstanding contribution without affecting
   // the merit-based 1..12 grading.
-  bonusPoints    Int?     @map("bonus_points")
-  bonusReason    String?  @db.Text @map("bonus_reason")
+  bonusPoints    Int?      @map("bonus_points")
+  bonusReason    String?   @map("bonus_reason") @db.Text
   // Short inline remark shown in the dashboard's Award Points table —
   // separate from the review `notes` which are tied to the formal
   // review-decision dialog.
-  remark         String?  @db.Text
+  remark         String?   @db.Text
   // Spotlight flag for Kaizen submissions only (other modules ignore
   // it). Lets admin tag a "Best Kaizen of the period".
-  isBestKaizen   Boolean? @map("is_best_kaizen")
-  reviewStatus   String?  @map("review_status") // approved | rejected | needs-info | pending
-  reviewerId     String?  @map("reviewer_id")
-  reviewerName   String?  @map("reviewer_name")
+  isBestKaizen   Boolean?  @map("is_best_kaizen")
+  reviewStatus   String?   @map("review_status") // approved | rejected | needs-info | pending
+  reviewerId     String?   @map("reviewer_id")
+  reviewerName   String?   @map("reviewer_name")
   reviewedAt     DateTime? @map("reviewed_at")
-  notes          String?  @db.Text
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  notes          String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   @@unique([submissionId, moduleType])
   @@index([organizationId])
@@ -1670,22 +1672,22 @@ model EngagementAward {
 // Members of a team see only their own team's data; HR / Admin see all.
 // Created and managed from Settings → Employee Engagement → Teams.
 model EngagementTeam {
-  id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   // Optional human-friendly description shown on the teams admin page.
-  description    String?  @db.Text
+  description    String?      @db.Text
   // Optional UI color (hex, e.g. "#3b82f6") so teams can be visually
   // distinguished in lists. Defaults to a neutral gray in the UI.
   color          String?
   // Optional team lead. Just a soft reference — deleting the user doesn't
   // delete the team, it just clears the lead.
-  leadUserId     String?  @map("lead_user_id")
-  isActive       Boolean  @default(true) @map("is_active")
+  leadUserId     String?      @map("lead_user_id")
+  isActive       Boolean      @default(true) @map("is_active")
   members        Employee[]
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
 
   // Team names are unique within an organization (case-sensitive at the DB
   // level; the API normalises whitespace + case before insert).
@@ -1699,34 +1701,34 @@ model EngagementTeam {
 // can be tracked centrally. Total estimated cost is stored (not derived) so
 // list queries can sort / filter on it cheaply.
 model StaffingPlan {
-  id                    String              @id @default(cuid())
-  planCode              String?             @unique @map("plan_code")
-  profileName           String              @map("profile_name")
-  department            String
-  designation           String
-  employmentType        EmploymentType      @map("employment_type")
-  vacancies             Int                 @default(1)
+  id                     String             @id @default(cuid())
+  planCode               String?            @unique @map("plan_code")
+  profileName            String             @map("profile_name")
+  department             String
+  designation            String
+  employmentType         EmploymentType     @map("employment_type")
+  vacancies              Int                @default(1)
   estimatedCostPerPerson Decimal?           @map("estimated_cost_per_person")
-  totalEstimatedCost    Decimal?            @map("total_estimated_cost")
-  status                StaffingPlanStatus  @default(DRAFT)
-  notes                 String?
+  totalEstimatedCost     Decimal?           @map("total_estimated_cost")
+  status                 StaffingPlanStatus @default(DRAFT)
+  notes                  String?
 
-  organizationId        String?             @map("organization_id")
-  organization          Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById           String?             @map("created_by_id")
-  createdBy             User?               @relation("StaffingPlanCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("StaffingPlanCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  jobOpenings           JobOpening[]
-  jobApplications       JobApplication[]
-  jobOffers             JobOffer[]
+  jobOpenings     JobOpening[]
+  jobApplications JobApplication[]
+  jobOffers       JobOffer[]
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields          Json?               @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
-  createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([organizationId])
   @@index([department])
@@ -1740,38 +1742,38 @@ model StaffingPlan {
 // profileName / company / department are duplicated so the posting keeps its
 // own snapshot even if the parent plan is later edited or deleted.
 model JobOpening {
-  id                String           @id @default(cuid())
-  jobCode           String?          @unique @map("job_code")
+  id      String  @id @default(cuid())
+  jobCode String? @unique @map("job_code")
 
-  staffingPlanId    String?          @map("staffing_plan_id")
-  staffingPlan      StaffingPlan?    @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+  staffingPlanId String?       @map("staffing_plan_id")
+  staffingPlan   StaffingPlan? @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
 
-  profileName       String           @map("profile_name")
-  department        String
-  designation       String
-  employmentType    EmploymentType   @map("employment_type")
-  vacancies         Int              @default(1)
+  profileName    String         @map("profile_name")
+  department     String
+  designation    String
+  employmentType EmploymentType @map("employment_type")
+  vacancies      Int            @default(1)
 
-  status            JobOpeningStatus @default(OPEN)
-  publishOnWebsite  Boolean          @default(false) @map("publish_on_website")
-  salaryApprox      String?          @map("salary_approx")
-  jobDescription    String           @map("job_description")
+  status           JobOpeningStatus @default(OPEN)
+  publishOnWebsite Boolean          @default(false) @map("publish_on_website")
+  salaryApprox     String?          @map("salary_approx")
+  jobDescription   String           @map("job_description")
 
-  organizationId    String?          @map("organization_id")
-  organization      Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById       String?          @map("created_by_id")
-  createdBy         User?            @relation("JobOpeningCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("JobOpeningCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  applications      JobApplication[]
-  offers            JobOffer[]
+  applications JobApplication[]
+  offers       JobOffer[]
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields      Json?            @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([organizationId])
   @@index([staffingPlanId])
@@ -1780,6 +1782,8 @@ model JobOpening {
   @@index([employmentType])
   @@index([publishOnWebsite])
   @@index([createdAt])
+  // Audit: recruitment dashboard ("open jobs in this department").
+  @@index([organizationId, status, department])
   @@map("job_openings")
 }
 
@@ -1787,59 +1791,59 @@ model JobOpening {
 // opening at create time so audits stay accurate even after the opening is
 // closed/edited.
 model JobApplication {
-  id                String               @id @default(cuid())
-  applicationCode   String?              @unique @map("application_code")
+  id              String  @id @default(cuid())
+  applicationCode String? @unique @map("application_code")
 
-  jobOpeningId      String?              @map("job_opening_id")
-  jobOpening        JobOpening?          @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
-  staffingPlanId    String?              @map("staffing_plan_id")
-  staffingPlan      StaffingPlan?        @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+  jobOpeningId   String?       @map("job_opening_id")
+  jobOpening     JobOpening?   @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
+  staffingPlanId String?       @map("staffing_plan_id")
+  staffingPlan   StaffingPlan? @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
 
-  department        String?
-  designation       String?
-  employmentType    EmploymentType?      @map("employment_type")
+  department     String?
+  designation    String?
+  employmentType EmploymentType? @map("employment_type")
 
-  applicantName     String               @map("applicant_name")
-  applicantEmail    String               @map("applicant_email")
-  applicantMobile   String               @map("applicant_mobile")
-  applicantSource   ApplicantSource?     @map("applicant_source")
+  applicantName   String           @map("applicant_name")
+  applicantEmail  String           @map("applicant_email")
+  applicantMobile String           @map("applicant_mobile")
+  applicantSource ApplicantSource? @map("applicant_source")
 
-  applicantResumeUrl  String?            @map("applicant_resume_url")
-  applicantResumeName String?            @map("applicant_resume_name")
+  applicantResumeUrl  String? @map("applicant_resume_url")
+  applicantResumeName String? @map("applicant_resume_name")
 
   // Data scanned out of the uploaded resume. `resumeData` holds the full
   // structured parse (JSON); the flat columns below are denormalised copies
   // of the most-used fields so the list table can show/filter them cheaply.
-  resumeParsedText      String?          @map("resume_parsed_text")     // raw extracted text
-  resumeData            Json?            @map("resume_data")            // full structured parse
-  resumeSkills          String?          @map("resume_skills")          // comma-joined skills
-  resumeTotalExperience String?          @map("resume_total_experience")// e.g. "6 years"
-  resumeEducation       String?          @map("resume_education")       // highest qualification
-  resumeSummary         String?          @map("resume_summary")         // 1–2 line summary
-  resumeParsedAt        DateTime?        @map("resume_parsed_at")
+  resumeParsedText      String?   @map("resume_parsed_text") // raw extracted text
+  resumeData            Json?     @map("resume_data") // full structured parse
+  resumeSkills          String?   @map("resume_skills") // comma-joined skills
+  resumeTotalExperience String?   @map("resume_total_experience") // e.g. "6 years"
+  resumeEducation       String?   @map("resume_education") // highest qualification
+  resumeSummary         String?   @map("resume_summary") // 1–2 line summary
+  resumeParsedAt        DateTime? @map("resume_parsed_at")
 
-  coverLetter       String?              @map("cover_letter")
-  salaryExpectation String?              @map("salary_expectation")
-  jobDescription    String?              @map("job_description")
+  coverLetter       String? @map("cover_letter")
+  salaryExpectation String? @map("salary_expectation")
+  jobDescription    String? @map("job_description")
 
-  applicantRating   Int?                 @map("applicant_rating")
-  status            JobApplicationStatus @default(NEW)
+  applicantRating Int?                 @map("applicant_rating")
+  status          JobApplicationStatus @default(NEW)
 
-  organizationId    String?              @map("organization_id")
-  organization      Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById       String?              @map("created_by_id")
-  createdBy         User?                @relation("JobApplicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("JobApplicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt         DateTime             @default(now()) @map("created_at")
-  updatedAt         DateTime             @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  offers              JobOffer[]
-  appointmentLetters  AppointmentLetter[]
+  offers             JobOffer[]
+  appointmentLetters AppointmentLetter[]
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields      Json?                  @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([organizationId])
   @@index([jobOpeningId])
@@ -1848,6 +1852,8 @@ model JobApplication {
   @@index([applicantSource])
   @@index([applicantEmail])
   @@index([createdAt])
+  // Audit: recruitment funnel ("applications by source for this org").
+  @@index([organizationId, status, applicantSource])
   @@map("job_applications")
 }
 
@@ -1855,40 +1861,40 @@ model JobApplication {
 // accepted JobApplication. Applicant identity is snapshotted so the offer
 // stays meaningful even if the application is later deleted or anonymised.
 model JobOffer {
-  id                  String           @id @default(cuid())
-  offerCode           String?          @unique @map("offer_code")
+  id        String  @id @default(cuid())
+  offerCode String? @unique @map("offer_code")
 
-  jobApplicationId    String?          @map("job_application_id")
-  jobApplication      JobApplication?  @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
-  jobOpeningId        String?          @map("job_opening_id")
-  jobOpening          JobOpening?      @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
-  staffingPlanId      String?          @map("staffing_plan_id")
-  staffingPlan        StaffingPlan?    @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
+  jobApplicationId String?         @map("job_application_id")
+  jobApplication   JobApplication? @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+  jobOpeningId     String?         @map("job_opening_id")
+  jobOpening       JobOpening?     @relation(fields: [jobOpeningId], references: [id], onDelete: SetNull)
+  staffingPlanId   String?         @map("staffing_plan_id")
+  staffingPlan     StaffingPlan?   @relation(fields: [staffingPlanId], references: [id], onDelete: SetNull)
 
-  applicantName       String           @map("applicant_name")
-  applicantEmail      String?          @map("applicant_email")
+  applicantName  String  @map("applicant_name")
+  applicantEmail String? @map("applicant_email")
 
-  offerDate           DateTime         @map("offer_date")
-  status              JobOfferStatus   @default(DRAFT)
+  offerDate DateTime       @map("offer_date")
+  status    JobOfferStatus @default(DRAFT)
 
-  jobOfferTerm        String?          @map("job_offer_term")
-  valueDescription    String?          @map("value_description")
-  termsAndConditions  String?          @map("terms_and_conditions")
+  jobOfferTerm       String? @map("job_offer_term")
+  valueDescription   String? @map("value_description")
+  termsAndConditions String? @map("terms_and_conditions")
 
-  organizationId      String?          @map("organization_id")
-  organization        Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById         String?          @map("created_by_id")
-  createdBy           User?            @relation("JobOfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("JobOfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt           DateTime         @default(now()) @map("created_at")
-  updatedAt           DateTime         @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  appointmentLetters  AppointmentLetter[]
+  appointmentLetters AppointmentLetter[]
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields        Json?            @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([organizationId])
   @@index([jobApplicationId])
@@ -1904,42 +1910,42 @@ model JobOffer {
 // the offer's applicant snapshot so revoking/deleting upstream records
 // doesn't leave the letter dangling.
 model AppointmentLetter {
-  id                  String                   @id @default(cuid())
-  letterCode          String?                  @unique @map("letter_code")
+  id         String  @id @default(cuid())
+  letterCode String? @unique @map("letter_code")
 
-  jobOfferId          String?                  @map("job_offer_id")
-  jobOffer            JobOffer?                @relation(fields: [jobOfferId], references: [id], onDelete: SetNull)
-  jobApplicationId    String?                  @map("job_application_id")
-  jobApplication      JobApplication?          @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
+  jobOfferId       String?         @map("job_offer_id")
+  jobOffer         JobOffer?       @relation(fields: [jobOfferId], references: [id], onDelete: SetNull)
+  jobApplicationId String?         @map("job_application_id")
+  jobApplication   JobApplication? @relation(fields: [jobApplicationId], references: [id], onDelete: SetNull)
 
-  applicantName       String                   @map("applicant_name")
-  applicantEmail      String?                  @map("applicant_email")
-  company             String?
+  applicantName  String  @map("applicant_name")
+  applicantEmail String? @map("applicant_email")
+  company        String?
 
-  appointmentDate     DateTime                 @map("appointment_date")
-  templateName        String?                  @map("template_name")
-  status              AppointmentLetterStatus  @default(DRAFT)
+  appointmentDate DateTime                @map("appointment_date")
+  templateName    String?                 @map("template_name")
+  status          AppointmentLetterStatus @default(DRAFT)
 
-  title               String?
-  introduction        String?
-  description         String?
-  closingNotes        String?                  @map("closing_notes")
+  title        String?
+  introduction String?
+  description  String?
+  closingNotes String? @map("closing_notes")
 
-  signed              Boolean                  @default(false)
-  signedDate          DateTime?                @map("signed_date")
+  signed     Boolean   @default(false)
+  signedDate DateTime? @map("signed_date")
 
-  organizationId      String?                  @map("organization_id")
-  organization        Organization?            @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById         String?                  @map("created_by_id")
-  createdBy           User?                    @relation("AppointmentLetterCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("AppointmentLetterCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt           DateTime                 @default(now()) @map("created_at")
-  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields        Json?                    @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([organizationId])
   @@index([jobOfferId])
@@ -1956,38 +1962,38 @@ model AppointmentLetter {
 // applicant is just a captured snapshot — they don't exist as a User until
 // recruitment proper begins.
 model EmployeeReferral {
-  id                    String                  @id @default(cuid())
-  referralCode          String?                 @unique @map("referral_code")
+  id           String  @id @default(cuid())
+  referralCode String? @unique @map("referral_code")
 
-  applicantName         String                  @map("applicant_name")
-  applicantEmail        String                  @map("applicant_email")
-  applicantMobile       String                  @map("applicant_mobile")
-  applicantResumeUrl    String?                 @map("applicant_resume_url")
-  applicantResumeName   String?                 @map("applicant_resume_name")
+  applicantName       String  @map("applicant_name")
+  applicantEmail      String  @map("applicant_email")
+  applicantMobile     String  @map("applicant_mobile")
+  applicantResumeUrl  String? @map("applicant_resume_url")
+  applicantResumeName String? @map("applicant_resume_name")
 
-  referralDate          DateTime                @map("referral_date")
-  designation           String?
+  referralDate DateTime @map("referral_date")
+  designation  String?
 
-  referringEmployeeId   String                  @map("referring_employee_id")
-  referringEmployee     Employee                @relation(fields: [referringEmployeeId], references: [id], onDelete: Cascade)
-  referrerFirstName     String                  @map("referrer_first_name")
-  referrerDepartment    String?                 @map("referrer_department")
+  referringEmployeeId String   @map("referring_employee_id")
+  referringEmployee   Employee @relation(fields: [referringEmployeeId], references: [id], onDelete: Cascade)
+  referrerFirstName   String   @map("referrer_first_name")
+  referrerDepartment  String?  @map("referrer_department")
 
-  remark                String?
-  status                EmployeeReferralStatus  @default(NEW)
+  remark String?
+  status EmployeeReferralStatus @default(NEW)
 
-  organizationId        String?                 @map("organization_id")
-  organization          Organization?           @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
-  createdById           String?                 @map("created_by_id")
-  createdBy             User?                   @relation("EmployeeReferralCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  createdBy   User?   @relation("EmployeeReferralCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  createdAt             DateTime                @default(now()) @map("created_at")
-  updatedAt             DateTime                @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Free-form values for non-core fields added in the form-builder. Keyed by
   // FormField.id; rendered alongside the static fields by the React form.
-  customFields          Json?                   @map("custom_fields")
+  customFields Json? @map("custom_fields")
 
   @@index([organizationId])
   @@index([referringEmployeeId])
@@ -2014,6 +2020,10 @@ model Activity {
   @@index([organizationId])
   @@index([type])
   @@index([createdAt])
+  // Audit: tenant-wide activity feed.
+  @@index([organizationId, createdAt(sort: Desc)])
+  // Audit: per-user activity feed.
+  @@index([userId, createdAt(sort: Desc)])
   @@map("activities")
 }
 
@@ -2160,6 +2170,9 @@ model PayrollRecord {
   @@index([month])
   @@index([year])
   @@index([status])
+  // Audit: chronological scans ("last N months for employee X") — the unique
+  // above orders month before year so it can't satisfy ORDER BY year, month.
+  @@index([employeeId, year, month])
   @@map("payroll_records")
 }
 
@@ -2179,23 +2192,23 @@ model Attendance {
   // checkInAt / checkOutAt are the authoritative timestamps; the legacy
   // checkInTime / checkOutTime strings are kept in sync by the punch
   // service so existing payroll readers keep working without changes.
-  organizationId   String?   @map("organization_id")
-  checkInAt        DateTime? @map("check_in_at")
-  checkOutAt       DateTime? @map("check_out_at")
-  checkInLat       Float?    @map("check_in_lat")
-  checkInLng       Float?    @map("check_in_lng")
-  checkOutLat      Float?    @map("check_out_lat")
-  checkOutLng      Float?    @map("check_out_lng")
-  checkInIp        String?   @map("check_in_ip")
-  checkOutIp       String?   @map("check_out_ip")
-  checkInDevice    String?   @map("check_in_device")
-  checkOutDevice   String?   @map("check_out_device")
-  checkInSource    String?   @map("check_in_source") // WEB | MOBILE | BIOMETRIC | ADMIN
-  checkOutSource   String?   @map("check_out_source")
-  breakMinutes     Int       @default(0) @map("break_minutes")
-  lateMinutes      Int       @default(0) @map("late_minutes")
-  earlyOutMinutes  Int       @default(0) @map("early_out_minutes")
-  overtimeMinutes  Int       @default(0) @map("overtime_minutes")
+  organizationId    String?   @map("organization_id")
+  checkInAt         DateTime? @map("check_in_at")
+  checkOutAt        DateTime? @map("check_out_at")
+  checkInLat        Float?    @map("check_in_lat")
+  checkInLng        Float?    @map("check_in_lng")
+  checkOutLat       Float?    @map("check_out_lat")
+  checkOutLng       Float?    @map("check_out_lng")
+  checkInIp         String?   @map("check_in_ip")
+  checkOutIp        String?   @map("check_out_ip")
+  checkInDevice     String?   @map("check_in_device")
+  checkOutDevice    String?   @map("check_out_device")
+  checkInSource     String?   @map("check_in_source") // WEB | MOBILE | BIOMETRIC | ADMIN
+  checkOutSource    String?   @map("check_out_source")
+  breakMinutes      Int       @default(0) @map("break_minutes")
+  lateMinutes       Int       @default(0) @map("late_minutes")
+  earlyOutMinutes   Int       @default(0) @map("early_out_minutes")
+  overtimeMinutes   Int       @default(0) @map("overtime_minutes")
   // Explicit overtime opt-in. The widget shows a "Start Overtime" toggle
   // after shift-end + overtimeStartBufferMinutes. When the employee turns
   // it on, the server stamps `overtimeOptedIn = true` + `overtimeStartedAt
@@ -2206,9 +2219,9 @@ model Attendance {
   // stay null/false in that case.
   overtimeOptedIn   Boolean   @default(false) @map("overtime_opted_in")
   overtimeStartedAt DateTime? @map("overtime_started_at")
-  isAutoCheckedOut Boolean   @default(false) @map("is_auto_checked_out")
-  status           String? // PRESENT | HALF | ABSENT | ON_LEAVE | HOLIDAY | WEEKLY_OFF | REGULARIZED
-  idempotencyKey   String?   @unique @map("idempotency_key")
+  isAutoCheckedOut  Boolean   @default(false) @map("is_auto_checked_out")
+  status            String? // PRESENT | HALF | ABSENT | ON_LEAVE | HOLIDAY | WEEKLY_OFF | REGULARIZED
+  idempotencyKey    String?   @unique @map("idempotency_key")
 
   // Face-capture proof — public URLs to the photo captured at each punch.
   // Uploaded via /api/attendance/photo through the existing Hostinger
@@ -2240,6 +2253,9 @@ model Attendance {
   @@index([checkedOut])
   @@index([organizationId])
   @@index([checkInAt])
+  // Audit: composite for tenant-wide date-range scans (org dashboards).
+  // [userId, date] is already covered by the unique above.
+  @@index([organizationId, date])
   @@map("attendance_records")
 }
 
@@ -2287,7 +2303,7 @@ model AttendanceConfiguration {
   //     for rows where the employee actually toggled OT on. False keeps
   //     the legacy "anything past overtimeAfterHours is OT" behavior.
   overtimeStartBufferMinutes Int     @default(30) @map("overtime_start_buffer_minutes")
-  overtimeMaxHoursPerDay     Float   @default(4)  @map("overtime_max_hours_per_day")
+  overtimeMaxHoursPerDay     Float   @default(4) @map("overtime_max_hours_per_day")
   overtimeRequiresOptIn      Boolean @default(true) @map("overtime_requires_opt_in")
 
   // Working week: 0 = Sun … 6 = Sat. Listed days are WEEKLY-OFF.
@@ -2393,12 +2409,12 @@ model AttendanceConfiguration {
   // IANA name (e.g. "Asia/Kolkata") used by the cron scheduler so reports
   // fire at reportSendHour wall-time of the org's timezone — null falls
   // back to the server's TZ.
-  reportRecipients      Json    @default("[]") @map("report_recipients")
-  reportTimezone        String? @map("report_timezone")
-  reportSendHour        Int     @default(7) @map("report_send_hour")
-  reportDailyEnabled    Boolean @default(false) @map("report_daily_enabled")
-  reportWeeklyEnabled   Boolean @default(false) @map("report_weekly_enabled")
-  reportMonthlyEnabled  Boolean @default(false) @map("report_monthly_enabled")
+  reportRecipients     Json    @default("[]") @map("report_recipients")
+  reportTimezone       String? @map("report_timezone")
+  reportSendHour       Int     @default(7) @map("report_send_hour")
+  reportDailyEnabled   Boolean @default(false) @map("report_daily_enabled")
+  reportWeeklyEnabled  Boolean @default(false) @map("report_weekly_enabled")
+  reportMonthlyEnabled Boolean @default(false) @map("report_monthly_enabled")
 
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
@@ -2662,6 +2678,12 @@ model AuditLog {
   @@index([module])
   @@index([createdAt])
   @@index([ipAddress])
+  // Audit: tenant-scoped chronological scans (admin audit page).
+  @@index([organizationId, createdAt(sort: Desc)])
+  // Audit: per-user audit history within a tenant.
+  @@index([organizationId, userId, createdAt(sort: Desc)])
+  // Audit: module-filtered tenant audit views.
+  @@index([organizationId, module, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 
@@ -2707,6 +2729,8 @@ model FormRecord {
   @@index([employee_id])
   @@index([date])
   @@index([userId])
+  // Audit: standard form-records list page (filter by status, sort recent).
+  @@index([formId, status, submittedAt(sort: Desc)])
   @@map("form_records")
 }
 
@@ -2885,6 +2909,8 @@ model ChatMessage {
 
   @@index([conversationId])
   @@index([createdAt])
+  // Audit: load messages of a conversation in time order.
+  @@index([conversationId, createdAt])
   @@map("chat_messages")
 }
 
@@ -2893,35 +2919,35 @@ model ChatMessage {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model WorkflowRule {
-  id                String              @id @default(cuid())
-  name              String
-  description       String?
-  moduleName        String              @map("module_name")
-  executeBasedOn    String              @map("execute_based_on") // "record-action" | "record-field" | "schedule"
-  recordAction      String?             @map("record_action") // "Create" | "Create or Edit" | "Edit" | "Delete"
-  dateField         String?             @map("date_field") // "Created Time" | "Last Activity Time" etc.
-  conditionType     String              @default("all") @map("condition_type") // "all" | "matching"
-  conditions        Json? // Array of condition objects
-  instantActions    Json?               @map("instant_actions") // Array of selected instant action names
-  scheduledExecute  String?             @map("scheduled_execute") // Number value (legacy: delay-after-date-field)
-  scheduledUnit     String?             @map("scheduled_unit") // "Minutes" | "Hours" | "Days"
+  id                 String              @id @default(cuid())
+  name               String
+  description        String?
+  moduleName         String              @map("module_name")
+  executeBasedOn     String              @map("execute_based_on") // "record-action" | "record-field" | "schedule"
+  recordAction       String?             @map("record_action") // "Create" | "Create or Edit" | "Edit" | "Delete"
+  dateField          String?             @map("date_field") // "Created Time" | "Last Activity Time" etc.
+  conditionType      String              @default("all") @map("condition_type") // "all" | "matching"
+  conditions         Json? // Array of condition objects
+  instantActions     Json?               @map("instant_actions") // Array of selected instant action names
+  scheduledExecute   String?             @map("scheduled_execute") // Number value (legacy: delay-after-date-field)
+  scheduledUnit      String?             @map("scheduled_unit") // "Minutes" | "Hours" | "Days"
   // ── Schedule trigger fields (executeBasedOn = "schedule") ─────────────────
-  scheduleCadence   String?             @map("schedule_cadence") // "daily" | "weekly" | "monthly" | "custom"
-  scheduleCron      String?             @map("schedule_cron") // raw cron expression when cadence = "custom"
-  scheduleHour      Int?                @map("schedule_hour") // 0-23, used by daily/weekly/monthly
-  scheduleMinute    Int?                @default(0) @map("schedule_minute") // 0-59
-  scheduleDayOfWeek Int?                @map("schedule_day_of_week") // 0=Sun..6=Sat, weekly only
-  scheduleDayOfMonth Int?               @map("schedule_day_of_month") // 1-31, monthly only
-  scheduleTimezone  String?             @map("schedule_timezone") // IANA tz, e.g. "Asia/Kolkata"
-  scheduleEnabled   Boolean             @default(true) @map("schedule_enabled")
-  active            Boolean             @default(true)
-  organizationId    String              @map("organization_id")
-  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdById       String              @map("created_by_id")
-  createdBy         User                @relation("WorkflowRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
-  executions        WorkflowExecution[]
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
+  scheduleCadence    String?             @map("schedule_cadence") // "daily" | "weekly" | "monthly" | "custom"
+  scheduleCron       String?             @map("schedule_cron") // raw cron expression when cadence = "custom"
+  scheduleHour       Int?                @map("schedule_hour") // 0-23, used by daily/weekly/monthly
+  scheduleMinute     Int?                @default(0) @map("schedule_minute") // 0-59
+  scheduleDayOfWeek  Int?                @map("schedule_day_of_week") // 0=Sun..6=Sat, weekly only
+  scheduleDayOfMonth Int?                @map("schedule_day_of_month") // 1-31, monthly only
+  scheduleTimezone   String?             @map("schedule_timezone") // IANA tz, e.g. "Asia/Kolkata"
+  scheduleEnabled    Boolean             @default(true) @map("schedule_enabled")
+  active             Boolean             @default(true)
+  organizationId     String              @map("organization_id")
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById        String              @map("created_by_id")
+  createdBy          User                @relation("WorkflowRuleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  executions         WorkflowExecution[]
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   @@index([organizationId])
   @@index([createdById])
@@ -2960,23 +2986,23 @@ model WorkflowExecution {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model CrmFunction {
-  id             String            @id @default(cuid())
+  id             String              @id @default(cuid())
   name           String
-  displayName    String            @map("display_name")
-  category       String            @default("Automation")
-  language       String            @default("JavaScript")
+  displayName    String              @map("display_name")
+  category       String              @default("Automation")
+  language       String              @default("JavaScript")
   description    String?
-  associated     Boolean           @default(false)
-  restApi        Boolean           @default(false) @map("rest_api")
-  script         String?           @db.Text
-  organizationId String            @map("organization_id")
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdById    String            @map("created_by_id")
-  createdBy      User              @relation("CrmFunctionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  associated     Boolean             @default(false)
+  restApi        Boolean             @default(false) @map("rest_api")
+  script         String?             @db.Text
+  organizationId String              @map("organization_id")
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String              @map("created_by_id")
+  createdBy      User                @relation("CrmFunctionCreator", fields: [createdById], references: [id], onDelete: Cascade)
   bindings       FunctionBinding[]
   executions     FunctionExecution[]
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
 
   @@index([organizationId])
   @@index([createdById])
@@ -3092,6 +3118,8 @@ model Notification {
   @@index([recipientId, isRead, createdAt])
   @@index([organizationId, createdAt])
   @@index([ruleId])
+  // Audit: tenant-wide unread/read filter (admin notification moderation).
+  @@index([organizationId, isRead, createdAt(sort: Desc)])
   @@map("notifications")
 }
 
@@ -3162,7 +3190,7 @@ model LeaveRequest {
   // employee can apply for today when a real emergency strikes. Past dates
   // are still blocked. Defaults to false; set client-side via the
   // "Emergency leave" toggle on the apply form.
-  isEmergency  Boolean @default(false) @map("is_emergency")
+  isEmergency Boolean @default(false) @map("is_emergency")
 
   status       LeaveRequestStatus @default(PENDING)
   appliedAt    DateTime           @default(now()) @map("applied_at")
@@ -3198,6 +3226,10 @@ model LeaveRequest {
   @@index([leaveTypeId])
   @@index([startDate, endDate])
   @@index([shortenStatus])
+  // Audit: pending-leaves dashboard sorted by start date.
+  @@index([organizationId, status, startDate])
+  // Audit: "my leave history" chronological list.
+  @@index([userId, startDate])
   @@map("leave_requests")
 }
 
@@ -3300,7 +3332,7 @@ model TrashBin {
   id             String   @id @default(cuid())
   organizationId String?  @map("organization_id")
   resourceType   String   @map("resource_type") // "Form" | "FormModule" | "Holiday" | ...
-  resourceId     String   @map("resource_id")   // original record id (for re-create)
+  resourceId     String   @map("resource_id") // original record id (for re-create)
   resourceName   String?  @map("resource_name") // human-readable label for the trash list
   snapshot       Json
   deletedById    String?  @map("deleted_by_id")
@@ -3392,8 +3424,8 @@ enum CommissionTermType {
 }
 
 model Property {
-  id             String  @id @default(cuid())
-  organizationId String  @map("organization_id")
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
 
   // Identity
   title       String
@@ -3724,17 +3756,17 @@ model Lead {
   organizationId String @map("organization_id")
 
   // Origin + ownership (see LeadOrigin doc above).
-  origin        LeadOrigin @default(AGENT)
+  origin            LeadOrigin @default(AGENT)
   // Final owner of the lead — set on transaction close for COMPANY
   // origin, or seeded from `assignedAgentId` for AGENT origin once a
   // capture is in flight. NULL while the lead is still in the open pool.
-  ownerAgentId  String?    @map("owner_agent_id")
+  ownerAgentId      String?    @map("owner_agent_id")
   // Self-FK pointing at the original Lead this row is a silent duplicate
   // of. Only populated for AGENT-origin leads. Surfaced ONLY to
   // privileged users (admin / MD); regular agents never see this field.
-  duplicateOfLeadId String? @map("duplicate_of_lead_id")
-  duplicateOf       Lead?   @relation("LeadDuplicates", fields: [duplicateOfLeadId], references: [id], onDelete: SetNull)
-  duplicates        Lead[]  @relation("LeadDuplicates")
+  duplicateOfLeadId String?    @map("duplicate_of_lead_id")
+  duplicateOf       Lead?      @relation("LeadDuplicates", fields: [duplicateOfLeadId], references: [id], onDelete: SetNull)
+  duplicates        Lead[]     @relation("LeadDuplicates")
 
   // Contact
   name     String
@@ -3769,7 +3801,7 @@ model Lead {
   buyer       Buyer?    @relation(fields: [buyerId], references: [id])
   lostReason  String?   @map("lost_reason")
 
-  notes      String? @db.Text
+  notes      String?           @db.Text
   activities LeadActivity[]
   viewings   PropertyViewing[]
 
@@ -3786,7 +3818,7 @@ model Lead {
   // Customer photo (passport-style snap that an agent takes on capture).
   // Uploaded to Hostinger via /api/upload like every other image; what
   // lives on Lead is just the URL.
-  photoUrl    String? @map("photo_url")
+  photoUrl   String? @map("photo_url")
   // Perceptual hash (dHash, 64-bit, stored as 16 lowercase hex chars)
   // computed in the browser at capture time. Drives image-based silent
   // duplicate detection — catches "agent retyped phone wrong to fool
@@ -3794,7 +3826,7 @@ model Lead {
   // distance ≤ 10. Indexed only by organizationId because we have to
   // pull all candidates into JS for the bit-distance compare anyway
   // (no native XOR/popcount in stock Prisma).
-  photoPhash  String? @map("photo_phash")
+  photoPhash String? @map("photo_phash")
 
   @@index([organizationId, status])
   @@index([assignedAgentId, status])
@@ -3805,6 +3837,8 @@ model Lead {
   @@index([organizationId, phoneNormalized])
   @@index([organizationId, emailNormalized])
   @@index([duplicateOfLeadId])
+  // Audit: pipeline page sorted by recency within status.
+  @@index([organizationId, status, createdAt(sort: Desc)])
   @@map("re_leads")
 }
 
@@ -3820,7 +3854,7 @@ model LeadActivity {
   outcome    String?
   // Type-specific payload, e.g. { fromStatus, toStatus } or
   // { fromAgentId, toAgentId } for ASSIGNMENT
-  data Json?
+  data       Json?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -3920,19 +3954,19 @@ model Transaction {
   sellingAgentId String? @map("selling_agent_id")
 
   // Pricing (Decimal for safety; FR-5.8)
-  salePrice  Decimal @map("sale_price") @db.Decimal(14, 2)
-  currency   String  @default("INR")
+  salePrice Decimal @map("sale_price") @db.Decimal(14, 2)
+  currency  String  @default("INR")
 
   // Lifecycle
-  status     TransactionStatus @default(PENDING)
-  closedAt   DateTime?         @map("closed_at")
-  cancelledAt DateTime?        @map("cancelled_at")
-  cancellationReason String?   @map("cancellation_reason") @db.Text
+  status             TransactionStatus @default(PENDING)
+  closedAt           DateTime?         @map("closed_at")
+  cancelledAt        DateTime?         @map("cancelled_at")
+  cancellationReason String?           @map("cancellation_reason") @db.Text
 
   // Versioning — once closed, the transaction "owns" the rule it used (FR-5.11
   // / BR-9). The application layer stamps these at close time.
-  commissionRuleId      String?  @map("commission_rule_id")
-  commissionRuleVersion Int?     @map("commission_rule_version")
+  commissionRuleId      String? @map("commission_rule_id")
+  commissionRuleVersion Int?    @map("commission_rule_version")
 
   // Total commission produced by the engine. Sum of CommissionSplit.amount.
   baseCommission Decimal? @map("base_commission") @db.Decimal(14, 2)
@@ -3940,10 +3974,10 @@ model Transaction {
   // Payment terms — free-form for Phase 2; later iterations may model EMIs.
   paymentTerms String? @map("payment_terms") @db.Text
 
-  documents     TransactionDocument[]
+  documents        TransactionDocument[]
   commissionSplits CommissionSplit[]
   commissionAudits CommissionAudit[]
-  ledgerEntries LedgerEntry[]
+  ledgerEntries    LedgerEntry[]
 
   createdById String   @map("created_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -3956,6 +3990,8 @@ model Transaction {
   @@index([listingAgentId])
   @@index([sellingAgentId])
   @@index([closedAt])
+  // Audit: sales reports filtered by status with close-date ordering.
+  @@index([organizationId, status, closedAt(sort: Desc)])
   @@map("re_transactions")
 }
 
@@ -4002,9 +4038,9 @@ model CommissionRule {
   // Same shape as Rank.overridePercents; rules can declare their own ladder
   // or fall through to the agent's rank.overridePercents (controlled by
   // useRankOverrides). Stored as Json (decimal array).
-  overridePercents  Json    @default("[]") @map("override_percents")
-  useRankOverrides  Boolean @default(false) @map("use_rank_overrides")
-  maxOverrideDepth  Int     @default(3) @map("max_override_depth")
+  overridePercents Json    @default("[]") @map("override_percents")
+  useRankOverrides Boolean @default(false) @map("use_rank_overrides")
+  maxOverrideDepth Int     @default(3) @map("max_override_depth")
 
   // Default base commission = % of sale price for any property that doesn't
   // override on the Property row itself (Property.commissionPercentage /
@@ -4012,8 +4048,8 @@ model CommissionRule {
   defaultBasePercent Decimal? @map("default_base_percent") @db.Decimal(7, 4)
 
   // Operational config
-  holdPeriodDays   Int     @default(7) @map("hold_period_days") // FR-5.12
-  compressionRule  Boolean @default(true) @map("compression_rule") // FR-5.6 / BR-8
+  holdPeriodDays  Int     @default(7) @map("hold_period_days") // FR-5.12
+  compressionRule Boolean @default(true) @map("compression_rule") // FR-5.6 / BR-8
 
   createdById String   @map("created_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -4045,27 +4081,27 @@ enum CommissionStatus {
 // SELLING_AGENT and BROKERAGE rows are the FR-5.3 splits; OVERRIDE rows are
 // the upline distribution (one per level), RANK_BONUS rows are FR-5.7 extras.
 model CommissionSplit {
-  id            String      @id @default(cuid())
-  organizationId String     @map("organization_id")
-  transactionId String      @map("transaction_id")
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  id             String      @id @default(cuid())
+  organizationId String      @map("organization_id")
+  transactionId  String      @map("transaction_id")
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
-  ruleId  String?         @map("rule_id")
-  rule    CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  ruleId String?         @map("rule_id")
+  rule   CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
 
-  role            CommissionSplitRole
+  role              CommissionSplitRole
   // For OVERRIDE rows: 1, 2, 3 = depth from the originating agent. Null for
   // listing/selling/brokerage rows.
-  level           Int?
+  level             Int?
   // Beneficiary user (agent) — null for the BROKERAGE-house row, which is
   // tracked at org level only.
-  beneficiaryUserId String?           @map("beneficiary_user_id")
+  beneficiaryUserId String?             @map("beneficiary_user_id")
 
-  percent  Decimal           @db.Decimal(7, 4) // % applied
-  amount   Decimal           @db.Decimal(14, 2) // computed amount
-  status   CommissionStatus  @default(ON_HOLD)
+  percent Decimal          @db.Decimal(7, 4) // % applied
+  amount  Decimal          @db.Decimal(14, 2) // computed amount
+  status  CommissionStatus @default(ON_HOLD)
 
-  ledgerEntryId String? @unique @map("ledger_entry_id") // 1:1 with the credit row
+  ledgerEntryId         String? @unique @map("ledger_entry_id") // 1:1 with the credit row
   reversalLedgerEntryId String? @unique @map("reversal_ledger_entry_id")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -4074,6 +4110,8 @@ model CommissionSplit {
   @@index([organizationId, status])
   @@index([transactionId])
   @@index([beneficiaryUserId, status])
+  // Audit: agent earnings page sorted by recency within status.
+  @@index([beneficiaryUserId, status, createdAt(sort: Desc)])
   @@map("re_commission_splits")
 }
 
@@ -4081,19 +4119,19 @@ model CommissionSplit {
 // keeps the inputs, the rule snapshot, and the resulting splits as JSON so
 // disputes can be answered without rerunning the engine.
 model CommissionAudit {
-  id            String      @id @default(cuid())
-  organizationId String     @map("organization_id")
-  transactionId String      @map("transaction_id")
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  id             String      @id @default(cuid())
+  organizationId String      @map("organization_id")
+  transactionId  String      @map("transaction_id")
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
   ruleId      String?         @map("rule_id")
   rule        CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
   ruleVersion Int             @map("rule_version")
 
-  kind  String // 'CALCULATE' | 'REVERSE' | 'RELEASE'
-  inputs   Json // sale price, agents, rank chain, rule snapshot
-  outputs  Json // split rows snapshot
-  notes    String? @db.Text
+  kind    String // 'CALCULATE' | 'REVERSE' | 'RELEASE'
+  inputs  Json // sale price, agents, rank chain, rule snapshot
+  outputs Json // split rows snapshot
+  notes   String? @db.Text
 
   createdById String   @map("created_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -4176,20 +4214,20 @@ model LedgerEntry {
   category LedgerCategory
   status   LedgerStatus    @default(RELEASED)
 
-  amount        Decimal @db.Decimal(14, 2) // always positive
+  amount       Decimal @db.Decimal(14, 2) // always positive
   // Snapshot of the wallet's available balance after this row was applied —
   // makes statements straightforward to render.
-  balanceAfter  Decimal @map("balance_after") @db.Decimal(14, 2)
-  currency      String  @default("INR")
+  balanceAfter Decimal @map("balance_after") @db.Decimal(14, 2)
+  currency     String  @default("INR")
 
   description String?
 
   // Optional cross-references — at most one is set per row.
-  transactionId    String?      @map("transaction_id")
-  transaction      Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-  splitId          String?      @map("split_id") // → CommissionSplit.id
-  withdrawalId     String?      @map("withdrawal_id")
-  reversesEntryId  String?      @map("reverses_entry_id") // → LedgerEntry.id
+  transactionId   String?      @map("transaction_id")
+  transaction     Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  splitId         String?      @map("split_id") // → CommissionSplit.id
+  withdrawalId    String?      @map("withdrawal_id")
+  reversesEntryId String?      @map("reverses_entry_id") // → LedgerEntry.id
 
   releasedAt DateTime? @map("released_at")
 
@@ -4200,6 +4238,8 @@ model LedgerEntry {
   @@index([walletId, status])
   @@index([transactionId])
   @@index([category, createdAt])
+  // Audit: tenant-wide reconciliation by date.
+  @@index([organizationId, createdAt(sort: Desc)])
   @@map("re_ledger_entries")
 }
 
@@ -4210,21 +4250,21 @@ model LedgerEntry {
 // Bank account for an agent. FR-7.1 — accountNumber stored encrypted at the
 // application layer; we keep accountNumberLast4 plaintext for UI display.
 model BankAccount {
-  id             String  @id @default(cuid())
-  organizationId String  @map("organization_id")
-  userId         String  @map("user_id")
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  userId         String @map("user_id")
 
-  label             String?
-  bankName          String  @map("bank_name")
-  accountHolderName String  @map("account_holder_name")
+  label                  String?
+  bankName               String  @map("bank_name")
+  accountHolderName      String  @map("account_holder_name")
   // Encrypted at rest (AES-256 — encryption key from REBM_BANK_KEY env var)
-  accountNumberEncrypted String @map("account_number_encrypted")
-  accountNumberLast4     String @map("account_number_last4")
-  ifscOrSwift            String @map("ifsc_or_swift")
+  accountNumberEncrypted String  @map("account_number_encrypted")
+  accountNumberLast4     String  @map("account_number_last4")
+  ifscOrSwift            String  @map("ifsc_or_swift")
   branch                 String?
   country                String  @default("IN")
 
-  isPrimary  Boolean @default(false) @map("is_primary")
+  isPrimary  Boolean   @default(false) @map("is_primary")
   verifiedAt DateTime? @map("verified_at")
 
   withdrawals WithdrawalRequest[]
@@ -4314,26 +4354,26 @@ model WithdrawalRequest {
 
   userId String @map("user_id") // requester / wallet owner
 
-  bankAccountId String       @map("bank_account_id")
-  bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id])
+  bankAccountId String      @map("bank_account_id")
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
 
-  amount      Decimal @db.Decimal(14, 2)
-  fee         Decimal @default(0) @db.Decimal(14, 2)
-  netAmount   Decimal @map("net_amount") @db.Decimal(14, 2) // amount − fee
-  currency    String  @default("INR")
+  amount    Decimal @db.Decimal(14, 2)
+  fee       Decimal @default(0) @db.Decimal(14, 2)
+  netAmount Decimal @map("net_amount") @db.Decimal(14, 2) // amount − fee
+  currency  String  @default("INR")
 
   status WithdrawalStatus @default(REQUESTED)
 
   // Approval & payment tracking
-  approvedById   String?   @map("approved_by_id")
-  approvedAt     DateTime? @map("approved_at")
-  rejectedById   String?   @map("rejected_by_id")
-  rejectedAt     DateTime? @map("rejected_at")
-  rejectionReason String?  @map("rejection_reason")
-  paidById       String?   @map("paid_by_id")
-  paidAt         DateTime? @map("paid_at")
-  paymentReference String? @map("payment_reference")
-  failureReason   String?  @map("failure_reason")
+  approvedById     String?   @map("approved_by_id")
+  approvedAt       DateTime? @map("approved_at")
+  rejectedById     String?   @map("rejected_by_id")
+  rejectedAt       DateTime? @map("rejected_at")
+  rejectionReason  String?   @map("rejection_reason")
+  paidById         String?   @map("paid_by_id")
+  paidAt           DateTime? @map("paid_at")
+  paymentReference String?   @map("payment_reference")
+  failureReason    String?   @map("failure_reason")
 
   // Ledger debit row that holds the funds while the request is in-flight
   holdLedgerEntryId String? @unique @map("hold_ledger_entry_id")
@@ -4372,8 +4412,8 @@ enum InventoryProductStatus {
 }
 
 model InventoryProduct {
-  id             String                 @id @default(cuid())
-  organizationId String                 @map("organization_id")
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
 
   // Basics
   name             String
@@ -4385,9 +4425,9 @@ model InventoryProduct {
 
   // Pricing
   price          Decimal  @db.Decimal(12, 2)
-  compareAtPrice Decimal? @db.Decimal(12, 2) @map("compare_at_price")
+  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(12, 2)
   currency       String   @default("INR")
-  taxRate        Decimal? @db.Decimal(5, 2) @map("tax_rate")
+  taxRate        Decimal? @map("tax_rate") @db.Decimal(5, 2)
 
   // Inventory
   stockQty          Int     @default(0) @map("stock_qty")
@@ -4417,7 +4457,7 @@ model InventoryProduct {
   // Shipping (advanced)
   weight     Decimal? @db.Decimal(10, 3)
   weightUnit String?  @map("weight_unit")
-  dimensions Json?    // { length, width, height, unit }
+  dimensions Json? // { length, width, height, unit }
 
   // Storefront layout — { rows: [{ id, blocks: [{ id, type, colSpan, props }] }] }
   pageLayout Json? @map("page_layout")
@@ -4438,8 +4478,8 @@ model InventoryProduct {
 
 // Module-level settings for Real Estate Brokerage (one row per org).
 model RebmSettings {
-  id             String  @id @default(cuid())
-  organizationId String  @unique @map("organization_id")
+  id             String @id @default(cuid())
+  organizationId String @unique @map("organization_id")
 
   // RERA gate — when true, transaction close is blocked unless both agents
   // are RERA-verified. Configurable so orgs can onboard before enforcement.
@@ -4475,11 +4515,11 @@ model AgentReraProfile {
   agent   AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   reraNumber     String?   @map("rera_number")
-  reraState      String?   @map("rera_state")      // state issuing the certificate
+  reraState      String?   @map("rera_state") // state issuing the certificate
   reraExpiresAt  DateTime? @map("rera_expires_at")
   reraVerifiedAt DateTime? @map("rera_verified_at")
   reraVerifiedBy String?   @map("rera_verified_by") // User.id of admin who verified
-  reraDocUrl     String?   @map("rera_doc_url")     // uploaded certificate URL
+  reraDocUrl     String?   @map("rera_doc_url") // uploaded certificate URL
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -4498,11 +4538,11 @@ enum CompPlanStatus {
 // Top-level plan document. One ACTIVE plan per org at a time. Plans are
 // immutable once ACTIVE — edits produce a new DRAFT version.
 model CompPlan {
-  id             String        @id @default(cuid())
-  organizationId String        @map("organization_id")
+  id             String         @id @default(cuid())
+  organizationId String         @map("organization_id")
   name           String
-  description    String?       @db.Text
-  version        Int           @default(1)
+  description    String?        @db.Text
+  version        Int            @default(1)
   status         CompPlanStatus @default(DRAFT)
 
   // Area unit for all slabs in this plan (SQYD / SQFT / SQM).
@@ -4523,17 +4563,17 @@ model CompPlan {
   // Slab counter scope: "LIFETIME" or "ANNUAL" (resets each April 1 in India).
   slabCounterScope String @default("LIFETIME") @map("slab_counter_scope")
 
-  createdById String   @map("created_by_id")
+  createdById String    @map("created_by_id")
   activatedAt DateTime? @map("activated_at")
-  activatedBy String?  @map("activated_by")
+  activatedBy String?   @map("activated_by")
   archivedAt  DateTime? @map("archived_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  slabs        CompPlanSlab[]
-  overrideLevels CompPlanOverrideLevel[]
-  designations CompPlanDesignation[]
-  guarantees   CompPlanGuarantee[]
+  slabs             CompPlanSlab[]
+  overrideLevels    CompPlanOverrideLevel[]
+  designations      CompPlanDesignation[]
+  guarantees        CompPlanGuarantee[]
   areaLedgerEntries AgentAreaLedger[]
 
   @@index([organizationId, status])
@@ -4547,10 +4587,10 @@ model CompPlanSlab {
   planId String   @map("plan_id")
   plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
-  sortOrder  Int     @map("sort_order") // 0-based; determines slab boundary order
-  minArea    Decimal @map("min_area") @db.Decimal(14, 2) // inclusive lower bound
-  maxArea    Decimal? @map("max_area") @db.Decimal(14, 2) // null = unlimited (last slab)
-  ratePerUnit Decimal @map("rate_per_unit") @db.Decimal(14, 4) // ₹ per sq.yd
+  sortOrder   Int      @map("sort_order") // 0-based; determines slab boundary order
+  minArea     Decimal  @map("min_area") @db.Decimal(14, 2) // inclusive lower bound
+  maxArea     Decimal? @map("max_area") @db.Decimal(14, 2) // null = unlimited (last slab)
+  ratePerUnit Decimal  @map("rate_per_unit") @db.Decimal(14, 4) // ₹ per sq.yd
 
   @@index([planId, sortOrder])
   @@map("re_comp_plan_slabs")
@@ -4564,7 +4604,7 @@ model CompPlanOverrideLevel {
   planId String   @map("plan_id")
   plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
-  level  Int     // 1 = immediate upline, 10 = deepest
+  level  Int // 1 = immediate upline, 10 = deepest
   factor Decimal @db.Decimal(10, 4) // see overrideMode
 
   @@unique([planId, level])
@@ -4577,12 +4617,12 @@ model CompPlanDesignation {
   planId String   @map("plan_id")
   plan   CompPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
-  sortOrder         Int     @map("sort_order")
-  minCumulativeArea Decimal @map("min_cumulative_area") @db.Decimal(14, 2)
-  designationCode   String  @map("designation_code") // e.g. BP, SBP, RBP
-  designationName   String  @map("designation_name") // e.g. Business Partner
-  rewardType        String  @map("reward_type") // TRAVEL | CASH | NONE | SURPRISE
-  rewardDescription String? @map("reward_description") @db.Text // e.g. "International Tour — Malaysia, Thailand"
+  sortOrder         Int      @map("sort_order")
+  minCumulativeArea Decimal  @map("min_cumulative_area") @db.Decimal(14, 2)
+  designationCode   String   @map("designation_code") // e.g. BP, SBP, RBP
+  designationName   String   @map("designation_name") // e.g. Business Partner
+  rewardType        String   @map("reward_type") // TRAVEL | CASH | NONE | SURPRISE
+  rewardDescription String?  @map("reward_description") @db.Text // e.g. "International Tour — Malaysia, Thailand"
   rewardCashAmount  Decimal? @map("reward_cash_amount") @db.Decimal(14, 2) // if CASH
 
   @@index([planId, sortOrder])
@@ -4606,10 +4646,10 @@ model CompPlanGuarantee {
 // ─── Area Ledger (append-only sq.yd tracking per agent) ──────────────────────
 
 model AgentAreaLedger {
-  id             String  @id @default(cuid())
-  organizationId String  @map("organization_id")
-  agentId        String  @map("agent_id")  // AgentProfile.id
-  planId         String  @map("plan_id")   // CompPlan under which the deal was counted
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  agentId        String   @map("agent_id") // AgentProfile.id
+  planId         String   @map("plan_id") // CompPlan under which the deal was counted
   plan           CompPlan @relation(fields: [planId], references: [id])
 
   transactionId  String  @map("transaction_id") // re_transactions.id
@@ -4619,8 +4659,8 @@ model AgentAreaLedger {
   directIncome   Decimal @map("direct_income") @db.Decimal(14, 2) // = dealArea × rateApplied
 
   // Reversal flag — set when the transaction is cancelled
-  isReversed     Boolean  @default(false) @map("is_reversed")
-  reversedAt     DateTime? @map("reversed_at")
+  isReversed Boolean   @default(false) @map("is_reversed")
+  reversedAt DateTime? @map("reversed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -4632,28 +4672,28 @@ model AgentAreaLedger {
 // ─── Reward Grants (Plan 4 milestone gifts) ───────────────────────────────────
 
 enum RewardGrantStatus {
-  PENDING    // milestone crossed; reward not yet fulfilled
-  FULFILLED  // admin marked as fulfilled
-  CANCELLED  // transaction reversed before fulfilment
+  PENDING // milestone crossed; reward not yet fulfilled
+  FULFILLED // admin marked as fulfilled
+  CANCELLED // transaction reversed before fulfilment
 }
 
 model RewardGrant {
-  id             String            @id @default(cuid())
-  organizationId String            @map("organization_id")
-  agentId        String            @map("agent_id")
-  planId         String            @map("plan_id")
-  designationCode String           @map("designation_code")
-  designationName String           @map("designation_name")
-  rewardType      String           @map("reward_type")
-  rewardDescription String?        @map("reward_description") @db.Text
-  rewardCashAmount  Decimal?       @map("reward_cash_amount") @db.Decimal(14, 2)
-  status          RewardGrantStatus @default(PENDING)
-  triggeredByArea Decimal          @map("triggered_by_area") @db.Decimal(14, 2)
-  fulfilledAt     DateTime?        @map("fulfilled_at")
-  fulfilledById   String?          @map("fulfilled_by_id")
-  notes           String?          @db.Text
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id                String            @id @default(cuid())
+  organizationId    String            @map("organization_id")
+  agentId           String            @map("agent_id")
+  planId            String            @map("plan_id")
+  designationCode   String            @map("designation_code")
+  designationName   String            @map("designation_name")
+  rewardType        String            @map("reward_type")
+  rewardDescription String?           @map("reward_description") @db.Text
+  rewardCashAmount  Decimal?          @map("reward_cash_amount") @db.Decimal(14, 2)
+  status            RewardGrantStatus @default(PENDING)
+  triggeredByArea   Decimal           @map("triggered_by_area") @db.Decimal(14, 2)
+  fulfilledAt       DateTime?         @map("fulfilled_at")
+  fulfilledById     String?           @map("fulfilled_by_id")
+  notes             String?           @db.Text
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
 
   @@index([organizationId, agentId])
   @@index([organizationId, status])
@@ -4663,17 +4703,17 @@ model RewardGrant {
 // ─── Guarantee Payouts (Plan 5 monthly credits) ───────────────────────────────
 
 model GuaranteePayout {
-  id             String  @id @default(cuid())
-  organizationId String  @map("organization_id")
-  agentId        String  @map("agent_id")
-  planId         String  @map("plan_id")
-  designationCode String @map("designation_code")
-  periodYear     Int     @map("period_year")  // e.g. 2026
-  periodMonth    Int     @map("period_month") // 1-12
-  amount         Decimal @map("amount") @db.Decimal(14, 2)
-  currency       String  @default("INR")
-  ledgerEntryId  String? @map("ledger_entry_id") // LedgerEntry.id
-  createdAt      DateTime @default(now()) @map("created_at")
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  agentId         String   @map("agent_id")
+  planId          String   @map("plan_id")
+  designationCode String   @map("designation_code")
+  periodYear      Int      @map("period_year") // e.g. 2026
+  periodMonth     Int      @map("period_month") // 1-12
+  amount          Decimal  @map("amount") @db.Decimal(14, 2)
+  currency        String   @default("INR")
+  ledgerEntryId   String?  @map("ledger_entry_id") // LedgerEntry.id
+  createdAt       DateTime @default(now()) @map("created_at")
 
   @@unique([organizationId, agentId, planId, periodYear, periodMonth])
   @@index([organizationId, periodYear, periodMonth])
@@ -4683,22 +4723,22 @@ model GuaranteePayout {
 // ─── Invite Tokens (agent self-onboarding) ───────────────────────────────────
 
 enum InviteTokenStatus {
-  PENDING   // created, not yet used
-  USED      // redeemed — AgentProfile created
-  EXPIRED   // past expiresAt without use
+  PENDING // created, not yet used
+  USED // redeemed — AgentProfile created
+  EXPIRED // past expiresAt without use
   CANCELLED // admin revoked
 }
 
 model InviteToken {
-  id             String            @id @default(cuid())
-  organizationId String            @map("organization_id")
-  token          String            @unique // URL-safe random string
-  sponsorAgentId String            @map("sponsor_agent_id") // AgentProfile.id of inviter
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  token          String  @unique // URL-safe random string
+  sponsorAgentId String  @map("sponsor_agent_id") // AgentProfile.id of inviter
   // parentAgentId defaults to sponsorAgentId but admin can override
-  parentAgentId  String?           @map("parent_agent_id")
+  parentAgentId  String? @map("parent_agent_id")
 
-  status         InviteTokenStatus @default(PENDING)
-  expiresAt      DateTime          @map("expires_at")
+  status    InviteTokenStatus @default(PENDING)
+  expiresAt DateTime          @map("expires_at")
 
   // Pre-filled fields shown on the join form
   prefillName  String? @map("prefill_name")
@@ -4717,3 +4757,61 @@ model InviteToken {
   @@map("re_invite_tokens")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RAW-SQL INDEX RECOMMENDATIONS (run manually — Prisma's DSL can't generate these)
+// ─────────────────────────────────────────────────────────────────────────────
+// These indexes are not expressible in the schema DSL but are strongly
+// recommended for production performance. Apply them by creating a
+// migration with `npx prisma migrate dev --create-only --name raw_indexes`
+// and pasting the body below into the generated .sql file, then running
+// `npx prisma migrate dev` to apply.
+//
+// Requires the pg_trgm extension for trigram search:
+//   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+//
+// -- Trigram indexes for ILIKE '%term%' search --------------------------------
+// CREATE INDEX IF NOT EXISTS employees_employee_name_trgm
+//   ON employees USING gin (employee_name gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS re_leads_name_trgm
+//   ON re_leads USING gin (name gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS re_leads_email_trgm
+//   ON re_leads USING gin (email gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS re_leads_phone_trgm
+//   ON re_leads USING gin (phone gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS re_properties_title_trgm
+//   ON re_properties USING gin (title gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS inventory_products_name_trgm
+//   ON inventory_products USING gin (name gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS job_applications_applicant_name_trgm
+//   ON job_applications USING gin (applicant_name gin_trgm_ops);
+// CREATE INDEX IF NOT EXISTS job_applications_applicant_email_trgm
+//   ON job_applications USING gin (applicant_email gin_trgm_ops);
+//
+// -- GIN indexes for JSON fields queried by content --------------------------
+// CREATE INDEX IF NOT EXISTS form_records_record_data_gin
+//   ON form_records USING gin (record_data);
+// CREATE INDEX IF NOT EXISTS employees_custom_fields_gin
+//   ON employees USING gin (custom_fields);
+// CREATE INDEX IF NOT EXISTS job_applications_resume_data_gin
+//   ON job_applications USING gin (resume_data);
+// CREATE INDEX IF NOT EXISTS workflow_rules_conditions_gin
+//   ON workflow_rules USING gin (conditions);
+// CREATE INDEX IF NOT EXISTS notifications_data_gin
+//   ON notifications USING gin (data);
+// CREATE INDEX IF NOT EXISTS inventory_products_tags_gin
+//   ON inventory_products USING gin (tags);
+// CREATE INDEX IF NOT EXISTS inventory_products_specs_gin
+//   ON inventory_products USING gin (specs);
+//
+// -- Partial indexes for hot/active filtering --------------------------------
+// -- (Useful when isActive=false rows dominate; uncomment if that's the case.)
+// -- CREATE INDEX IF NOT EXISTS permissions_active
+// --   ON permissions (organization_id, resource) WHERE is_active = true;
+// -- CREATE INDEX IF NOT EXISTS roles_active
+// --   ON roles (organization_id, name) WHERE is_active = true;
+//
+// -- Partial index for session sweep ------------------------------------------
+// -- (Drop the existing user_sessions(expires_at) index after creating this.)
+// -- CREATE INDEX IF NOT EXISTS user_sessions_active_expiry
+// --   ON user_sessions (expires_at) WHERE expires_at > now();
+// ─────────────────────────────────────────────────────────────────────────────
