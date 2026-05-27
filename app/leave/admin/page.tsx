@@ -43,6 +43,8 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCircle,
+  Search,
+  X as XIcon,
 } from 'lucide-react';
 import {
   LeaveCalendar,
@@ -98,6 +100,7 @@ export default function LeaveAdminPage() {
   const [forbidden, setForbidden] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -184,55 +187,95 @@ export default function LeaveAdminPage() {
       )
       .map((b) => b.leaveType) ?? [];
 
+  const filteredEmployees = useMemo(() => {
+    const list = employees ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((e) => {
+      const name = `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim().toLowerCase();
+      return (
+        name.includes(q) ||
+        e.email.toLowerCase().includes(q) ||
+        (e.department ?? '').toLowerCase().includes(q)
+      );
+    });
+  }, [employees, search]);
+
   return (
     <div className="container mx-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4">
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <PageBackLink href="/leave" label="Leave" />
-        <div className="flex items-start justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <Wallet className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
-                Leave Administration
-              </h1>
-              {employees && (
-                <div className="text-xs text-muted-foreground truncate">
-                  {employees.length} employee{employees.length === 1 ? '' : 's'} · year {year}
-                </div>
-              )}
-            </div>
+        {/* Title block — name + count on its own row so the toolbar below
+            never crowds it on mobile. */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Wallet className="h-5 w-5" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-              <SelectTrigger className="w-[90px] h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={refresh}
-              disabled={refreshing}
-              className="h-8 w-8"
-              aria-label="Refresh"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            </Button>
-            <Button size="sm" onClick={() => setBulkOpen(true)} className="h-8 px-2 sm:px-3">
-              <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
-              <span className="hidden sm:inline">Bulk Allocate</span>
-              <span className="sm:hidden">Bulk</span>
-            </Button>
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
+              Leave Administration
+            </h1>
+            {employees && (
+              <div className="text-xs text-muted-foreground truncate">
+                {employees.length} employee{employees.length === 1 ? '' : 's'} · year {year}
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Toolbar — search grows to fill, year/refresh/bulk anchor right.
+            Wraps cleanly under 380px without overflowing. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="relative flex-1 min-w-[160px] order-1">
+            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search name, email, department…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-7 h-8 text-xs w-full"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <XIcon className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+            <SelectTrigger className="w-[90px] h-8 text-xs shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={refresh}
+            disabled={refreshing}
+            className="h-8 w-8 shrink-0"
+            aria-label="Refresh"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setBulkOpen(true)}
+            className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+          >
+            <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">Bulk Allocate</span>
+            <span className="sm:hidden">Bulk</span>
+          </Button>
         </div>
       </div>
 
@@ -262,7 +305,9 @@ export default function LeaveAdminPage() {
         <TabsContent value="allocations">
           <AllocationsGrid
             loading={loading}
-            employees={employees ?? []}
+            employees={filteredEmployees}
+            totalEmployees={employees?.length ?? 0}
+            searchActive={search.trim().length > 0}
             allTypes={allTypes}
             savingCell={savingCell}
             onAdjust={adjust}
@@ -274,7 +319,7 @@ export default function LeaveAdminPage() {
         </TabsContent>
 
         <TabsContent value="usage">
-          <UsageSummary employees={employees ?? []} allTypes={allTypes} loading={loading} />
+          <UsageSummary employees={filteredEmployees} allTypes={allTypes} loading={loading} />
         </TabsContent>
       </Tabs>
 
@@ -299,12 +344,16 @@ export default function LeaveAdminPage() {
 function AllocationsGrid({
   loading,
   employees,
+  totalEmployees,
+  searchActive,
   allTypes,
   savingCell,
   onAdjust,
 }: {
   loading: boolean;
   employees: EmployeeRow[];
+  totalEmployees: number;
+  searchActive: boolean;
   allTypes: { id: string; name: string }[];
   savingCell: string | null;
   onAdjust: (userId: string, leaveTypeId: string, amount: number) => void;
@@ -320,7 +369,7 @@ function AllocationsGrid({
       </Card>
     );
   }
-  if (employees.length === 0) {
+  if (totalEmployees === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -339,31 +388,40 @@ function AllocationsGrid({
       </Card>
     );
   }
+  if (employees.length === 0 && searchActive) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          <Search className="h-10 w-10 mx-auto mb-3 opacity-50" />
+          No employees match your search.
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
       <CardContent className="p-0 overflow-x-auto">
-        {/* Spreadsheet-style table — mirrors the Employee Master layout:
-            row-number gutter, avatar column, then employee name/email,
-            then one cell per leave type. The first three columns are
-            sticky so they stay visible while horizontal-scrolling the
-            leave-type cells on mobile. */}
-        <table className="w-full border-separate border-spacing-0">
+        {/* Spreadsheet-style table — # gutter, avatar, Employee, then
+            one cell per leave type. Nothing is sticky: the whole table
+            shifts horizontally on scroll so the row is read as a single
+            unit (employee + their balances move together). */}
+        <table className="w-full border-separate border-spacing-0 text-sm">
           <thead className="text-[10px] uppercase text-muted-foreground bg-muted tracking-wider">
             <tr>
-              <th className="text-center px-2 py-2 w-10 sticky left-0 bg-muted z-20 font-semibold border-b border-r">
+              <th className="text-center px-1.5 py-2 w-9 bg-muted font-semibold border-b border-r">
                 #
               </th>
-              <th className="text-left px-2 py-2 w-14 sticky left-10 bg-muted z-20 font-semibold border-b border-r">
+              <th className="text-left px-1.5 py-2 w-12 bg-muted font-semibold border-b border-r">
                 {/* avatar column — no label */}
               </th>
-              <th className="text-left px-3 py-2 sticky left-24 bg-muted z-20 font-semibold border-b border-r min-w-[180px]">
+              <th className="text-left px-2 py-2 bg-muted font-semibold border-b border-r min-w-[160px] max-w-[220px]">
                 Employee
               </th>
               {allTypes.map((t) => (
                 <th
                   key={t.id}
-                  className="text-left px-3 py-2 min-w-[140px] font-semibold border-b"
+                  className="text-left px-3 py-2 min-w-[150px] font-semibold border-b whitespace-nowrap"
                 >
                   {t.name}
                 </th>
@@ -373,21 +431,21 @@ function AllocationsGrid({
           <tbody>
             {employees.map((e, idx) => (
               <tr key={e.id} className="hover:bg-muted/20 group">
-                <td className="px-2 py-2 w-10 text-center text-[10px] tabular-nums text-muted-foreground sticky left-0 bg-background group-hover:bg-muted/20 z-10 border-b border-r">
+                <td className="px-1.5 py-1.5 w-9 text-center text-[10px] tabular-nums text-muted-foreground border-b border-r align-middle">
                   {idx + 1}
                 </td>
-                <td className="px-2 py-2 w-14 sticky left-10 bg-background group-hover:bg-muted/20 z-10 border-b border-r">
-                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <UserCircle className="h-5 w-5 text-primary/60" />
+                <td className="px-1.5 py-1.5 w-12 border-b border-r align-middle">
+                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <UserCircle className="h-4 w-4 text-primary/60" />
                   </div>
                 </td>
-                <td className="px-3 py-2 sticky left-24 bg-background group-hover:bg-muted/20 z-10 border-b border-r min-w-[180px]">
-                  <div className="text-sm font-medium leading-tight truncate uppercase">
+                <td className="px-2 py-1.5 border-b border-r min-w-[160px] max-w-[220px] align-middle">
+                  <div className="text-xs font-medium leading-tight truncate uppercase">
                     {e.firstName || e.lastName
                       ? `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim()
                       : e.email}
                   </div>
-                  <div className="text-[11px] text-muted-foreground truncate leading-tight">
+                  <div className="text-[10px] text-muted-foreground truncate leading-tight">
                     {e.email}
                     {e.department ? ` · ${e.department}` : ''}
                   </div>
@@ -396,7 +454,7 @@ function AllocationsGrid({
                   const b = e.balances.find((bb) => bb.leaveType.id === t.id);
                   const cellId = `${e.id}:${t.id}`;
                   return (
-                    <td key={t.id} className="px-3 py-2 border-b">
+                    <td key={t.id} className="px-3 py-1.5 border-b align-middle">
                       <BalanceCell
                         available={b?.available ?? 0}
                         used={b?.used ?? 0}
@@ -473,12 +531,12 @@ function BalanceCell({
       className="text-left hover:bg-muted/40 px-2 py-1 rounded -mx-2 -my-1 w-full"
       title="Click to edit allocated"
     >
-      <div className="text-sm font-medium tabular-nums leading-tight">
+      <div className="text-xs font-medium tabular-nums leading-tight whitespace-nowrap">
         {available.toFixed(1)}
         <span className="text-muted-foreground font-normal"> / {allocated.toFixed(0)}</span>
       </div>
-      <div className="text-[10px] text-muted-foreground tabular-nums leading-tight mt-0.5">
-        used {used.toFixed(1)} · pending {pending.toFixed(1)}
+      <div className="text-[10px] text-muted-foreground tabular-nums leading-tight mt-0.5 whitespace-nowrap">
+        used {used.toFixed(1)} · pend {pending.toFixed(1)}
       </div>
     </button>
   );

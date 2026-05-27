@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   CalendarClock, Clock, Search, RefreshCcw, Loader2, AlertTriangle,
-  Edit3, MapPin, Info,
+  Edit3, MapPin, Info, X as XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
@@ -31,9 +31,12 @@ import { useUserTimezone } from "@/lib/user-timezone";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
-  FilterChips, ActiveFilterPills,
+  SelectFilter, ActiveFilterPills,
   ManageColumnsButton,
 } from "@/components/real-estate/workspace";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   HoverCard, HoverCardContent, HoverCardTrigger,
 } from "@/components/ui/hover-card";
@@ -124,6 +127,7 @@ export function MyAttendance() {
   const [regularizing, setRegularizing] = useState<AttendanceRecord | null>(null);
 
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
   const fetchHistory = useCallback(async () => {
@@ -465,22 +469,57 @@ export function MyAttendance() {
         header={
           <>
             <WorkspaceHeader
-              icon={<CalendarClock className="h-5 w-5" />}
+              icon={<CalendarClock className="h-5 w-5 text-blue-600" />}
               title="My Attendance"
               subtitle={subtitle}
             >
-              {/* Search takes the full row on mobile (same as Employee
-                  Master) so the placeholder text stays legible and the
-                  action buttons can wrap underneath cleanly. */}
-              <div className="relative w-full sm:w-auto order-1 sm:order-none">
-                <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search date or status…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-8 w-full sm:w-64 text-sm"
-                />
-              </div>
+              {/* Search collapses to a 🔍 icon button + popover so the
+                  header stays compact on mobile — mirrors Self Target's
+                  workspace header treatment. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search date or status…"
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setSearch(searchInput);
+                        if (e.key === "Escape") { setSearchInput(""); setSearch(""); }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); setSearch(""); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <ManageColumnsButton
                 tableId="my-attendance"
                 columns={columns}
@@ -488,33 +527,30 @@ export function MyAttendance() {
               />
               <Button
                 size="sm"
-                className="h-8 flex-1 sm:flex-none min-w-[140px] sm:min-w-0"
+                className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
                 onClick={fetchHistory}
                 disabled={loading}
               >
                 {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
                 ) : (
-                  <RefreshCcw className="h-3.5 w-3.5 mr-1" />
+                  <RefreshCcw className="h-3.5 w-3.5 sm:mr-1" />
                 )}
                 <span className="hidden sm:inline">Refresh</span>
-                <span className="sm:hidden">Refresh</span>
               </Button>
             </WorkspaceHeader>
 
-            {/* Filter chip row — STATUS chips wrap naturally onto a second
-                row on narrow screens (same as Employee Master's STATUS/DEPT
-                chip wrapping). Date range and quick-range chips sit beside
-                the status chips like Min/Max Salary in Employee Master. */}
-            <div className="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3">
-              <FilterChips
+            {/* Compact filter row — mirrors the Self Target page: a
+                SelectFilter dropdown pill for Status, date range inputs,
+                and quick-range chips. Wraps cleanly on mobile. */}
+            <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+              <SelectFilter
                 label="Status"
                 value={statusFilter}
                 onChange={setStatusFilter}
                 options={STATUS_OPTIONS}
               />
-              {/* Date range — fills the row on mobile (matches Min/Max
-                  Salary's `w-full sm:w-auto` layout in Employee Master). */}
+              {/* Date range — fills the row on mobile. */}
               <div className="flex items-center gap-1 w-full sm:w-auto">
                 <Input
                   type="date"
@@ -582,11 +618,12 @@ export function MyAttendance() {
                 filters={activePills}
                 onClear={(k) => {
                   if (k === "status") setStatusFilter("");
-                  if (k === "search") setSearch("");
+                  if (k === "search") { setSearch(""); setSearchInput(""); }
                 }}
                 onClearAll={() => {
                   setStatusFilter("");
                   setSearch("");
+                  setSearchInput("");
                 }}
               />
               <Link

@@ -13,7 +13,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -28,6 +27,7 @@ import {
   Search,
   Inbox,
   FileText,
+  X as XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { AttendanceRecordsTable } from "./attendance-records-table";
@@ -37,7 +37,11 @@ import { todayIso } from "./attendance-format";
 import {
   WorkspaceShell,
   WorkspaceHeader,
+  ActiveFilterPills,
 } from "@/components/real-estate/workspace";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface TeamUser {
   id: string;
@@ -68,6 +72,7 @@ export function TeamAttendance() {
   const [from, setFrom] = useState<string>(today);
   const [to, setTo] = useState<string>(today);
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +133,17 @@ export function TeamAttendance() {
   const totalRecords = data?.records.length ?? 0;
   const filteredCount = decorated.length;
 
+  const activePills = useMemo(() => {
+    const pills: Array<{ key: string; label: React.ReactNode }> = [];
+    if (search) {
+      pills.push({
+        key: "search",
+        label: <>Search: <strong>{search}</strong></>,
+      });
+    }
+    return pills;
+  }, [search]);
+
   return (
     <>
       <WorkspaceShell
@@ -135,45 +151,147 @@ export function TeamAttendance() {
         selectedId={null}
         onCloseSelection={() => {}}
         header={
-          <WorkspaceHeader
-            icon={<Users className="h-5 w-5" />}
-            title="Team Attendance"
-            subtitle={
-              data && !forbidden
-                ? `${filteredCount}${
-                    filteredCount !== totalRecords ? ` / ${totalRecords}` : ""
-                  } record${filteredCount === 1 ? "" : "s"} · ${from}${
-                    from !== to ? ` → ${to}` : ""
-                  }`
-                : undefined
-            }
-          >
-            <div className="flex items-center gap-1.5">
+          <>
+            <WorkspaceHeader
+              icon={<Users className="h-5 w-5 text-blue-600" />}
+              title="Team Attendance"
+              subtitle={
+                data && !forbidden
+                  ? `${filteredCount}${
+                      filteredCount !== totalRecords ? ` / ${totalRecords}` : ""
+                    } record${filteredCount === 1 ? "" : "s"} · ${from}${
+                      from !== to ? ` → ${to}` : ""
+                    }`
+                  : undefined
+              }
+            >
+              {/* Search collapses to a 🔍 icon button + popover so the
+                  header stays compact on mobile — mirrors Self Target. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 relative shrink-0"
+                    aria-label="Search"
+                    disabled={forbidden}
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {search && (
+                      <span
+                        aria-hidden
+                        className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-72 p-2">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search name, email, status…"
+                      value={searchInput}
+                      onChange={(e) => {
+                        setSearchInput(e.target.value);
+                        setSearch(e.target.value);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setSearchInput("");
+                          setSearch("");
+                        }
+                      }}
+                      autoFocus
+                      className="pl-8 pr-7 h-8 w-full text-sm"
+                    />
+                    {searchInput && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchInput(""); setSearch(""); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
                 onClick={fetchTeam}
                 disabled={loading || forbidden}
                 title="Refresh"
-                className="h-8 px-2 shrink-0"
+                aria-label="Refresh"
+                className="h-8 w-8 shrink-0"
               >
                 <RefreshCw
-                  className={`h-3.5 w-3.5 sm:mr-1 ${loading ? "animate-spin" : ""}`}
+                  className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
                 />
-                <span className="hidden sm:inline">Refresh</span>
               </Button>
               <Button
                 size="sm"
                 onClick={() => setManualOpen(true)}
                 disabled={forbidden}
-                className="h-8 px-2 sm:px-3"
+                className="h-8 px-2 sm:px-3 bg-blue-600 hover:bg-blue-700 text-white shrink-0"
               >
                 <Plus className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">Manual entry</span>
                 <span className="sm:hidden">Manual</span>
               </Button>
-            </div>
-          </WorkspaceHeader>
+            </WorkspaceHeader>
+
+            {/* Compact filter row — mirrors Self Target's filter pill row.
+                FROM/TO date inputs sit on the left; active filter pills
+                wrap; the regularizations link anchors to the right. */}
+            {!forbidden && (
+              <div className="px-3 sm:px-6 pb-2 flex flex-wrap items-center gap-2 border-t pt-2">
+                <div className="inline-flex items-center gap-1 rounded-md border bg-background px-2 h-7">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    From
+                  </span>
+                  <Input
+                    id="team-from"
+                    type="date"
+                    value={from}
+                    max={to}
+                    onChange={(e) => setFrom(e.target.value)}
+                    className="h-6 w-32 border-0 p-0 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+                    aria-label="From date"
+                  />
+                </div>
+                <div className="inline-flex items-center gap-1 rounded-md border bg-background px-2 h-7">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    To
+                  </span>
+                  <Input
+                    id="team-to"
+                    type="date"
+                    value={to}
+                    min={from}
+                    max={today}
+                    onChange={(e) => setTo(e.target.value)}
+                    className="h-6 w-32 border-0 p-0 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+                    aria-label="To date"
+                  />
+                </div>
+                <ActiveFilterPills
+                  filters={activePills}
+                  onClear={(k) => {
+                    if (k === "search") { setSearch(""); setSearchInput(""); }
+                  }}
+                  onClearAll={() => { setSearch(""); setSearchInput(""); }}
+                />
+                <Link
+                  href="/attendance/regularizations"
+                  className="w-full sm:w-auto sm:ml-auto text-xs text-blue-700 hover:underline shrink-0"
+                >
+                  Pending regularization requests →
+                </Link>
+              </div>
+            )}
+          </>
         }
         list={
           <div className="flex flex-col h-full bg-muted/10">
@@ -181,69 +299,13 @@ export function TeamAttendance() {
               <ForbiddenPanel />
             ) : (
               <>
-                {/* ── Toolbar: date range + search ─────────────────────────── */}
+                {/* ── Toolbar: geofence chip + error ───────────────────────── */}
                 <div className="p-3 sm:p-4 pb-2 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                    <div className="flex items-center gap-2 flex-1 sm:flex-none">
-                      <Label
-                        htmlFor="team-from"
-                        className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0"
-                      >
-                        From
-                      </Label>
-                      <Input
-                        id="team-from"
-                        type="date"
-                        value={from}
-                        max={to}
-                        onChange={(e) => setFrom(e.target.value)}
-                        className="h-8 text-xs flex-1 sm:flex-none sm:w-40"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 flex-1 sm:flex-none">
-                      <Label
-                        htmlFor="team-to"
-                        className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0"
-                      >
-                        To
-                      </Label>
-                      <Input
-                        id="team-to"
-                        type="date"
-                        value={to}
-                        min={from}
-                        max={today}
-                        onChange={(e) => setTo(e.target.value)}
-                        className="h-8 text-xs flex-1 sm:flex-none sm:w-40"
-                      />
-                    </div>
-                    <div className="relative flex-1 min-w-0">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        placeholder="Search name, email, status…"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="h-8 pl-7 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Quick link to the regularization queue keeps approvers
-                      one click away from pending requests without leaving
-                      the page chrome. */}
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    {data?.geofence ? (
+                  {data?.geofence && (
+                    <div className="flex items-center gap-2 flex-wrap">
                       <GeofenceStatus geofence={data.geofence} />
-                    ) : (
-                      <span />
-                    )}
-                    <Link
-                      href="/attendance/regularizations"
-                      className="text-xs font-medium text-primary hover:underline shrink-0"
-                    >
-                      Pending regularization requests →
-                    </Link>
-                  </div>
+                    </div>
+                  )}
 
                   {error && (
                     <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
