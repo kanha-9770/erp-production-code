@@ -75,6 +75,7 @@ const AUTO_ANCHOR_RULES: Array<{
   { path: '/leave', fromSlots: ['leave'] },
   { path: '/leave/approvals', fromSlots: ['leave'] },
   { path: '/leave/admin', fromSlots: ['leave'] },
+  { path: '/leave/config', fromSlots: ['leave'] },
   { path: '/settings/holidays', fromSlots: ['holiday', 'leave'] },
   { path: '/payroll', fromSlots: ['employee', 'checkIn'] },
   { path: '/payroll/configure', fromSlots: ['employee', 'checkIn'] },

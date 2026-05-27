@@ -111,6 +111,14 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'wallet',
   },
   {
+    path: '/leave/config',
+    label: 'Leave Configuration',
+    group: 'Leave Management',
+    description: 'Notice days, consecutive caps, deduction & approval rules',
+    adminOnly: true,
+    icon: 'settings',
+  },
+  {
     path: '/settings/holidays',
     label: 'Holiday Calendar',
     group: 'Leave Management',

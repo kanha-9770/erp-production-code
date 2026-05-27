@@ -51,22 +51,32 @@ async function seedLeaveTypes() {
   // Create leave rules
   await prisma.leaveRule.upsert({
     where: { id: "sick-leave-rule" },
-    update: {},
+    update: {
+      name: "Paid leave",
+      description: "Paid leave with prior notice",
+      minNoticeDays: 2,
+      maxConsecutiveDays: 5,
+    },
     create: {
       id: "sick-leave-rule",
       leaveTypeId: fullDayLeave.id,
-      name: "Sick Leave",
-      description: "Paid sick leave with medical certificate",
+      name: "Paid leave",
+      description: "Paid leave with prior notice",
       deductionPercentage: 0,
       requiresApproval: true,
       isPaid: true,
       affectsAttendance: true,
+      minNoticeDays: 2,
+      maxConsecutiveDays: 5,
     },
   });
 
   await prisma.leaveRule.upsert({
     where: { id: "casual-leave-rule" },
-    update: {},
+    update: {
+      minNoticeDays: 1,
+      maxConsecutiveDays: 3,
+    },
     create: {
       id: "casual-leave-rule",
       leaveTypeId: fullDayLeave.id,
@@ -76,6 +86,8 @@ async function seedLeaveTypes() {
       requiresApproval: true,
       isPaid: false,
       affectsAttendance: true,
+      minNoticeDays: 1,
+      maxConsecutiveDays: 3,
     },
   });
 
@@ -112,6 +124,67 @@ async function seedLeaveTypes() {
   });
 
   console.log("Leave types and rules seeded successfully!");
+
+  // Default per-employee balances for the current calendar year. Without
+  // these the Apply Leave form shows the type in the dropdown but every
+  // submission fails balance validation. Tweak the numbers below to match
+  // your HR policy.
+  const DEFAULTS_BY_CODE: Record<string, number> = {
+    FULL_DAY_LEAVE: 12,
+    HALF_DAY_LEAVE: 6,
+    SHORT_LEAVE: 12,
+  };
+
+  const year = new Date().getFullYear();
+  console.log(`Allocating default balances for ${year}…`);
+
+  const users = await prisma.user.findMany({
+    where: { status: "ACTIVE" },
+    select: { id: true, organizationId: true },
+  });
+
+  const typesByCode = new Map<string, string>([
+    ["FULL_DAY_LEAVE", fullDayLeave.id],
+    ["HALF_DAY_LEAVE", halfDayLeave.id],
+    ["SHORT_LEAVE", shortLeave.id],
+  ]);
+
+  let created = 0;
+  let skipped = 0;
+  for (const u of users) {
+    if (!u.organizationId) continue;
+    for (const [code, days] of Object.entries(DEFAULTS_BY_CODE)) {
+      const leaveTypeId = typesByCode.get(code);
+      if (!leaveTypeId) continue;
+      const existing = await prisma.leaveBalance.findUnique({
+        where: {
+          userId_leaveTypeId_year: { userId: u.id, leaveTypeId, year },
+        },
+      });
+      if (existing) {
+        // Never overwrite an existing balance — it may have used / pending
+        // values an admin tuned by hand. Re-runs are idempotent and safe.
+        skipped += 1;
+        continue;
+      }
+      await prisma.leaveBalance.create({
+        data: {
+          organizationId: u.organizationId,
+          userId: u.id,
+          leaveTypeId,
+          year,
+          allocated: days,
+          carriedForward: 0,
+          used: 0,
+          pending: 0,
+        },
+      });
+      created += 1;
+    }
+  }
+  console.log(
+    `Default balances done — ${created} created, ${skipped} already existed.`,
+  );
 }
 
 seedLeaveTypes()
