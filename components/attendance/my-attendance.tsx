@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +23,22 @@ import {
   Edit3, MapPin, Info, X as XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
-import { RegularizationDialog } from "./regularization-dialog";
+// Type-only import is free at runtime; the value-side AttendanceRecordDetail
+// is dynamic-imported below so the modal's code doesn't ship with the
+// initial my-attendance bundle.
+import type { AttendanceRecord } from "./attendance-record-detail";
+// Both panels only render after a user action (clicking a row → detail,
+// clicking "Regularize" → dialog). Dynamic-importing them removes ~600
+// lines + their Radix dependencies from the initial bundle. `ssr: false`
+// because they only matter once the user has interacted client-side.
+const AttendanceRecordDetail = dynamic(
+  () => import("./attendance-record-detail").then((m) => m.AttendanceRecordDetail),
+  { ssr: false },
+);
+const RegularizationDialog = dynamic(
+  () => import("./regularization-dialog").then((m) => m.RegularizationDialog),
+  { ssr: false },
+);
 import {
   formatHM, formatTimeShort, shiftDays, todayIso, workedMinutesFor,
 } from "./attendance-format";
@@ -669,17 +684,19 @@ export function MyAttendance() {
         preview={null}
       />
 
-      <AttendanceRecordDetail
-        record={
-          selected
-            ? {
-                ...selected,
-                faceMatchThreshold: data?.faceVerify?.threshold ?? null,
-              }
-            : null
-        }
-        onClose={() => setSelected(null)}
-      />
+      {/* Only mount the detail / regularize panels once the user has
+          actually picked a row. Combined with the dynamic-imports above,
+          this means their chunks don't download on a cold visit — only
+          on the first row-click. */}
+      {selected && (
+        <AttendanceRecordDetail
+          record={{
+            ...selected,
+            faceMatchThreshold: data?.faceVerify?.threshold ?? null,
+          }}
+          onClose={() => setSelected(null)}
+        />
+      )}
       <RegularizationDialog
         open={!!regularizing}
         onOpenChange={(o) => !o && setRegularizing(null)}

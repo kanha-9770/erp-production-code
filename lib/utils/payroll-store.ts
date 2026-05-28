@@ -18,11 +18,31 @@ async function getActivePayrollConfigRow(organizationId: string) {
 }
 
 /**
+ * Public entry-point for the post-deploy cache warmer. Forces the cached
+ * payroll-config row to be (re)populated for the given org so the first real
+ * request after a deploy doesn't pay the DB miss.
+ */
+export async function warmPayrollConfigCache(organizationId: string): Promise<void> {
+  await getActivePayrollConfigRow(organizationId);
+}
+
+/**
  * Drop the cached PayrollConfiguration row for an org. Call this from any
  * handler that creates / updates / deactivates a PayrollConfiguration row.
+ *
+ * Also invalidates the sidebar's static-page anchors cache because anchors
+ * auto-derive from PayrollConfiguration.attendanceFieldMappings.
  */
 export async function invalidatePayrollConfigCache(organizationId: string) {
-  await cacheInvalidate('hr', payrollConfigKey(organizationId));
+  await cacheInvalidate(
+    'hr',
+    payrollConfigKey(organizationId),
+  );
+  // Auto-derived sidebar anchors depend on this config — drop them too.
+  await cacheInvalidate(
+    'default',
+    buildKey('default', 'page-anchors', organizationId),
+  );
 }
 
 // =============================================================================

@@ -137,6 +137,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma'; // ← use your shared prisma instance (preferred)
 import { validateSession } from '@/lib/auth';
 import { parseEmployeeData, analyzeRecordDataStructure } from '@/lib/employeeDataParser';
+import { buildKey, cached } from '@/lib/cache';
+
+// Employee-records is read on every visit to the employee-master page. The
+// data CAN go stale (new form submissions arrive any time), but a 60-second
+// TTL bounds the staleness while still skipping the heavy field-label scan
+// and per-record N+1 walks on most reads. We don't wire explicit
+// invalidation: the server-side duplicate-check on the eventual "Create
+// User" action is the real correctness mechanism — the cache only affects
+// what the table shows, not what creating users actually allows.
+const EMPLOYEE_RECORDS_TTL_S = 60;
+const employeeRecordsKey = (orgId: string) =>
+  buildKey('hr', 'employee-records', orgId);
 
 // Do NOT create new PrismaClient() here — use the shared instance from lib/prisma
 // const prisma = new PrismaClient();  ← REMOVE THIS LINE
@@ -174,6 +186,50 @@ export async function GET(request: NextRequest) {
 
     console.log(`Fetching records for organization: ${orgId}`);
 
+    // Cached body — produces the response payload shape below. Skipped on a
+    // warm cache (24ms instead of the field-scan + N+1 walk).
+    const payload = await cached(
+      'hr',
+      employeeRecordsKey(orgId),
+      EMPLOYEE_RECORDS_TTL_S,
+      () => buildEmployeeRecordsPayload(orgId),
+    );
+
+    return NextResponse.json({
+      success: true,
+      records: payload.usableRecords,
+      total: payload.usableRecords.length,
+      allProcessedRecords: payload.processedRecords,
+      ...(process.env.NODE_ENV === 'development' && {
+        _metadata: {
+          totalRecordsInDB: payload.totalInDb,
+          usableRecords: payload.usableRecords.length,
+          skippedRecords: payload.processedRecords.length - payload.usableRecords.length,
+          skipReasons: payload.skipReasons,
+          organizationId: orgId,
+        },
+      }),
+    });
+  } catch (error) {
+    console.error('Error fetching employee records:', error);
+    return NextResponse.json(
+      {
+        error: 'Failed to fetch employee records',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+interface EmployeeRecordsPayload {
+  usableRecords: any[];
+  processedRecords: any[];
+  skipReasons: Array<{ recordId: string; reason: string }>;
+  totalInDb: number;
+}
+
+async function buildEmployeeRecordsPayload(orgId: string): Promise<EmployeeRecordsPayload> {
     // ──────────────────────────────────────────────────────────────
     // 2. Build fieldId → label lookup from FormField table
     //    This resolves Format B records (sections with plain values)
@@ -282,7 +338,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const usableRecords = processedRecords.filter(r => 
+    const usableRecords = processedRecords.filter(r =>
       r.processStatus === 'valid' || r.processStatus === 'warning'
     );
 
@@ -291,29 +347,10 @@ export async function GET(request: NextRequest) {
       `(total processed: ${processedRecords.length})`
     );
 
-    return NextResponse.json({
-      success: true,
-      records: usableRecords,
-      total: usableRecords.length,
-      allProcessedRecords: processedRecords,
-      ...(process.env.NODE_ENV === 'development' && {
-        _metadata: {
-          totalRecordsInDB: records.length,
-          usableRecords: usableRecords.length,
-          skippedRecords: processedRecords.length - usableRecords.length,
-          skipReasons,
-          organizationId: orgId,  // helps debugging
-        }
-      })
-    });
-  } catch (error) {
-    console.error('Error fetching employee records:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to fetch employee records',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
-  }
+    return {
+      usableRecords,
+      processedRecords,
+      skipReasons,
+      totalInDb: records.length,
+    };
 }

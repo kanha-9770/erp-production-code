@@ -19,6 +19,7 @@
     "seed:re-transactions": "npx tsx scripts/seed-real-estate-transactions.ts",
     "setup:hr": "npx tsx scripts/setup-hr-production.ts",
     "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll",
+    "warm:cache": "npx tsx scripts/warm-cache.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

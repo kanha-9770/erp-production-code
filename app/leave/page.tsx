@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,7 +64,15 @@ import {
   type CalendarLeave,
   dateToYmd,
 } from '@/components/leave/leave-calendar';
-import { LeaveDateRangePicker } from '@/components/leave/leave-date-range-picker';
+// LeaveDateRangePicker is 311 lines and only renders inside the Apply
+// Leave Sheet — dynamic-import keeps its weight (incl. date-fns deps
+// already in the bundle, plus its own picker UI) out of the initial leave
+// page chunk. The Sheet stays mounted but inactive on page load, so we
+// also conditionally render the picker below.
+const LeaveDateRangePicker = dynamic(
+  () => import('@/components/leave/leave-date-range-picker').then((m) => m.LeaveDateRangePicker),
+  { ssr: false },
+);
 import {
   WorkspaceShell,
   WorkspaceHeader,

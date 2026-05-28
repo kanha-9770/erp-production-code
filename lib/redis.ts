@@ -165,13 +165,62 @@ export const redis: Redis | null = getRedis("default");
 /**
  * Best-effort PING for a namespace. Use to validate connectivity at boot or
  * from a /health endpoint. Never throws.
+ *
+ * Implementation note: clients are built with `lazyConnect: true` AND
+ * `enableOfflineQueue: false`, which means the first command on a fresh
+ * client gets rejected immediately ("Stream isn't writable…") because
+ * ioredis hasn't opened the TCP connection yet. We wait for the `ready`
+ * event before pinging so the result actually reflects end-to-end
+ * connectivity. Capped at 5s so a misconfigured URL doesn't stall a caller.
+ *
+ * Several namespaces may share the same underlying client (de-dup by URL in
+ * `getRedis`), so this function is also called concurrently against the same
+ * Redis instance — waiting on the `ready` event handles that race cleanly
+ * without us having to coordinate connect() calls.
  */
 export async function redisPing(namespace: Namespace = "default"): Promise<boolean> {
   const client = getRedis(namespace);
   if (!client) return false;
   try {
+    if (client.status !== "ready") {
+      await waitForReady(client, 5_000);
+    }
     return (await client.ping()) === "PONG";
   } catch {
     return false;
   }
+}
+
+function waitForReady(client: Redis, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (client.status === "ready") {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`redis ready timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    function cleanup() {
+      clearTimeout(timer);
+      client.off("ready", onReady);
+      client.off("error", onError);
+    }
+    client.once("ready", onReady);
+    client.once("error", onError);
+    // Kick the connection if it hasn't started. `connect()` on an already-
+    // connecting/connected client rejects — we swallow that and let the
+    // event handlers above settle the promise.
+    if (client.status === "wait" || client.status === "end" || client.status === "close") {
+      client.connect().catch(() => {});
+    }
+  });
 }

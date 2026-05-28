@@ -1,6 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
+import { cached } from "@/lib/cache"
+import {
+  LEAVE_TYPES_KEY,
+  LEAVE_TYPES_TTL_S,
+  invalidateLeaveCaches,
+} from "@/lib/hr/leave-cache"
 
 // GET - Fetch all leave types
 export async function GET(request: NextRequest) {
@@ -8,10 +14,12 @@ export async function GET(request: NextRequest) {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })
 
-    const leaveTypes = await prisma.leaveType.findMany({
-      where: { isActive: true },
-      orderBy: { sortOrder: "asc" },
-    })
+    const leaveTypes = await cached("hr", LEAVE_TYPES_KEY, LEAVE_TYPES_TTL_S, () =>
+      prisma.leaveType.findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: "asc" },
+      })
+    );
 
     return NextResponse.json({ success: true, leaveTypes })
   } catch (error) {
@@ -55,6 +63,10 @@ export async function POST(request: NextRequest) {
         data: typeData,
       })
     }
+
+    // LeaveType change can affect both the types list AND the rules graph
+    // (since rules are nested under types). Clear both.
+    await invalidateLeaveCaches()
 
     return NextResponse.json({ success: true, leaveType })
   } catch (error) {

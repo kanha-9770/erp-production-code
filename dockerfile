@@ -26,6 +26,17 @@ RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 ENV PORT=5000
 
+# ── Cache warm-up on container boot ──────────────────────────────────────────
+# The instrumentation.ts hook (compiled into .next/) runs once when the Node
+# server starts. With WARM_CACHE_ON_BOOT=1 it fires the warmer in the
+# background after boot so the first real user request hits warm Upstash
+# instead of paying the Postgres miss.
+#   WARM_CACHE_ON_BOOT=1            → enable
+#   WARM_CACHE_SCOPE=all            → also warm per-org caches (omit for globals-only)
+#   WARM_CACHE_FORMS=1              → also pre-load every form's full structure
+ENV WARM_CACHE_ON_BOOT=1
+ENV WARM_CACHE_SCOPE=all
+
 WORKDIR /app
 
 COPY --from=builder /app/.env ./.env

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -56,9 +57,24 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import PayrollEngine from '@/components/payroll/payroll-engine';
-import PayrollAnalytics from '@/components/payroll/payroll-analytics';
-import PayslipPreview from '@/components/payroll/payslip-preview';
+// All three are tab-/modal-gated panels — none render on the default tab,
+// so dynamic-importing them keeps the initial payroll-page chunk lean.
+//   PayrollEngine    → only inside the "Run Payroll" tab
+//   PayrollAnalytics → only inside the "Analytics" tab (pulls recharts)
+//   PayslipPreview   → only when the user opens a specific payslip
+// `ssr: false` keeps them out of the SSR pass — they're admin tools, no SEO
+// value, and the loading skeleton is good UX for the in-tab click.
+const PayrollEngine = dynamic(() => import('@/components/payroll/payroll-engine'), {
+  ssr: false,
+  loading: () => <Skeleton className="h-72 w-full" />,
+});
+const PayrollAnalytics = dynamic(() => import('@/components/payroll/payroll-analytics'), {
+  ssr: false,
+  loading: () => <Skeleton className="h-72 w-full" />,
+});
+const PayslipPreview = dynamic(() => import('@/components/payroll/payslip-preview'), {
+  ssr: false,
+});
 import { cn } from '@/lib/utils';
 
 interface PayrollBreakdown {

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
+import { invalidateLeaveCaches } from '@/lib/hr/leave-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,6 +132,10 @@ export async function PUT(request: NextRequest) {
   }
 
   await prisma.leaveRule.update({ where: { id: body.id }, data });
+
+  // Clear both the types and rules caches so the refresh below — and any
+  // subsequent reads on /api/payroll/leave-rules — see fresh data.
+  await invalidateLeaveCaches();
 
   const leaveTypes = await listLeaveTypes();
   return NextResponse.json(

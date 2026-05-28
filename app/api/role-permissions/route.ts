@@ -18,6 +18,10 @@ export async function GET(request: NextRequest) {
     }
 
     const roleId = request.nextUrl.searchParams.get("roleId");
+    // Comma-separated batch form. usePermissions fans this in to replace its
+    // old N+1 (one fetch per role) with a single call: a user with 5 roles
+    // used to cost 5 round-trips, now 1.
+    const roleIdsParam = request.nextUrl.searchParams.get("roleIds");
     let formId = request.nextUrl.searchParams.get("formId");
 
     if (formId === "" || formId === "null" || formId === "undefined") {
@@ -31,7 +35,17 @@ export async function GET(request: NextRequest) {
       formFieldId: null,
     };
 
-    if (roleId) {
+    if (roleIdsParam) {
+      const ids = roleIdsParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (ids.length > 0) {
+        // `in` covers both the single-id and many-ids case; the role.organizationId
+        // filter above still guarantees cross-tenant isolation.
+        whereClause.roleId = { in: ids };
+      }
+    } else if (roleId) {
       whereClause.roleId = roleId;
     }
 

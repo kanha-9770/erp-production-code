@@ -1,6 +1,7 @@
 "use client";
 import type React from "react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
 import {
   Dialog,
   DialogContent,
@@ -60,7 +61,18 @@ import {
   useLazyGetTestingDataQuery,
 } from "@/lib/api/forms";
 // ── PHONE INPUT IMPORTS ───────────────────────────────────────────────────────
-import PhoneInput from "react-phone-number-input";
+// PhoneInput (UI + country data) is ~47KB gzip — dynamic-import so the
+// FormFieldRenderer chunk doesn't bake it in. It downloads only on pages
+// that actually render a `phone-input` field. `isValidPhoneNumber` is the
+// sync validation half of the library; we keep it static because every
+// field's validator runs synchronously and the validation paths are much
+// smaller than the picker UI.
+const PhoneInput = dynamic(() => import("react-phone-number-input").then((m) => m.default), {
+  ssr: false,
+  loading: () => (
+    <Input placeholder="Loading phone input…" disabled className="h-10" />
+  ),
+});
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
 

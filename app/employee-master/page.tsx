@@ -9,6 +9,7 @@
  */
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import {
   useGetEmployeeListQuery,
@@ -27,7 +28,7 @@ import { Card } from "@/components/ui/card";
 import {
   Users, Plus, Search, Mail, Phone, Calendar, MapPin, Building2, User2,
   Briefcase, CreditCard, Pencil, ExternalLink, Trash2, ChevronLeft, ChevronRight,
-  ImageOff, UserCircle, X as XIcon,
+  ImageOff, UserCircle, X as XIcon, Loader2,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -44,8 +45,26 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
 } from "@/components/ui/sheet";
-import { EmployeeForm } from "@/components/employee/employee-form";
-import { descriptorToBase64 } from "@/lib/face/descriptor";
+// EmployeeForm is large (2k+ lines) and transitively pulls in face-api.js
+// via FaceCaptureDialog. It only renders inside the Sheet that opens on
+// "New employee" / "Edit" — so we dynamic-import it: the initial page
+// chunk drops the form's weight, the user pays for it only when they
+// actually open the sheet.
+const EmployeeForm = dynamic(
+  () => import("@/components/employee/employee-form").then((m) => m.EmployeeForm),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center py-20 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        Loading form…
+      </div>
+    ),
+  },
+);
+// Import from the lightweight encoder module so this page chunk doesn't
+// pull face-api.js in just to base64-encode the descriptor for upload.
+import { descriptorToBase64 } from "@/lib/face/encoding";
 
 const STATUS_OPTIONS = [
   { value: "ACTIVE", label: "Active" },
