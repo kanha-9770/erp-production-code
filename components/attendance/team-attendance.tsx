@@ -34,6 +34,7 @@ import { AttendanceRecordsTable } from "./attendance-records-table";
 import { AttendanceRecordDetail, type AttendanceRecord } from "./attendance-record-detail";
 import { ManualEntryDialog } from "./manual-entry-dialog";
 import { todayIso } from "./attendance-format";
+import { setOrgTimezone, useOrgTimezone } from "@/lib/org-timezone";
 import {
   WorkspaceShell,
   WorkspaceHeader,
@@ -56,6 +57,7 @@ interface TeamResponse {
   success: boolean;
   from: string;
   to: string;
+  reportTimezone?: string;
   users: TeamUser[];
   records: AttendanceRecord[];
   geofence?: {
@@ -68,6 +70,9 @@ interface TeamResponse {
 }
 
 export function TeamAttendance() {
+  // Attendance times render in the org's reportTimezone — subscribe so an
+  // admin saving a new value in Attendance Configuration ripples here.
+  useOrgTimezone();
   const today = useMemo(() => todayIso(), []);
   const [from, setFrom] = useState<string>(today);
   const [to, setTo] = useState<string>(today);
@@ -95,6 +100,8 @@ export function TeamAttendance() {
       if (!res.ok || !json?.success) {
         throw new Error(json?.error ?? "Failed to load team attendance");
       }
+      // Anchor the table cells to the org's tz before the first paint.
+      setOrgTimezone(json.reportTimezone);
       setData(json);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load team attendance");
