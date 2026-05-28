@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
-import { distanceMeters, todayKey } from '@/lib/hr/attendance-service';
+import { distanceMeters, orgTimezone, todayKey } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
 
@@ -119,6 +119,9 @@ export async function GET(request: NextRequest) {
       success: true,
       from,
       to,
+      // IANA tz the rows' check-in/out times should be rendered in.
+      // Single source of truth so every attendance surface stays aligned.
+      reportTimezone: orgTimezone(cfg),
       summary: {
         presentDays,
         lateDays,

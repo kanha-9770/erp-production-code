@@ -28,6 +28,7 @@ import {
   formatHM, formatTimeShort, shiftDays, todayIso, workedMinutesFor,
 } from "./attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
+import { setOrgTimezone, useOrgTimezone } from "@/lib/org-timezone";
 import {
   WorkspaceShell, WorkspaceHeader,
   DataTable, type ColumnDef,
@@ -45,6 +46,7 @@ interface HistoryResponse {
   success: boolean;
   from: string;
   to: string;
+  reportTimezone?: string;
   summary: {
     presentDays: number;
     lateDays: number;
@@ -112,10 +114,13 @@ function fmtShortDate(iso: string): string {
 }
 
 export function MyAttendance() {
-  // Subscribe so check-in / check-out cells re-render when the user
-  // changes timezone in Profile → Preferences. Without this, the cells
-  // would still show the ISO converted via the *previous* zone until
-  // the next mount.
+  // Subscribe to the org's reportTimezone (set on the Attendance
+  // Configuration page) so the check-in / check-out cells re-render when
+  // an admin changes it — attendance times are anchored to the org's
+  // zone, not the viewing user's, so every desk sees the same value.
+  useOrgTimezone();
+  // Kept so other user-zone-dependent labels on the page (e.g. headers
+  // formatted via formatDateLong) react to a profile-zone change.
   useUserTimezone();
   const today = useMemo(() => todayIso(), []);
   const [from, setFrom] = useState<string>(() => shiftDays(today, -29));
@@ -140,6 +145,9 @@ export function MyAttendance() {
       if (!res.ok || !json?.success) {
         throw new Error(json?.error ?? "Failed to load attendance history");
       }
+      // Cache the org's reportTimezone before rendering so the table
+      // cells format check-in/out in the same zone the server stored.
+      setOrgTimezone(json.reportTimezone);
       setData(json);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load attendance history");

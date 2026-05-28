@@ -5,6 +5,7 @@ import { canApproveAttendance } from '@/lib/hr/attendance-permissions';
 import {
   applyDayCapAutoCheckouts,
   distanceMeters,
+  orgTimezone,
   todayKey,
 } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
@@ -201,6 +202,8 @@ export async function GET(request: NextRequest) {
       success: true,
       from,
       to,
+      // IANA tz the rows' check-in/out times should be rendered in.
+      reportTimezone: orgTimezone(cfg),
       geofence: {
         mode: cfg.geofenceMode,
         lat: cfg.geofenceLat,
