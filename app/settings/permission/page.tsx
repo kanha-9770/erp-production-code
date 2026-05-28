@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { ShieldCheck, Route, Anchor } from "lucide-react"
+import { ShieldCheck, Route, Anchor, Globe } from "lucide-react"
 import { useRouteAccess } from "@/hooks/use-route-access"
 import PageBackLink from "@/components/shared/page-back-link"
 
@@ -13,6 +13,9 @@ export default function PermissionPage() {
   const canAccessRoles = isPermitted("/settings/permission/roles")
   const canAccessRoutes = isPermitted("/settings/permission/route")
   const canAccessStaticPages = isPermitted("/settings/permission/static-pages")
+  const canAccessStaticPagePerms = isPermitted(
+    "/settings/permission/static-page-permission",
+  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
@@ -27,7 +30,7 @@ export default function PermissionPage() {
               Configure access control for your organization using role-based or route-based permissions
             </p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-6">
             {canAccessRoles && (
               <Card className="hover:shadow-lg transition-shadow">
                 <CardHeader>
@@ -89,7 +92,28 @@ export default function PermissionPage() {
               </Card>
             )}
 
-            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPages && (
+            {canAccessStaticPagePerms && (
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="w-12 h-12 rounded-lg bg-fuchsia-100 flex items-center justify-center mb-4">
+                    <Globe className="w-6 h-6 text-fuchsia-600" />
+                  </div>
+                  <CardTitle>Static Page Permission</CardTitle>
+                  <CardDescription>
+                    Grant or deny system pages (Leaves, Attendance, Payroll&hellip;) per role and per user, with the same workflow as role-based permissions.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link href="/settings/permission/static-page-permission">
+                    <Button variant="outline" className="w-full bg-transparent">
+                      Manage Static Pages
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
+            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPages && !canAccessStaticPagePerms && (
               <div className="col-span-full text-center py-12">
                 <p className="text-muted-foreground">
                   You don't have permission to access any permission management features.
