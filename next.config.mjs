@@ -32,6 +32,18 @@ const nextConfig = {
   turbopack: {
     root: import.meta.dirname,
   },
+  // Allow the dev server to accept requests from the laptop's LAN IP so a
+  // phone on the same wifi can load JS chunks + RSC payloads + HMR. Without
+  // this Next 16 silently blocks cross-origin requests and the page renders
+  // (SSR) but never hydrates — buttons appear dead, forms don't submit.
+  // Add every LAN/tunnel host you test from (192.168.x.x, 10.x.x.x, ngrok,
+  // tailscale). Localhost is always allowed and doesn't need listing.
+  allowedDevOrigins: [
+    '192.168.0.162',
+    '192.168.1.*',
+    '192.168.0.*',
+    '10.0.0.*',
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: '50mb',
