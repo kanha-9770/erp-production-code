@@ -20,13 +20,6 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
   },
   formatDetection: { telephone: false },
-  icons: {
-    icon: [
-      { url: "/placeholder-logo.png", sizes: "192x192", type: "image/png" },
-      { url: "/placeholder-logo.png", sizes: "512x512", type: "image/png" },
-    ],
-    apple: [{ url: "/placeholder-logo.png", sizes: "180x180", type: "image/png" }],
-  },
 };
 
 export const viewport = {
