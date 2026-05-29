@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Bell, BellRing, Check, CheckCheck } from "lucide-react"
+import { Bell, BellRing, Check, CheckCheck, Volume2, VolumeX } from "lucide-react"
 import { requestPushPermission } from "@/components/push/push-init"
 import {
   ensureAlertSoundUnlock,
   playNotificationSound,
+  isAlertSoundMuted,
+  setAlertSoundMuted,
 } from "@/lib/notifications/alert-sound"
 import {
   Popover,
@@ -56,6 +58,17 @@ export function NotificationBell({ collapsed = false }: NotificationBellProps) {
   // The notification currently expanded in the detail dialog. `null` = closed.
   const [activeNotification, setActiveNotification] =
     useState<NotificationItem | null>(null)
+  // Per-device sound mute. Initialised from localStorage after mount to avoid
+  // a hydration mismatch (server has no localStorage).
+  const [muted, setMuted] = useState(false)
+  useEffect(() => {
+    setMuted(isAlertSoundMuted())
+  }, [])
+  const toggleMuted = () => {
+    const next = !muted
+    setMuted(next)
+    setAlertSoundMuted(next)
+  }
 
   // Poll the cheap count endpoint every 60s for the badge; only fetch the
   // full list when the popover is opened so the closed state is essentially
@@ -147,6 +160,20 @@ export function NotificationBell({ collapsed = false }: NotificationBellProps) {
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
             <span className="text-sm font-semibold">Notifications</span>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleMuted}
+                className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                title={muted ? "Unmute notification sound" : "Mute notification sound"}
+                aria-label={muted ? "Unmute notification sound" : "Mute notification sound"}
+                aria-pressed={muted}
+              >
+                {muted ? (
+                  <VolumeX className="w-3.5 h-3.5" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5" />
+                )}
+              </button>
               <PushEnableButton />
               <button
                 type="button"
