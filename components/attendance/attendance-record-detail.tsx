@@ -44,6 +44,12 @@ export interface AttendanceRecord {
   overtimeMinutes: number;
   isAutoCheckedOut: boolean;
   status: string | null;
+  // Server-computed status that already accounts for org thresholds
+  // (halfDayMinHours / fullDayMinHours), per-employee shift, and
+  // auto-checkout. Prefer this over `status` when both are present —
+  // legacy rows / cached responses may have only `status`.
+  effectiveStatus?: string;
+  effectiveStatusReason?: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
   // Face-match score recorded at each punch (Euclidean distance — lower is
