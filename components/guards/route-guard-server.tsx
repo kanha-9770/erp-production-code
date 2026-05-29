@@ -32,7 +32,7 @@ export async function RouteGuardServer({
 }: {
   children: React.ReactNode;
 }) {
-  const headersList = headers();
+  const headersList = await headers();
   const pathname =
     headersList.get("x-next-pathname") ||
     headersList.get("x-invoke-path") ||
@@ -50,7 +50,7 @@ export async function RouteGuardServer({
   }
 
   // Check auth
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get("auth-token")?.value;
 
   if (!token) {

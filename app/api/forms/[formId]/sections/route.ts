@@ -10,10 +10,8 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
  *
  * Returns all sections of a form (id, title, order).
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {

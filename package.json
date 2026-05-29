@@ -4,10 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "prisma generate && next build",
-    "analyze": "cross-env ANALYZE=true next build",
-    "dev": "next dev -p 5001",
-    "lint": "next lint",
+    "build": "prisma generate && next build --webpack",
+    "analyze": "cross-env ANALYZE=true next build --webpack",
+    "dev": "next dev --webpack -p 5001",
     "start": "next start -p 5001",
     "create-default-org": "ts-node --esm --transpile-only scripts/create-default-organization.ts",
     "create:second-org": "npx tsx scripts/create-second-organization.ts",
@@ -92,7 +91,7 @@
     "markmap-view": "^0.18.12",
     "moment": "^2.30.1",
     "mongodb": "^7.0.0",
-    "next": "14.2.16",
+    "next": "16.2.6",
     "next-auth": "^4.24.11",
     "next-themes": "^0.4.4",
     "node-cron": "3.0.3",
@@ -100,12 +99,12 @@
     "openai": "^6.18.0",
     "pdf-parse": "^2.4.5",
     "prisma": "6.19.0",
-    "react": "^18",
+    "react": "^19",
     "react-big-calendar": "^1.19.4",
     "react-day-picker": "8.10.1",
     "react-dnd": "latest",
     "react-dnd-html5-backend": "^16.0.1",
-    "react-dom": "^18",
+    "react-dom": "^19",
     "react-hook-form": "^7.54.1",
     "react-mentions": "^4.4.10",
     "react-phone-number-input": "^3.4.14",
@@ -124,6 +123,14 @@
     "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "react": "19",
+        "react-dom": "19"
+      }
+    }
+  },
   "devDependencies": {
     "@next/bundle-analyzer": "^16.2.6",
     "@swc/core": "^1.13.5",
@@ -131,8 +138,8 @@
     "@types/bcryptjs": "^3.0.0",
     "@types/dagre": "^0.7.54",
     "@types/node": "^22.19.18",
-    "@types/react": "^18.3.28",
-    "@types/react-dom": "^18",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19",
     "@types/react-mentions": "^4.4.1",
     "@types/web-push": "^3.6.4",
     "@types/xlsx": "^0.0.36",

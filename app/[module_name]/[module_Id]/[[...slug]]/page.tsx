@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Lock, Edit3, MousePointer2, Settings2 } from "lucide-react";
@@ -36,11 +36,12 @@ import type {
 import { formatFieldValue, getFieldIcon } from "@/lib/utils/fieldUtils";
 import { processRecordData } from "@/lib/utils/recordUtils";
 
-export default function ModulePage({
-  params,
-}: {
-  params: { module_name: string; module_Id: string; slug?: string[] };
-}) {
+export default function ModulePage(
+  props: {
+    params: Promise<{ module_name: string; module_Id: string; slug?: string[] }>;
+  }
+) {
+  const params = use(props.params);
   const { toast } = useToast();
   const { module_name, module_Id, slug } = params;
 

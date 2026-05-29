@@ -11,10 +11,8 @@ async function loadProfileOwnedBy(profileId: string, organizationId: string) {
   });
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser?.organizationId) {
     return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
@@ -26,10 +24,8 @@ export async function GET(
   return NextResponse.json({ success: true, profile });
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser?.organizationId) {
     return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
@@ -80,10 +76,8 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser?.organizationId) {
     return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });

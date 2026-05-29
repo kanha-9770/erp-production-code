@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 
-export async function GET(request: Request, { params }: { params: { formId: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const count = await DatabaseService.getFormSubmissionCount(params.formId, undefined)
     return NextResponse.json({ success: true, data: { count } })

@@ -4,10 +4,8 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { sectionId: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ sectionId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {
@@ -346,15 +344,13 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  context: { params: { sectionId: string } }
+  context: { params: Promise<{ sectionId: string }> }
 ) {
   return POST(request, context);
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { sectionId: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ sectionId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {

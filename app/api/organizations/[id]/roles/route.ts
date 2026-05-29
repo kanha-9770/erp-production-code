@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma"; // Assuming this is your Prisma client import
 import { getRolesByOrganization, createRole } from "@/lib/database/roles"; // Adjust path if needed
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const organizationId = params.id;
     const roles = await getRolesByOrganization(organizationId);
@@ -13,7 +14,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const organizationId = params.id;
     const data = await request.json();

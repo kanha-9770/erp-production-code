@@ -113,10 +113,8 @@ function makePublishedView(form: any) {
   return clone;
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const form = await DatabaseService.getForm(params.formId);
     if (!form) {
@@ -255,10 +253,8 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json();
     const form = await DatabaseService.updateForm(params.formId, body);
@@ -272,10 +268,8 @@ export async function PUT(
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json();
 
@@ -331,10 +325,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getAuthenticatedUser(request);
     if (!user) {

@@ -15,11 +15,12 @@ const VALID_EVENTS = new Set([
 ])
 
 interface Params {
-  params: { id: string; bindingId: string }
+  params: Promise<{ id: string; bindingId: string }>
 }
 
 /** PUT /api/functions/[id]/bindings/[bindingId] — update a binding. */
-export async function PUT(request: NextRequest, { params }: Params) {
+export async function PUT(request: NextRequest, props: Params) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
@@ -92,7 +93,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 }
 
 /** DELETE /api/functions/[id]/bindings/[bindingId] — remove a binding. */
-export async function DELETE(_request: NextRequest, { params }: Params) {
+export async function DELETE(_request: NextRequest, props: Params) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(_request)
     if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })

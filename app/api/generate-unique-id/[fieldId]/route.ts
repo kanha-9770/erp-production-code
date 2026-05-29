@@ -3,10 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma"; // ← your prisma client import
 import crypto from "crypto";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { fieldId: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ fieldId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json();
     const {

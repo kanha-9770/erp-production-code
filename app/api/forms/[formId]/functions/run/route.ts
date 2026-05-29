@@ -28,10 +28,8 @@ import { runBindingById } from "@/lib/functions/bindingRunner"
  *   durationMs: number
  * }
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })

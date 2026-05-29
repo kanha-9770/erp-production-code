@@ -8,11 +8,12 @@ function isValidView(v: string | undefined): v is AuthView {
   return VALID_VIEWS.includes(v as AuthView)
 }
 
-export default function AuthPage({
-  searchParams,
-}: {
-  searchParams: { view?: string; userId?: string; type?: string }
-}) {
+export default async function AuthPage(
+  props: {
+    searchParams: Promise<{ view?: string; userId?: string; type?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   const view: AuthView = isValidView(searchParams.view) ? searchParams.view : "login"
 
   return (

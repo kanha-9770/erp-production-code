@@ -6,17 +6,13 @@ import { OrganizationHandlers as H } from "@/lib/api-handlers/organization";
 import { prisma } from "@/lib/prisma";
 import { updateRole } from "@/lib/database/roles";
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return H.deleteRole(request, params.id);
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const roleId = params.id;
 

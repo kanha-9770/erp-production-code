@@ -113,7 +113,8 @@ function flattenSubformFields(subforms: Subform[]): FormField[] {
 // POST handler
 // ──────────────────────────────────────────────
 
-export async function POST(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const { formId } = params;
     const body = await request.json();
@@ -256,7 +257,7 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
     }
 
     // ─── 6. Client metadata ─────────────────────────────────────
-    const headersList = headers();
+    const headersList = await headers();
     const userAgent = headersList.get("user-agent") || body.userAgent || "Unknown";
     const ipAddress =
       headersList.get("x-forwarded-for") ||

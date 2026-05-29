@@ -14,10 +14,8 @@ const VALID_EVENTS = new Set([
 ])
 
 /** GET /api/functions/[id]/bindings — list bindings for a function. */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
@@ -49,10 +47,8 @@ export async function GET(
 }
 
 /** POST /api/functions/[id]/bindings — create a binding. */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })

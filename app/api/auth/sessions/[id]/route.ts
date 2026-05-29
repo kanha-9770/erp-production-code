@@ -16,10 +16,8 @@ function err(status: number, message: string) {
   return NextResponse.json({ success: false, error: message }, { status, headers: NO_STORE });
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getAuthenticatedUser(request);
   if (!user) return err(401, "Not authenticated");
 

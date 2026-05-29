@@ -17,7 +17,7 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('auth-token')?.value;
 
   if (!token) {
@@ -31,7 +31,7 @@ export default async function AdminLayout({
   }
 
   // Get current pathname
-  const headersList = headers();
+  const headersList = await headers();
   const pathname =
     headersList.get('x-next-pathname') ||
     headersList.get('x-invoke-path') ||

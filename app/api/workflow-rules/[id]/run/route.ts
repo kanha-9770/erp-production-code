@@ -22,10 +22,8 @@ import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers"
 import { runWorkflowRule } from "@/lib/workflow/trigger"
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const ruleId = params.id
   if (!ruleId) {
     return NextResponse.json(
@@ -101,10 +99,8 @@ export async function POST(
 /**
  * Recent execution history for a rule — for the admin UI's "Last runs" panel.
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const ruleId = params.id
   const authUser = await getAuthenticatedUser(request)
   if (!authUser) {

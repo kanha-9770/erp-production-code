@@ -6,10 +6,8 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { invalidateFormCache } from "@/lib/forms/form-cache";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { subformId: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const { subformId } = params;
     const { searchParams } = new URL(request.url);
@@ -52,10 +50,8 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { subformId: string } }
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const { subformId } = params;
     const body = await request.json();
@@ -142,10 +138,8 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { subformId: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const { subformId } = params;
     const user = await getAuthenticatedUser(request);
@@ -182,10 +176,8 @@ export async function DELETE(
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { subformId: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const { subformId } = params;
     const body = await request.json();

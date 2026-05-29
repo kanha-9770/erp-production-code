@@ -4,10 +4,8 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database/database-service";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { formId: string } }   // ← changed from { id } to { formId }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const { formId } = params;   // ← now correctly destructured
 

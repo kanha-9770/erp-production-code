@@ -5,10 +5,8 @@ import { authorizeOrgAdmin } from "@/lib/tenant"
 import { getAuthenticatedUser } from "@/lib/api-helpers"
 import { moveToTrash } from "@/lib/trash"
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const unitId = params.id
 
@@ -45,10 +43,8 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const unitId = params.id
     const { name, description, assignedRoles, assignedUsers } = await request.json()
@@ -113,10 +109,8 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const unitId = params.id
     const user = await getAuthenticatedUser(request)

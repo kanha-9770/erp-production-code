@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 
-export async function GET(request: Request, { params }: { params: { formId: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const { searchParams } = new URL(request.url)
     const range = searchParams.get("range") || "7d"

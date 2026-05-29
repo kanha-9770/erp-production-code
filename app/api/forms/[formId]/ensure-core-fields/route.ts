@@ -61,10 +61,8 @@ const CORE_FIELDS: CoreFieldSpec[] = [
   { coreKey: 'dateOfBirth', label: 'Date of Birth', type: 'date' },
 ];
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { formId: string } },
-) {
+export async function POST(request: NextRequest, props0: { params: Promise<{ formId: string }> }) {
+  const params = await props0.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser) {
     return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });

@@ -29,21 +29,24 @@ const NODE_BUILTINS = new Set([
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },
   images: {
     unoptimized: true,
   },
+  // Pin the workspace root so Next doesn't pick up a stray pnpm-lock.yaml
+  // higher up the tree (e.g. in the user home dir) and infer the wrong root.
+  turbopack: {
+    root: import.meta.dirname,
+  },
+  // Moved out of experimental in Next 15 — server-only deps that webpack/turbopack
+  // must leave as runtime requires instead of bundling.
+  serverExternalPackages: SERVER_ONLY_EXTERNALS,
   experimental: {
     serverActions: {
       bodySizeLimit: '50mb',
     },
-    instrumentationHook: true,
-    serverComponentsExternalPackages: SERVER_ONLY_EXTERNALS,
     // Tells the compiler to tree-shake these barrel packages so importing
     // one icon / helper doesn't pull the entire library into the chunk.
     // Biggest win on `lucide-react` (hundreds of icons) — present in nearly

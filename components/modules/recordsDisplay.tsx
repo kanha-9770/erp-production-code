@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Eye, Pencil, Trash2, MoreHorizontal, Loader2, User, Clock } from "lucide-react";
+import { Eye, Pencil, Trash2, MoreHorizontal, Loader2, User as UserIcon, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DndContext, closestCenter, DragOverlay } from "@dnd-kit/core";
@@ -1704,7 +1704,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     <div>
                       <p className="text-gray-500">Created By</p>
                       <p className="font-medium flex items-center gap-2">
-                        <User className="h-4 w-4" /> {createdByName}
+                        <UserIcon className="h-4 w-4" /> {createdByName}
                       </p>
                     </div>
                     <div>
@@ -1726,7 +1726,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                     <div>
                       <p className="text-gray-500">Last Updated By</p>
                       <p className="font-medium flex items-center gap-2">
-                        <User className="h-4 w-4" /> {updatedByName}
+                        <UserIcon className="h-4 w-4" /> {updatedByName}
                       </p>
                     </div>
                     <div>

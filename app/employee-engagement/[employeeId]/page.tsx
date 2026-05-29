@@ -10,7 +10,8 @@ import EmployeeAwardsView, { type EmployeeSubmission } from "./employee-awards-v
 import { getValidatedSession } from "@/lib/auth/session";
 import { isUserAdmin } from "@/lib/api-helpers";
 
-export default async function EmployeeContributionDetail({ params }: { params: { employeeId: string } }) {
+export default async function EmployeeContributionDetail(props: { params: Promise<{ employeeId: string }> }) {
+  const params = await props.params;
   const employeeId = params.employeeId;
 
   // Reviewer (Admin / HR) resolution — only Admin / HR may award points

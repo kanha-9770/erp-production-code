@@ -49,10 +49,8 @@ async function loadAndAuthorize(request: NextRequest, id: string) {
   return { authUser, row };
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let body: PatchBody;
   try {
     body = (await request.json()) as PatchBody;
@@ -97,10 +95,8 @@ export async function PATCH(
   );
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const loaded = await loadAndAuthorize(request, params.id);
   if ('error' in loaded) return loaded.error;
   const { authUser, row } = loaded;

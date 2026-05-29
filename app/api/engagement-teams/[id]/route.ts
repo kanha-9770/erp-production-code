@@ -35,10 +35,8 @@ interface UpdateBody {
   isActive?: boolean;
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser) return err('Not authenticated', 401);
   if (!authUser.organizationId) return err('No organization', 403);
@@ -79,10 +77,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser) return err('Not authenticated', 401);
   if (!authUser.organizationId) return err('No organization', 403);

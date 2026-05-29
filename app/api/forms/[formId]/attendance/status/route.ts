@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get("employeeId")
