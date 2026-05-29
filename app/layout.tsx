@@ -12,6 +12,28 @@ export const metadata: Metadata = {
   title: "ERP System",
   description: "Complete Enterprise Resource Planning System",
   generator: "Complete Enterprise Resource Planning System",
+  manifest: "/manifest.webmanifest",
+  applicationName: "ERP System",
+  appleWebApp: {
+    capable: true,
+    title: "ERP",
+    statusBarStyle: "default",
+  },
+  formatDetection: { telephone: false },
+  icons: {
+    icon: [
+      { url: "/placeholder-logo.png", sizes: "192x192", type: "image/png" },
+      { url: "/placeholder-logo.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/placeholder-logo.png", sizes: "180x180", type: "image/png" }],
+  },
+};
+
+export const viewport = {
+  themeColor: "#0f172a",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
 };
 export default function RootLayout({
   children,
