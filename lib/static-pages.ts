@@ -240,8 +240,8 @@ export const STATIC_PAGES: StaticPage[] = [
   },
 
   // ── Performance ────────────────────────────────────────────────────────
-  // KRA tracking + periodic appraisals. Both pages persist to localStorage
-  // until a backend table is added — replace with API hooks when ready.
+  // KRA tracking + periodic appraisals. Both pages persist via the
+  // /api/performance/{kras,appraisals} routes (HR Phase 1).
   {
     path: '/performance/kra',
     label: 'Key Result Areas',
@@ -259,6 +259,34 @@ export const STATIC_PAGES: StaticPage[] = [
     // itself via the `canManage` check.
     description: 'Quarterly / annual review with rating, strengths, growth areas',
     icon: 'trending-up',
+  },
+
+  // ── HR Lifecycle (Phase 1) ─────────────────────────────────────────────
+  // Onboarding fires automatically when an Appointment Letter is SIGNED;
+  // Offboarding fires when an Employee.resignationLetterDate is set.
+  {
+    path: '/hr/onboarding',
+    label: 'Onboarding',
+    group: 'HR Core',
+    description: 'New-hire checklist dashboard — auto-created on letter SIGNED',
+    adminOnly: true,
+    icon: 'user-plus',
+  },
+  {
+    path: '/hr/onboarding/templates',
+    label: 'Onboarding Templates',
+    group: 'HR Core',
+    description: 'Default task seeds used by the SIGNED trigger',
+    adminOnly: true,
+    icon: 'list',
+  },
+  {
+    path: '/hr/offboarding',
+    label: 'Offboarding',
+    group: 'HR Core',
+    description: 'Exit checklists — auto-created when resignation date is set',
+    adminOnly: true,
+    icon: 'user-minus',
   },
 
   // ── Asset & Admin ──────────────────────────────────────────────────────

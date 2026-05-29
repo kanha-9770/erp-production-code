@@ -37,6 +37,7 @@ import {
   Network,
   List,
   UserPlus,
+  UserMinus,
   Coins,
   Receipt,
   Banknote,
@@ -288,6 +289,8 @@ function staticPageIcon(name?: string) {
       return List;
     case "user-plus":
       return UserPlus;
+    case "user-minus":
+      return UserMinus;
     case "coins":
       return Coins;
     case "file-text":
