@@ -88,6 +88,96 @@ export async function getUserTeamId(userId: string): Promise<string | null> {
   return ((emp as any)?.engagementTeamId as string | null) ?? null;
 }
 
+/** Lightweight employee shape for contributor / team-mate pickers. */
+export interface TeamMemberOption {
+  id: string;
+  employeeName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  department: string | null;
+  email: string | null;
+}
+
+/**
+ * Employees the given user can pick as engagement contributors (Kaizen
+ * "Employee Contributor", suggestion co-authors, etc.).
+ *
+ * This deliberately does NOT reuse the role-hierarchy scoping of
+ * /api/employees: there, a leaf employee only sees their own record, which
+ * would leave every contributor picker empty. Engagement contributors are
+ * peers, so we scope by organization + engagement team instead.
+ *
+ * Preference order:
+ *   1. Other ACTIVE employees on the caller's engagement team.
+ *   2. Fallback — every other ACTIVE employee in the organization. This keeps
+ *      the picker usable in orgs that haven't set up engagement teams yet
+ *      (the common case), where step 1 would return nothing.
+ * The caller's own employee record is always excluded.
+ */
+export async function listTeamMembersForUser(
+  userId: string,
+  organizationId: string | null,
+): Promise<{ members: TeamMemberOption[]; scope: 'team' | 'org' }> {
+  if (!userId || !organizationId) return { members: [], scope: 'org' };
+
+  const me = await prisma.employee.findUnique({
+    where: { userId },
+    select: { id: true, engagementTeamId: true } as any,
+  });
+  const myEmployeeId = (me as any)?.id ?? null;
+  const myTeamId = ((me as any)?.engagementTeamId as string | null) ?? null;
+
+  const select = {
+    id: true,
+    employeeName: true,
+    firstName: true,
+    lastName: true,
+    department: true,
+    emailAddress1: true,
+  };
+
+  // Org scope flows through the linked user (Employee has no direct
+  // organizationId), matching how /api/employees scopes the org.
+  const baseWhere: any = {
+    status: 'ACTIVE',
+    user: { organizationId },
+  };
+  if (myEmployeeId) baseWhere.id = { not: myEmployeeId };
+
+  let rows: any[] = [];
+  let scope: 'team' | 'org' = 'org';
+
+  if (myTeamId) {
+    rows = await prisma.employee.findMany({
+      where: { ...baseWhere, engagementTeamId: myTeamId } as any,
+      select,
+      orderBy: [{ employeeName: 'asc' }],
+    });
+    scope = 'team';
+  }
+
+  if (rows.length === 0) {
+    rows = await prisma.employee.findMany({
+      where: baseWhere as any,
+      select,
+      orderBy: [{ employeeName: 'asc' }],
+    });
+    scope = 'org';
+  }
+
+  return {
+    members: rows.map((r) => ({
+      id: r.id,
+      employeeName: r.employeeName ?? null,
+      firstName: r.firstName ?? null,
+      lastName: r.lastName ?? null,
+      department: r.department ?? null,
+      email: r.emailAddress1 ?? null,
+    })),
+    scope,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CRUD
 // ─────────────────────────────────────────────────────────────────────────────

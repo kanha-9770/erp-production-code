@@ -146,18 +146,35 @@ export default function KaizenPage() {
     return m;
   }, [employees]);
 
-  // Other members of the current user's engagement team (self excluded).
-  // Used by KaizenForm's "Employee Contributor" multi-select. Empty array
-  // when the user isn't on an engagement team yet — the form handles that
-  // case with a "no contributors available" hint.
-  const teamMembers = useMemo(() => {
-    if (!currentEmployee) return [];
-    const myTeam = employeeToTeam.get(currentEmployee.id) ?? null;
-    if (!myTeam) return [];
-    return employees.filter(
-      (e) => e.id !== currentEmployee.id && employeeToTeam.get(e.id) === myTeam,
-    );
-  }, [employees, employeeToTeam, currentEmployee]);
+  // Candidates for KaizenForm's "Employee Contributor" multi-select. Sourced
+  // from /api/engagement-teams/members rather than the role-scoped employee
+  // list (useGetEmployeeListQuery): that list returns only the caller's OWN
+  // record for a leaf employee, so deriving team-mates from it always yielded
+  // an empty picker ("No team members available"). The endpoint returns the
+  // caller's engagement-team peers, falling back to all active org employees
+  // when the user isn't on an engagement team yet.
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/engagement-teams/members", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        const json = await res.json();
+        if (!cancelled && res.ok && json?.success) {
+          setTeamMembers(Array.isArray(json.members) ? json.members : []);
+        }
+      } catch {
+        // Non-fatal — the picker shows its "No team members available" hint.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const views = useSavedViews<Filters>("kaizens");
 
