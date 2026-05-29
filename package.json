@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "prisma generate && next build --webpack",
-    "analyze": "cross-env ANALYZE=true next build --webpack",
-    "dev": "next dev --webpack -p 5001",
+    "build": "prisma generate && next build",
+    "analyze": "cross-env ANALYZE=true next build",
+    "dev": "next dev -p 5001",
     "start": "next start -p 5001",
     "create-default-org": "ts-node --esm --transpile-only scripts/create-default-organization.ts",
     "create:second-org": "npx tsx scripts/create-second-organization.ts",
