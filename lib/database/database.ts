@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { invalidatePermissionCache } from "@/lib/api-helpers";
 
 export interface DatabaseUser {
   id: string;
@@ -175,6 +176,9 @@ async function ensureStandardPermissionsExist(): Promise<void> {
           updatedAt: new Date(),
         },
       });
+      // Drop any stale `not-found` cache entry that pre-existed this upsert.
+      // Best-effort — cache failures must not break seeding.
+      await invalidatePermissionCache(perm.name).catch(() => {});
     }
   } catch (error) {
     console.error("[v0] Failed to ensure standard permissions:", error);

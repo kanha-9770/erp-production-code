@@ -67,6 +67,17 @@ export const baseApi = createApi({
     // Employee referrals
     "EmployeeReferrals",
     "EmployeeReferral",
+    // HR Phase 1 — Performance, Onboarding, Offboarding
+    "Kras",
+    "Kra",
+    "Appraisals",
+    "Appraisal",
+    "OnboardingTemplates",
+    "OnboardingTemplate",
+    "OnboardingChecklists",
+    "OnboardingChecklist",
+    "ExitChecklists",
+    "ExitChecklist",
     // Settings
     "MasterData",
     // Route Permissions

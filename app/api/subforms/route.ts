@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateFormCache } from "@/lib/forms/form-cache";
 
 export async function POST(request: NextRequest) {
   try {
@@ -149,6 +150,9 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+
+    // New subform added — drop the parent form's cached structure.
+    if (subform.formId) await invalidateFormCache(subform.formId);
 
     return NextResponse.json({
       success: true,

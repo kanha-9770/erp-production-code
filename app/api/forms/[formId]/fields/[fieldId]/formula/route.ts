@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { invalidateFormCache } from "@/lib/forms/form-cache"
 
 export async function POST(request: NextRequest, { params }: { params: { formId: string; fieldId: string } }) {
   try {
@@ -42,6 +43,9 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
         blankPreference: blankPreference || "Empty",
       },
     })
+
+    // formId is already validated above (field belongs to this form).
+    await invalidateFormCache(formId)
 
     return NextResponse.json({
       success: true,

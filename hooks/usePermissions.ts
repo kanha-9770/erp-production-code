@@ -142,27 +142,30 @@ export function usePermissions(): PermissionsState {
 
     const fetchAll = async () => {
       try {
-        const [roleResults, userPermsRes] = await Promise.all([
-          // Role permissions (one request per role)
+        // ── PERFORMANCE: one batched role-permissions call ──────────────────
+        // Old behaviour: Promise.all of N fetches, one per role. For a user
+        // with 5 roles that's 5 separate round-trips even though they were
+        // started concurrently — Upstash routing + TLS handshake repeated N
+        // times. New behaviour: pass roleIds=a,b,c as a single CSV param;
+        // the backend uses `roleId IN (...)` and returns everything in one
+        // payload. Single request, single round-trip.
+        const roleIdsCsv = roleIds.join(",")
+        const [roleRes, userPermsRes] = await Promise.all([
           roleIds.length > 0
-            ? Promise.all(
-                roleIds.map(async (roleId) => {
-                  const res = await fetch(`/api/role-permissions?roleId=${roleId}`, { credentials: "include" })
-                  if (!res.ok) return []
-                  const json = await res.json()
-                  return json.success && Array.isArray(json.data) ? json.data : []
-                })
-              )
-            : Promise.resolve([]),
-          // User-level permissions for the current user
+            ? fetch(`/api/role-permissions?roleIds=${encodeURIComponent(roleIdsCsv)}`, {
+                credentials: "include",
+              })
+                .then((res) => (res.ok ? res.json() : { success: false, data: [] }))
+                .catch(() => ({ success: false, data: [] }))
+            : Promise.resolve({ success: true, data: [] as RolePermission[] }),
           fetch(`/api/user-permissions?userId=${user.id}`, { credentials: "include" })
             .then((res) => (res.ok ? res.json() : { success: false, data: [] }))
             .catch(() => ({ success: false, data: [] })),
         ])
 
         if (!cancelled) {
-          const allRolePerms: RolePermission[] = []
-          roleResults.forEach((perms) => allRolePerms.push(...perms))
+          const allRolePerms: RolePermission[] =
+            roleRes && roleRes.success && Array.isArray(roleRes.data) ? roleRes.data : []
           setPermissions(allRolePerms)
 
           const uPerms: UserPermissionRecord[] =

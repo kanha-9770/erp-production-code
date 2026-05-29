@@ -2,10 +2,8 @@
 // pages. Kept tiny and pure so they're cheap to call inside table cells
 // without spinning up extra deps.
 
-import {
-  formatDateKeyInUserZone,
-  formatTimeInUserZone,
-} from "@/lib/user-timezone";
+import { formatDateKeyInUserZone } from "@/lib/user-timezone";
+import { formatTimeInOrgZone } from "@/lib/org-timezone";
 
 export function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -32,9 +30,12 @@ export function formatDateLong(yyyymmdd: string): string {
 
 export function formatTimeShort(iso: string | null): string {
   // ISO timestamps stored on attendance rows are absolute moments. Format
-  // them in the user's chosen timezone so check-in/check-out clocks
-  // match the time the user actually sees on their wall.
-  return formatTimeInUserZone(iso);
+  // them in the **org's** reportTimezone (set on the Attendance
+  // Configuration page) so the widget card, the records table, the bell
+  // notification and HR's team view all show the same wall-clock time for
+  // the same row — regardless of which zone the viewing user happens to
+  // be in.
+  return formatTimeInOrgZone(iso);
 }
 
 export function workedMinutesFor(record: {

@@ -1,6 +1,7 @@
 "use client";
 import type React from "react";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -28,7 +29,18 @@ import type { FormField } from "@/types/form-builder";
 import { LookupField } from "@/components/forms/lookup-field";
 import CameraCapture from "@/components/forms/camera-capture";
 import { FileUploadZone } from "@/components/forms/file-upload-zone";
-import PhoneInput from "react-phone-number-input";
+// PhoneInput (UI + country data) is ~47KB gzip — dynamic-import so pages
+// without any phone field don't pay for it, and pages with phone fields
+// only download it when the renderer's switch lands on the "phone-input"
+// case. `isValidPhoneNumber` stays static because validation runs
+// synchronously for every field and the validation surface alone is much
+// smaller than the picker UI.
+const PhoneInput = dynamic(() => import("react-phone-number-input").then((m) => m.default), {
+  ssr: false,
+  loading: () => (
+    <Input placeholder="Loading phone input…" disabled className="h-10" />
+  ),
+});
 import "react-phone-number-input/style.css";
 import { isValidPhoneNumber } from "react-phone-number-input";
 import { COUNTRIES } from "@/lib/constants/countries";

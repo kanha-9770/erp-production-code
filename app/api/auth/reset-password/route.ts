@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { hashPassword, createSession } from '@/lib/auth'
+import { hashPassword, createSession, invalidateAllSessionsForUser } from '@/lib/auth'
 import { z } from 'zod'
 import { assertStrongPassword } from '@/lib/auth/password-policy'
 import { getRequestMeta } from '@/lib/api-helpers'
@@ -102,6 +102,14 @@ export async function POST(request: NextRequest) {
         },
       }),
     ])
+
+    // A password reset means any previously-issued session is potentially
+    // compromised (that's the whole reason the user is resetting). Drop them
+    // ALL — both from Redis (invalidateAllSessionsForUser reads the tokens
+    // before they're deleted) and from Postgres. The fresh session created
+    // below auto-logs the user back in on this device.
+    await invalidateAllSessionsForUser(userId).catch(() => null)
+    await prisma.userSession.deleteMany({ where: { userId } }).catch(() => null)
 
     // Create session to auto-login user
     const session = await createSession(

@@ -8,6 +8,13 @@ import type {
   Subform,
 } from "@/types/form-builder";
 import { DatabaseTransforms } from "./DatabaseTransforms";
+import {
+  invalidateFormCache,
+  invalidateFormCacheMany,
+  resolveFormIdFromField,
+  resolveFormIdFromSection,
+  resolveFormIdFromSubform,
+} from "@/lib/forms/form-cache";
 
 export class DatabaseModules {
   // Module operations with hierarchy support
@@ -719,6 +726,9 @@ export class DatabaseModules {
         },
       });
 
+      // Form/table-mapping shape changed — drop any cached structure.
+      await invalidateFormCache(id);
+
       return DatabaseTransforms.transformForm(form);
     } catch (error: any) {
       console.error("Database error updating form:", error);
@@ -731,6 +741,8 @@ export class DatabaseModules {
       await prisma.form.delete({
         where: { id },
       });
+      // Drop the cache so any pending reads miss instead of serving ghost data.
+      await invalidateFormCache(id);
     } catch (error: any) {
       console.error("Database error deleting form:", error);
       throw new Error(`Failed to delete form: ${error?.message}`);
@@ -812,6 +824,9 @@ export class DatabaseModules {
         },
       });
 
+      // New section in an existing form — invalidate so the next read picks it up.
+      await invalidateFormCache(data.formId);
+
       return DatabaseTransforms.transformSection(section);
     } catch (error: any) {
       console.error("Database error creating section:", error);
@@ -872,6 +887,8 @@ export class DatabaseModules {
         },
       });
 
+      await invalidateFormCache(section.formId);
+
       return DatabaseTransforms.transformSection(section);
     } catch (error: any) {
       console.error("Database error updating section:", error);
@@ -881,9 +898,12 @@ export class DatabaseModules {
 
   static async deleteSection(id: string): Promise<void> {
     try {
+      // Resolve the formId BEFORE delete (section.formId becomes unreadable after).
+      const formId = await resolveFormIdFromSection(id);
       await prisma.formSection.delete({
         where: { id },
       });
+      if (formId) await invalidateFormCache(formId);
     } catch (error: any) {
       console.error("Database error deleting section:", error);
       throw new Error(`Failed to delete section: ${error?.message}`);
@@ -967,6 +987,9 @@ export class DatabaseModules {
           });
         }
       }
+
+      // Section + fields + lookups + reorders all changed structure.
+      await invalidateFormCache(formId);
     } catch (error: any) {
       console.error("Database error deleting section with cleanup:", error);
       throw new Error(
@@ -1053,6 +1076,11 @@ export class DatabaseModules {
         },
       });
 
+      // Drop the parent form's cached structure so the new subform appears.
+      if ((subform as any).formId) {
+        await invalidateFormCache((subform as any).formId);
+      }
+
       return DatabaseTransforms.transformSubform(subform);
     } catch (error: any) {
       console.error("Database error creating subform:", error);
@@ -1112,6 +1140,10 @@ export class DatabaseModules {
         },
       });
 
+      if ((subform as any).formId) {
+        await invalidateFormCache((subform as any).formId);
+      }
+
       return DatabaseTransforms.transformSubform(subform);
     } catch (error: any) {
       console.error("Database error updating subform:", error);
@@ -1121,9 +1153,12 @@ export class DatabaseModules {
 
   static async deleteSubform(id: string): Promise<void> {
     try {
+      // Capture formId BEFORE delete so we can invalidate the parent form's cache.
+      const formId = await resolveFormIdFromSubform(id);
       await prisma.subform.delete({
         where: { id },
       });
+      if (formId) await invalidateFormCache(formId);
     } catch (error: any) {
       console.error("Database error deleting subform:", error);
       throw new Error(`Failed to delete subform: ${error?.message}`);
@@ -1183,6 +1218,11 @@ export class DatabaseModules {
           // Don't fail the field creation if lookup relations fail
         }
       }
+
+      // Resolve which form this field belongs to (it could be attached to a
+      // section or to a subform) and drop that form's cached structure.
+      const formId = await resolveFormIdFromField(field.id);
+      if (formId) await invalidateFormCache(formId);
 
       return DatabaseTransforms.transformField(field);
     } catch (error: any) {
@@ -1471,6 +1511,9 @@ export class DatabaseModules {
         }
       }
 
+      const formId = await resolveFormIdFromField(id);
+      if (formId) await invalidateFormCache(formId);
+
       return DatabaseTransforms.transformField(field);
     } catch (error: any) {
       console.error("Database error updating field:", error);
@@ -1480,9 +1523,12 @@ export class DatabaseModules {
 
   static async deleteField(id: string): Promise<void> {
     try {
+      // Resolve formId BEFORE delete — afterwards the field row is gone.
+      const formId = await resolveFormIdFromField(id);
       await prisma.formField.delete({
         where: { id },
       });
+      if (formId) await invalidateFormCache(formId);
     } catch (error: any) {
       console.error("Database error deleting field:", error);
       throw new Error(`Failed to delete field: ${error?.message}`);

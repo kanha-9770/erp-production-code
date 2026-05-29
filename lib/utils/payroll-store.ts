@@ -1,4 +1,49 @@
 import { prisma } from '@/lib/prisma';
+import { buildKey, cached, cacheInvalidate } from '@/lib/cache';
+
+// PayrollConfiguration is read on every payroll calculation. Single source of
+// truth for the cached row — both `loadSetup` and `getPayrollFormulas` go
+// through this so we only cache one shape.
+const PAYROLL_CONFIG_TTL_S = 600;
+const payrollConfigKey = (orgId: string) =>
+  buildKey('hr', 'payroll-config-row', orgId);
+
+async function getActivePayrollConfigRow(organizationId: string) {
+  return cached('hr', payrollConfigKey(organizationId), PAYROLL_CONFIG_TTL_S, () =>
+    prisma.payrollConfiguration.findFirst({
+      where: { isActive: true, organizationId },
+      orderBy: { createdAt: 'desc' },
+    }),
+  );
+}
+
+/**
+ * Public entry-point for the post-deploy cache warmer. Forces the cached
+ * payroll-config row to be (re)populated for the given org so the first real
+ * request after a deploy doesn't pay the DB miss.
+ */
+export async function warmPayrollConfigCache(organizationId: string): Promise<void> {
+  await getActivePayrollConfigRow(organizationId);
+}
+
+/**
+ * Drop the cached PayrollConfiguration row for an org. Call this from any
+ * handler that creates / updates / deactivates a PayrollConfiguration row.
+ *
+ * Also invalidates the sidebar's static-page anchors cache because anchors
+ * auto-derive from PayrollConfiguration.attendanceFieldMappings.
+ */
+export async function invalidatePayrollConfigCache(organizationId: string) {
+  await cacheInvalidate(
+    'hr',
+    payrollConfigKey(organizationId),
+  );
+  // Auto-derived sidebar anchors depend on this config — drop them too.
+  await cacheInvalidate(
+    'default',
+    buildKey('default', 'page-anchors', organizationId),
+  );
+}
 
 // =============================================================================
 // MULTI-TENANCY CONTRACT
@@ -701,10 +746,7 @@ interface PayrollSetupShape {
 
 async function loadSetup(organizationId: string): Promise<PayrollSetupShape | null> {
   try {
-    const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true, organizationId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const config = await getActivePayrollConfigRow(organizationId);
     const m: any = config?.attendanceFieldMappings;
     if (m && typeof m === 'object' && m._meta === SETUP_META_KEY) {
       const policyRaw = m.policy ?? {};
@@ -741,10 +783,7 @@ export async function getPayrollFormulas(organizationId: string): Promise<Payrol
   // gross + 5% flat tax + ₹500 insurance, which is closer to a placeholder
   // than reality, so the defaults are the saner starting point.
   try {
-    const config = await prisma.payrollConfiguration.findFirst({
-      where: { isActive: true, organizationId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const config = await getActivePayrollConfigRow(organizationId);
     const m: any = config?.attendanceFieldMappings;
     if (m && typeof m === 'object' && m._meta === SETUP_META_KEY) {
       return {

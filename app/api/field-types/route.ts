@@ -1,10 +1,22 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
+import { buildKey, cached, cacheInvalidate } from "@/lib/cache"
+
+// Field types are global, change only when the admin re-seeds them (POST
+// below). Form-builder pages read this list constantly, so it's a high-ROI
+// cache.
+const FIELD_TYPES_TTL_S = 3600; // 1 hour — they essentially never change
+const FIELD_TYPES_KEY = buildKey("default", "field-types", "active");
 
 export async function GET() {
   try {
-    const fieldTypes = await DatabaseService.getFieldTypes()
+    const fieldTypes = await cached(
+      "default",
+      FIELD_TYPES_KEY,
+      FIELD_TYPES_TTL_S,
+      () => DatabaseService.getFieldTypes(),
+    );
     return NextResponse.json({ success: true, data: fieldTypes })
   } catch (error: any) {
     console.error("Error fetching field types:", error)
@@ -134,6 +146,9 @@ export async function POST() {
         active: true,
       })
     }
+
+    // Drop the cached list so the next read picks up newly-seeded rows.
+    await cacheInvalidate("default", FIELD_TYPES_KEY)
 
     return NextResponse.json({ success: true, message: "Field types seeded successfully." })
   } catch (error: any) {

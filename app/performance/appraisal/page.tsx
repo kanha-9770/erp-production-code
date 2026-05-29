@@ -16,6 +16,12 @@ import {
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import {
+  useGetAppraisalsQuery,
+  useCreateAppraisalMutation,
+  useUpdateAppraisalMutation,
+  useDeleteAppraisalMutation,
+} from "@/lib/api/performance";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -52,6 +58,10 @@ type Cycle = "Q1" | "Q2" | "Q3" | "Q4" | "MID_YEAR" | "ANNUAL";
 
 interface Appraisal {
   id: string;
+  // Human-readable per-org identifier ("APR-0001"). Server-generated; the
+  // table cell that used to render `id` now reads this and falls back to a
+  // sliced cuid.
+  displayId?: string | null;
   employee: string;
   // Employee identification (parallel to engagement module).
   employeeId?: string;
@@ -100,44 +110,60 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-const STORAGE_KEY = "performance-appraisal:v1";
-
-const SEED: Appraisal[] = [
-  {
-    id: "APR-0001",
-    employee: "Riya Sharma",
-    reviewer: "Sanjay Pillai",
-    cycle: "ANNUAL",
-    year: 2024,
-    rating: 4.5,
-    strengths: "Owned the ticket-resolution initiative end-to-end. Strong stakeholder communication.",
-    improvements: "Delegate more to L1 — currently a bottleneck on escalations.",
-    comments: "Promotion candidate for next cycle.",
-    status: "COMPLETED",
-    submittedAt: "2025-01-12",
-  },
-  {
-    id: "APR-0002",
-    employee: "Arjun Mehta",
-    reviewer: "Sanjay Pillai",
-    cycle: "ANNUAL",
-    year: 2024,
-    rating: 5,
-    strengths: "Exceeded sales target by 38%. Mentored 3 new joiners successfully.",
-    improvements: "Documentation discipline on closed deals.",
-    comments: "Top performer — flagged for retention.",
-    status: "ACKNOWLEDGED",
-    submittedAt: "2025-01-14",
-  },
-];
-
 const EMPTY: Appraisal = {
-  id: "", employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
+  id: "", displayId: null, employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
   department: "", employeeEngagementTeamName: "",
   reviewer: "", reviewerId: "",
   cycle: "ANNUAL", year: new Date().getFullYear(),
   rating: 0, strengths: "", improvements: "", comments: "", status: "PENDING", submittedAt: ""
 };
+
+// Map a server AppraisalItem into the page's in-memory Appraisal shape.
+function fromServer(a: any): Appraisal {
+  return {
+    id: a.id,
+    displayId: a.displayId ?? null,
+    employee: a.employeeName ?? "",
+    employeeId: a.employeeId ?? "",
+    firstName: a.firstName ?? "",
+    middleName: a.middleName ?? "",
+    lastName: a.lastName ?? "",
+    department: a.department ?? "",
+    employeeEngagementTeamName: a.employeeEngagementTeamName ?? "",
+    reviewer: a.reviewerName ?? "",
+    reviewerId: a.reviewerId ?? "",
+    cycle: (a.cycle ?? "ANNUAL") as Cycle,
+    year: Number(a.year ?? new Date().getFullYear()),
+    rating: Number(a.rating ?? 0),
+    strengths: a.strengths ?? "",
+    improvements: a.improvements ?? "",
+    comments: a.comments ?? "",
+    status: (a.status ?? "PENDING") as AppraisalStatus,
+    submittedAt: a.submittedAt ? String(a.submittedAt).slice(0, 10) : "",
+  };
+}
+
+function toServer(a: Appraisal): Record<string, any> {
+  return {
+    employeeName: a.employee || [a.firstName, a.lastName].filter(Boolean).join(" ").trim(),
+    employeeId: a.employeeId || null,
+    firstName: a.firstName || null,
+    middleName: a.middleName || null,
+    lastName: a.lastName || null,
+    department: a.department || null,
+    employeeEngagementTeamName: a.employeeEngagementTeamName || null,
+    reviewerName: a.reviewer,
+    reviewerId: a.reviewerId || null,
+    cycle: a.cycle,
+    year: a.year,
+    rating: a.rating,
+    strengths: a.strengths || null,
+    improvements: a.improvements || null,
+    comments: a.comments || null,
+    status: a.status,
+    submittedAt: a.submittedAt || null,
+  };
+}
 
 // --- Components ---
 
@@ -167,8 +193,19 @@ export default function PerformanceAppraisalPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
-  const [items, setItems] = useState<Appraisal[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Persistence layer — RTK Query against /api/performance/appraisals.
+  // Replaces the previous localStorage-backed seed.
+  const { data: appraisalData, isLoading: appraisalLoading } = useGetAppraisalsQuery();
+  const [createAppraisal] = useCreateAppraisalMutation();
+  const [updateAppraisal] = useUpdateAppraisalMutation();
+  const [deleteAppraisal] = useDeleteAppraisalMutation();
+
+  const items: Appraisal[] = useMemo(
+    () => (appraisalData?.items ?? []).map(fromServer),
+    [appraisalData]
+  );
+  const loading = appraisalLoading;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState({ search: "", cycle: "", status: "", department: "" });
@@ -180,19 +217,6 @@ export default function PerformanceAppraisalPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const views = useSavedViews<typeof filters>("performance-appraisal");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setItems(JSON.parse(raw));
-      else setItems(SEED);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!loading) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items, loading]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { id: "employee", label: "Employee", type: "text" },
@@ -226,7 +250,7 @@ export default function PerformanceAppraisalPage() {
       const q = filters.search.toLowerCase();
       result = result.filter(a =>
         a.employee.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
+        (a.displayId?.toLowerCase().includes(q) ?? false) ||
         a.reviewer.toLowerCase().includes(q) ||
         (a.employeeId?.toLowerCase().includes(q) ?? false)
       );
@@ -243,7 +267,7 @@ export default function PerformanceAppraisalPage() {
       header: "Appraisal ID",
       width: 120,
       pinned: true,
-      cell: (a) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{a.id}</span>,
+      cell: (a) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{a.displayId ?? a.id.slice(0, 8)}</span>,
     },
     {
       id: "employee",
@@ -291,25 +315,40 @@ export default function PerformanceAppraisalPage() {
     },
   ], []);
 
-  const handleSave = (draft: Appraisal) => {
-    if (editingId) {
-      setItems(items.map(i => i.id === editingId ? draft : i));
-      toast({ title: "Appraisal Updated" });
-    } else {
-      const newId = `APR-${String(items.length + 1).padStart(4, '0')}`;
-      setItems([{ ...draft, id: newId }, ...items]);
-      toast({ title: "Appraisal Created" });
+  const handleSave = async (draft: Appraisal) => {
+    try {
+      if (editingId) {
+        await updateAppraisal({ id: editingId, body: toServer(draft) }).unwrap();
+        toast({ title: "Appraisal Updated" });
+      } else {
+        await createAppraisal(toServer(draft)).unwrap();
+        toast({ title: "Appraisal Created" });
+      }
+      setFormOpen(false);
+      setEditingId(null);
+    } catch (err: any) {
+      toast({
+        title: editingId ? "Update failed" : "Create failed",
+        description: err?.data?.error || err?.message || "Server error",
+        variant: "destructive",
+      });
     }
-    setFormOpen(false);
-    setEditingId(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deletingId) return;
-    setItems(items.filter(i => i.id !== deletingId));
-    if (selectedId === deletingId) setSelectedId(null);
-    setDeletingId(null);
-    toast({ title: "Appraisal Deleted", variant: "destructive" });
+    try {
+      await deleteAppraisal(deletingId).unwrap();
+      if (selectedId === deletingId) setSelectedId(null);
+      setDeletingId(null);
+      toast({ title: "Appraisal Deleted", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.data?.error || err?.message || "Server error",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -476,7 +515,7 @@ function PreviewHeader({ id, items }: { id: string, items: Appraisal[] }) {
   if (!a) return null;
   return (
     <div className="flex items-center gap-2 min-w-0 w-full">
-      <Badge variant="outline" className="text-[10px] uppercase font-bold">{a.id}</Badge>
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{a.displayId ?? a.id.slice(0, 8)}</Badge>
       <span className="font-bold text-sm truncate uppercase tracking-tight">{a.employee}</span>
       <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
         <Link href={`/performance/appraisal/${a.id}`} title="Open full details">

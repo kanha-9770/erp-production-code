@@ -791,7 +791,9 @@ export const UserManagementHandlers = {
             { userId: null },
           ],
         },
-        select: { id: true },
+        // Pull the previous resignation date so we can detect a null → set
+        // transition and trigger offboarding.
+        select: { id: true, resignationLetterDate: true, dateOfLeaving: true, reasonOfLeaving: true },
       });
       if (!existing) {
         return NextResponse.json({ error: "Employee not found" }, { status: 404 });
@@ -799,6 +801,28 @@ export const UserManagementHandlers = {
 
       const data = sanitizeEmployeePayload(body, { partial: true });
       const employee = await prisma.employee.update({ where: { id }, data });
+
+      // Offboarding trigger: HR sets `resignationLetterDate` on the Employee
+      // form when a resignation comes in. The first time that field goes
+      // from null → set, materialise the exit checklist with the default
+      // task seeds. Idempotent on the service side, so re-saves are safe.
+      const resignedNow =
+        "resignationLetterDate" in data &&
+        data.resignationLetterDate != null &&
+        !existing.resignationLetterDate;
+      if (resignedNow && authUser.organizationId) {
+        const { materializeExitChecklist } = await import("@/lib/hr/offboarding-service");
+        void materializeExitChecklist({
+          organizationId: authUser.organizationId,
+          employeeId: employee.id,
+          initiatedAt: new Date(),
+          lastWorkingDate: (employee as any).dateOfLeaving ?? null,
+          reason: (employee as any).reasonOfLeaving ?? null,
+          createdById: authUser.id,
+        }).catch((err) =>
+          console.error("[updateEmployee] materialise exit checklist:", err),
+        );
+      }
 
       // Mirror the shared identity/contact fields onto the linked User
       // account so an edit in Employee Master shows up everywhere the User

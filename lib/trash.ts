@@ -384,6 +384,13 @@ const CONFIGS: Record<string, TrashConfig> = {
   // falls back to ctx.organizationId, which the handler passes from auth.
   Employee: { model: "employee", nameOf: (r) => r.employeeName ?? r.id },
 
+  // HR — Performance, Onboarding, Offboarding (Phase 1)
+  Kra: { model: "kra", orgField: "organizationId", nameOf: (r) => r.displayId ?? r.id },
+  Appraisal: { model: "appraisal", orgField: "organizationId", nameOf: (r) => r.displayId ?? r.id },
+  OnboardingTemplate: { model: "onboardingTemplate", orgField: "organizationId", nameOf: (r) => r.name ?? r.id },
+  OnboardingChecklist: { model: "onboardingChecklist", orgField: "organizationId", nameOf: (r) => r.id },
+  ExitChecklist: { model: "exitChecklist", orgField: "organizationId", nameOf: (r) => r.id },
+
   // Inventory
   InventoryProduct: { model: "inventoryProduct", orgField: "organizationId", nameOf: (r) => r.name ?? r.id },
 

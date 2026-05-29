@@ -16,6 +16,12 @@ import {
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
+import {
+  useGetKrasQuery,
+  useCreateKraMutation,
+  useUpdateKraMutation,
+  useDeleteKraMutation,
+} from "@/lib/api/performance";
 import { SubmitterDetails } from "@/components/employee-engagement/submitter-details";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -51,7 +57,12 @@ type KraStatus = "DRAFT" | "ACTIVE" | "ACHIEVED" | "AT_RISK" | "MISSED";
 type Period = "Q1" | "Q2" | "Q3" | "Q4" | "ANNUAL";
 
 interface Kra {
+  // Server-side cuid — opaque, used for mutations and row keys.
   id: string;
+  // Human-readable per-org identifier ("KRA-0001"). Server-generated; the
+  // table cell that used to render `id` now reads this and falls back to
+  // a sliced cuid for in-flight rows that haven't yet hit the server.
+  displayId?: string | null;
   employee: string;
   // Employee identification fields (parallel to engagement module).
   employeeId?: string;
@@ -97,56 +108,61 @@ const DEPARTMENT_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-const STORAGE_KEY = "performance-kra:v1";
-
-const SEED: Kra[] = [
-  {
-    id: "KRA-0001",
-    employee: "Riya Sharma",
-    objective: "Reduce average ticket resolution time by 25%",
-    weight: 30,
-    target: "≤ 4 hours",
-    actual: "4.6 hours",
-    progress: 78,
-    period: "Q1",
-    year: 2024,
-    status: "ACTIVE",
-    notes: "Tracked via Zendesk export",
-  },
-  {
-    id: "KRA-0002",
-    employee: "Arjun Mehta",
-    objective: "Close 8 enterprise deals worth ₹50L+ each",
-    weight: 40,
-    target: "8 deals",
-    actual: "8 deals",
-    progress: 100,
-    period: "Q1",
-    year: 2024,
-    status: "ACHIEVED",
-    notes: "Closed last deal on 28 Mar",
-  },
-  {
-    id: "KRA-0003",
-    employee: "Priya Kapoor",
-    objective: "Ship the new payroll module to GA",
-    weight: 35,
-    target: "GA by 31 Mar",
-    actual: "Beta only",
-    progress: 55,
-    period: "Q1",
-    year: 2024,
-    status: "AT_RISK",
-    notes: "Tax compliance review pending",
-  },
-];
-
 const EMPTY: Kra = {
-  id: "", employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
+  id: "", displayId: null, employee: "", employeeId: "", firstName: "", middleName: "", lastName: "",
   department: "", employeeEngagementTeamName: "",
   objective: "", weight: 0, target: "", actual: "",
   progress: 0, period: "Q1", year: new Date().getFullYear(), status: "DRAFT", notes: ""
 };
+
+// Map a server KraItem (Prisma shape, Decimal-as-string) into the page's
+// in-memory Kra shape (numbers, never-null strings). Keeps the rest of the
+// page free of null-checks for fields the UI treats as required text.
+function fromServer(k: any): Kra {
+  return {
+    id: k.id,
+    displayId: k.displayId ?? null,
+    employee: k.employeeName ?? "",
+    employeeId: k.employeeId ?? "",
+    firstName: k.firstName ?? "",
+    middleName: k.middleName ?? "",
+    lastName: k.lastName ?? "",
+    department: k.department ?? "",
+    employeeEngagementTeamName: k.employeeEngagementTeamName ?? "",
+    objective: k.objective ?? "",
+    weight: Number(k.weight ?? 0),
+    target: k.target ?? "",
+    actual: k.actual ?? "",
+    progress: Number(k.progress ?? 0),
+    period: (k.period ?? "Q1") as Period,
+    year: Number(k.year ?? new Date().getFullYear()),
+    status: (k.status ?? "DRAFT") as KraStatus,
+    notes: k.notes ?? "",
+  };
+}
+
+// Inverse of fromServer — strips id/displayId (server-owned) and renames
+// `employee` back to `employeeName` for the API contract.
+function toServer(k: Kra): Record<string, any> {
+  return {
+    employeeName: k.employee || [k.firstName, k.lastName].filter(Boolean).join(" ").trim(),
+    employeeId: k.employeeId || null,
+    firstName: k.firstName || null,
+    middleName: k.middleName || null,
+    lastName: k.lastName || null,
+    department: k.department || null,
+    employeeEngagementTeamName: k.employeeEngagementTeamName || null,
+    objective: k.objective,
+    weight: k.weight,
+    target: k.target || null,
+    actual: k.actual || null,
+    progress: k.progress,
+    period: k.period,
+    year: k.year,
+    status: k.status,
+    notes: k.notes || null,
+  };
+}
 
 // --- Main Component ---
 
@@ -169,8 +185,20 @@ export default function KraPage() {
   const employees = empData?.employees ?? [];
   const currentEmployee = employees.find(e => e.userId === user?.id);
 
-  const [items, setItems] = useState<Kra[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Persistence layer — RTK Query against /api/performance/kras. Replaces
+  // the previous localStorage-backed seed; the server owns IDs, ordering,
+  // and visibility (org-scope is enforced server-side).
+  const { data: kraData, isLoading: kraLoading } = useGetKrasQuery();
+  const [createKra] = useCreateKraMutation();
+  const [updateKra] = useUpdateKraMutation();
+  const [deleteKra] = useDeleteKraMutation();
+
+  const items: Kra[] = useMemo(
+    () => (kraData?.items ?? []).map(fromServer),
+    [kraData]
+  );
+  const loading = kraLoading;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState({ search: "", period: "", status: "", department: "" });
@@ -182,19 +210,6 @@ export default function KraPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const views = useSavedViews<typeof filters>("performance-kra");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setItems(JSON.parse(raw));
-      else setItems(SEED);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!loading) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  }, [items, loading]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { id: "employee", label: "Employee", type: "text" },
@@ -229,7 +244,7 @@ export default function KraPage() {
       const q = filters.search.toLowerCase();
       result = result.filter(k =>
         k.employee.toLowerCase().includes(q) ||
-        k.id.toLowerCase().includes(q) ||
+        (k.displayId?.toLowerCase().includes(q) ?? false) ||
         k.objective.toLowerCase().includes(q) ||
         (k.employeeId?.toLowerCase().includes(q) ?? false)
       );
@@ -246,7 +261,7 @@ export default function KraPage() {
       header: "KRA ID",
       width: 120,
       pinned: true,
-      cell: (k) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{k.id}</span>,
+      cell: (k) => <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">{k.displayId ?? k.id.slice(0, 8)}</span>,
     },
     {
       id: "employee",
@@ -302,25 +317,40 @@ export default function KraPage() {
     },
   ], []);
 
-  const handleSave = (draft: Kra) => {
-    if (editingId) {
-      setItems(items.map(i => i.id === editingId ? draft : i));
-      toast({ title: "KRA Updated" });
-    } else {
-      const newId = `KRA-${String(items.length + 1).padStart(4, '0')}`;
-      setItems([{ ...draft, id: newId }, ...items]);
-      toast({ title: "KRA Added" });
+  const handleSave = async (draft: Kra) => {
+    try {
+      if (editingId) {
+        await updateKra({ id: editingId, body: toServer(draft) }).unwrap();
+        toast({ title: "KRA Updated" });
+      } else {
+        await createKra(toServer(draft)).unwrap();
+        toast({ title: "KRA Added" });
+      }
+      setFormOpen(false);
+      setEditingId(null);
+    } catch (err: any) {
+      toast({
+        title: editingId ? "Update failed" : "Create failed",
+        description: err?.data?.error || err?.message || "Server error",
+        variant: "destructive",
+      });
     }
-    setFormOpen(false);
-    setEditingId(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deletingId) return;
-    setItems(items.filter(i => i.id !== deletingId));
-    if (selectedId === deletingId) setSelectedId(null);
-    setDeletingId(null);
-    toast({ title: "KRA Deleted", variant: "destructive" });
+    try {
+      await deleteKra(deletingId).unwrap();
+      if (selectedId === deletingId) setSelectedId(null);
+      setDeletingId(null);
+      toast({ title: "KRA Deleted", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Delete failed",
+        description: err?.data?.error || err?.message || "Server error",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -487,7 +517,7 @@ function PreviewHeader({ id, items }: { id: string, items: Kra[] }) {
   if (!k) return null;
   return (
     <div className="flex items-center gap-2 min-w-0 w-full">
-      <Badge variant="outline" className="text-[10px] uppercase font-bold">{k.id}</Badge>
+      <Badge variant="outline" className="text-[10px] uppercase font-bold">{k.displayId ?? k.id.slice(0, 8)}</Badge>
       <span className="font-bold text-sm truncate uppercase tracking-tight">{k.employee}</span>
       <Button asChild variant="ghost" size="icon" className="h-7 w-7 shrink-0 ml-auto">
         <Link href={`/performance/kra/${k.id}`} title="Open full details">

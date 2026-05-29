@@ -1187,13 +1187,13 @@ export default function ChatbotUI() {
 
       <div className="flex-1 flex flex-col min-w-0 h-full relative bg-background">
         {/* Header */}
-        <div className="border-b border-border/60 bg-background px-4 py-2.5 flex items-center gap-2 flex-wrap shrink-0">
+        <div className="sticky top-0 z-20 border-b border-border/60 bg-background/80 backdrop-blur-xl px-3 sm:px-4 py-2.5 flex items-center gap-2 flex-wrap shrink-0">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setSidebarOpen((v) => !v)}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            className="h-8 w-8 p-0 hover:bg-muted text-muted-foreground"
+            className="h-8 w-8 p-0 hover:bg-muted text-muted-foreground rounded-lg"
           >
             {sidebarOpen ? (
               <PanelLeftClose className="h-4 w-4" />
@@ -1201,34 +1201,44 @@ export default function ChatbotUI() {
               <PanelLeft className="h-4 w-4" />
             )}
           </Button>
-          <div className="flex items-center gap-2 mr-auto min-w-0">
-            <h1 className="text-[13px] font-medium truncate max-w-[320px] text-foreground/90">
-              {activeConversationId
-                ? activeConversation?.title ?? "Chat"
-                : "New chat"}
-            </h1>
-            {streaming && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+          <div className="flex items-center gap-2.5 mr-auto min-w-0">
+            <div className="hidden sm:flex relative shrink-0">
+              <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20">
+                <Bot className="h-3.5 w-3.5 text-primary-foreground" />
+              </div>
+            </div>
+            <div className="min-w-0 leading-tight">
+              <h1 className="text-[13.5px] font-semibold truncate max-w-[260px] sm:max-w-[320px] text-foreground tracking-tight">
+                {activeConversationId
+                  ? activeConversation?.title ?? "Chat"
+                  : "New conversation"}
+              </h1>
+              {streaming ? (
+                <span className="inline-flex items-center gap-1.5 text-[10.5px] text-primary font-medium">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+                  </span>
+                  thinking…
                 </span>
-                thinking
-              </span>
-            )}
+              ) : (
+                <span className="text-[10.5px] text-muted-foreground/80 hidden sm:inline">
+                  Analytics assistant
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Provider/Model selects — hidden below sm to keep the header in a
-              single row on mobile. The settings popover surfaces the same
-              context (system prompt + temperature) and the underlying state
-              still drives requests, so nothing is lost on small screens. */}
-          <div className="hidden sm:flex items-center gap-1.5">
+          {/* Provider/Model selects — grouped into a single pill so they read
+              as one connected control. Hidden below sm; the settings popover
+              still exposes the same state on mobile. */}
+          <div className="hidden sm:flex items-center rounded-xl border border-border/60 bg-muted/40 p-0.5 shadow-inner shadow-black/[0.02]">
             <Select
               value={providerId}
               onValueChange={setProviderId}
               disabled={streaming || providers.length === 0}
             >
-              <SelectTrigger className="h-8 w-[120px] lg:w-[140px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+              <SelectTrigger className="h-7 w-[110px] lg:w-[130px] text-[11.5px] font-medium border-0 bg-transparent hover:bg-background/80 rounded-lg shadow-none focus:ring-0">
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
@@ -1239,20 +1249,18 @@ export default function ChatbotUI() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="hidden sm:flex items-center gap-1.5">
+            <span aria-hidden className="h-4 w-px bg-border/60 mx-0.5" />
             <Select
               value={model}
               onValueChange={setModel}
               disabled={streaming || modelOptions.length === 0}
             >
-              <SelectTrigger className="h-8 w-[140px] lg:w-[170px] text-xs border-border/60 bg-transparent hover:bg-muted/60 rounded-lg">
+              <SelectTrigger className="h-7 w-[130px] lg:w-[160px] text-[11.5px] font-mono border-0 bg-transparent hover:bg-background/80 rounded-lg shadow-none focus:ring-0">
                 <SelectValue placeholder="Model" />
               </SelectTrigger>
               <SelectContent>
                 {modelOptions.map((m) => (
-                  <SelectItem key={m} value={m} className="text-xs">
+                  <SelectItem key={m} value={m} className="text-xs font-mono">
                     {m}
                   </SelectItem>
                 ))}
@@ -1447,7 +1455,16 @@ export default function ChatbotUI() {
         </div>
 
         {/* Composer */}
-        <form onSubmit={handleSubmit} className="bg-background px-4 pt-2 pb-4 shrink-0">
+        <form
+          onSubmit={handleSubmit}
+          className="relative bg-gradient-to-t from-background via-background to-background/0 px-3 sm:px-4 pt-4 pb-3 sm:pb-4 shrink-0"
+        >
+          {/* Soft fade above so the last message gracefully runs under
+              the composer instead of butting against a hard line. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-background to-transparent"
+          />
           <div className="max-w-3xl mx-auto">
             {/* Hidden file input — driven by the attach menu. The `accept`
                 attribute is overwritten per-category before each open. */}
@@ -1482,8 +1499,9 @@ export default function ChatbotUI() {
 
             <div
               className={cn(
-                "group relative flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 transition-all duration-200",
-                "focus-within:border-primary/50 focus-within:shadow-[0_2px_16px_-2px_rgba(201,100,66,0.12)]",
+                "group relative flex items-end gap-2 rounded-3xl border border-border/70 bg-card px-3 py-2.5 transition-all duration-200",
+                "shadow-[0_8px_30px_-12px_rgba(0,0,0,0.08)]",
+                "focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 focus-within:shadow-[0_10px_40px_-12px_hsl(var(--primary)/0.18)]",
                 (streaming || providers.length === 0) && "opacity-60"
               )}
             >
@@ -1499,7 +1517,7 @@ export default function ChatbotUI() {
                       pendingAttachments.length >= 8
                     }
                     title="Attach files"
-                    className="shrink-0 h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                    className="shrink-0 h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                   >
                     <Paperclip className="h-4 w-4" />
                   </Button>
@@ -1611,7 +1629,7 @@ export default function ChatbotUI() {
                   size="icon"
                   onClick={cancelStream}
                   title="Stop generating"
-                  className="shrink-0 h-8 w-8 rounded-lg bg-foreground hover:bg-foreground/90 text-background"
+                  className="shrink-0 h-9 w-9 rounded-xl bg-foreground hover:bg-foreground/90 text-background shadow-md"
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </Button>
@@ -1626,26 +1644,27 @@ export default function ChatbotUI() {
                   }
                   title="Send (Enter)"
                   className={cn(
-                    "shrink-0 h-8 w-8 rounded-lg transition-colors",
-                    "bg-primary hover:bg-primary/90 text-primary-foreground",
-                    "disabled:bg-muted disabled:text-muted-foreground/60"
+                    "shrink-0 h-9 w-9 rounded-xl transition-all",
+                    "bg-gradient-to-br from-primary to-primary/80 hover:from-primary hover:to-primary text-primary-foreground",
+                    "shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.03]",
+                    "disabled:bg-muted disabled:from-muted disabled:to-muted disabled:text-muted-foreground/60 disabled:shadow-none disabled:scale-100"
                   )}
                 >
                   <Send className="h-3.5 w-3.5" />
                 </Button>
               )}
             </div>
-            <div className="flex items-center justify-center gap-2 mt-2 text-[11px] text-muted-foreground/70">
-              <span>
-                <kbd className="px-1 py-px rounded border border-border/70 font-mono text-[10px] mr-1">
+            <div className="flex items-center justify-center gap-2.5 mt-2.5 text-[10.5px] text-muted-foreground/70">
+              <span className="inline-flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded-md border border-border/60 bg-muted/40 font-mono text-[10px] font-medium text-foreground/80 shadow-[inset_0_-1px_0_rgba(0,0,0,0.04)]">
                   Enter
                 </kbd>
                 to send
               </span>
-              <span className="opacity-50">·</span>
-              <span>
-                <kbd className="px-1 py-px rounded border border-border/70 font-mono text-[10px] mr-1">
-                  Shift+Enter
+              <span className="opacity-40">·</span>
+              <span className="inline-flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded-md border border-border/60 bg-muted/40 font-mono text-[10px] font-medium text-foreground/80 shadow-[inset_0_-1px_0_rgba(0,0,0,0.04)]">
+                  Shift + Enter
                 </kbd>
                 newline
               </span>

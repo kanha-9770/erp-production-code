@@ -18,6 +18,7 @@ import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import {
   getHolidaysFromDB,
   getLeavesFromDB,
+  invalidatePayrollConfigCache,
 } from '@/lib/utils/payroll-store';
 import { todayKey } from '@/lib/hr/attendance-service';
 
@@ -244,6 +245,7 @@ export async function GET(request: NextRequest) {
           },
         });
       }
+      await invalidatePayrollConfigCache(authUser.organizationId);
       bindings = {
         employee: enforce(setup.employee.formId),
         checkIn: enforce(setup.checkIn.formId),
@@ -426,6 +428,7 @@ export async function PUT(request: NextRequest) {
       },
     });
   }
+  await invalidatePayrollConfigCache(authUser.organizationId);
 
   return NextResponse.json({ success: true });
 }

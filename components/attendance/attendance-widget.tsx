@@ -36,6 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
 import { formatTimeShort } from "@/components/attendance/attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
+import { setOrgTimezone, useOrgTimezone, formatTimeInOrgZone } from "@/lib/org-timezone";
 import { descriptorToBase64 } from "@/lib/face/descriptor";
 
 type WidgetState =
@@ -50,6 +51,7 @@ type WidgetState =
 interface AttendanceStatusPayload {
   state: WidgetState;
   date: string;
+  reportTimezone?: string;
   checkedIn: boolean;
   checkedOut: boolean;
   canCheckIn: boolean;
@@ -429,7 +431,12 @@ function useAttendance(enabled: boolean): UseAttendanceState {
       }
       const json = await res.json();
       if (json?.success) {
-        setStatus(json.status as AttendanceStatusPayload);
+        const payload = json.status as AttendanceStatusPayload;
+        // Cache the org's reportTimezone so every attendance display
+        // helper renders check-in/out in the same zone — including the
+        // ones mounted before this fetch resolves.
+        setOrgTimezone(payload.reportTimezone);
+        setStatus(payload);
         setError(null);
       } else {
         setError(json?.error ?? "Could not load attendance");
@@ -542,7 +549,9 @@ function useAttendance(enabled: boolean): UseAttendanceState {
           (err as any).code = json?.code ?? null;
           throw err;
         }
-        setStatus(json.status as AttendanceStatusPayload);
+        const next = json.status as AttendanceStatusPayload;
+        setOrgTimezone(next.reportTimezone);
+        setStatus(next);
         setError(null);
         // Broadcast a window event so other attendance views (My
         // Attendance table, Team Attendance, dashboard summary) can
@@ -586,8 +595,13 @@ export function AttendanceWidget({
   collapsed = false,
 }: AttendanceWidgetProps) {
   const { toast } = useToast();
-  // Re-render when the user changes their saved timezone so the popover's
-  // check-in/out clock labels switch zones live without a page reload.
+  // Re-render when the org's reportTimezone changes (admin saved a new
+  // value in Attendance Configuration) so the popover's check-in/out
+  // clock labels switch zones without a page reload. Attendance times
+  // are anchored to the org's zone — not the viewing user's — so HR and
+  // the employee always see the same wall-clock for the same row.
+  useOrgTimezone();
+  // Kept for any user-zone-aware labels rendered elsewhere in the widget.
   useUserTimezone();
   const { loading, busy, error, status, punch, refresh } = useAttendance(enabled);
   const [now, setNow] = useState<number>(() => Date.now());
@@ -712,11 +726,15 @@ export function AttendanceWidget({
       }
 
       await punch(type, photoUrl, geo, faceMatch, livenessPassed);
+      // Show the punch time in the success toast so the user sees the
+      // same wall-clock value HR sees on the row — formatted in the
+      // org's reportTimezone via the shared org-tz cache.
+      const punchTime = formatTimeInOrgZone(new Date());
       toast({
         title:
           type === "IN"
-            ? "You are checked in successfully"
-            : "You are checked out successfully",
+            ? `Checked in at ${punchTime}`
+            : `Checked out at ${punchTime}`,
         description: inFenceMode
           ? "You are within the office radius"
           : type === "IN"

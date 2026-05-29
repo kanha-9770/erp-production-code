@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
+import { invalidateFormCache } from "@/lib/forms/form-cache";
 
 export async function GET(
   request: NextRequest,
@@ -127,6 +128,10 @@ export async function PUT(
       },
     });
 
+    if (updatedSubform.formId) {
+      await invalidateFormCache(updatedSubform.formId);
+    }
+
     return NextResponse.json({ success: true, data: updatedSubform });
   } catch (error) {
     console.error("Error updating subform:", error);
@@ -158,6 +163,11 @@ export async function DELETE(
       userName: user.email,
       organizationId: user.organizationId,
     });
+
+    // existingSubform.formId captured before the trash move.
+    if (existingSubform.formId) {
+      await invalidateFormCache(existingSubform.formId);
+    }
 
     return NextResponse.json({
       success: true,
@@ -207,6 +217,8 @@ export async function PATCH(
       data: updateData,
       select: { id: true, conditional: true, updatedAt: true },
     });
+
+    if (existing.formId) await invalidateFormCache(existing.formId);
 
     return NextResponse.json({ success: true, data: updated });
   } catch (error: any) {

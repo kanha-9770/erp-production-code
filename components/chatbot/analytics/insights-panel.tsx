@@ -234,9 +234,14 @@ function InsightsPanelImpl({
     <aside
       className={cn(
         "flex flex-col h-full border-l border-border/70 bg-gradient-to-b from-background via-background to-muted/20",
+        // Solid base layer behind the gradient so the bottom of the panel
+        // never bleeds through to the composer / messages underneath
+        // (especially as a mobile drawer where the panel floats over the
+        // chat area).
+        "before:absolute before:inset-0 before:-z-10 before:bg-background relative",
         isMobile
           ? "fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] shadow-2xl shrink-0"
-          : "relative w-[340px] xl:w-[380px] shrink-0"
+          : "w-[340px] xl:w-[380px] shrink-0"
       )}
     >
       {/* Header */}

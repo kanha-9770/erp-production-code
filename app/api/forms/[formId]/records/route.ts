@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUser } from "@/lib/api-helpers";
+import { getAuthenticatedUser, getPermissionIdByName } from "@/lib/api-helpers";
+import { getCachedFormStructure } from "@/lib/forms/form-cache";
 import {
   getCallerRoleContext,
   getInheritedUserIds,
@@ -51,40 +52,12 @@ export async function GET(
 
   try {
     // ────────────────────────────────────────────────
-    // 2. Fetch form structure (once — reused for enrichment + field lookup)
+    // 2. Fetch form structure (cached in `forms` namespace — own Upstash DB).
+    //    Invalidated automatically by every write path that touches Form,
+    //    FormSection, FormField, Subform, FormulaField, or FormTableMapping.
+    //    See lib/forms/form-cache.ts for the invalidation grep.
     // ────────────────────────────────────────────────
-    const form = await prisma.form.findUnique({
-      where: { id: formId },
-      include: {
-        module: { select: { organizationId: true } },
-        sections: {
-          include: {
-            fields: { orderBy: { order: "asc" } },
-          },
-          orderBy: { order: "asc" },
-        },
-        subforms: {
-          where: { parentSubformId: null },
-          include: {
-            fields: { orderBy: { order: "asc" } },
-            childSubforms: {
-              include: {
-                fields: { orderBy: { order: "asc" } },
-                childSubforms: {
-                  include: {
-                    fields: { orderBy: { order: "asc" } },
-                  },
-                  orderBy: { order: "asc" },
-                },
-              },
-              orderBy: { order: "asc" },
-            },
-          },
-          orderBy: { order: "asc" },
-        },
-        tableMapping: true,
-      },
-    });
+    const form = await getCachedFormStructure(formId);
 
     if (!form) {
       return NextResponse.json(
@@ -154,16 +127,18 @@ export async function GET(
     const hiddenFieldIds = new Set<string>();
 
     if (inheritanceUserIdFilter !== null) {
-      const viewPerm = await prisma.permission.findFirst({
-        where: { name: "VIEW" },
-        select: { id: true },
-      });
-
-      if (viewPerm?.id) {
-        const userAssignments = await prisma.userUnitAssignment.findMany({
+      // VIEW permission row never changes per-org; cached helper avoids the
+      // DB roundtrip on warm requests. Assignments are independent of the
+      // permission lookup so they run in parallel.
+      const [viewPermId, userAssignments] = await Promise.all([
+        getPermissionIdByName("VIEW"),
+        prisma.userUnitAssignment.findMany({
           where: { userId: authUser.id },
           select: { roleId: true },
-        });
+        }),
+      ]);
+
+      if (viewPermId) {
         const userRoleIds = Array.from(new Set(userAssignments.map((u) => u.roleId)));
 
         const sectionIds = form.sections.map((s: any) => s.id);
@@ -183,7 +158,7 @@ export async function GET(
             ? prisma.rolePermission.findMany({
                 where: {
                   roleId: { in: userRoleIds },
-                  permissionId: viewPerm.id,
+                  permissionId: viewPermId,
                   OR: [
                     { formId: form.id, sectionId: null, formFieldId: null },
                     { sectionId: { in: sectionIds }, formFieldId: null },
@@ -203,7 +178,7 @@ export async function GET(
             where: {
               userId: authUser.id,
               isActive: true,
-              permissionId: viewPerm.id,
+              permissionId: viewPermId,
               OR: [
                 { formId: form.id, resourceType: null },
                 { resourceType: "section", resourceId: { in: sectionIds } },

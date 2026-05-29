@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
+import { invalidatePayrollConfigCache } from '@/lib/utils/payroll-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -494,6 +495,8 @@ export async function POST(request: NextRequest) {
     // changes which rows the engine reads. Drop any cached payroll for
     // the org so the next read recomputes against the new mapping.
     invalidatePayrollCache(authUser.organizationId);
+    // Drop the cached PayrollConfiguration row so the engine re-reads it.
+    await invalidatePayrollConfigCache(authUser.organizationId);
 
     return NextResponse.json({ success: true, config });
   } catch (error) {

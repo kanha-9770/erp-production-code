@@ -12,6 +12,21 @@ export const metadata: Metadata = {
   title: "ERP System",
   description: "Complete Enterprise Resource Planning System",
   generator: "Complete Enterprise Resource Planning System",
+  manifest: "/manifest.webmanifest",
+  applicationName: "ERP System",
+  appleWebApp: {
+    capable: true,
+    title: "ERP",
+    statusBarStyle: "default",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport = {
+  themeColor: "#0f172a",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
 };
 export default function RootLayout({
   children,

@@ -40,6 +40,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
 import { STATIC_PAGES, STATIC_PAGE_GROUP_ORDER, type StaticPageGroup } from '@/lib/static-pages';
+import { buildKey, cached, cacheInvalidate } from '@/lib/cache';
+
+// Sidebar anchors barely change (admin-only edits) but the GET fires on every
+// page navigation. Cache the resolved shape per-org in the default Upstash DB.
+const ANCHORS_TTL_S = 600; // 10 minutes
+const anchorsKey = (orgId: string) => buildKey('default', 'page-anchors', orgId);
 
 export const dynamic = 'force-dynamic';
 
@@ -249,7 +255,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const resolved = await resolveAnchors(authUser.organizationId);
+  const resolved = await cached(
+    'default',
+    anchorsKey(authUser.organizationId),
+    ANCHORS_TTL_S,
+    () => resolveAnchors(authUser.organizationId!),
+  );
   return NextResponse.json(
     { success: true, ...resolved },
     { headers: NO_STORE },
@@ -393,6 +404,8 @@ export async function PUT(request: NextRequest) {
       if (data.length === 0) return;
       await tx.staticPageAnchor.createMany({ data });
     });
+    // Drop the cached resolved shape so the next read repopulates.
+    await cacheInvalidate('default', anchorsKey(authUser.organizationId));
   } catch (err: any) {
     // P2021: table doesn't exist — schema is in place but migration hasn't run.
     if (err?.code === 'P2021') {

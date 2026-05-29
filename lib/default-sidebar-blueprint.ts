@@ -104,6 +104,19 @@ const HR_BLUEPRINT: ModuleBlueprint = {
             "/settings/holidays",
           ],
         },
+        // Phase 1 lifecycle workflows. Onboarding fires when an Appointment
+        // Letter is SIGNED; Offboarding fires when an Employee's
+        // resignationLetterDate is set.
+        {
+          name: "Onboarding",
+          icon: "user-plus",
+          pages: ["/hr/onboarding", "/hr/onboarding/templates"],
+        },
+        {
+          name: "Offboarding",
+          icon: "user-minus",
+          pages: ["/hr/offboarding"],
+        },
       ],
     },
     {

@@ -12,6 +12,7 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
 import { moveToTrash } from "@/lib/trash";
+import { materializeChecklistForEmployee } from "@/lib/hr/onboarding-service";
 
 const STATUSES = ["DRAFT", "ISSUED", "SIGNED", "REVOKED"] as const;
 
@@ -514,25 +515,42 @@ async function autoCreateEmployeeFromAppointmentLetter(
     // two near-simultaneous PATCHes that both flip to SIGNED, must not
     // create duplicate Employee rows. Match on email within org first;
     // fall back to (name + joining date) for letters with no email.
-    if (email) {
-      const dup = await prisma.employee.findFirst({
-        where: {
-          emailAddress1: email,
-          user: { organizationId: authUser.organizationId },
-        },
-        select: { id: true },
-      });
-      if (dup) return { id: dup.id, alreadyExisted: true };
-    } else if (name && letter.appointmentDate) {
-      const dup = await prisma.employee.findFirst({
-        where: {
-          employeeName: name,
-          dateOfJoining: letter.appointmentDate,
-          user: { organizationId: authUser.organizationId },
-        },
-        select: { id: true },
-      });
-      if (dup) return { id: dup.id, alreadyExisted: true };
+    const dupEmployee = email
+      ? await prisma.employee.findFirst({
+          where: {
+            emailAddress1: email,
+            user: { organizationId: authUser.organizationId },
+          },
+          select: { id: true },
+        })
+      : name && letter.appointmentDate
+      ? await prisma.employee.findFirst({
+          where: {
+            employeeName: name,
+            dateOfJoining: letter.appointmentDate,
+            user: { organizationId: authUser.organizationId },
+          },
+          select: { id: true },
+        })
+      : null;
+
+    if (dupEmployee) {
+      // Even though the Employee already exists, the onboarding checklist
+      // may not have been materialised yet (legacy data, or the letter was
+      // re-SIGNED after being revoked). The materialise call is idempotent.
+      void materializeChecklistForEmployee({
+        organizationId: authUser.organizationId,
+        employeeId: dupEmployee.id,
+        appointmentLetterId: letterId,
+        startDate: letter.appointmentDate ?? new Date(),
+        createdById: authUser.id,
+      }).catch((err) =>
+        console.error(
+          "[AppointmentLetterHandlers] materialise onboarding (dup employee) failed:",
+          err,
+        ),
+      );
+      return { id: dupEmployee.id, alreadyExisted: true };
     }
 
     const department =
@@ -629,6 +647,22 @@ async function autoCreateEmployeeFromAppointmentLetter(
     // New Employee → drop the live payroll cache so they appear in the
     // dashboard on the next fetch instead of waiting for the 5s TTL.
     invalidatePayrollCache(authUser.organizationId);
+
+    // Materialise the onboarding checklist for this new hire. Errors here
+    // are logged but do not roll back employee creation — HR can manually
+    // start a checklist later from /hr/onboarding if the trigger fails.
+    void materializeChecklistForEmployee({
+      organizationId: authUser.organizationId,
+      employeeId: employee.id,
+      appointmentLetterId: letterId,
+      startDate: letter.appointmentDate ?? new Date(),
+      createdById: authUser.id,
+    }).catch((err) =>
+      console.error(
+        "[AppointmentLetterHandlers] materialise onboarding failed:",
+        err,
+      ),
+    );
 
     return { id: employee.id };
   } catch (err: any) {

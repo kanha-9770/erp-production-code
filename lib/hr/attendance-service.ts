@@ -70,6 +70,10 @@ export interface PunchInput {
 export interface AttendanceStatus {
   state: AttendanceState;
   date: string; // YYYY-MM-DD (local server tz)
+  // IANA tz name the org's attendance times are anchored to (e.g.
+  // "Asia/Kolkata"). Single source of truth so HR, the employee, the bell
+  // notification and the widget all render check-in/out in the same zone.
+  reportTimezone: string;
   checkedIn: boolean;
   checkedOut: boolean;
   canCheckIn: boolean;
@@ -772,6 +776,7 @@ export async function getStatus(
   return {
     state,
     date,
+    reportTimezone: orgTimezone(cfg),
     checkedIn,
     checkedOut,
     canCheckIn,

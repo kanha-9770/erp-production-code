@@ -126,6 +126,91 @@ enum AppointmentLetterStatus {
   REVOKED
 }
 
+// ── Performance Management enums ────────────────────────────────────────────
+// KRA lifecycle — driven by the existing /performance/kra UI. Kept as a
+// plain string set so the form's status options map 1:1 without translation.
+enum KraStatus {
+  DRAFT
+  ACTIVE
+  ACHIEVED
+  AT_RISK
+  MISSED
+}
+
+enum KraPeriod {
+  Q1
+  Q2
+  Q3
+  Q4
+  ANNUAL
+}
+
+// Appraisal lifecycle — matches the four states the appraisal UI already
+// renders (PENDING → IN_REVIEW → COMPLETED → ACKNOWLEDGED).
+enum AppraisalStatus {
+  PENDING
+  IN_REVIEW
+  COMPLETED
+  ACKNOWLEDGED
+}
+
+enum AppraisalCycle {
+  Q1
+  Q2
+  Q3
+  Q4
+  MID_YEAR
+  ANNUAL
+}
+
+// ── Onboarding enums ────────────────────────────────────────────────────────
+enum OnboardingStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OnboardingTaskCategory {
+  DOCS
+  IT
+  INDUCTION
+  POLICY
+  FINANCE
+  OTHER
+}
+
+enum OnboardingTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+// ── Offboarding enums ───────────────────────────────────────────────────────
+enum ExitChecklistStatus {
+  INITIATED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ExitTaskCategory {
+  ASSETS
+  HANDOVER
+  ACCESS
+  FINANCE
+  INTERVIEW
+  OTHER
+}
+
+enum ExitTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
 enum EmployeeReferralStatus {
   NEW
   REVIEWED
@@ -4780,6 +4865,230 @@ model InviteToken {
   @@index([organizationId, sponsorAgentId])
   @@index([token])
   @@map("re_invite_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HR PHASE 1 — Performance, Onboarding, Offboarding
+// ─────────────────────────────────────────────────────────────────────────────
+// Models below back the existing /app/performance/{kra,appraisal} pages and
+// add structured onboarding + offboarding triggered by AppointmentLetter
+// SIGNED and Employee.resignationLetterDate respectively. All models are
+// org-scoped (multi-tenant). FK relations to User/Employee use SetNull on
+// delete so HR-side soft-delete (TrashBin) doesn't cascade and erase history.
+
+// KRA — Key Result Area for an employee. Schema mirrors the fields the
+// existing UI already collects so swapping localStorage for the DB is a
+// flat-data swap with no shape translation.
+model Kra {
+  id             String  @id @default(cuid())
+  displayId      String? @map("display_id") // e.g. "KRA-0001", generated per-org
+  organizationId String  @map("organization_id")
+
+  // Employee snapshot — keep names alongside the FK so legacy rows survive
+  // if the Employee row is later removed (e.g. moved to trash). UI reads
+  // these directly without an extra join.
+  employeeId                 String? @map("employee_id")
+  employeeName               String  @map("employee_name")
+  firstName                  String? @map("first_name")
+  middleName                 String? @map("middle_name")
+  lastName                   String? @map("last_name")
+  department                 String?
+  employeeEngagementTeamName String? @map("employee_engagement_team_name")
+
+  objective String  @db.Text
+  weight    Decimal @default(0) // % share of total performance
+  target    String?
+  actual    String?
+  progress  Int     @default(0) // 0–100
+
+  period KraPeriod @default(Q1)
+  year   Int
+  status KraStatus @default(DRAFT)
+
+  notes String? @db.Text
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, year, period])
+  @@index([organizationId, employeeId])
+  @@index([organizationId, status])
+  @@index([displayId])
+  @@map("kras")
+}
+
+// Appraisal — single record per (employee, cycle, year). The existing
+// /performance/appraisal UI treats one appraisal as one row, so we mirror
+// that rather than split into Cycle + Review tables.
+model Appraisal {
+  id             String  @id @default(cuid())
+  displayId      String? @map("display_id") // e.g. "APR-0001"
+  organizationId String  @map("organization_id")
+
+  employeeId                 String? @map("employee_id")
+  employeeName               String  @map("employee_name")
+  firstName                  String? @map("first_name")
+  middleName                 String? @map("middle_name")
+  lastName                   String? @map("last_name")
+  department                 String?
+  employeeEngagementTeamName String? @map("employee_engagement_team_name")
+
+  reviewerId   String? @map("reviewer_id")
+  reviewerName String  @map("reviewer_name")
+
+  cycle  AppraisalCycle  @default(ANNUAL)
+  year   Int
+  rating Decimal         @default(0) // 0.0 – 5.0
+  status AppraisalStatus @default(PENDING)
+
+  strengths    String? @db.Text
+  improvements String? @db.Text
+  comments     String? @db.Text
+
+  submittedAt DateTime? @map("submitted_at")
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, year, cycle])
+  @@index([organizationId, employeeId])
+  @@index([organizationId, status])
+  @@index([displayId])
+  @@map("appraisals")
+}
+
+// OnboardingTemplate — named bundle of default tasks. HR can have several
+// (e.g. "Engineering Hire", "Sales Hire") and mark one as the default that
+// fires when an AppointmentLetter is SIGNED with no explicit template.
+model OnboardingTemplate {
+  id             String  @id @default(cuid())
+  organizationId String  @map("organization_id")
+  name           String
+  description    String?
+  isDefault      Boolean @default(false) @map("is_default")
+
+  // Array of task seeds: [{ title, description, category, offsetDays }].
+  // Materialised into OnboardingTask rows when a checklist is created.
+  defaultTasks Json @default("[]") @map("default_tasks")
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  checklists OnboardingChecklist[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isDefault])
+  @@map("onboarding_templates")
+}
+
+model OnboardingChecklist {
+  id                  String              @id @default(cuid())
+  organizationId      String              @map("organization_id")
+  employeeId          String              @map("employee_id")
+  // Optional link back to the trigger letter — null for manually-created
+  // checklists (e.g. for an existing employee whose onboarding was missed).
+  appointmentLetterId String?             @map("appointment_letter_id")
+  templateId          String?             @map("template_id")
+  template            OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  status            OnboardingStatus @default(PENDING)
+  startDate         DateTime?        @map("start_date")
+  completedAt       DateTime?        @map("completed_at")
+  completionPercent Int              @default(0) @map("completion_percent")
+
+  notes String? @db.Text
+
+  tasks OnboardingTask[]
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, employeeId, appointmentLetterId])
+  @@index([organizationId, status])
+  @@index([organizationId, employeeId])
+  @@index([appointmentLetterId])
+  @@map("onboarding_checklists")
+}
+
+model OnboardingTask {
+  id          String              @id @default(cuid())
+  checklistId String              @map("checklist_id")
+  checklist   OnboardingChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?                @db.Text
+  category    OnboardingTaskCategory @default(OTHER)
+  sortOrder   Int                    @default(0) @map("sort_order")
+
+  assigneeUserId String?              @map("assignee_user_id")
+  dueDate        DateTime?            @map("due_date")
+  status         OnboardingTaskStatus @default(PENDING)
+  completedAt    DateTime?            @map("completed_at")
+  completedById  String?              @map("completed_by_id")
+  completionNote String?              @map("completion_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([checklistId, status])
+  @@index([assigneeUserId, status])
+  @@map("onboarding_tasks")
+}
+
+model ExitChecklist {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+  employeeId     String @map("employee_id")
+
+  initiatedAt     DateTime            @default(now()) @map("initiated_at")
+  lastWorkingDate DateTime?           @map("last_working_date")
+  status          ExitChecklistStatus @default(INITIATED)
+  completedAt     DateTime?           @map("completed_at")
+
+  // Free-form interview captured as JSON (questions+answers). Allows the
+  // questionnaire to evolve without a schema migration.
+  exitInterview         Json?   @map("exit_interview")
+  finalSettlementStatus String? @map("final_settlement_status") // PENDING / IN_PROGRESS / SETTLED
+  reason                String? @db.Text
+
+  tasks ExitTask[]
+
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, employeeId])
+  @@index([organizationId, status])
+  @@map("exit_checklists")
+}
+
+model ExitTask {
+  id          String        @id @default(cuid())
+  checklistId String        @map("checklist_id")
+  checklist   ExitChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?          @db.Text
+  category    ExitTaskCategory @default(OTHER)
+  sortOrder   Int              @default(0) @map("sort_order")
+
+  assigneeUserId String?        @map("assignee_user_id")
+  dueDate        DateTime?      @map("due_date")
+  status         ExitTaskStatus @default(PENDING)
+  completedAt    DateTime?      @map("completed_at")
+  completedById  String?        @map("completed_by_id")
+  completionNote String?        @map("completion_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([checklistId, status])
+  @@index([assigneeUserId, status])
+  @@map("exit_tasks")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
