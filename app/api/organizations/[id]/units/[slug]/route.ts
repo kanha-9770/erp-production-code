@@ -6,8 +6,9 @@ import { moveToTrash } from "@/lib/trash";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; slug: string } } // ← Changed: id = orgId, unitId = unit
+  props: { params: Promise<{ id: string; slug: string }> }
 ) {
+  const params = await props.params;
   try {
     const organizationId = params.id;
     const unitId = params.slug;
@@ -53,8 +54,9 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; unitId: string } }
+  props: { params: Promise<{ id: string; unitId: string }> }
 ) {
+  const params = await props.params;
   try {
     const organizationId = params.id;
     const unitId = params.unitId;
@@ -147,8 +149,9 @@ export async function PUT(
 }
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; slug: string } }
+  props: { params: Promise<{ id: string; slug: string }> }
 ) {
+  const params = await props.params;
   const organizationId = params.id?.trim();
   const unitId = params.slug?.trim();
 

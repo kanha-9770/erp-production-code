@@ -2,7 +2,11 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getFormulaEvaluator } from "@/lib/formula/evaluator"
 import { prisma } from "@/lib/prisma"
 
-export async function POST(request: NextRequest, { params }: { params: { formId: string; fieldId: string } }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ formId: string; fieldId: string }> }
+) {
+  const params = await props.params;
   try {
     const { formId, fieldId } = params
     const body = await request.json()

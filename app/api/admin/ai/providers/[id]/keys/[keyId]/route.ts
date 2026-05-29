@@ -43,8 +43,9 @@ async function guard(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; keyId: string } }
+  props: { params: Promise<{ id: string; keyId: string }> }
 ) {
+  const params = await props.params;
   try {
     const g = await guard(request, params.id, params.keyId);
     if ("error" in g) return g.error;
@@ -86,8 +87,9 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; keyId: string } }
+  props: { params: Promise<{ id: string; keyId: string }> }
 ) {
+  const params = await props.params;
   try {
     const g = await guard(request, params.id, params.keyId);
     if ("error" in g) return g.error;

@@ -21,11 +21,12 @@
 import { Suspense } from "react"
 import AuthPanel from "@/components/auth/AuthPanel"
 
-export default function VerifyOTPPage({
-  searchParams,
-}: {
-  searchParams: { userId?: string; type?: string }
-}) {
+export default async function VerifyOTPPage(
+  props: {
+    searchParams: Promise<{ userId?: string; type?: string }>
+  }
+) {
+  const searchParams = await props.searchParams;
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-white">

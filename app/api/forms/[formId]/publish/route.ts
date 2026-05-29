@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 import { getRequestOrigin } from "@/lib/request-url"
 
-export async function POST(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     let body: any = {}
 

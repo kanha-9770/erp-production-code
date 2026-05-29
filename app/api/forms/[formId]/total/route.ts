@@ -77,7 +77,8 @@ function collectAllFields(form: any): any[] {
   return out
 }
 
-export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const form = await DatabaseService.getForm(params.formId)
     if (!form) {
@@ -165,7 +166,8 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
   }
 }
 // PUT and DELETE — completely unchanged
-export async function PUT(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json()
     const form = await DatabaseService.updateForm(params.formId, body)
@@ -175,7 +177,8 @@ export async function PUT(request: NextRequest, { params }: { params: { formId: 
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
-export async function DELETE(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getAuthenticatedUser(request)
     if (!user) return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 })

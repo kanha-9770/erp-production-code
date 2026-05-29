@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -6,8 +6,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { resourceType: string; resourceId: string } }
+  props: { params: Promise<{ resourceType: string; resourceId: string }> }
 ) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request);
     if (!authUser) {
@@ -184,15 +185,16 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  context: { params: any }
+  context: { params: Promise<{ resourceType: string; resourceId: string }> }
 ) {
   return POST(request, context);
 }
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { resourceType: string; resourceId: string } }
+  props: { params: Promise<{ resourceType: string; resourceId: string }> }
 ) {
+  const params = await props.params;
   try {
     const body = await request.json();
     const { roleId, userId, permissionId, permissionIds } = body;

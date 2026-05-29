@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 
-export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const { formId } = params
 

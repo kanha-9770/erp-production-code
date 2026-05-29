@@ -15,10 +15,8 @@ import { preflight } from "@/lib/ai/preflight";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const pf = await preflight({ requireSecret: true });
     if (pf) return apiError(pf.message, pf.status);

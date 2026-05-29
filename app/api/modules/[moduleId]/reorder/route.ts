@@ -19,10 +19,8 @@ import { getAuthenticatedUser } from "@/lib/api-helpers";
  *
  * This is the single source of truth for "drag-to-reorder" in the admin sidebar.
  */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { moduleId: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ moduleId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getAuthenticatedUser(request);
     if (!user) {

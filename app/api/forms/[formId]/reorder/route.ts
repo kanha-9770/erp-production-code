@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma"
 import { DatabaseService } from "@/lib/database/database-service"
 import { invalidateFormCache } from "@/lib/forms/form-cache"
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const { id } = params
     const { moduleId, sortOrder } = await request.json()

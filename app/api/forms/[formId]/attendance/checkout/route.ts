@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { formId: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json()
     const { employeeId, checkOutTime, date, location, deviceInfo, workingHours } = body

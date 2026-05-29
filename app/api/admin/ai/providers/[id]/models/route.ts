@@ -29,10 +29,8 @@ export const runtime = "nodejs";
  * Uses an existing active key via the rotator. Falls back to preset suggestions
  * if discovery fails (e.g. endpoint not supported, network error).
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const pf = await preflight();
     if (pf) return apiError(pf.message, pf.status);

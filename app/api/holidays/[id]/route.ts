@@ -12,10 +12,8 @@ export const dynamic = 'force-dynamic';
 
 const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(_request);
   if (!authUser) {
     return NextResponse.json(

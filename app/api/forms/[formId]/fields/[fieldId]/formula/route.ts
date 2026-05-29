@@ -2,7 +2,11 @@ import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { invalidateFormCache } from "@/lib/forms/form-cache"
 
-export async function POST(request: NextRequest, { params }: { params: { formId: string; fieldId: string } }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ formId: string; fieldId: string }> }
+) {
+  const params = await props.params;
   try {
     const { formId, fieldId } = params
     const body = await request.json()
@@ -61,7 +65,11 @@ export async function POST(request: NextRequest, { params }: { params: { formId:
   }
 }
 
-export async function GET(request: NextRequest, { params }: { params: { formId: string; fieldId: string } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ formId: string; fieldId: string }> }
+) {
+  const params = await props.params;
   try {
     const { formId, fieldId } = params
 

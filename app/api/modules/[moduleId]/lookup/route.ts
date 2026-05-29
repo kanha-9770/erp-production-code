@@ -3,7 +3,8 @@ import { NextRequest } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 import { AuthMiddleware } from "@/lib/auth-middleware"
 
-export async function GET(request: NextRequest, { params }: { params: { moduleId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ moduleId: string }> }) {
+  const params = await props.params;
   try {
     // Check user permissions for this module
     const authResult = await AuthMiddleware.checkPermission(

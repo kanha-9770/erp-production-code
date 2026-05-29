@@ -25,10 +25,8 @@ interface DecideBody {
   note?: string | null;
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser) {
     return NextResponse.json(

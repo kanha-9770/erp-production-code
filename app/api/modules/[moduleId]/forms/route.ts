@@ -2,10 +2,8 @@ import { NextResponse } from "next/server"
 import { NextRequest } from "next/server"
 import { DatabaseService } from "@/lib/database/database-service"
 
-export const POST = async (
-  request: NextRequest,
-  { params }: { params: { moduleId: string } }
-) => {
+export const POST = async (request: NextRequest, props: { params: Promise<{ moduleId: string }> }) => {
+  const params = await props.params;
   try {
     const body = await request.json()
     const { name, description } = body

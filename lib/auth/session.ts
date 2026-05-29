@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import { validateSession } from '@/lib/auth';
 
 export async function getValidatedSession() {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const token = cookieStore.get('auth-token')?.value;
 
     if (!token) {

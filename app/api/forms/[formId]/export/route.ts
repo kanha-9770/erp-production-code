@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { exportFormRecords } from "@/lib/api-handlers/data-migration"
 import { getAuthenticatedUser, hasFormPermission } from "@/lib/api-helpers"
 
-export async function GET(request: NextRequest, { params }: { params: { formId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ formId: string }> }) {
+  const params = await props.params;
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { formId: 
       const values = result.headers.map((h) => {
         const val = String(row[h] ?? "")
         if (val.includes(",") || val.includes('"') || val.includes("\n")) {
-          return `"${val.replace(/"/g, '""')}"`
+          return `"${val.replace(/"/g, '""')}"`;
         }
         return val
       })

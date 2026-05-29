@@ -10,7 +10,7 @@ export default async function SettingsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get("auth-token")?.value;
 
   if (!token) {
@@ -26,7 +26,7 @@ export default async function SettingsLayout({
   }
 
   // Get current pathname from headers (set by middleware)
-  const headersList = headers();
+  const headersList = await headers();
   const pathname =
     headersList.get("x-next-pathname") ||
     headersList.get("x-invoke-path") ||

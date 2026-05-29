@@ -31,10 +31,8 @@ async function load(id: string, userId: string) {
   });
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const pf = await preflight();
     if (pf) return apiError(pf.message, pf.status);
@@ -51,10 +49,8 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const pf = await preflight();
     if (pf) return apiError(pf.message, pf.status);
@@ -100,10 +96,8 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const pf = await preflight();
     if (pf) return apiError(pf.message, pf.status);

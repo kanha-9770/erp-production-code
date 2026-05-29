@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
-export async function GET(request: Request, { params }: { params: { subformId: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const records = await prisma.subformRecord.findMany({
       where: { subformId: params.subformId },
@@ -15,7 +16,8 @@ export async function GET(request: Request, { params }: { params: { subformId: s
   }
 }
 
-export async function POST(request: Request, { params }: { params: { subformId: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ subformId: string }> }) {
+  const params = await props.params;
   try {
     const body = await request.json()
     const { recordData } = body

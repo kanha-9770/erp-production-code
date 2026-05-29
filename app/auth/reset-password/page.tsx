@@ -1,7 +1,8 @@
 import { Suspense } from 'react'
 import ResetPasswordForm from '@/components/ResetPasswordForm'
 
-export default function AuthResetPasswordPage({ searchParams }: { searchParams: { userId?: string } }) {
+export default async function AuthResetPasswordPage(props: { searchParams: Promise<{ userId?: string }> }) {
+  const searchParams = await props.searchParams;
   return (
     <Suspense fallback={<div>Loading reset form...</div>}>
       <ResetPasswordForm userId={searchParams.userId} />
