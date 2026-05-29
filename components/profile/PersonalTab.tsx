@@ -67,6 +67,7 @@ import {
 import type { ProfileUser } from "./types"
 import { displayName, initialsOf } from "./profile-utils"
 import { DailyBanner } from "./DailyBanner"
+import AvatarCropper from "./AvatarCropper"
 
 interface PersonalTabProps {
   user: ProfileUser
@@ -112,6 +113,10 @@ export default function PersonalTab({ user }: PersonalTabProps) {
   // Confirmation for "Remove photo" — replaces the native window.confirm
   // popup so the modal matches the rest of the app.
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
+  // Crop/edit step shown between picking-or-capturing an image and the
+  // upload. `cropSrc` is the object URL of the image being framed.
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const [cropName, setCropName] = useState("photo.jpg")
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
@@ -187,7 +192,9 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     })
     setCameraMode(false)
     setPreviewOpen(false)
-    await onAvatarFile(file)
+    // Hand the captured frame to the cropper so the user can frame their face
+    // before it's uploaded and enrolled for attendance.
+    openCropper(file)
   }
 
   const dirty =
@@ -206,6 +213,34 @@ export default function PersonalTab({ user }: PersonalTabProps) {
     if (!isValidPhoneNumber(value)) return setter(`Invalid number for selected country`), false
     setter("")
     return true
+  }
+
+  // Open the crop/edit dialog for a freshly chosen or captured image. Both
+  // the file picker and the camera route through here so every photo can be
+  // framed before upload. Heavy originals are fine — the cropper downscales to
+  // a 512px square — but guard against absurd files that could exhaust memory
+  // when decoded into an <img>.
+  const openCropper = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Pick an image file", variant: "destructive" })
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ title: "Image too large", description: "Max 25 MB.", variant: "destructive" })
+      return
+    }
+    setCropName(file.name || "photo.jpg")
+    setCropSrc((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(file)
+    })
+  }
+
+  const closeCropper = () => {
+    setCropSrc((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
   }
 
   const onAvatarFile = async (file: File) => {
@@ -442,6 +477,21 @@ export default function PersonalTab({ user }: PersonalTabProps) {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Crop / edit dialog — runs after a photo is picked or captured,
+            before it's uploaded. On Apply we get back a framed 512px square
+            JPEG, which flows through the same upload + face-enrollment path
+            as before. */}
+      <AvatarCropper
+        open={!!cropSrc}
+        src={cropSrc}
+        fileName={cropName}
+        onCancel={closeCropper}
+        onCropped={async (file) => {
+          closeCropper()
+          await onAvatarFile(file)
+        }}
+      />
+
       {/* ── Daily banner — matches the cover on /profile so the edit
             page feels like a continuation of the same surface, not a
             different screen. Tucked behind the avatar block so the
@@ -497,7 +547,7 @@ export default function PersonalTab({ user }: PersonalTabProps) {
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0]
-            if (f) onAvatarFile(f)
+            if (f) openCropper(f)
             e.currentTarget.value = ""
           }}
         />
