@@ -202,6 +202,30 @@ export async function PUT(request: NextRequest) {
     patch.facePhotoMaxKb = Math.floor(fpKb);
   }
 
+  // Retention window: 0 = keep forever; positive = auto-delete photos
+  // older than N days via the cleanup job. Upper bound matches the
+  // coercer in attendance-config.ts so a typo can't schedule a 100-year
+  // retention. Anything outside the band is silently dropped (no change).
+  const retentionDays = pickOptionalNumber(body.facePhotoRetentionDays);
+  if (
+    retentionDays !== undefined &&
+    retentionDays >= 0 &&
+    retentionDays <= 3650
+  ) {
+    patch.facePhotoRetentionDays = Math.floor(retentionDays);
+  }
+
+  // Store-after-verify mode. Only ALWAYS / ON_MISMATCH_ONLY / NEVER are
+  // honored; anything else is treated as "no change" so a malformed PUT
+  // can't wipe the existing setting.
+  if (
+    body.facePhotoStoreAfterVerify === 'ALWAYS' ||
+    body.facePhotoStoreAfterVerify === 'ON_MISMATCH_ONLY' ||
+    body.facePhotoStoreAfterVerify === 'NEVER'
+  ) {
+    patch.facePhotoStoreAfterVerify = body.facePhotoStoreAfterVerify;
+  }
+
   // Face verification mode + threshold. Mode follows the same OFF/WARN/
   // ENFORCE shape used internally; threshold is clamped to the band the
   // coercer in attendance-config.ts accepts so a typo can't lock anyone

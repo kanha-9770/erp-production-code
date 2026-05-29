@@ -69,6 +69,10 @@ interface HistoryResponse {
     totalOvertimeMinutes: number;
   };
   faceVerify?: { mode: string; threshold: number };
+  // Storage-policy snapshot the detail panel uses to label the photo
+  // slot — distinguishes "never stored" (storage skipped on verify) from
+  // "expired" (auto-deleted after retentionDays).
+  facePhotoStorage?: { storeAfterVerify: string; retentionDays: number };
   records: AttendanceRecord[];
   error?: string;
 }
@@ -173,6 +177,27 @@ export function MyAttendance() {
 
   useEffect(() => {
     fetchHistory();
+  }, [fetchHistory]);
+
+  // Auto-refresh on cross-component punch events. The sidebar
+  // AttendanceWidget dispatches `attendance:punch` on every successful
+  // check-in / check-out so any table view open in the same tab picks
+  // up the new row without the user having to reload.
+  // Also refetch when the tab becomes visible again — covers the case
+  // where the user punched on their phone and switched back to the
+  // browser, or simply left the tab idle past their next punch.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPunch = () => fetchHistory();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchHistory();
+    };
+    window.addEventListener("attendance:punch", onPunch as EventListener);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("attendance:punch", onPunch as EventListener);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchHistory]);
 
   // In-memory filtering — date range is already applied server-side.
@@ -701,6 +726,13 @@ export function MyAttendance() {
           record={{
             ...selected,
             faceMatchThreshold: data?.faceVerify?.threshold ?? null,
+            // Required for the photo-slot to differentiate "expired"
+            // (auto-deleted by the retention sweeper) from "skipped"
+            // (storage was never asked for). Without this the panel
+            // falls back to the generic "Photo not stored" copy even
+            // for rows whose JPEG was actually deleted by retention.
+            facePhotoRetentionDays:
+              data?.facePhotoStorage?.retentionDays ?? null,
           }}
           onClose={() => setSelected(null)}
         />

@@ -1,8 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Bell, BellRing, Check, CheckCheck } from "lucide-react"
 import { requestPushPermission } from "@/components/push/push-init"
+import {
+  ensureAlertSoundUnlock,
+  playNotificationSound,
+} from "@/lib/notifications/alert-sound"
 import {
   Popover,
   PopoverContent,
@@ -68,6 +72,26 @@ export function NotificationBell({ collapsed = false }: NotificationBellProps) {
 
   const unread = countResp?.data?.count || 0
   const items = useMemo(() => listResp?.data || [], [listResp])
+
+  // Ring the in-app chime whenever the unread count goes up. First render is
+  // a no-op (just record the baseline) so we don't ding on initial page load
+  // when previously-unread rows simply rehydrate from the server. Browser
+  // autoplay policies require a prior user gesture — `ensureAlertSoundUnlock`
+  // arms a one-time listener that resumes the AudioContext on first input.
+  const prevUnreadRef = useRef<number | null>(null)
+  useEffect(() => {
+    ensureAlertSoundUnlock()
+  }, [])
+  useEffect(() => {
+    if (prevUnreadRef.current === null) {
+      prevUnreadRef.current = unread
+      return
+    }
+    if (unread > prevUnreadRef.current) {
+      playNotificationSound()
+    }
+    prevUnreadRef.current = unread
+  }, [unread])
 
   // Click on an item — open the detail dialog and mark the row read in the
   // background. We don't navigate anywhere: notifications are read-only

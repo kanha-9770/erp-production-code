@@ -1387,19 +1387,147 @@ export async function runWorkflowRule(
         const title = act.notifyTitle || act.notifyName || `Scheduled: ${rule.name}`
         const body = act.notifyMessage || null
 
+        // Resolve the admin-selected fields (`notifyFieldIds`) into a
+        // per-recipient `{ label, apiName, value }[]` payload so the bell
+        // detail popup can render the same "Field updates" table the
+        // event-triggered path produces. Scheduled rules have no triggering
+        // record, so values come from the recipient's User + Employee row
+        // (which is the only per-recipient context that makes sense for a
+        // reminder like "please check-in"). Fields that can't be resolved
+        // without a record (e.g. checkedIn, lateMinutes) skip cleanly.
+        const includeFields = (act.notifyFieldIds || []).filter(Boolean)
+        const perUserFields = new Map<
+          string,
+          Array<{ label: string; apiName: string; value: string }>
+        >()
+        if (includeFields.length > 0) {
+          try {
+            const { getStaticFieldsForModule } = await import(
+              "@/lib/static-page-fields"
+            )
+            const staticFields = getStaticFieldsForModule(rule.moduleName)
+            const idToInfo = new Map<
+              string,
+              { label: string; apiName: string; coreKey: string }
+            >()
+            for (const sf of staticFields) {
+              idToInfo.set(sf.id, {
+                label: sf.label,
+                apiName: sf.apiName,
+                coreKey: sf.apiName,
+              })
+            }
+
+            const users = await prisma.user.findMany({
+              where: { id: { in: recipientIds } },
+              select: {
+                id: true,
+                email: true,
+                first_name: true,
+                last_name: true,
+                department: true,
+                employee: {
+                  select: {
+                    employeeName: true,
+                    department: true,
+                    designation: true,
+                  },
+                },
+              },
+            })
+
+            const fullName = (u: (typeof users)[number]) =>
+              u.employee?.employeeName ||
+              [u.first_name, u.last_name].filter(Boolean).join(" ").trim() ||
+              u.email
+
+            for (const u of users) {
+              const fields: Array<{
+                label: string
+                apiName: string
+                value: string
+              }> = []
+              for (const fid of includeFields) {
+                const info = idToInfo.get(fid)
+                if (!info) continue // dynamic-form fields: no record → no value
+                let value: any = ""
+                switch (info.coreKey) {
+                  case "userId":
+                    value = u.id
+                    break
+                  case "employeeName":
+                  case "fullName":
+                    value = fullName(u)
+                    break
+                  case "department":
+                    value = u.employee?.department || u.department || ""
+                    break
+                  case "designation":
+                    value = u.employee?.designation || ""
+                    break
+                  case "email":
+                  case "emailAddress1":
+                    value = u.email || ""
+                    break
+                  default:
+                    value = "" // record-only fields skip on scheduled runs
+                }
+                if (value === undefined || value === null || value === "")
+                  continue
+                fields.push({
+                  label: info.label,
+                  apiName: info.apiName,
+                  value: String(value),
+                })
+              }
+              if (fields.length > 0) perUserFields.set(u.id, fields)
+            }
+          } catch (err: any) {
+            console.warn(
+              `[workflow] runWorkflowRule "${rule.name}" — failed to resolve per-recipient fields:`,
+              err?.message || err,
+            )
+          }
+        }
+
+        const buildRow = (uid: string, includeData: boolean) => {
+          const fields = perUserFields.get(uid)
+          return {
+            recipientId: uid,
+            organizationId: rule.organizationId,
+            title,
+            body,
+            ...(includeData && fields && fields.length > 0
+              ? { data: { fields } }
+              : {}),
+            ruleId: rule.id,
+            ruleName: rule.name,
+            moduleName: rule.moduleName,
+          }
+        }
+
         try {
-          await (prisma as any).notification.createMany({
-            data: recipientIds.map((uid: string) => ({
-              recipientId: uid,
-              organizationId: rule.organizationId,
-              title,
-              body,
-              ruleId: rule.id,
-              ruleName: rule.name,
-              moduleName: rule.moduleName,
-            })),
-            skipDuplicates: true,
-          })
+          try {
+            await (prisma as any).notification.createMany({
+              data: recipientIds.map((uid: string) => buildRow(uid, true)),
+              skipDuplicates: true,
+            })
+          } catch (validationErr: any) {
+            // Same stale-Prisma-client fallback the event-triggered path uses.
+            const msg = String(validationErr?.message || validationErr || "")
+            const looksLikeUnknownDataArg =
+              msg.includes("Unknown arg") ||
+              msg.includes("Unknown argument") ||
+              msg.includes("data")
+            if (!looksLikeUnknownDataArg) throw validationErr
+            console.warn(
+              `[workflow] runWorkflowRule "${rule.name}" — Prisma client appears stale; retrying without structured \`data\` payload.`,
+            )
+            await (prisma as any).notification.createMany({
+              data: recipientIds.map((uid: string) => buildRow(uid, false)),
+              skipDuplicates: true,
+            })
+          }
         } catch (err: any) {
           results.push({
             type: act.type,
@@ -1413,8 +1541,26 @@ export async function runWorkflowRule(
         results.push({
           type: act.type,
           ok: true,
-          detail: { recipients: recipientIds.length },
+          detail: {
+            recipients: recipientIds.length,
+            fieldsAppended: includeFields.length,
+          },
         })
+
+        // Web push fan-out — was missing on the scheduled path, so OS-level
+        // banners never fired for scheduled rules. Matches the event-based
+        // path's fire-and-forget call.
+        void sendPushToUsers(recipientIds, {
+          title,
+          body: body || undefined,
+          tag: `rule:${rule.id}`,
+        }).catch((err) => {
+          console.warn(
+            `[workflow] runWorkflowRule "${rule.name}" web push fan-out failed:`,
+            err?.message || err,
+          )
+        })
+
         continue
       }
 

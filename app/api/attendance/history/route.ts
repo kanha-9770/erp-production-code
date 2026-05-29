@@ -141,6 +141,14 @@ export async function GET(request: NextRequest) {
         mode: cfg.faceVerifyMode,
         threshold: cfg.faceMatchThreshold,
       },
+      // Storage policy snapshot — lets the detail panel differentiate
+      // "photo was never stored" from "photo was deleted by retention"
+      // when checkInPhoto/checkOutPhoto is null on an older row. Retention
+      // of 0 means "keep forever" and disables the inference.
+      facePhotoStorage: {
+        storeAfterVerify: cfg.facePhotoStoreAfterVerify,
+        retentionDays: cfg.facePhotoRetentionDays,
+      },
       // Threshold knobs surfaced to the client so the status filter chip
       // can display the right options and the badge stays in sync with the
       // payroll classifier. Mirrors the values the server uses for the

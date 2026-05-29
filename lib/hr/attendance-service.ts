@@ -149,15 +149,13 @@ export interface AttendanceStatus {
 
 // ---- Date / time helpers --------------------------------------------------
 
-// Format YYYY-MM-DD using server-local time. Mirrors lib/attendance.getToday()
-// behaviour for backward compatibility — we deliberately do NOT swap to UTC
-// here, since the existing Attendance rows were written this way and a
-// timezone change would split today's row in two.
-export function todayKey(now: Date = new Date()): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+// Format YYYY-MM-DD for the *org's* timezone (not the server's). Production
+// hosts run in UTC, so reading the calendar date off a raw Date would key a
+// late-night IST check-in to the wrong day (UTC is 5:30 behind IST). Passing
+// the org tz keeps the day boundary aligned with what the employee sees.
+export function todayKey(now: Date = new Date(), tz: string = FALLBACK_TZ): string {
+  const { year, month, day } = zonedParts(now, tz);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 // Default IANA timezone used when neither the org config nor the env
@@ -190,11 +188,74 @@ export function formatHHmm(d: Date, tz: string = FALLBACK_TZ): string {
   }
 }
 
-function dateAtHHmm(base: Date, hhmm: string): Date {
+// ---- Timezone-aware date math ---------------------------------------------
+//
+// All "midnight" / "today at HH:mm" boundaries must be computed in the org's
+// IANA timezone, NOT the server's. On Vercel/Supabase the Node process runs
+// in UTC, so `Date.setHours(0,...)` yields 00:00 UTC = 05:30 IST — which is
+// exactly why auto-checkout stamps were showing 05:30 instead of midnight.
+//
+// India observes no DST, so a single offset read is exact. For DST zones the
+// one-pass guess is correct except for the ~1h/year fold, which is acceptable
+// for attendance boundaries.
+
+/** Break a Date down into its wall-clock components *in tz* (24h). */
+function zonedParts(date: Date, tz: string): {
+  year: number; month: number; day: number; hour: number; minute: number; second: number;
+} {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const map: Record<string, number> = {};
+  for (const p of dtf.formatToParts(date)) {
+    if (p.type !== 'literal') map[p.type] = Number(p.value);
+  }
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    hour: map.hour,
+    minute: map.minute,
+    second: map.second,
+  };
+}
+
+/** Offset (ms) of tz relative to UTC at `date`: localWallClockAsUTC − date. */
+function tzOffsetMs(date: Date, tz: string): number {
+  const p = zonedParts(date, tz);
+  const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return asUTC - date.getTime();
+}
+
+/** Build the UTC instant for a given wall-clock (y/mo/d/h/mi) *in tz*. Month
+ *  is 1-based; out-of-range day/hour values roll over via Date.UTC. */
+function zonedWallClockToUtc(
+  y: number, mo: number, d: number, h: number, mi: number, tz: string,
+): Date {
+  // First guess treats the wall clock as if it were UTC, then corrects by the
+  // tz offset at that instant. One pass is exact for non-DST zones (India).
+  const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  const offset = tzOffsetMs(new Date(guess), tz);
+  return new Date(guess - offset);
+}
+
+function dateAtHHmm(base: Date, hhmm: string, tz: string = FALLBACK_TZ): Date {
   const mins = parseHHmm(hhmm) ?? 9 * 60;
-  const out = new Date(base);
-  out.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
-  return out;
+  const { year, month, day } = zonedParts(base, tz);
+  return zonedWallClockToUtc(year, month, day, Math.floor(mins / 60), mins % 60, tz);
+}
+
+/** 00:00 of `now`'s calendar day, in tz, as a UTC instant. */
+function startOfDayInTz(now: Date, tz: string = FALLBACK_TZ): Date {
+  const { year, month, day } = zonedParts(now, tz);
+  return zonedWallClockToUtc(year, month, day, 0, 0, tz);
 }
 
 function diffMinutes(a: Date, b: Date): number {
@@ -385,12 +446,14 @@ function findLeaveForToday(
 // because the row's owner hasn't loaded their widget yet to trigger the
 // per-user sweep.
 
-/** Midnight (00:00) of the day immediately after checkInAt, in server-local
- *  time. `setHours(24, ...)` normalises to start-of-next-day. */
-function midnightAfter(checkInAt: Date): Date {
-  const d = new Date(checkInAt);
-  d.setHours(24, 0, 0, 0);
-  return d;
+/** Midnight (00:00) of the day immediately after checkInAt, in the org's
+ *  timezone `tz`, returned as a UTC instant. Day+1 rolls over month/year via
+ *  Date.UTC. Computed in tz (not server-local) so the stored checkOutAt lands
+ *  at true local midnight — e.g. 18:30 UTC for 00:00 IST — instead of 00:00
+ *  UTC, which would display as 05:30 IST. */
+function midnightAfter(checkInAt: Date, tz: string = FALLBACK_TZ): Date {
+  const { year, month, day } = zonedParts(checkInAt, tz);
+  return zonedWallClockToUtc(year, month, day + 1, 0, 0, tz);
 }
 
 /**
@@ -413,8 +476,7 @@ export async function applyDayCapAutoCheckouts(
   // user who checked in at 11:55 PM yesterday gets closed at 00:00 today,
   // and a user who checked in three days ago gets closed at 00:00 of the
   // day after their check-in.
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
+  const startOfToday = startOfDayInTz(now, FALLBACK_TZ);
   const where: any = {
     checkedIn: true,
     checkedOut: false,
@@ -436,6 +498,13 @@ export async function applyDayCapAutoCheckouts(
       id: true,
       organizationId: true,
       checkInAt: true,
+      // OT bookkeeping the sweep needs to mirror recordPunch's OUT path.
+      // Without these, we'd write inflated OT minutes for opt-in orgs
+      // (employee toggled OT at 22:00 but legacy "worked − 9h" formula
+      // still credits ~5h, which the daily cap clips to 4h — paying for
+      // 4h of OT when only ~2h was actually opted-in).
+      overtimeOptedIn: true,
+      overtimeStartedAt: true,
     } as any,
   });
   if (stale.length === 0) return;
@@ -454,13 +523,36 @@ export async function applyDayCapAutoCheckouts(
       cfgByOrg.set(orgId, cfg);
     }
 
-    const checkOutAt = midnightAfter(checkInAt);
-    const workedMinutes = Math.max(
-      0,
-      diffMinutes(checkOutAt, checkInAt) - cfg.breakMinutes,
-    );
-    const overtimeThreshold = Math.round(cfg.overtimeAfterHours * 60);
-    const overtimeMinutes = Math.max(0, workedMinutes - overtimeThreshold);
+    const checkOutAt = midnightAfter(checkInAt, orgTimezone(cfg));
+
+    // OT computation — must match the OUT branch in recordPunch (around
+    // line 1192-1214) so a row closed by the sweep produces the same
+    // overtimeMinutes a self-checkout would have. Two paths:
+    //   • overtimeRequiresOptIn = true → credit only the time between
+    //     overtimeStartedAt and checkOutAt (= midnight). Not opted in?
+    //     OT = 0 and payroll's AUTO_CHECKOUT branch will zero the day.
+    //   • overtimeRequiresOptIn = false → legacy "worked beyond
+    //     overtimeAfterHours is OT" for orgs that haven't switched on
+    //     opt-in. Cap applies in both branches.
+    const cap = Math.round(Math.max(0, cfg.overtimeMaxHoursPerDay) * 60);
+    let overtimeMinutes = 0;
+    if (cfg.overtimeRequiresOptIn) {
+      const otStart: Date | null = (row as any).overtimeStartedAt
+        ? new Date((row as any).overtimeStartedAt)
+        : null;
+      if ((row as any).overtimeOptedIn && otStart) {
+        const rawOt = Math.max(0, diffMinutes(checkOutAt, otStart));
+        overtimeMinutes = cap > 0 ? Math.min(rawOt, cap) : rawOt;
+      }
+    } else {
+      const workedMinutes = Math.max(
+        0,
+        diffMinutes(checkOutAt, checkInAt) - cfg.breakMinutes,
+      );
+      const overtimeThreshold = Math.round(cfg.overtimeAfterHours * 60);
+      const raw = Math.max(0, workedMinutes - overtimeThreshold);
+      overtimeMinutes = cap > 0 ? Math.min(raw, cap) : raw;
+    }
 
     // Conditional update keeps us race-safe against a parallel checkout — if
     // someone else just closed the row, our updateMany matches 0 and we
@@ -496,17 +588,17 @@ async function applyAutoCheckoutIfNeeded(
   shift: EffectiveShift,
   now: Date,
 ): Promise<{ checkOutAt: Date; overtimeMinutes: number; earlyOutMinutes: number } | null> {
-  const auto = parseHHmm(cfg.autoCheckoutAt ?? null);
-  if (auto === null) return null;
-  const autoToday = new Date(now);
-  autoToday.setHours(Math.floor(auto / 60), auto % 60, 0, 0);
+  if (parseHHmm(cfg.autoCheckoutAt ?? null) === null) return null;
+  const tz = orgTimezone(cfg);
+  // The configured auto-checkout wall-clock, on today's date, in the org tz.
+  const autoToday = dateAtHHmm(now, cfg.autoCheckoutAt as string, tz);
   if (now < autoToday) return null;
   // Don't auto-close before the user has been "in" for a sensible duration —
   // shields against misconfigurations that would otherwise fire instantly.
   if (now.getTime() - checkInAt.getTime() < 60 * 60 * 1000) return null;
 
   const checkOutAt = autoToday;
-  const expectedOut = dateAtHHmm(now, shift.end);
+  const expectedOut = dateAtHHmm(now, shift.end, tz);
   const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, checkOutAt));
   const workedMinutes = Math.max(
     0,
@@ -548,7 +640,8 @@ export async function getStatus(
   // per-row inTime/outTime gets classified against their own hours instead of
   // the org default.
   const shift = await getEffectiveShift(userId, cfg);
-  const date = todayKey(now);
+  const tz = orgTimezone(cfg);
+  const date = todayKey(now, tz);
   const month = date.slice(0, 7);
 
   // Look up the user + linked employee once — both feed leave-matching:
@@ -621,9 +714,14 @@ export async function getStatus(
     }
   }
 
-  const expectedInAt = dateAtHHmm(now, shift.start);
-  const expectedOutAt = dateAtHHmm(now, shift.end);
-  const isWeeklyOff = cfg.weeklyOffDays.includes(now.getDay());
+  const expectedInAt = dateAtHHmm(now, shift.start, tz);
+  const expectedOutAt = dateAtHHmm(now, shift.end, tz);
+  // Day-of-week must be read in the org tz, not server-local: near the
+  // UTC/IST boundary `now.getDay()` can name yesterday's weekday. Noon-UTC of
+  // the tz-local calendar date is unambiguous.
+  const isWeeklyOff = cfg.weeklyOffDays.includes(
+    new Date(`${date}T12:00:00Z`).getUTCDay(),
+  );
 
   const checkedIn = !!row?.checkedIn;
   const checkedOut = !!row?.checkedOut;
@@ -736,6 +834,7 @@ export async function getStatus(
       availableAt: dateAtHHmm(
         now,
         addMinutesToHHmm(shift.end, cfg.overtimeStartBufferMinutes),
+        tz,
       ).toISOString(),
       optedIn: !!(row as any)?.overtimeOptedIn,
       startedAt: (row as any)?.overtimeStartedAt
@@ -938,7 +1037,8 @@ export async function recordPunch(
   // OUT's earlyOutMinutes / overtimeMinutes are all computed against the
   // same window the widget/getStatus shows the user.
   const shift = await getEffectiveShift(input.userId, cfg);
-  const date = todayKey(now);
+  const tz = orgTimezone(cfg);
+  const date = todayKey(now, tz);
   const source = input.source ?? 'WEB';
 
   // Account validity. We do this first so an inactive/terminated user gets a
@@ -975,7 +1075,19 @@ export async function recordPunch(
   // Pre-flight reject: geofence + IP. We log the rejection so admins can see
   // attempts even when nothing was written. ENFORCE blocks; CAPTURE records
   // and warns; OFF ignores.
-  if (cfg.faceCaptureMode === 'REQUIRED' && !input.photoUrl) {
+  //
+  // A photoUrl-less punch is allowed when face verification successfully
+  // ran for this punch — i.e. `faceMatch` is a finite number. That covers
+  // the legitimate "facePhotoStoreAfterVerify = NEVER / ON_MISMATCH_ONLY"
+  // path where the photo route skips the upload after a verified match.
+  // The match score on the row IS the audit trail in that case.
+  const hasVerificationProof =
+    typeof input.faceMatch === 'number' && Number.isFinite(input.faceMatch);
+  if (
+    cfg.faceCaptureMode === 'REQUIRED' &&
+    !input.photoUrl &&
+    !hasVerificationProof
+  ) {
     await safeAudit(
       auditEmail,
       input.userId,
@@ -1117,7 +1229,7 @@ export async function recordPunch(
       };
     }
 
-    const expectedIn = dateAtHHmm(now, shift.start);
+    const expectedIn = dateAtHHmm(now, shift.start, tz);
     const graceEnd = new Date(expectedIn.getTime() + cfg.graceMinutes * 60_000);
     const lateMinutes = Math.max(0, diffMinutes(now, graceEnd));
 
@@ -1220,7 +1332,7 @@ export async function recordPunch(
     const checkInAt = (existing as any).checkInAt
       ? new Date((existing as any).checkInAt)
       : null;
-    const expectedOut = dateAtHHmm(now, shift.end);
+    const expectedOut = dateAtHHmm(now, shift.end, tz);
     const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, now));
 
     // Overtime computation. Two paths depending on the org policy:
@@ -1519,7 +1631,8 @@ export async function setOvertimeOptIn(
   const cfg = await getAttendanceConfig(input.organizationId);
   const shift = await getEffectiveShift(input.userId, cfg);
   const now = new Date();
-  const date = todayKey(now);
+  const tz = orgTimezone(cfg);
+  const date = todayKey(now, tz);
 
   const row = await prisma.attendance.findFirst({
     where: { userId: input.userId, date },
@@ -1545,6 +1658,7 @@ export async function setOvertimeOptIn(
     const availableAt = dateAtHHmm(
       now,
       addMinutesToHHmm(shift.end, cfg.overtimeStartBufferMinutes),
+      tz,
     );
     if (now < availableAt) {
       throw new AttendanceError(

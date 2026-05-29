@@ -210,6 +210,17 @@ export async function GET(request: NextRequest) {
         lng: cfg.geofenceLng,
         radiusM: cfg.geofenceRadiusM,
       },
+      // Same snapshots the My Attendance response carries — lets the
+      // shared AttendanceRecordDetail panel render the verified badge and
+      // label missing photos correctly (expired vs never-stored).
+      faceVerify: {
+        mode: cfg.faceVerifyMode,
+        threshold: cfg.faceMatchThreshold,
+      },
+      facePhotoStorage: {
+        storeAfterVerify: cfg.facePhotoStoreAfterVerify,
+        retentionDays: cfg.facePhotoRetentionDays,
+      },
       users: users.map((u) => ({
         id: u.id,
         email: u.email,

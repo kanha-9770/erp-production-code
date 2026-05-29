@@ -348,7 +348,11 @@ interface UseAttendanceState {
 }
 
 interface UploadFacePhotoResult {
-  url: string;
+  // Null when the server accepted the punch but skipped storing the JPEG
+  // (facePhotoStoreAfterVerify = NEVER / ON_MISMATCH_ONLY + verified).
+  // The attendance row will hold null for checkInPhoto / checkOutPhoto in
+  // that case; the verification metadata below is still authoritative.
+  url: string | null;
   // Verification fields. Null when face verification is OFF or the user
   // isn't enrolled (in WARN mode). Always populated when the server
   // accepted the photo under WARN/ENFORCE mode with a stored enrollment.
@@ -384,7 +388,10 @@ async function uploadFacePhoto(
     body: fd,
   });
   const json = await res.json();
-  if (!res.ok || !json?.success || !json.url) {
+  // `json.url` is now optional — the server may legitimately return null
+  // when storage was skipped (verification succeeded + facePhotoStoreAfterVerify
+  // = NEVER / ON_MISMATCH_ONLY). Treat that as success.
+  if (!res.ok || !json?.success) {
     // Surface the structured error code so callers can show a tailored
     // toast (e.g. "Please enroll your face first" for FACE_NOT_ENROLLED).
     const err = new Error(json?.error ?? "Photo upload failed");
@@ -392,7 +399,7 @@ async function uploadFacePhoto(
     throw err;
   }
   return {
-    url: json.url as string,
+    url: typeof json.url === "string" && json.url.length > 0 ? json.url : null,
     faceMatch:
       typeof json.faceMatch === "number" && Number.isFinite(json.faceMatch)
         ? json.faceMatch
@@ -528,17 +535,42 @@ function useAttendance(enabled: boolean): UseAttendanceState {
           // Roll back to previous state.
           setStatus(previous);
           setError(json?.error ?? "Failed to punch");
-          throw new Error(json?.error ?? "Failed to punch");
+          // Attach the server's structured code so the caller's catch
+          // block can render a tailored toast for FACE_CAPTURE_REQUIRED,
+          // FACE_VERIFY_REQUIRED, LIVENESS_REQUIRED, etc. The widget
+          // refreshes status on these so a stale-cache client picks up
+          // the new mode and re-prompts properly next time.
+          if (json?.code === "FACE_CAPTURE_REQUIRED" ||
+              json?.code === "FACE_VERIFY_REQUIRED" ||
+              json?.code === "LIVENESS_REQUIRED") {
+            fetchStatus();
+          }
+          const err = new Error(json?.error ?? "Failed to punch");
+          (err as any).code = json?.code ?? null;
+          throw err;
         }
         const next = json.status as AttendanceStatusPayload;
         setOrgTimezone(next.reportTimezone);
         setStatus(next);
         setError(null);
+        // Broadcast a window event so other attendance views (My
+        // Attendance table, Team Attendance, dashboard summary) can
+        // refetch their own data without the user having to reload.
+        // The widget itself doesn't need this — it already updates from
+        // the punch response — but the rest of the app does. Idempotency-
+        // key is included so listeners can dedupe if they need to.
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("attendance:punch", {
+              detail: { type, idempotencyKey, at: Date.now() },
+            }),
+          );
+        }
       } finally {
         setBusy(false);
       }
     },
-    [busy, status],
+    [busy, status, fetchStatus],
   );
 
   return {
@@ -845,6 +877,22 @@ export function AttendanceWidget({
           title = "Liveness check failed";
           description =
             "The photo appears static. Real selfies have natural micro-motion — please retake while looking at the camera.";
+        } else if (code === "FACE_CAPTURE_REQUIRED") {
+          // Server-side guard fired — almost always means the client had
+          // a stale faceCapture.mode snapshot. The /punch handler
+          // refreshes status automatically so the next click hits the
+          // dialog properly.
+          title = "Face capture is required";
+          description =
+            "Your organization now requires a face photo for every punch. Please try again — the camera will open.";
+        } else if (code === "FACE_VERIFY_REQUIRED") {
+          title = "Face verification is required";
+          description =
+            "Your organization requires identity verification for every punch. Please retake the photo through the app.";
+        } else if (code === "LIVENESS_REQUIRED") {
+          title = "Liveness check is required";
+          description =
+            "Your organization requires a strict liveness check. Please retake while looking at the camera so motion is captured.";
         }
         toast({ title, description, variant: "destructive" });
       } finally {

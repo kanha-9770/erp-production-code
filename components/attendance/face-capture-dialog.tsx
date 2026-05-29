@@ -72,9 +72,21 @@ interface FaceCaptureDialogProps {
   strictLiveness?: boolean;
 }
 
+// Camera STREAM hint — browsers honor this as an upper bound when they
+// can, but mobile browsers routinely ignore it and hand back 1280x720 or
+// higher. We use OUTPUT_* below to clamp the canvas independently so the
+// captured JPEG stays small regardless of what the stream actually delivers.
 const TARGET_WIDTH = 640;
 const TARGET_HEIGHT = 480;
-const JPEG_QUALITY = 0.82;
+// Final captured-frame dimensions written to the canvas. Lower than the
+// stream hint above because:
+//   • face-api detects faces fine down to ~240px wide
+//   • 480x360 JPEGs at q=0.65 are ~25–60 KB (vs 400+ KB at the old defaults)
+//   • smaller frames = faster descriptor extraction on CPU-backend devices
+// The server cap (facePhotoMaxKb, default 100) is the safety net behind this.
+const OUTPUT_WIDTH = 480;
+const OUTPUT_HEIGHT = 360;
+const JPEG_QUALITY = 0.65;
 
 export function FaceCaptureDialog({
   open,
@@ -151,11 +163,18 @@ export function FaceCaptureDialog({
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
         throw new Error("Camera not supported in this browser");
       }
+      // `ideal` is a hint; mobile browsers routinely ignore it and hand
+      // back 720p/1080p streams. `max` is a hard ceiling so the stream
+      // never exceeds what we actually need for a face capture — saves
+      // bandwidth, memory, and (on phones) thermal headroom. Downscaling
+      // further to OUTPUT_WIDTH x OUTPUT_HEIGHT still happens in grabFrame,
+      // but starting from a smaller stream means less GPU work per draw.
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
-          width: { ideal: TARGET_WIDTH },
-          height: { ideal: TARGET_HEIGHT },
+          width: { ideal: TARGET_WIDTH, max: 1280 },
+          height: { ideal: TARGET_HEIGHT, max: 720 },
+          frameRate: { ideal: 24, max: 30 },
         },
         audio: false,
       });
@@ -225,23 +244,37 @@ export function FaceCaptureDialog({
   // Grab a single still frame from the live video as a mirrored JPEG
   // blob. Used both for the final captured photo and (when liveness is
   // on) for the 3-frame motion sequence.
+  //
+  // The canvas is forced to OUTPUT_WIDTH x OUTPUT_HEIGHT regardless of
+  // what the camera stream is delivering. Phones often ignore the 640x480
+  // hint and produce 1280x720 or 1920x1080 streams, which used to
+  // generate 1+ MB JPEGs that overran the server's 800 KB cap and got
+  // rejected — the "I can't mark from my phone, have to use the laptop"
+  // user complaint. Downscaling here also makes face-api inference
+  // measurably faster on CPU-backend devices.
   const grabFrame = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas) return resolve(null);
-      const w = video.videoWidth || TARGET_WIDTH;
-      const h = video.videoHeight || TARGET_HEIGHT;
-      canvas.width = w;
-      canvas.height = h;
+      const srcW = video.videoWidth || TARGET_WIDTH;
+      const srcH = video.videoHeight || TARGET_HEIGHT;
+      // Preserve the source aspect ratio inside the OUTPUT_* box so the
+      // captured photo isn't squashed when the camera gives us 16:9 or
+      // 4:3 streams that don't match 480x360 exactly.
+      const scale = Math.min(OUTPUT_WIDTH / srcW, OUTPUT_HEIGHT / srcH);
+      const drawW = Math.max(1, Math.round(srcW * scale));
+      const drawH = Math.max(1, Math.round(srcH * scale));
+      canvas.width = drawW;
+      canvas.height = drawH;
       const ctx = canvas.getContext("2d");
       if (!ctx) return resolve(null);
       // Mirror flip — the user expects the captured photo to match what
       // they see on-screen (which is mirrored to feel like a, well, mirror).
       ctx.save();
-      ctx.translate(w, 0);
+      ctx.translate(drawW, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, w, h);
+      ctx.drawImage(video, 0, 0, drawW, drawH);
       ctx.restore();
       canvas.toBlob(
         (blob) => resolve(blob),

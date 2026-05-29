@@ -20,10 +20,16 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── 1. Always allow internals, API, static files, /form/ pages ─────────────
+  // `/models/` holds face-api.js weight shards (e.g. face_recognition_model-shard1)
+  // which are EXTENSIONLESS files served from /public. Without this explicit
+  // bypass they'd hit the auth-meta staleness redirect (line 94 below) every
+  // 5 minutes and the browser would surface ERR_TOO_MANY_REDIRECTS — silently
+  // breaking face verification + liveness in the attendance widget.
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/form/") ||
+    pathname.startsWith("/models/") ||
     pathname.includes(".")
   ) {
     return NextResponse.next();
@@ -181,5 +187,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon\\.ico).*)"],
+  // Matcher excludes paths the middleware function should never even be
+  // invoked for. `models` is the face-api.js weight shard directory in
+  // /public — extensionless files that would otherwise hit the auth-meta
+  // staleness redirect every 5 minutes and produce ERR_TOO_MANY_REDIRECTS
+  // in the browser. Belt-and-suspenders with the `pathname.startsWith("/models/")`
+  // early-return inside the middleware function above.
+  matcher: ["/((?!api|_next/static|_next/image|models|favicon\\.ico).*)"],
 };

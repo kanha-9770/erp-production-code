@@ -66,6 +66,10 @@ interface TeamResponse {
     lng: number | null;
     radiusM: number | null;
   };
+  faceVerify?: { mode: string; threshold: number };
+  // Storage-policy snapshot used by the detail panel to label the photo
+  // slot with the right reason when checkInPhoto / checkOutPhoto is null.
+  facePhotoStorage?: { storeAfterVerify: string; retentionDays: number };
   error?: string;
 }
 
@@ -112,6 +116,25 @@ export function TeamAttendance() {
 
   useEffect(() => {
     fetchTeam();
+  }, [fetchTeam]);
+
+  // Same cross-component refresh as My Attendance: when anyone in the
+  // app dispatches `attendance:punch` (i.e. the sidebar widget completes
+  // a punch) the team view refetches so the current user's row reflects
+  // the new state without a manual reload. visibilitychange covers the
+  // "left the tab open, came back later" case.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPunch = () => fetchTeam();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchTeam();
+    };
+    window.addEventListener("attendance:punch", onPunch as EventListener);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("attendance:punch", onPunch as EventListener);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchTeam]);
 
   // Decorate records with user info + filter by free-text search.
@@ -358,7 +381,19 @@ export function TeamAttendance() {
         preview={null}
       />
 
-      <AttendanceRecordDetail record={selected} onClose={() => setSelected(null)} />
+      <AttendanceRecordDetail
+        record={
+          selected
+            ? {
+                ...selected,
+                faceMatchThreshold: data?.faceVerify?.threshold ?? null,
+                facePhotoRetentionDays:
+                  data?.facePhotoStorage?.retentionDays ?? null,
+              }
+            : null
+        }
+        onClose={() => setSelected(null)}
+      />
       <ManualEntryDialog
         open={manualOpen}
         onOpenChange={setManualOpen}

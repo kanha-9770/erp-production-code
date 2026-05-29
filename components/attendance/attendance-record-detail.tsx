@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   ShieldAlert,
+  Archive,
 } from "lucide-react";
 import {
   formatDateLong,
@@ -43,6 +44,12 @@ export interface AttendanceRecord {
   overtimeMinutes: number;
   isAutoCheckedOut: boolean;
   status: string | null;
+  // Server-computed status that already accounts for org thresholds
+  // (halfDayMinHours / fullDayMinHours), per-employee shift, and
+  // auto-checkout. Prefer this over `status` when both are present —
+  // legacy rows / cached responses may have only `status`.
+  effectiveStatus?: string;
+  effectiveStatusReason?: string | null;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
   // Face-match score recorded at each punch (Euclidean distance — lower is
@@ -55,6 +62,12 @@ export interface AttendanceRecord {
   // by the parent (my-attendance / team-attendance) since it doesn't live
   // on the record itself.
   faceMatchThreshold?: number | null;
+  // Org's current photo-retention window in days. Used to label an empty
+  // photo slot as "expired" (file auto-deleted by the daily cleanup
+  // sweeper) vs "skipped" (storage was never asked for). 0 / null means
+  // the org keeps photos forever, so an empty slot can only mean
+  // "skipped" — never "expired".
+  facePhotoRetentionDays?: number | null;
   checkInLat: number | null;
   checkInLng: number | null;
   checkOutLat: number | null;
@@ -114,11 +127,17 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                     </Badge>
                   )}
               </SheetTitle>
-              {(record.userName || record.userEmail) && (
-                <SheetDescription>
-                  {record.userName ?? record.userEmail}
-                </SheetDescription>
-              )}
+              {/* Always render a SheetDescription so Radix Dialog's a11y
+                  contract is satisfied (otherwise it logs a "Missing
+                  Description or aria-describedby" console warning).
+                  Falls back to a generic line on My Attendance where
+                  userName/userEmail aren't on the record; team views
+                  keep showing the employee name as before. */}
+              <SheetDescription>
+                {record.userName ??
+                  record.userEmail ??
+                  "Attendance details for the selected date."}
+              </SheetDescription>
             </SheetHeader>
 
             {/* Stats row */}
@@ -156,6 +175,8 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 locationMissing={record.checkInLocationMissing ?? null}
                 faceMatch={record.checkInFaceMatch ?? null}
                 faceMatchThreshold={record.faceMatchThreshold ?? null}
+                recordDate={record.date}
+                retentionDays={record.facePhotoRetentionDays ?? null}
               />
               <PunchPanel
                 title="Check-Out"
@@ -171,6 +192,8 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                 locationMissing={record.checkOutLocationMissing ?? null}
                 faceMatch={record.checkOutFaceMatch ?? null}
                 faceMatchThreshold={record.faceMatchThreshold ?? null}
+                recordDate={record.date}
+                retentionDays={record.facePhotoRetentionDays ?? null}
               />
             </div>
           </>
@@ -209,6 +232,40 @@ function Stat({
   );
 }
 
+// Classify the photo slot when no URL is present. We can usually tell
+// the difference between "the org told us not to upload" and "the
+// daily cleanup sweeper deleted it" based on row age vs the org's
+// retention setting:
+//   • A row OLDER than retentionDays + verification ran   → likely deleted
+//   • A row younger than retentionDays + verification ran → likely never stored
+//   • Verification didn't run + no photo                  → legacy "no capture"
+//   • retentionDays=0/null                                → org keeps forever,
+//                                                           so a null URL can't
+//                                                           be "expired"; treat
+//                                                           as never-stored.
+type PhotoState = "present" | "expired" | "skipped" | "missing";
+function classifyPhoto(
+  photo: string | null,
+  rowDate: string | null,
+  faceMatch: number | null,
+  retentionDays: number | null,
+): PhotoState {
+  if (photo) return "present";
+  const verificationRan = typeof faceMatch === "number";
+  if (!verificationRan) return "missing";
+  if (!retentionDays || retentionDays <= 0 || !rowDate) return "skipped";
+  // Compare date strings lexicographically — Attendance.date is stored as
+  // YYYY-MM-DD so a simple string compare against the cutoff works without
+  // any timezone math.
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
+  const y = cutoff.getUTCFullYear();
+  const m = String(cutoff.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(cutoff.getUTCDate()).padStart(2, "0");
+  const cutoffStr = `${y}-${m}-${d}`;
+  return rowDate < cutoffStr ? "expired" : "skipped";
+}
+
 function PunchPanel({
   title,
   time,
@@ -223,6 +280,8 @@ function PunchPanel({
   locationMissing,
   faceMatch,
   faceMatchThreshold,
+  recordDate,
+  retentionDays,
 }: {
   title: string;
   time: string | null;
@@ -237,6 +296,8 @@ function PunchPanel({
   locationMissing: boolean | null;
   faceMatch: number | null;
   faceMatchThreshold: number | null;
+  recordDate: string | null;
+  retentionDays: number | null;
 }) {
   const accentClass =
     accent === "emerald"
@@ -261,22 +322,71 @@ function PunchPanel({
         {time ?? "—"}
       </div>
       <div className="aspect-[4/3] w-full overflow-hidden rounded-md border border-black/10 bg-gray-100">
-        {photo ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <a href={photo} target="_blank" rel="noreferrer noopener">
-            <img
-              src={photo}
-              alt={`${title} photo`}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </a>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-            <ImageOff className="h-4 w-4 mr-1" />
-            No photo
-          </div>
-        )}
+        {(() => {
+          const state = classifyPhoto(photo, recordDate, faceMatch, retentionDays);
+          if (state === "present") {
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a href={photo!} target="_blank" rel="noreferrer noopener">
+                <img
+                  src={photo!}
+                  alt={`${title} photo`}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </a>
+            );
+          }
+          if (state === "expired") {
+            // Photo existed once and was deleted by the retention sweep.
+            // Distinct icon + amber tint so HR / managers immediately
+            // know this isn't a missing-data bug — the file aged out.
+            return (
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-1 px-3 text-center"
+                title={
+                  retentionDays
+                    ? `Auto-deleted after the ${retentionDays}-day retention window. The verification score below is the audit trail.`
+                    : undefined
+                }
+              >
+                <Archive className="h-5 w-5 text-amber-500" />
+                <div className="text-[11px] font-medium text-amber-800">
+                  Photo expired
+                </div>
+                <div className="text-[10px] text-amber-700/80 leading-tight">
+                  Deleted after {retentionDays}-day retention
+                </div>
+              </div>
+            );
+          }
+          if (state === "skipped") {
+            // Storage was deliberately skipped (Never store / mismatch-only
+            // + verified). Different copy from "missing" so it's clear the
+            // ABSENCE was intentional — the score below is the proof.
+            return (
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-1 px-3 text-center"
+                title="Storage was skipped because identity was already proven by the face match score."
+              >
+                <ShieldCheck className="h-5 w-5 text-emerald-500/80" />
+                <div className="text-[11px] font-medium text-gray-600">
+                  Photo not stored
+                </div>
+                <div className="text-[10px] text-gray-500 leading-tight">
+                  Match score is the proof
+                </div>
+              </div>
+            );
+          }
+          // Verification didn't run, no photo. Legacy / no-capture punch.
+          return (
+            <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+              <ImageOff className="h-4 w-4 mr-1" />
+              No photo
+            </div>
+          );
+        })()}
       </div>
       {/* Face verification badge — only shown when a match score was
           recorded at punch time. Threshold may be null on historical
