@@ -17,6 +17,29 @@
 let ctx: AudioContext | null = null
 let unlockBound = false
 
+// Per-device mute preference. Persisted to localStorage so it survives reloads
+// without needing a backend column. Defaults to unmuted (sound on).
+const MUTE_KEY = "notifications.sound.muted.v1"
+
+export function isAlertSoundMuted(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return localStorage.getItem(MUTE_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+export function setAlertSoundMuted(muted: boolean): void {
+  if (typeof window === "undefined") return
+  try {
+    if (muted) localStorage.setItem(MUTE_KEY, "1")
+    else localStorage.removeItem(MUTE_KEY)
+  } catch {
+    /* storage unavailable (private mode / quota) — ignore */
+  }
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null
   if (ctx) return ctx
@@ -49,6 +72,8 @@ export function ensureAlertSoundUnlock(): void {
 }
 
 export function playNotificationSound(): void {
+  // Respect the user's per-device mute toggle.
+  if (isAlertSoundMuted()) return
   const ac = getCtx()
   if (!ac) return
   if (ac.state === "suspended") {
