@@ -28,6 +28,15 @@ type PayableBasis = "monthDays" | "fixed26" | "fixed30";
 type FaceCaptureMode = "OFF" | "OPTIONAL" | "REQUIRED";
 type FaceVerifyMode = "OFF" | "WARN" | "ENFORCE";
 type FaceLivenessMode = "OFF" | "PERMISSIVE" | "STRICT";
+type FacePhotoStoreAfterVerify = "ALWAYS" | "ON_MISMATCH_ONLY" | "NEVER";
+
+// Sentinel for the retention dropdown's "Custom…" option. The actual
+// number lives in the adjacent input; this sentinel just controls
+// whether the input is shown vs. the preset is used.
+const RETENTION_CUSTOM = "custom";
+// Common preset values for the retention picker. Matches the menu in
+// the design doc — 30 / 60 / 90 / 180 / 365 days, plus "Forever" (0).
+const RETENTION_PRESETS = [30, 60, 90, 180, 365] as const;
 
 interface AttendanceConfig {
   id: string | null;
@@ -58,6 +67,8 @@ interface AttendanceConfig {
   minPunchGapSeconds: number;
   faceCaptureMode: FaceCaptureMode;
   facePhotoMaxKb: number;
+  facePhotoRetentionDays: number;
+  facePhotoStoreAfterVerify: FacePhotoStoreAfterVerify;
   faceVerifyMode: FaceVerifyMode;
   faceMatchThreshold: number;
   faceLivenessMode: FaceLivenessMode;
@@ -106,6 +117,12 @@ export function AttendanceConfigForm() {
     minPunchGapSeconds: string;
     faceCaptureMode: FaceCaptureMode;
     facePhotoMaxKb: string;
+    /** Either a preset like "30" / "60" / "0" (forever) OR the literal
+     *  RETENTION_CUSTOM sentinel — when set to the sentinel, the actual
+     *  retention value lives in facePhotoRetentionDaysCustom. */
+    facePhotoRetentionPreset: string;
+    facePhotoRetentionDaysCustom: string;
+    facePhotoStoreAfterVerify: FacePhotoStoreAfterVerify;
     faceVerifyMode: FaceVerifyMode;
     faceMatchThreshold: string;
     faceLivenessMode: FaceLivenessMode;
@@ -161,7 +178,20 @@ export function AttendanceConfigForm() {
         enforceEmployeeActive: !!c.enforceEmployeeActive,
         minPunchGapSeconds: String(c.minPunchGapSeconds ?? 5),
         faceCaptureMode: c.faceCaptureMode ?? "OFF",
-        facePhotoMaxKb: String(c.facePhotoMaxKb ?? 800),
+        facePhotoMaxKb: String(c.facePhotoMaxKb ?? 100),
+        facePhotoRetentionPreset: (() => {
+          // Snap an existing stored value onto the closest preset; if it
+          // doesn't match, drop into the "custom" option so the admin sees
+          // their actual configured number.
+          const days = Number(c.facePhotoRetentionDays ?? 30);
+          if (days === 0) return "0";
+          if ((RETENTION_PRESETS as readonly number[]).includes(days)) {
+            return String(days);
+          }
+          return RETENTION_CUSTOM;
+        })(),
+        facePhotoRetentionDaysCustom: String(c.facePhotoRetentionDays ?? 30),
+        facePhotoStoreAfterVerify: c.facePhotoStoreAfterVerify ?? "ALWAYS",
         faceVerifyMode: c.faceVerifyMode ?? "OFF",
         faceMatchThreshold: String(c.faceMatchThreshold ?? 0.55),
         faceLivenessMode: c.faceLivenessMode ?? "OFF",
@@ -274,6 +304,19 @@ export function AttendanceConfigForm() {
       Number(form.minPunchGapSeconds) !== config.minPunchGapSeconds ||
       form.faceCaptureMode !== config.faceCaptureMode ||
       Number(form.facePhotoMaxKb) !== config.facePhotoMaxKb ||
+      // Retention: compare the EFFECTIVE value (preset or custom input)
+      // against the stored one. Forever (preset "0") is its own case.
+      (() => {
+        const stored = config.facePhotoRetentionDays ?? 30;
+        const effective =
+          form.facePhotoRetentionPreset === RETENTION_CUSTOM
+            ? Number(form.facePhotoRetentionDaysCustom)
+            : Number(form.facePhotoRetentionPreset);
+        if (!Number.isFinite(effective)) return false;
+        return effective !== stored;
+      })() ||
+      form.facePhotoStoreAfterVerify !==
+        (config.facePhotoStoreAfterVerify ?? "ALWAYS") ||
       form.faceVerifyMode !== config.faceVerifyMode ||
       Number(form.faceMatchThreshold) !== config.faceMatchThreshold ||
       form.faceLivenessMode !== config.faceLivenessMode ||
@@ -286,7 +329,26 @@ export function AttendanceConfigForm() {
 
   const updateForm = useCallback(
     <K extends keyof NonNullable<typeof form>>(key: K, value: NonNullable<typeof form>[K]) => {
-      setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+      setForm((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, [key]: value } as NonNullable<typeof form>;
+        // Cross-field sync — runs whenever flipping verification mode.
+        // Under ENFORCE, the server rejects mismatched punches BEFORE the
+        // storage decision, so "Store only when face does NOT match"
+        // behaves identically to "Never store". Auto-coerce the stale
+        // option to NEVER (preserves the user's intent of "don't keep
+        // verified photos") instead of leaving a setting that quietly
+        // does nothing. The reverse direction (ENFORCE → WARN) does not
+        // change the storage value — WARN respects every storage option.
+        if (
+          key === "faceVerifyMode" &&
+          (value as FaceVerifyMode) === "ENFORCE" &&
+          next.facePhotoStoreAfterVerify === "ON_MISMATCH_ONLY"
+        ) {
+          next.facePhotoStoreAfterVerify = "NEVER";
+        }
+        return next;
+      });
     },
     [],
   );
@@ -358,7 +420,17 @@ export function AttendanceConfigForm() {
 
       const minPunchGapSeconds = Math.max(0, Math.floor(Number(form.minPunchGapSeconds) || 0));
       const trimmedWorkflowModule = form.workflowModuleName.trim();
-      const facePhotoMaxKb = Math.max(50, Math.min(10_000, Math.floor(Number(form.facePhotoMaxKb) || 800)));
+      const facePhotoMaxKb = Math.max(50, Math.min(10_000, Math.floor(Number(form.facePhotoMaxKb) || 100)));
+      // Resolve retention from preset OR custom input. Clamp matches the
+      // server coercer (0..3650). 0 = forever / no cleanup.
+      const facePhotoRetentionDays = (() => {
+        const raw =
+          form.facePhotoRetentionPreset === RETENTION_CUSTOM
+            ? Number(form.facePhotoRetentionDaysCustom)
+            : Number(form.facePhotoRetentionPreset);
+        if (!Number.isFinite(raw)) return 30;
+        return Math.max(0, Math.min(3650, Math.floor(raw)));
+      })();
       const faceMatchThreshold = Math.max(
         0.3,
         Math.min(1.0, Number(form.faceMatchThreshold) || 0.55),
@@ -416,6 +488,8 @@ export function AttendanceConfigForm() {
         minPunchGapSeconds,
         faceCaptureMode: form.faceCaptureMode,
         facePhotoMaxKb,
+        facePhotoRetentionDays,
+        facePhotoStoreAfterVerify: form.facePhotoStoreAfterVerify,
         faceVerifyMode: form.faceVerifyMode,
         faceMatchThreshold,
         faceLivenessMode: form.faceLivenessMode,
@@ -866,7 +940,7 @@ export function AttendanceConfigForm() {
                 <Field
                   label="Max photo size (KB)"
                   htmlFor="facePhotoMaxKb"
-                  hint="Browser downscales already; 800 KB is generous."
+                  hint="Browser downscales to 480×360 already; 100 KB is plenty."
                 >
                   <Input
                     id="facePhotoMaxKb"
@@ -971,6 +1045,128 @@ export function AttendanceConfigForm() {
               )}
             </div>
           </Section>
+
+          {/* Storage & retention — only meaningful when face capture is on.
+              Two knobs: how long to keep stored photos before the daily
+              cleanup job deletes them, and whether to bother storing the
+              photo at all when face verification already proved identity. */}
+          {form.faceCaptureMode !== "OFF" && (
+            <Section
+              title="Storage & retention"
+              hint="Auto-delete old photos and skip storage on verified punches"
+            >
+              <div className="space-y-2">
+                <Field
+                  label="Keep photos for"
+                  htmlFor="facePhotoRetention"
+                  hint="Older photo files are deleted from storage; the attendance row itself (date, time, verification score) is kept."
+                >
+                  <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                    <Select
+                      value={form.facePhotoRetentionPreset}
+                      onValueChange={(v) =>
+                        updateForm("facePhotoRetentionPreset", v)
+                      }
+                    >
+                      <SelectTrigger
+                        id="facePhotoRetention"
+                        className="w-full sm:w-56"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RETENTION_PRESETS.map((d) => (
+                          <SelectItem key={d} value={String(d)}>
+                            {d} days
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="0">
+                          Forever — no auto-delete
+                        </SelectItem>
+                        <SelectItem value={RETENTION_CUSTOM}>
+                          Custom…
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {form.facePhotoRetentionPreset === RETENTION_CUSTOM && (
+                      <Input
+                        id="facePhotoRetentionCustom"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        step={1}
+                        value={form.facePhotoRetentionDaysCustom}
+                        onChange={(e) =>
+                          updateForm(
+                            "facePhotoRetentionDaysCustom",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="days"
+                        className="w-full sm:w-32"
+                      />
+                    )}
+                  </div>
+                </Field>
+
+                {/* Only meaningful when verification is actually on —
+                    with verification OFF the photo IS the proof, so
+                    skipping it would leave you with no audit trail.
+                    The set of options shown depends on verifyMode:
+                      WARN    → all three options (mismatches reach this stage)
+                      ENFORCE → ON_MISMATCH_ONLY is hidden because the server
+                                rejects mismatched punches before storage runs,
+                                making it functionally identical to NEVER. */}
+                {form.faceVerifyMode !== "OFF" && (
+                  <Field
+                    label="When verification succeeds"
+                    htmlFor="facePhotoStoreAfterVerify"
+                    hint={
+                      form.faceVerifyMode === "ENFORCE"
+                        ? "Under Enforce, mismatched punches are already rejected — only verified punches reach storage. Switch Verification to Warn to enable the “mismatch only” option."
+                        : "The match score is recorded on the attendance row regardless; this only controls whether the JPEG itself is uploaded."
+                    }
+                  >
+                    <Select
+                      value={form.facePhotoStoreAfterVerify}
+                      onValueChange={(v: string) =>
+                        updateForm(
+                          "facePhotoStoreAfterVerify",
+                          v as FacePhotoStoreAfterVerify,
+                        )
+                      }
+                    >
+                      <SelectTrigger
+                        id="facePhotoStoreAfterVerify"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALWAYS">
+                          Always store the photo
+                        </SelectItem>
+                        {/* ON_MISMATCH_ONLY is only useful under WARN
+                            where mismatched punches actually proceed
+                            and produce a stored photo to inspect.
+                            Under ENFORCE we hide it; updateForm() above
+                            also auto-coerces a stale ON_MISMATCH_ONLY
+                            value to NEVER when the user flips the mode. */}
+                        {form.faceVerifyMode === "WARN" && (
+                          <SelectItem value="ON_MISMATCH_ONLY">
+                            Store only when face does NOT match
+                          </SelectItem>
+                        )}
+                        <SelectItem value="NEVER">
+                          Never store (score is the proof)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
+              </div>
+            </Section>
+          )}
 
           <Section
             title="Geofence"

@@ -14,6 +14,7 @@ export type PayableBasis = 'monthDays' | 'fixed26' | 'fixed30';
 export type FaceCaptureMode = 'OFF' | 'OPTIONAL' | 'REQUIRED';
 export type FaceVerifyMode = 'OFF' | 'WARN' | 'ENFORCE';
 export type FaceLivenessMode = 'OFF' | 'PERMISSIVE' | 'STRICT';
+export type FacePhotoStoreAfterVerify = 'ALWAYS' | 'ON_MISMATCH_ONLY' | 'NEVER';
 
 export interface AttendanceConfig {
   id: string | null;
@@ -55,6 +56,11 @@ export interface AttendanceConfig {
   minPunchGapSeconds: number;
   faceCaptureMode: FaceCaptureMode;
   facePhotoMaxKb: number;
+  /** Days to retain uploaded attendance photos before the cleanup job
+   *  deletes them. 0 = retain forever. */
+  facePhotoRetentionDays: number;
+  /** When face verification ran and succeeded, whether to keep the JPEG. */
+  facePhotoStoreAfterVerify: FacePhotoStoreAfterVerify;
   faceVerifyMode: FaceVerifyMode;
   faceMatchThreshold: number;
   faceLivenessMode: FaceLivenessMode;
@@ -101,7 +107,9 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   enforceEmployeeActive: false,
   minPunchGapSeconds: 5,
   faceCaptureMode: 'OFF',
-  facePhotoMaxKb: 800,
+  facePhotoMaxKb: 100,
+  facePhotoRetentionDays: 30,
+  facePhotoStoreAfterVerify: 'ALWAYS',
   faceVerifyMode: 'OFF',
   faceMatchThreshold: 0.55,
   faceLivenessMode: 'OFF',
@@ -148,6 +156,20 @@ function coerceFaceVerifyMode(raw: unknown): FaceVerifyMode {
 
 function coerceFaceLivenessMode(raw: unknown): FaceLivenessMode {
   return raw === 'PERMISSIVE' || raw === 'STRICT' ? raw : 'OFF';
+}
+
+function coerceFacePhotoStoreAfterVerify(
+  raw: unknown,
+): FacePhotoStoreAfterVerify {
+  return raw === 'ON_MISMATCH_ONLY' || raw === 'NEVER' ? raw : 'ALWAYS';
+}
+
+// Retention is in days. 0 means "forever"; we clamp the upper bound at
+// 10 years so a typo can't accidentally schedule a 100-year retention.
+function coerceFacePhotoRetentionDays(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_ATTENDANCE_CONFIG.facePhotoRetentionDays;
+  return Math.min(3650, Math.max(0, Math.floor(n)));
 }
 
 function coerceFaceMatchThreshold(raw: unknown): number {
@@ -246,7 +268,13 @@ export async function getAttendanceConfig(
       faceCaptureMode: coerceFaceCaptureMode(row.faceCaptureMode),
       facePhotoMaxKb: Number.isFinite(row.facePhotoMaxKb)
         ? Math.max(50, Number(row.facePhotoMaxKb))
-        : 800,
+        : DEFAULT_ATTENDANCE_CONFIG.facePhotoMaxKb,
+      facePhotoRetentionDays: coerceFacePhotoRetentionDays(
+        row.facePhotoRetentionDays,
+      ),
+      facePhotoStoreAfterVerify: coerceFacePhotoStoreAfterVerify(
+        row.facePhotoStoreAfterVerify,
+      ),
       faceVerifyMode: coerceFaceVerifyMode(row.faceVerifyMode),
       faceMatchThreshold: coerceFaceMatchThreshold(row.faceMatchThreshold),
       faceLivenessMode: coerceFaceLivenessMode(row.faceLivenessMode),
@@ -300,6 +328,8 @@ export interface AttendanceConfigUpdate {
   minPunchGapSeconds?: number;
   faceCaptureMode?: FaceCaptureMode;
   facePhotoMaxKb?: number;
+  facePhotoRetentionDays?: number;
+  facePhotoStoreAfterVerify?: FacePhotoStoreAfterVerify;
   faceVerifyMode?: FaceVerifyMode;
   faceMatchThreshold?: number;
   faceLivenessMode?: FaceLivenessMode;

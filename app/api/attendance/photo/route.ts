@@ -232,6 +232,38 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ─── Storage opt-out when verification already proved identity ───────
+  // When face verification ran and either succeeded (verified=true) or
+  // failed (verified=false), the match score itself is the audit trail —
+  // the JPEG is redundant. Skip the FTP upload entirely if the org has
+  // opted into not storing verified-only or never-storing photos. Saves
+  // storage and shaves the slowest tail of the punch flow.
+  //   ALWAYS            → keep uploading (legacy behavior).
+  //   ON_MISMATCH_ONLY  → upload only when verification failed (verified=false).
+  //   NEVER             → never upload when verification ran (regardless of pass/fail).
+  // Only applies when verification actually ran AND produced a numeric
+  // score; if descriptors were missing or the user wasn't enrolled, we
+  // fall through to the upload so there's at least a photo on the row.
+  const verificationRan = cfg.faceVerifyMode !== 'OFF' && faceMatch !== null;
+  const skipStorage =
+    verificationRan &&
+    (cfg.facePhotoStoreAfterVerify === 'NEVER' ||
+      (cfg.facePhotoStoreAfterVerify === 'ON_MISMATCH_ONLY' && verified));
+  if (skipStorage) {
+    return NextResponse.json({
+      success: true,
+      // No file means no URL — the attendance row will store null for
+      // checkInPhoto / checkOutPhoto. Verification metadata (faceMatch,
+      // verified, livenessPassed) still lands on the row via the punch
+      // endpoint so the audit trail is preserved.
+      url: null,
+      faceMatch,
+      verified,
+      livenessPassed: livenessSent,
+      stored: false,
+    });
+  }
+
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
@@ -242,9 +274,13 @@ export async function POST(request: NextRequest) {
   const day = todayKey();
   const ext = extFor(mime);
   const filename = `att_${safeUserId}_${day}_${punchType}_${Date.now()}.${ext}`;
+  // Bucket uploads into month-folders so the retention sweeper can rm
+  // whole months at a time instead of stat-ing 50k files in a flat dir
+  // every day. Format: att/YYYY-MM. `day` is YYYY-MM-DD; slice first 7.
+  const subdir = `att/${day.slice(0, 7)}`;
 
   try {
-    const url = await uploadToHostinger(buffer, filename);
+    const url = await uploadToHostinger(buffer, filename, subdir);
     return NextResponse.json({
       success: true,
       url,

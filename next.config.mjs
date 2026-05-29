@@ -38,6 +38,26 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Long-lived caching for static assets that never change content under a
+  // given filename. `/models/*` holds the face-api.js weight shards (~7 MB
+  // total) used by the attendance face-capture flow — the files are
+  // immutable for a given face-api version, so they should be downloaded
+  // ONCE per browser and reused forever. Without this header, browsers
+  // fell back to default heuristics and re-fetched ~7 MB on every fresh
+  // session, dominating first-punch latency on slow connections.
+  async headers() {
+    return [
+      {
+        source: '/models/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+    ];
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: '50mb',
@@ -78,6 +98,24 @@ const nextConfig = {
         callback();
       });
       config.externals = externals;
+    } else {
+      // Client bundle: face-api.js (and a couple of other libs) reference
+      // Node-only modules in dead-code branches. Without an explicit
+      // `fs: false`, webpack sees the unresolved `require('fs')` inside
+      // face-api's env detection and fails the entire client compile —
+      // which silently breaks descriptor extraction in the attendance
+      // widget. The `false` fallback tells webpack to substitute an
+      // empty module for the unresolvable id, which is exactly what
+      // face-api's runtime check expects when it falls back to the
+      // browser code path.
+      config.resolve = config.resolve ?? {};
+      config.resolve.fallback = {
+        ...(config.resolve.fallback ?? {}),
+        fs: false,
+        path: false,
+        crypto: false,
+        encoding: false,
+      };
     }
     return config;
   },

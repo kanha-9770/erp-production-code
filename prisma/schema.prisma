@@ -2354,9 +2354,34 @@ model AttendanceConfiguration {
   faceCaptureMode String @default("OFF") @map("face_capture_mode") // OFF | OPTIONAL | REQUIRED
 
   // Hard server-side cap on the uploaded photo size in kilobytes. The
-  // browser already downscales aggressively so 800 KB is generous; raise
-  // for high-resolution kiosks, lower for cheap data plans.
-  facePhotoMaxKb Int @default(800) @map("face_photo_max_kb")
+  // browser already downscales aggressively so 100 KB is plenty; raise
+  // for high-resolution kiosks, lower for cheap data plans. Lowered from
+  // the historical 800 KB when the dialog began downscaling to 480x360.
+  facePhotoMaxKb Int @default(100) @map("face_photo_max_kb")
+
+  // How long to keep uploaded attendance photos on the file host before
+  // the daily cleanup job deletes them. 0 = retain forever (legacy
+  // behavior). Defaults to 30 days so storage stays bounded for new orgs
+  // without surprising anyone with sudden deletions on existing data.
+  // Attendance rows themselves are never deleted by this; only the
+  // photo column + the corresponding stored file are cleared.
+  facePhotoRetentionDays Int @default(30) @map("face_photo_retention_days")
+
+  // Whether to keep the photo file at all when face verification ran and
+  // the score was within faceMatchThreshold. The match score + verified
+  // flag already prove identity, so the JPEG is redundant for verified
+  // punches. Three modes:
+  //   ALWAYS            — store every photo, even verified ones (legacy
+  //                        behavior; the JPEG is the audit trail).
+  //   ON_MISMATCH_ONLY  — store only when verification failed OR ran but
+  //                        scored above threshold. Verified punches keep
+  //                        their match score on the row but no JPEG.
+  //   NEVER             — never store the photo when verification was on
+  //                        and succeeded. Biggest storage win; relies on
+  //                        the descriptor + score as the only proof.
+  // Only takes effect when faceVerifyMode != OFF. With verification OFF
+  // the photo IS the proof, so this setting is ignored.
+  facePhotoStoreAfterVerify String @default("ALWAYS") @map("face_photo_store_after_verify") // ALWAYS | ON_MISMATCH_ONLY | NEVER
 
   // Face LIVENESS (anti-spoofing — refuses static photo / phone-screen
   // captures by requiring measurable face movement across 3 quick frames).

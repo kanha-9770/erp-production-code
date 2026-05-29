@@ -6,6 +6,7 @@ import {
   type PunchType,
   type PunchSource,
 } from '@/lib/hr/attendance-service';
+import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
 
 export const dynamic = 'force-dynamic';
@@ -102,6 +103,53 @@ export async function POST(request: NextRequest) {
 
   const livenessPassed =
     typeof body.livenessPassed === 'boolean' ? body.livenessPassed : null;
+
+  // ─── Server-side enforcement of face capture / verify / liveness ─────
+  // The widget gates the dialog client-side, but a stale-status snapshot,
+  // a custom client, or a direct API call (cURL / dev-tools) can bypass
+  // that. This block is the authoritative gate: when the org has any of
+  // the face features turned ON, the punch endpoint refuses anything that
+  // didn't go through the matching capture/verify/liveness step.
+  //
+  // Key insight on photoUrl: when facePhotoStoreAfterVerify = NEVER or
+  // ON_MISMATCH_ONLY, a fully-verified punch legitimately arrives with
+  // photoUrl = null. So we accept photoUrl=null ONLY when verification
+  // actually ran (faceMatch is numeric). Otherwise we require a photoUrl.
+  const cfg = await getAttendanceConfig(authUser.organizationId);
+  const verificationProof = typeof faceMatch === 'number';
+  if (cfg.faceCaptureMode === 'REQUIRED' && !photoUrl && !verificationProof) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Face capture is required. Please use the Check In button in the app — direct punches without a captured photo are not allowed.',
+        code: 'FACE_CAPTURE_REQUIRED',
+      },
+      { status: 403 },
+    );
+  }
+  if (cfg.faceVerifyMode === 'ENFORCE' && !verificationProof) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Face verification is required but no verification was performed for this punch. Please retake the photo through the app.',
+        code: 'FACE_VERIFY_REQUIRED',
+      },
+      { status: 403 },
+    );
+  }
+  if (cfg.faceLivenessMode === 'STRICT' && livenessPassed !== true) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Liveness check is required and was not confirmed for this punch.',
+        code: 'LIVENESS_REQUIRED',
+      },
+      { status: 403 },
+    );
+  }
 
   try {
     const { status, deduplicated } = await recordPunch({
