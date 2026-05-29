@@ -11,10 +11,13 @@
  *
  * All helpers are async and pull from the lazy-loaded models — callers
  * never need to load the nets themselves.
+ *
+ * face-api.js is dynamic-imported via `getFaceApi()` inside each helper,
+ * so importing `descriptorToBase64` (a pure 1-KB utility) from this file
+ * does NOT pull face-api into the importer's initial chunk.
  */
 
-import * as faceapi from "face-api.js";
-import { loadFaceModels } from "./models";
+import { getFaceApi, loadFaceModels } from "./models";
 
 // Tuned for the 640x480 captures the FaceCaptureDialog produces. Smaller
 // inputSize is faster but misses partial / edge / small faces — and
@@ -22,10 +25,16 @@ import { loadFaceModels } from "./models";
 // a lower scoreThreshold catches partial faces at the edge (e.g. the
 // person holding a phone with someone else's photo) at modest extra
 // inference cost (~50ms vs 320).
-const TINY_DETECTOR_OPTIONS = new faceapi.TinyFaceDetectorOptions({
-  inputSize: 224,
-  scoreThreshold: 0.3,
-});
+const TINY_DETECTOR_INPUT_SIZE = 224;
+const TINY_DETECTOR_SCORE_THRESHOLD = 0.3;
+
+async function tinyDetectorOptions() {
+  const faceapi = await getFaceApi();
+  return new faceapi.TinyFaceDetectorOptions({
+    inputSize: TINY_DETECTOR_INPUT_SIZE,
+    scoreThreshold: TINY_DETECTOR_SCORE_THRESHOLD,
+  });
+}
 
 /**
  * Result returned by face detection. `faceCount` is the number of faces
@@ -119,6 +128,8 @@ export async function computeDescriptorFromImage(
   includeDescriptor: boolean = true,
 ): Promise<FaceDetectionResult> {
   await loadFaceModels();
+  const faceapi = await getFaceApi();
+  const detectorOptions = await tinyDetectorOptions();
 
   // Yield to the browser's event loop before starting heavy inference.
   // This allows React to paint the "Analyzing..." spinner to the screen
@@ -130,11 +141,11 @@ export async function computeDescriptorFromImage(
     // nets, so this is ~5–10× faster than the full pipeline. Used when
     // face verification is OFF — we still want anti-proxy enforcement
     // but we don't need the 128-dim embedding for matching.
-    const detections = await faceapi.detectAllFaces(img, TINY_DETECTOR_OPTIONS);
+    const detections = await faceapi.detectAllFaces(img, detectorOptions);
     return { descriptor: null, faceCount: detections.length };
   }
   const detections = await faceapi
-    .detectAllFaces(img, TINY_DETECTOR_OPTIONS)
+    .detectAllFaces(img, detectorOptions)
     .withFaceLandmarks()
     .withFaceDescriptors();
   const faceCount = detections.length;
@@ -214,6 +225,8 @@ export async function computeLivenessFromBlobs(
     return { passed: null, motion: 0, frames: blobs.length };
   }
   await loadFaceModels();
+  const faceapi = await getFaceApi();
+  const detectorOptions = await tinyDetectorOptions();
 
   // Decode all blobs in parallel, then detect landmarks for each. We
   // skip the recognition net here — only landmarks are needed for the
@@ -229,7 +242,7 @@ export async function computeLivenessFromBlobs(
     for (const img of images) {
       await new Promise((resolve) => setTimeout(resolve, 40));
       const detection = await faceapi
-        .detectSingleFace(img, TINY_DETECTOR_OPTIONS)
+        .detectSingleFace(img, detectorOptions)
         .withFaceLandmarks();
       detections.push(detection);
     }
