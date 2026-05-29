@@ -307,27 +307,43 @@ export function MyAttendance() {
           );
           if (!reason) return badge;
           // Pair the badge with a small info icon so the tooltip is
-          // discoverable. The HoverCard opens on hover (desktop) and on
-          // tap (mobile), and we stop propagation so clicking the icon
-          // doesn't accidentally open the row detail panel underneath.
+          // discoverable. HoverCard only fires on pointer hover, which
+          // never happens on touch devices — so we share one trigger
+          // between a HoverCard (desktop hover) and a Popover (tap/click on
+          // mobile, and click on desktop). Both render the same reason, so
+          // whichever opens, the user sees it. stopPropagation keeps the tap
+          // from also opening the row detail panel underneath.
           return (
             <HoverCard openDelay={100} closeDelay={100}>
-              <HoverCardTrigger
-                asChild
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className="inline-flex items-center gap-1 cursor-help">
-                  {badge}
-                  <Info className="h-3 w-3 text-muted-foreground" />
-                </span>
-              </HoverCardTrigger>
-              <HoverCardContent
-                side="bottom"
-                align="start"
-                className="text-xs w-64 p-3 leading-snug"
-              >
-                {reason}
-              </HoverCardContent>
+              <Popover>
+                <HoverCardTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 cursor-pointer text-left"
+                    >
+                      {badge}
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                </HoverCardTrigger>
+                <HoverCardContent
+                  side="bottom"
+                  align="start"
+                  className="text-xs w-64 p-3 leading-snug"
+                >
+                  {reason}
+                </HoverCardContent>
+                <PopoverContent
+                  side="bottom"
+                  align="start"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-xs w-64 p-3 leading-snug"
+                >
+                  {reason}
+                </PopoverContent>
+              </Popover>
             </HoverCard>
           );
         },

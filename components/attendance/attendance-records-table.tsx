@@ -15,6 +15,11 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { MapPin, Edit3, AlertTriangle, Info } from "lucide-react";
 import {
   formatDateLong,
@@ -227,29 +232,44 @@ export function AttendanceRecordsTable({
                   {badge.reason ? (
                     // Info icon makes the tooltip discoverable — without
                     // it, employees don't realise the badge is hoverable.
-                    // side=bottom + align=start keeps the popup below the
-                    // badge so it doesn't fight the sticky table header.
-                    // Radix flips it to top automatically near the bottom
-                    // of the viewport via collisionPadding in HoverCardContent.
+                    // HoverCard fires only on pointer hover, which touch
+                    // devices never emit, so we share one trigger with a
+                    // Popover that opens on tap/click. side=bottom +
+                    // align=start keeps the popup below the badge so it
+                    // doesn't fight the sticky table header; Radix flips it
+                    // near the viewport edge automatically.
                     <HoverCard openDelay={100} closeDelay={100}>
-                      <HoverCardTrigger
-                        asChild
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="inline-flex items-center gap-1 cursor-help">
-                          <Badge variant="outline" className={badge.className}>
-                            {badge.label}
-                          </Badge>
-                          <Info className="h-3 w-3 text-muted-foreground" />
-                        </span>
-                      </HoverCardTrigger>
-                      <HoverCardContent
-                        side="bottom"
-                        align="start"
-                        className="text-xs w-64 p-3 leading-snug"
-                      >
-                        {badge.reason}
-                      </HoverCardContent>
+                      <Popover>
+                        <HoverCardTrigger asChild>
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 cursor-pointer text-left"
+                            >
+                              <Badge variant="outline" className={badge.className}>
+                                {badge.label}
+                              </Badge>
+                              <Info className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                          </PopoverTrigger>
+                        </HoverCardTrigger>
+                        <HoverCardContent
+                          side="bottom"
+                          align="start"
+                          className="text-xs w-64 p-3 leading-snug"
+                        >
+                          {badge.reason}
+                        </HoverCardContent>
+                        <PopoverContent
+                          side="bottom"
+                          align="start"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs w-64 p-3 leading-snug"
+                        >
+                          {badge.reason}
+                        </PopoverContent>
+                      </Popover>
                     </HoverCard>
                   ) : (
                     <Badge variant="outline" className={badge.className}>
