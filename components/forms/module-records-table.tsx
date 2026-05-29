@@ -680,7 +680,7 @@ if (typeof value === "string") {
                         <div className="text-sm">
                           {new Date(record.submittedAt).toLocaleDateString()}
                           <div className="text-xs text-gray-500">
-                            {new Date(record.submittedAt).toLocaleTimeString()}
+                            {new Date(record.submittedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
                           </div>
                         </div>
                       </TableCell>

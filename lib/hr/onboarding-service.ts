@@ -16,6 +16,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { sendPushToUsers } from "@/lib/push/server";
 
 export type OnboardingTaskSeed = {
   title: string;
@@ -172,6 +173,13 @@ async function notifyChecklistCreated(organizationId: string, checklist: any) {
       link: `/hr/onboarding/${checklist.id}`,
     })),
   });
+
+  void sendPushToUsers(recipientIds, {
+    title: `Onboarding started: ${empName}`,
+    body: `${checklist.tasks?.length ?? 0} tasks created. Review and assign owners.`,
+    url: `/hr/onboarding/${checklist.id}`,
+    tag: `onboarding:${checklist.id}`,
+  }).catch(() => {});
 }
 
 // Called from task PUT handler after a task transitions to COMPLETED. If
@@ -254,6 +262,12 @@ async function notifyChecklistCompleted(
         link: `/hr/onboarding/${checklistId}`,
       },
     });
+    void sendPushToUsers([employee.userId], {
+      title: "Onboarding complete",
+      body: "Welcome aboard — your onboarding checklist is done.",
+      url: `/hr/onboarding/${checklistId}`,
+      tag: `onboarding:${checklistId}`,
+    }).catch(() => {});
   }
 
   // Notify org admins.
@@ -279,6 +293,12 @@ async function notifyChecklistCompleted(
           link: `/hr/onboarding/${checklistId}`,
         })),
       });
+      void sendPushToUsers(recipientIds, {
+        title: `Onboarding complete: ${empName}`,
+        body: `All tasks done. Employee is now ACTIVE.`,
+        url: `/hr/onboarding/${checklistId}`,
+        tag: `onboarding:${checklistId}`,
+      }).catch(() => {});
     }
   }
 }

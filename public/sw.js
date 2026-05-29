@@ -59,6 +59,11 @@ self.addEventListener('push', (event) => {
     // `tag` lets a newer notification replace a stale one (e.g. same OT toggle
     // fired twice in quick succession won't pile up as two banners).
     tag: payload.tag || undefined,
+    // When a tagged notification replaces an existing one, `renotify` forces
+    // the device to alert again (sound + heads-up / lock-screen banner)
+    // instead of updating the tray entry silently. Without this, a second
+    // push sharing a tag arrives but never re-pops on a locked phone.
+    renotify: Boolean(payload.tag),
     // Slight vibration on phones so the user notices without being yelled at.
     vibrate: [120, 60, 120],
     requireInteraction: false,

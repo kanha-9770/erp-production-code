@@ -28,6 +28,25 @@ export function formatDateLong(yyyymmdd: string): string {
   return formatDateKeyInUserZone(yyyymmdd);
 }
 
+/**
+ * Convert a stored 24-hour "HH:mm" string (Attendance.checkInTime /
+ * checkOutTime) into a 12-hour "h:mm AM/PM" label for display. The stored
+ * column stays 24-hour for uniformity; this is purely for rendering. Returns
+ * the input unchanged if it isn't a valid HH:mm, and "—" for empty values.
+ */
+export function hhmmTo12h(hhmm: string | null | undefined): string {
+  if (!hhmm) return "—";
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return hhmm;
+  let h = Number(m[1]);
+  const min = m[2];
+  if (h < 0 || h > 23) return hhmm;
+  const period = h < 12 ? "AM" : "PM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${min} ${period}`;
+}
+
 export function formatTimeShort(iso: string | null): string {
   // ISO timestamps stored on attendance rows are absolute moments. Format
   // them in the **org's** reportTimezone (set on the Attendance

@@ -40,7 +40,7 @@ const RegularizationDialog = dynamic(
   { ssr: false },
 );
 import {
-  formatHM, formatTimeShort, shiftDays, todayIso, workedMinutesFor,
+  formatHM, formatTimeShort, hhmmTo12h, shiftDays, todayIso, workedMinutesFor,
 } from "./attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
 import { setOrgTimezone, useOrgTimezone } from "@/lib/org-timezone";
@@ -357,11 +357,11 @@ export function MyAttendance() {
         // chosen timezone — the legacy `checkInTime` HH:mm string is in
         // server-local time (UTC in prod), which made My Attendance
         // disagree with Team Attendance for the same row.
-        copyValue: (r) => r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? ""),
+        copyValue: (r) => r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ? hhmmTo12h(r.checkInTime) : ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? "—")}</span>
+            <span className="font-mono">{r.checkInAt ? formatTimeShort(r.checkInAt) : hhmmTo12h(r.checkInTime)}</span>
             {r.lateMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 +{r.lateMinutes}m
@@ -375,11 +375,11 @@ export function MyAttendance() {
         header: "Check-out",
         width: 130,
         sortKey: "checkOutAt",
-        copyValue: (r) => r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? ""),
+        copyValue: (r) => r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ? hhmmTo12h(r.checkOutTime) : ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? "—")}</span>
+            <span className="font-mono">{r.checkOutAt ? formatTimeShort(r.checkOutAt) : hhmmTo12h(r.checkOutTime)}</span>
             {r.earlyOutMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 -{r.earlyOutMinutes}m

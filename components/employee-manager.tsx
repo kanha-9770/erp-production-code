@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Users, Clock, MapPin } from 'lucide-react';
 import { parseApiResponse, calculateDailyPayroll } from '@/lib/utils/payroll-utils';
 import { useLazyGetFormsTestingDataQuery } from '@/lib/api/forms';
+import { hhmmTo12h } from '@/components/attendance/attendance-format';
 
 interface DailyRecord {
   employeeName: string;
@@ -149,11 +150,11 @@ export default function EmployeeManager() {
                             <span className="font-medium text-foreground">{record.date}</span>
                             <div className="flex gap-2">
                               <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                                {record.checkInTime}
+                                {hhmmTo12h(record.checkInTime)}
                               </span>
                               {record.checkOutTime && (
                                 <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded">
-                                  {record.checkOutTime}
+                                  {hhmmTo12h(record.checkOutTime)}
                                 </span>
                               )}
                             </div>

@@ -25,6 +25,7 @@ import {
   formatDateLong,
   formatHM,
   formatTimeShort,
+  hhmmTo12h,
   workedMinutesFor,
 } from "./attendance-format";
 import type { AttendanceRecord } from "./attendance-record-detail";
@@ -278,10 +279,10 @@ export function AttendanceRecordsTable({
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
-                  {r.checkInAt ? formatTimeShort(r.checkInAt) : r.checkInTime || "—"}
+                  {r.checkInAt ? formatTimeShort(r.checkInAt) : hhmmTo12h(r.checkInTime)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
-                  {r.checkOutAt ? formatTimeShort(r.checkOutAt) : r.checkOutTime || "—"}
+                  {r.checkOutAt ? formatTimeShort(r.checkOutAt) : hhmmTo12h(r.checkOutTime)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
                   {worked > 0 ? formatHM(worked) : "—"}

@@ -26,6 +26,7 @@ import {
 import { acquireSlot, commitSlot } from './attendance-rate-limit';
 import { triggerWorkflowsForRecord } from '@/lib/workflow/trigger';
 import { logAudit } from '@/lib/api-helpers';
+import { sendPushToUsers } from '@/lib/push/server';
 
 export type PunchType = 'IN' | 'OUT';
 export type PunchSource = 'WEB' | 'MOBILE' | 'BIOMETRIC' | 'ADMIN';
@@ -175,6 +176,11 @@ export function orgTimezone(
 export function formatHHmm(d: Date, tz: string = FALLBACK_TZ): string {
   // Intl.DateTimeFormat respects the IANA tz, so this returns "09:30"
   // for an Indian user even when the Node process is running in UTC.
+  //
+  // NOTE: this is the *stored data* shape (Attendance.checkInTime /
+  // checkOutTime) and must stay 24-hour "HH:mm" so the column is uniform and
+  // parseable. For anything the user reads, format with the 12-hour helpers
+  // below — `formatHHmm12` (from a Date) or `hhmmTo12h` (from a stored string).
   try {
     return new Intl.DateTimeFormat('en-GB', {
       hour: '2-digit',
@@ -186,6 +192,37 @@ export function formatHHmm(d: Date, tz: string = FALLBACK_TZ): string {
     // Bad TZ name — fall back to a UTC-local read so we never throw mid-punch.
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
   }
+}
+
+/** "09:30 AM" — 12-hour display of a Date in the given IANA tz. Display only. */
+export function formatHHmm12(d: Date, tz: string = FALLBACK_TZ): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: tz,
+    }).format(d);
+  } catch {
+    return formatHHmm(d, tz);
+  }
+}
+
+/**
+ * Convert a stored 24-hour "HH:mm" string to a 12-hour "h:mm AM/PM" label for
+ * display. Returns the input untouched if it isn't a valid HH:mm. Display only.
+ */
+export function hhmmTo12h(hhmm: string | null | undefined): string {
+  if (!hhmm) return '—';
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return hhmm;
+  let h = Number(m[1]);
+  const min = m[2];
+  if (h < 0 || h > 23) return hhmm;
+  const period = h < 12 ? 'AM' : 'PM';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${min} ${period}`;
 }
 
 // ---- Timezone-aware date math ---------------------------------------------
@@ -1503,7 +1540,7 @@ async function createPunchNotification(args: {
   const fields: Array<{ label: string; apiName: string; value: string }> = [];
 
   if (type === 'IN') {
-    title = `Checked in at ${status.checkInTime ?? '—'}`;
+    title = `Checked in at ${hhmmTo12h(status.checkInTime)}`;
     if (status.lateMinutes > 0) {
       body = `Late by ${fmtHM(status.lateMinutes)}.`;
       fields.push({
@@ -1512,15 +1549,15 @@ async function createPunchNotification(args: {
         value: fmtHM(status.lateMinutes),
       });
     } else {
-      body = `On time. Shift ends at ${status.shift.end}.`;
+      body = `On time. Shift ends at ${hhmmTo12h(status.shift.end)}.`;
     }
     fields.push({
       label: 'Shift',
       apiName: 'shift',
-      value: `${status.shift.start} – ${status.shift.end}`,
+      value: `${hhmmTo12h(status.shift.start)} – ${hhmmTo12h(status.shift.end)}`,
     });
   } else {
-    title = `Checked out at ${status.checkOutTime ?? '—'}`;
+    title = `Checked out at ${hhmmTo12h(status.checkOutTime)}`;
     const parts: string[] = [];
     if (status.workedMinutes > 0) {
       parts.push(`Worked ${fmtHM(status.workedMinutes)}`);
@@ -1587,6 +1624,18 @@ async function createPunchNotification(args: {
       },
     });
   }
+
+  // Web Push fan-out so the punch notification reaches the phone's lock
+  // screen — not just the in-app bell. Fire-and-forget: the DB row above is
+  // already saved, and the helper no-ops if VAPID isn't configured or the
+  // user has no subscription. A fresh tag per punch type keeps check-in and
+  // check-out as distinct banners while collapsing rapid duplicates.
+  void sendPushToUsers([userId], {
+    title,
+    body: body || undefined,
+    url: '/attendance',
+    tag: `attendance:${type.toLowerCase()}`,
+  }).catch(() => {});
 }
 
 // Builds the response status + outcome metadata. Centralised so every
@@ -1663,7 +1712,7 @@ export async function setOvertimeOptIn(
     if (now < availableAt) {
       throw new AttendanceError(
         'OT_NOT_AVAILABLE',
-        `Overtime starts at ${formatHHmm(availableAt, orgTimezone(cfg))}. Try again then.`,
+        `Overtime starts at ${formatHHmm12(availableAt, orgTimezone(cfg))}. Try again then.`,
         409,
       );
     }

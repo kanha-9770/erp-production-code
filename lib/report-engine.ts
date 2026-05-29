@@ -50,7 +50,7 @@ function addPageFooter(doc: jsPDF, meta: ReportMeta) {
     doc.setFontSize(8);
     doc.setTextColor(MUTED.r, MUTED.g, MUTED.b);
     doc.text(
-      `${meta.organizationName} | Generated ${meta.generatedAt.toLocaleDateString()} at ${meta.generatedAt.toLocaleTimeString()} | Page ${i} of ${pageCount}`,
+      `${meta.organizationName} | Generated ${meta.generatedAt.toLocaleDateString()} at ${meta.generatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} | Page ${i} of ${pageCount}`,
       doc.internal.pageSize.width / 2,
       doc.internal.pageSize.height - 10,
       { align: 'center' }
@@ -92,7 +92,7 @@ function addCoverPage(doc: jsPDF, meta: ReportMeta, title: string, subtitle: str
   doc.setTextColor(MUTED.r, MUTED.g, MUTED.b);
   const details = [
     `Period: ${meta.dateRange}`,
-    `Generated: ${meta.generatedAt.toLocaleDateString()} ${meta.generatedAt.toLocaleTimeString()}`,
+    `Generated: ${meta.generatedAt.toLocaleDateString()} ${meta.generatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}`,
     `Prepared by: ${meta.generatedBy}`,
   ];
   if (meta.filters) {

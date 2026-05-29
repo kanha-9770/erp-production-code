@@ -423,7 +423,7 @@ export default function WorkflowExecutionsPage() {
                         )}
                       </TableCell>
                       <TableCell className="py-2 text-xs whitespace-nowrap">
-                        <div>{format(new Date(row.startedAt), "MMM d, HH:mm:ss")}</div>
+                        <div>{format(new Date(row.startedAt), "MMM d, h:mm:ss a")}</div>
                         <div className="text-[10px] text-muted-foreground">
                           {formatDistanceToNow(new Date(row.startedAt), { addSuffix: true })}
                         </div>
