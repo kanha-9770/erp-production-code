@@ -1561,6 +1561,15 @@ export function EmployeeForm({
               onChange={(v) => set("department", v)}
             />
           </Field>
+          <Field
+            label="Designation"
+            hint="Pick a standard title or choose “Add custom…” to type your own"
+          >
+            <DesignationCombobox
+              value={values.designation}
+              onChange={(v) => set("designation", v)}
+            />
+          </Field>
           <Field label="Company *" error={errors.companyName}>
             <Input
               value={values.companyName}
@@ -2223,6 +2232,90 @@ function DepartmentCombobox({
           Pick existing
         </Button>
       )}
+    </div>
+  );
+}
+
+// Standard job titles offered in the Designation dropdown. Fixed list (unlike
+// departments, which are org-derived) — HR can still enter anything bespoke
+// via the "+ Add custom…" option, which flips the control to free text.
+const DESIGNATION_OPTIONS = [
+  "Intern",
+  "Trainee Engineer",
+  "Software Developer",
+  "Senior Developer",
+  "Team Lead",
+  "HR Executive",
+  "HR Manager",
+  "Accountant",
+  "Sales Executive",
+  "Production Supervisor",
+  "Quality Engineer",
+  "Operations Manager",
+];
+
+// Designation picker: dropdown of the standard titles above + an inline
+// "type custom" mode for bespoke titles. Mirrors DepartmentCombobox, but the
+// option list is a fixed constant rather than org-derived. A stored value
+// that isn't one of the presets (e.g. an older free-text title) opens
+// straight in custom mode so it round-trips on edit.
+function DesignationCombobox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const valueInOptions = !!value && DESIGNATION_OPTIONS.includes(value);
+  const [mode, setMode] = useState<"select" | "custom">(
+    value && !valueInOptions ? "custom" : "select",
+  );
+  if (mode === "select") {
+    return (
+      <div className="flex gap-2">
+        <Select
+          value={value || undefined}
+          onValueChange={(v) => {
+            if (v === "__custom__") {
+              setMode("custom");
+              onChange("");
+              return;
+            }
+            onChange(v);
+          }}
+        >
+          <SelectTrigger className="flex-1">
+            <SelectValue placeholder="Select a designation" />
+          </SelectTrigger>
+          <SelectContent>
+            {DESIGNATION_OPTIONS.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d}
+              </SelectItem>
+            ))}
+            <SelectItem value="__custom__">+ Add custom…</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-2">
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="e.g. Principal Engineer"
+        className="flex-1"
+        autoFocus
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setMode("select")}
+      >
+        Pick from list
+      </Button>
     </div>
   );
 }
