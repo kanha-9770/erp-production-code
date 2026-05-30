@@ -267,6 +267,47 @@ function getRecordFieldValue(
 }
 
 /**
+ * Load the most-recent real record for a static module so a Test Run (or a
+ * scheduled run) of a record-triggered System Notification can show actual
+ * field values instead of blanks. The live event path already has the
+ * triggering record; this only backfills the no-record paths.
+ *
+ * Returns recordData shaped like the event path's (keyed by coreKey), or null
+ * for modules we can't sample yet. Best-effort — never throws.
+ */
+async function loadLatestRecordData(
+  moduleName: string | null | undefined,
+  organizationId: string,
+): Promise<Record<string, any> | null> {
+  if (!moduleName) return null
+  try {
+    const { getStaticFormsForModule } = await import("@/lib/static-page-fields")
+    const forms = getStaticFormsForModule(moduleName)
+    const formIds = new Set(forms.map((f) => f.formId))
+
+    // Leave — latest request in the org, denormalised the same way the leave
+    // routes do before they fire workflows.
+    if (formIds.has("static:leave-request")) {
+      const latest = await (prisma as any).leaveRequest.findFirst({
+        where: { organizationId },
+        orderBy: { appliedAt: "desc" },
+      })
+      if (!latest) return null
+      const { buildLeaveRecordData } = await import("@/lib/hr/leave-workflow")
+      return await buildLeaveRecordData(latest)
+    }
+
+    return null
+  } catch (err: any) {
+    console.warn(
+      `[workflow] loadLatestRecordData(${moduleName}) failed:`,
+      err?.message || err,
+    )
+    return null
+  }
+}
+
+/**
  * Substitute {{api_name}} / {{Field Label}} / {{fieldId}} placeholders in a
  * subject or body string using the module's field map + the record's current
  * values. Unknown placeholders render as an empty string — matches the
@@ -1418,6 +1459,18 @@ export async function runWorkflowRule(
               })
             }
 
+            // Record-triggered rules (e.g. "notify HR when a leave is
+            // applied") select record fields like Applicant / Dates / Reason.
+            // A Test Run or scheduled run has no triggering record, so without
+            // this those fields silently vanish — the exact "I selected fields
+            // but don't see them" symptom. Load the latest real record for the
+            // module and resolve those fields from it; falls back to per-user
+            // identity values below for fields the record doesn't carry.
+            const sampleRecordData = await loadLatestRecordData(
+              rule.moduleName,
+              rule.organizationId,
+            )
+
             const users = await prisma.user.findMany({
               where: { id: { in: recipientIds } },
               select: {
@@ -1451,26 +1504,40 @@ export async function runWorkflowRule(
                 const info = idToInfo.get(fid)
                 if (!info) continue // dynamic-form fields: no record → no value
                 let value: any = ""
-                switch (info.coreKey) {
-                  case "userId":
-                    value = u.id
-                    break
-                  case "employeeName":
-                  case "fullName":
-                    value = fullName(u)
-                    break
-                  case "department":
-                    value = u.employee?.department || u.department || ""
-                    break
-                  case "designation":
-                    value = u.employee?.designation || ""
-                    break
-                  case "email":
-                  case "emailAddress1":
-                    value = u.email || ""
-                    break
-                  default:
-                    value = "" // record-only fields skip on scheduled runs
+                // Prefer the value from the latest real record so a Test Run
+                // of a record-triggered rule shows the actual Applicant /
+                // Dates / Reason / Status instead of blanks. getRecordFieldValue
+                // strips the `static:` prefix to match the recordData keys.
+                if (sampleRecordData) {
+                  const recVal = getRecordFieldValue(sampleRecordData, fid)
+                  if (recVal !== undefined && recVal !== null && recVal !== "") {
+                    value = recVal
+                  }
+                }
+                // Fall back to per-user identity values for fields the record
+                // doesn't carry (or when there's no sample record at all).
+                if (value === "") {
+                  switch (info.coreKey) {
+                    case "userId":
+                      value = u.id
+                      break
+                    case "employeeName":
+                    case "fullName":
+                      value = fullName(u)
+                      break
+                    case "department":
+                      value = u.employee?.department || u.department || ""
+                      break
+                    case "designation":
+                      value = u.employee?.designation || ""
+                      break
+                    case "email":
+                    case "emailAddress1":
+                      value = u.email || ""
+                      break
+                    default:
+                      value = "" // record-only field with no sample record
+                  }
                 }
                 if (value === undefined || value === null || value === "")
                   continue
