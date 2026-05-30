@@ -65,6 +65,10 @@ export async function invalidatePayrollConfigCache(organizationId: string) {
 
 export interface SampleEmployee {
   employeeId: string;
+  /** Linked User.id when known. Lets the payroll engine resolve this
+   *  employee's roles for per-user rules (e.g. late-half-day scoping). May be
+   *  undefined for form-only rows with no bound user. */
+  userId?: string | null;
   employeeName: string;
   email: string;
   designation: string;
@@ -157,6 +161,10 @@ export interface PayrollPolicy {
    *  pay) rather than half-day. Mirrors AttendanceConfiguration so the
    *  payroll classifier and the UI badge stay in lockstep. */
   halfDayMinHours?: number;
+  /** When true, a check-in past shift+grace downgrades an otherwise-full day
+   *  to half. When false/unset, lateness doesn't change the day. Mirrors
+   *  AttendanceConfiguration.lateHalfDay. */
+  lateHalfDay?: boolean;
   /** When true, OT minutes count only on rows the employee toggled OT on. */
   overtimeRequiresOptIn?: boolean;
   /** Labour-law daily cap (hours) the payroll engine clamps OT to. 0 / unset
@@ -172,6 +180,7 @@ const DEFAULT_POLICY: PayrollPolicy = {
   shortLeaveHours: 2,
   fullDayMinHours: 8,
   halfDayMinHours: 4,
+  lateHalfDay: false,
   overtimeRequiresOptIn: true,
   overtimeMaxHoursPerDay: 4,
 };
@@ -971,6 +980,7 @@ export async function getPayrollPolicy(organizationId: string): Promise<PayrollP
         halfDayMinHours: Number.isFinite(cfg.halfDayMinHours)
           ? Math.max(0, Number(cfg.halfDayMinHours))
           : 4,
+        lateHalfDay: !!cfg.lateHalfDay,
         overtimeRequiresOptIn:
           cfg.overtimeRequiresOptIn === undefined
             ? true
@@ -1583,6 +1593,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
     // employees should switch to the native Employee table path.
     employees.push({
       employeeId: String(employeeId),
+      userId: userId || null,
       employeeName: String(employeeName),
       email: email || '',
       designation: String(designation || ''),
@@ -1698,6 +1709,7 @@ export async function getEmployeesFromDB(organizationId: string): Promise<Sample
 
       employees.push({
         employeeId: u.employee?.id ? String(u.employee.id) : userId,
+        userId,
         employeeName: String(composedName),
         email: u.email ? u.email.toLowerCase() : '',
         designation: u.employee?.designation ?? '',

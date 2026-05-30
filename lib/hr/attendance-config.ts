@@ -29,6 +29,17 @@ export interface AttendanceConfig {
   graceMinutes: number;
   halfDayMinHours: number;
   fullDayMinHours: number;
+  /** When true, a check-in past shift+grace makes the day a half-day even
+   *  with full hours worked. When false (default), lateness is info only.
+   *  This is the MASTER switch; the *-RoleIds / *-UserIds lists below carve
+   *  out exceptions when it is on (see lib/hr/late-half-day.ts). */
+  lateHalfDay: boolean;
+  /** Roles the late-half-day rule is turned OFF for (everyone else covered). */
+  lateHalfDayExcludedRoleIds: string[];
+  /** Individual users forced OFF, overriding their role. */
+  lateHalfDayExcludedUserIds: string[];
+  /** Individual users forced ON, overriding an excluded role. */
+  lateHalfDayIncludedUserIds: string[];
   overtimeAfterHours: number;
   breakMinutes: number;
   /** # of half-day occurrences the company forgives each month. Beyond this
@@ -89,6 +100,10 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   graceMinutes: 15,
   halfDayMinHours: 4,
   fullDayMinHours: 8,
+  lateHalfDay: false,
+  lateHalfDayExcludedRoleIds: [],
+  lateHalfDayExcludedUserIds: [],
+  lateHalfDayIncludedUserIds: [],
   overtimeAfterHours: 9,
   breakMinutes: 60,
   monthlyHalfDayQuota: 0,
@@ -249,6 +264,10 @@ async function loadAttendanceConfigFromDb(
       graceMinutes: row.graceMinutes ?? 15,
       halfDayMinHours: Number(row.halfDayMinHours ?? 4),
       fullDayMinHours: Number(row.fullDayMinHours ?? 8),
+      lateHalfDay: row.lateHalfDay === undefined ? false : !!row.lateHalfDay,
+      lateHalfDayExcludedRoleIds: coerceRoleIds(row.lateHalfDayExcludedRoleIds),
+      lateHalfDayExcludedUserIds: coerceRoleIds(row.lateHalfDayExcludedUserIds),
+      lateHalfDayIncludedUserIds: coerceRoleIds(row.lateHalfDayIncludedUserIds),
       overtimeAfterHours: Number(row.overtimeAfterHours ?? 9),
       breakMinutes: row.breakMinutes ?? 60,
       monthlyHalfDayQuota: Number.isFinite(row.monthlyHalfDayQuota)
@@ -326,6 +345,10 @@ export interface AttendanceConfigUpdate {
   graceMinutes?: number;
   halfDayMinHours?: number;
   fullDayMinHours?: number;
+  lateHalfDay?: boolean;
+  lateHalfDayExcludedRoleIds?: string[];
+  lateHalfDayExcludedUserIds?: string[];
+  lateHalfDayIncludedUserIds?: string[];
   overtimeAfterHours?: number;
   breakMinutes?: number;
   monthlyHalfDayQuota?: number;

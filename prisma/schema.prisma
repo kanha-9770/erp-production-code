@@ -2357,6 +2357,10 @@ model AttendanceConfiguration {
   graceMinutes       Int    @default(15) @map("grace_minutes")
   halfDayMinHours    Float  @default(4) @map("half_day_min_hours")
   fullDayMinHours    Float  @default(8) @map("full_day_min_hours")
+  lateHalfDay        Boolean @default(false) @map("late_half_day")
+  lateHalfDayExcludedRoleIds Json @default("[]") @map("late_half_day_excluded_role_ids")
+  lateHalfDayExcludedUserIds Json @default("[]") @map("late_half_day_excluded_user_ids")
+  lateHalfDayIncludedUserIds Json @default("[]") @map("late_half_day_included_user_ids")
   overtimeAfterHours Float  @default(9) @map("overtime_after_hours")
   breakMinutes       Int    @default(60) @map("break_minutes")
 

@@ -106,13 +106,9 @@ function statusBadge(record: AttendanceRecord): {
         "You forgot to check out — the system closed this day at the cutoff. This day's salary is ₹0.",
     };
   }
-  if (record.checkedOut && (record.lateMinutes ?? 0) > 0) {
-    return {
-      label: "Half Day",
-      className: "bg-amber-100 text-amber-800 border-amber-200",
-      reason: `Late check-in by ${record.lateMinutes}m past grace — counted as half-day.`,
-    };
-  }
+  // Note: a late check-in no longer downgrades a checked-out day to half-day
+  // (org policy: full hours = full day). Lateness is surfaced elsewhere as
+  // info; here we fall straight through to the persisted status.
   switch ((record.status ?? "").toUpperCase()) {
     case "PRESENT":
       return {
