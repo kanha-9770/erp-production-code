@@ -339,9 +339,10 @@ export default function WorkflowRulesPage() {
         <TabsContent value="rules" className="mt-0">
           <div className="px-4 sm:px-6 py-4 space-y-4">
             {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-1 w-full sm:w-auto">
-                <div className="relative flex-1 w-full sm:max-w-xs">
+            <div className="space-y-3">
+              {/* Primary row — search + module filter + create rule stay on one line at every breakpoint */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0 sm:max-w-xs">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Search rules..."
@@ -354,7 +355,7 @@ export default function WorkflowRulesPage() {
                   />
                 </div>
                 <Select value={moduleFilter} onValueChange={(v) => { setModuleFilter(v); setCurrentPage(1) }}>
-                  <SelectTrigger className="w-full sm:w-44 h-9 text-sm">
+                  <SelectTrigger className="h-9 w-28 shrink-0 text-xs sm:w-44 sm:text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -366,11 +367,42 @@ export default function WorkflowRulesPage() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* Secondary actions sit on the right on desktop; on mobile they drop to the row below */}
+                <div className="ml-auto hidden items-center gap-2 sm:flex">
+                  {selectedIds.size > 0 && (
+                    <Button variant="destructive" size="sm" className="h-9" onClick={bulkDelete}>
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      Delete ({selectedIds.size})
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => router.push("/settings/workflow-rules/executions")}
+                  >
+                    <History className="w-3.5 h-3.5 mr-1.5" />
+                    Execution Log
+                  </Button>
+                </div>
+
+                {/* Create Rule stays inline with search + filter; icon-only on mobile to hold one line */}
+                <Button
+                  size="sm"
+                  className="h-9 w-9 shrink-0 px-0 sm:w-auto sm:px-3"
+                  onClick={() => setCreateDialogOpen(true)}
+                  aria-label="Create Rule"
+                >
+                  <Plus className="w-4 h-4 sm:mr-1.5" />
+                  <span className="hidden sm:inline">Create Rule</span>
+                </Button>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              {/* Secondary row — mobile only: execution log (+ bulk delete) */}
+              <div className="flex items-center gap-2 sm:hidden">
                 {selectedIds.size > 0 && (
-                  <Button variant="destructive" size="sm" onClick={bulkDelete}>
+                  <Button variant="destructive" size="sm" className="h-9 flex-1" onClick={bulkDelete}>
                     <Trash2 className="w-3.5 h-3.5 mr-1.5" />
                     Delete ({selectedIds.size})
                   </Button>
@@ -378,14 +410,11 @@ export default function WorkflowRulesPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="h-9 flex-1"
                   onClick={() => router.push("/settings/workflow-rules/executions")}
                 >
                   <History className="w-3.5 h-3.5 mr-1.5" />
                   Execution Log
-                </Button>
-                <Button size="sm" className="ml-auto sm:ml-0" onClick={() => setCreateDialogOpen(true)}>
-                  <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Create Rule
                 </Button>
               </div>
             </div>
@@ -534,7 +563,7 @@ export default function WorkflowRulesPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-7 w-7 p-0 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
                               >
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
@@ -610,7 +639,7 @@ export default function WorkflowRulesPage() {
 
             {/* Pagination */}
             {filteredRules.length > 0 && (
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex flex-col items-center gap-3 text-xs sm:flex-row sm:justify-between">
                 <p className="text-muted-foreground">
                   Showing{" "}
                   {(currentPage - 1) * itemsPerPage + 1}
@@ -727,7 +756,7 @@ export default function WorkflowRulesPage() {
 
       {/* ── Delete Confirmation Dialog ──────────────────────────────────── */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md rounded-lg sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Workflow Rule</DialogTitle>
             <DialogDescription>
@@ -748,14 +777,14 @@ export default function WorkflowRulesPage() {
 
       {/* ── Create Rule Dialog (Zoho-style) ─────────────────────────── */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[calc(100%-2rem)] max-w-md rounded-lg sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-semibold">Create New Rule</DialogTitle>
           </DialogHeader>
           <div className="space-y-5 py-1">
             {/* Module - first field like Zoho */}
-            <div className="grid grid-cols-[100px_1fr] items-center gap-3">
-              <Label className="text-sm text-right text-muted-foreground">Module</Label>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[100px_1fr] sm:items-center sm:gap-3">
+              <Label className="text-sm text-left text-muted-foreground sm:text-right">Module</Label>
               <Select
                 value={newRule.module}
                 onValueChange={(v) =>
@@ -786,8 +815,8 @@ export default function WorkflowRulesPage() {
             </div>
 
             {/* Rule Name */}
-            <div className="grid grid-cols-[100px_1fr] items-center gap-3">
-              <Label className="text-sm text-right text-muted-foreground">Rule Name</Label>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[100px_1fr] sm:items-center sm:gap-3">
+              <Label className="text-sm text-left text-muted-foreground sm:text-right">Rule Name</Label>
               <Input
                 placeholder=""
                 value={newRule.name}
@@ -799,8 +828,8 @@ export default function WorkflowRulesPage() {
             </div>
 
             {/* Description - textarea like Zoho */}
-            <div className="grid grid-cols-[100px_1fr] items-start gap-3">
-              <Label className="text-sm text-right text-muted-foreground pt-2">Description</Label>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-[100px_1fr] sm:items-start sm:gap-3">
+              <Label className="text-sm text-left text-muted-foreground sm:pt-2 sm:text-right">Description</Label>
               <Textarea
                 placeholder=""
                 value={newRule.description}

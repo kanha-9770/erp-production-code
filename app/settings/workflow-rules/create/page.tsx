@@ -1658,7 +1658,7 @@ export default function CreateWorkflowRulePage() {
     >
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="border-b bg-background sticky top-0 z-20">
-        <div className="px-4 sm:px-6 py-3 flex items-start justify-between gap-4">
+        <div className="px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
           <div className="min-w-0 flex-1">
             <button
               onClick={() => router.push("/settings/workflow-rules")}
@@ -1718,7 +1718,7 @@ export default function CreateWorkflowRulePage() {
           </div>
 
           {/* Header controls — rule status, activate/deactivate, view usage, overflow menu */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:shrink-0">
             {saveStatus === "saved" && (
               <span className="text-xs text-emerald-600">✓ Saved</span>
             )}
@@ -2703,7 +2703,7 @@ export default function CreateWorkflowRulePage() {
       </div>
 
       {/* ── Bottom Footer Bar ──────────────────────────────────────────── */}
-      <div className="sticky bottom-0 left-0 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex items-center justify-start gap-3 z-30 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
+      <div className="sticky bottom-0 left-0 right-0 border-t bg-background px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-start gap-2 sm:gap-3 z-30 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
         <Button
           size="sm"
           className="h-8 text-xs px-5 font-medium"
@@ -2745,7 +2745,7 @@ export default function CreateWorkflowRulePage() {
           </span>
         )}
         {!canSaveRule && (
-          <span className="text-[11px] text-muted-foreground ml-auto mr-4">
+          <span className="text-[11px] text-muted-foreground ml-auto mr-4 w-full sm:w-auto">
             {!ruleName.trim()
               ? "Name the rule to enable Save"
               : !moduleName
