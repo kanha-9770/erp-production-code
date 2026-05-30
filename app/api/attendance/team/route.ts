@@ -163,7 +163,6 @@ export async function GET(request: NextRequest) {
       ),
     ]),
   );
-  const lateScope = lateHalfDayScopeOf(cfg);
 
   const userIds = users.map((u) => u.id);
   const records = await prisma.attendance.findMany({
@@ -182,6 +181,7 @@ export async function GET(request: NextRequest) {
   // is a separate decision that's only about *blocking* — visibility
   // shouldn't depend on it.
   const cfg = await getAttendanceConfig(authUser.organizationId);
+  const lateScope = lateHalfDayScopeOf(cfg);
   const fenceActive =
     cfg.geofenceLat != null &&
     cfg.geofenceLng != null &&
