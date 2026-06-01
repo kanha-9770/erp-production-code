@@ -414,6 +414,12 @@ function useAttendance(enabled: boolean): UseAttendanceState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
+  // Idempotency keys for punches this instance initiated. The punch handler
+  // already updates local state from the server response, so when the
+  // `attendance:punch` broadcast comes back to us we skip the redundant
+  // refetch — only OTHER mounted widgets (dashboard card, sidebar pill,
+  // mobile bottom-nav) act on it.
+  const ownPunchKeysRef = useRef<Set<string>>(new Set());
 
   const fetchStatus = useCallback(async () => {
     if (!enabled) return;
@@ -462,11 +468,28 @@ function useAttendance(enabled: boolean): UseAttendanceState {
     const onVisible = () => {
       if (document.visibilityState === "visible") fetchStatus();
     };
+    // Cross-widget sync: when any attendance widget punches, every other
+    // mounted instance refetches immediately so the dashboard card, sidebar
+    // pill and mobile bottom-nav stay in lock-step instead of waiting out
+    // the 60s poll. Skip the key we fired ourselves — that instance already
+    // has the fresh status from the punch response.
+    const onPunch = (e: Event) => {
+      const key = (e as CustomEvent).detail?.idempotencyKey as
+        | string
+        | undefined;
+      if (key && ownPunchKeysRef.current.has(key)) {
+        ownPunchKeysRef.current.delete(key);
+        return;
+      }
+      fetchStatus();
+    };
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("attendance:punch", onPunch);
     return () => {
       aliveRef.current = false;
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("attendance:punch", onPunch);
     };
   }, [enabled, fetchStatus]);
 
@@ -560,6 +583,9 @@ function useAttendance(enabled: boolean): UseAttendanceState {
         // the punch response — but the rest of the app does. Idempotency-
         // key is included so listeners can dedupe if they need to.
         if (typeof window !== "undefined") {
+          // Mark this key as ours so our own listener ignores the echo and
+          // doesn't fire a redundant refetch (we already have the response).
+          ownPunchKeysRef.current.add(idempotencyKey);
           window.dispatchEvent(
             new CustomEvent("attendance:punch", {
               detail: { type, idempotencyKey, at: Date.now() },
