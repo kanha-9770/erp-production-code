@@ -529,6 +529,11 @@ model RolePermission {
   sectionId     String?      @map("section_id")
   formFieldId   String?      @map("form_field_id")
   section       FormSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  // Static-page scope. When set (moduleId/formId null) this row permissions a
+  // registry static page (lib/static-pages.ts) — the path is the page's
+  // RoutePermission pattern, e.g. "/attendance". Lets static pages reuse the
+  // exact same RolePermission engine as form modules.
+  pagePath      String?      @map("page_path")
   granted       Boolean      @default(true)
   canDelegate   Boolean      @default(false) @map("can_delegate")
   inheritedFrom String?      @map("inherited_from")
@@ -540,11 +545,15 @@ model RolePermission {
   @@unique([roleId, permissionId, moduleId, formId], map: "role_perm_module_unique")
   @@unique([roleId, permissionId, moduleId, sectionId], map: "role_perm_section_unique")
   @@unique([roleId, permissionId, moduleId, sectionId, formFieldId], map: "role_perm_field_unique")
+  // Static-page scope: one row per (role, permission, page). pagePath is null
+  // for module/form rows, so this index never collides with them.
+  @@unique([roleId, permissionId, pagePath], map: "role_perm_page_unique")
   @@index([roleId])
   @@index([permissionId])
   @@index([moduleId])
   @@index([formId])
   @@index([sectionId])
+  @@index([pagePath])
   @@map("role_permissions")
 }
 
@@ -1394,6 +1403,9 @@ model UserPermission {
   module        FormModule? @relation(fields: [moduleId], references: [id], onDelete: Cascade, name: "UserPermissionToFormModule")
   formId        String?     @map("form_id")
   form          Form?       @relation(fields: [formId], references: [id], onDelete: Cascade)
+  // Static-page scope — mirrors RolePermission.pagePath. When set this is a
+  // per-user override for a registry static page.
+  pagePath      String?     @map("page_path")
   resourceType  String?     @map("resource_type")
   resourceId    String?     @map("resource_id")
   granted       Boolean     @default(true)
@@ -1412,12 +1424,15 @@ model UserPermission {
   updatedAt     DateTime    @updatedAt @map("updated_at")
 
   @@unique([userId, permissionId, moduleId, formId], name: "unique_user_permission")
+  // Static-page scope: one override row per (user, permission, page).
+  @@unique([userId, permissionId, pagePath], name: "unique_user_page_permission")
   // Note: the prior @@unique([userId, resourceType, resourceId]) was removed
   // to allow multiple permission rows per (user, resource) — required for
   // multi-permission field/section access.
   @@index([userId])
   @@index([permissionId])
   @@index([moduleId])
+  @@index([pagePath])
   @@index([resourceType])
   @@index([resourceId])
   @@index([isActive])

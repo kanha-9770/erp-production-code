@@ -89,6 +89,9 @@ export interface UserPermissionUpdate {
   permissionId: string;
   moduleId?: string | null;
   formId?: string | null;
+  /** Static-page scope. When set (and module/form unset) this is a per-user
+   *  override for a registry static page. */
+  pagePath?: string | null;
   granted: boolean;
   reason?: string;
   grantedBy?: string | null;
@@ -182,6 +185,41 @@ async function ensureStandardPermissionsExist(): Promise<void> {
     }
   } catch (error) {
     console.error("[v0] Failed to ensure standard permissions:", error);
+  }
+}
+
+// Page-only permission(s). Kept OUT of `ensureStandardPermissionsExist` so the
+// form/module permission matrix never gains an APPROVAL column — APPROVAL is
+// exposed only on the static-page matrix (see getPagePermissions).
+const PAGE_ONLY_PERMISSIONS = [
+  { id: "8", name: "APPROVAL", category: "SPECIAL", resource: "page" },
+];
+
+async function ensurePagePermissionsExist(): Promise<void> {
+  const isConnected = await isDatabaseConnected();
+  if (!isConnected) return;
+
+  try {
+    const organizationId = await getValidOrganizationId();
+    for (const perm of PAGE_ONLY_PERMISSIONS) {
+      await prisma.permission.upsert({
+        where: { id: perm.id },
+        update: {},
+        create: {
+          id: perm.id,
+          name: perm.name,
+          category: perm.category as any,
+          resource: perm.resource,
+          organizationId,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      await invalidatePermissionCache(perm.name).catch(() => {});
+    }
+  } catch (error) {
+    console.error("[v0] Failed to ensure page permissions:", error);
   }
 }
 
@@ -279,7 +317,9 @@ export async function getPermissions(): Promise<any[]> {
     await ensureStandardPermissionsExist();
 
     const permissions = await prisma.permission.findMany({
-      where: { isActive: true },
+      // Exclude page-only permissions (e.g. APPROVAL) so the form/module
+      // matrix keeps its original 7 columns.
+      where: { isActive: true, NOT: { name: { in: PAGE_ONLY_PERMISSIONS.map((p) => p.name) } } },
       orderBy: { name: "asc" },
     });
 
@@ -296,6 +336,41 @@ export async function getPermissions(): Promise<any[]> {
         resource: p.resource,
       })
     );
+  } catch (error) {
+    return [];
+  }
+}
+
+// Permissions exposed on the STATIC-PAGE matrix: the standard 7 plus the
+// page-only set (APPROVAL). Returned in a stable, human-friendly order.
+const PAGE_PERMISSION_ORDER = [
+  "VIEW", "CREATE", "EDIT", "DELETE", "IMPORT", "EXPORT", "PRINT", "APPROVAL",
+];
+
+export async function getPagePermissions(): Promise<any[]> {
+  const isConnected = await isDatabaseConnected();
+  if (!isConnected) return [];
+
+  try {
+    await ensureStandardPermissionsExist();
+    await ensurePagePermissionsExist();
+
+    const permissions = await prisma.permission.findMany({
+      where: { isActive: true },
+    });
+
+    return permissions
+      .map((p: { id: string; name: string; category: string; resource: string }) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        resource: p.resource,
+      }))
+      .filter((p) => PAGE_PERMISSION_ORDER.includes(p.name))
+      .sort(
+        (a, b) =>
+          PAGE_PERMISSION_ORDER.indexOf(a.name) - PAGE_PERMISSION_ORDER.indexOf(b.name),
+      );
   } catch (error) {
     return [];
   }
@@ -587,11 +662,41 @@ export async function updateUserPermissions(
   try {
     await ensureStandardPermissionsExist();
 
+    // Validate existence by reading ONLY the ids the payload references —
+    // not the whole users/permissions/forms/modules tables (which on a busy
+    // multi-tenant DB is a needless full scan per save, and reads other orgs'
+    // rows). Module ids carry an optional `_self`/`_self-perm` suffix that the
+    // loop below strips, so normalize here too.
+    const refUserIds = Array.from(
+      new Set(updates.map((u) => u.userId).filter(Boolean) as string[])
+    );
+    const refPermIds = Array.from(
+      new Set(updates.map((u) => u.permissionId).filter(Boolean) as string[])
+    );
+    const refFormIds = Array.from(
+      new Set(updates.map((u) => u.formId).filter(Boolean) as string[])
+    );
+    const refModuleIds = Array.from(
+      new Set(
+        updates
+          .map((u) => u.moduleId?.replace(/_self-perm$|_self$/, ""))
+          .filter(Boolean) as string[]
+      )
+    );
+
     const [users, permissions, forms, modules] = await Promise.all([
-      prisma.user.findMany({ select: { id: true } }),
-      prisma.permission.findMany({ select: { id: true } }),
-      prisma.form.findMany({ select: { id: true, moduleId: true } }),
-      prisma.formModule.findMany({ select: { id: true } }),
+      refUserIds.length
+        ? prisma.user.findMany({ where: { id: { in: refUserIds } }, select: { id: true } })
+        : Promise.resolve([] as { id: string }[]),
+      refPermIds.length
+        ? prisma.permission.findMany({ where: { id: { in: refPermIds } }, select: { id: true } })
+        : Promise.resolve([] as { id: string }[]),
+      refFormIds.length
+        ? prisma.form.findMany({ where: { id: { in: refFormIds } }, select: { id: true, moduleId: true } })
+        : Promise.resolve([] as { id: string; moduleId: string }[]),
+      refModuleIds.length
+        ? prisma.formModule.findMany({ where: { id: { in: refModuleIds } }, select: { id: true } })
+        : Promise.resolve([] as { id: string }[]),
     ]);
 
     const userSet = new Set(users.map((u) => u.id));
@@ -601,7 +706,11 @@ export async function updateUserPermissions(
 
     // FIX: Correct the type annotation (was broken intersection type)
     const validUpdates: Array<
-      UserPermissionUpdate & { moduleId: string | null; formId: string | null }
+      UserPermissionUpdate & {
+        moduleId: string | null;
+        formId: string | null;
+        pagePath: string | null;
+      }
     > = [];
 
     for (const u of updates) {
@@ -611,6 +720,7 @@ export async function updateUserPermissions(
 
       let moduleId: string | null = null;
       let formId: string | null = null;
+      let pagePath: string | null = null;
 
       if (u.formId) {
         formId = u.formId;
@@ -620,49 +730,112 @@ export async function updateUserPermissions(
         const cleanId = u.moduleId.replace(/_self-perm$|_self$/, "");
         if (!moduleSet.has(cleanId)) continue;
         moduleId = cleanId;
+      } else if (u.pagePath) {
+        // Static-page override — no module/form scope.
+        pagePath = u.pagePath;
       } else {
         continue;
       }
 
-      validUpdates.push({ ...u, moduleId, formId });
+      validUpdates.push({ ...u, moduleId, formId, pagePath });
     }
 
     if (validUpdates.length === 0) return true;
 
-    // FIX: Use the correct Prisma compound unique key name.
-    // Schema has: @@unique([userId, permissionId, moduleId, formId], name: "unique_user_permission")
-    // Since `name:` is used, the Prisma client key IS "unique_user_permission"
+    // ── Bulk write path ──────────────────────────────────────────────────--
+    // The old implementation issued one `upsert` PER item inside the
+    // transaction — 2N round-trips to a remote DB, which on a large bulk save
+    // (e.g. dozens of per-user overrides) blew past the transaction timeout and
+    // threw P2028. Instead we resolve everything with a FIXED number of
+    // queries regardless of N:
+    //   1 bulk read  →  partition into create / update-groups  →
+    //   1 createMany + a handful of updateMany (grouped by identical data).
+    //
+    // Scope tuple — page-scoped rows key on pagePath; module/form rows key on
+    // (moduleId, formId). The two never collide because the prefix differs.
+    const tupleKey = (r: {
+      userId: string;
+      permissionId: string;
+      moduleId: string | null;
+      formId: string | null;
+      pagePath: string | null;
+    }) =>
+      r.pagePath
+        ? `p|${r.userId}|${r.permissionId}|${r.pagePath}`
+        : `m|${r.userId}|${r.permissionId}|${r.moduleId ?? ""}|${r.formId ?? ""}`;
+
+    // Dedup by scope tuple (last write wins) so one payload can't ask us to
+    // both create and update the same row.
+    const deduped = Array.from(
+      new Map(validUpdates.map((u) => [tupleKey(u), u])).values()
+    );
+
+    // One read covers every row these (user, permission) pairs could touch —
+    // including soft-deleted (isActive:false) rows so a re-grant reactivates
+    // the existing row instead of hitting the unique constraint.
+    const userIds = Array.from(new Set(deduped.map((u) => u.userId)));
+    const permIds = Array.from(new Set(deduped.map((u) => u.permissionId)));
+    const existingRows = await prisma.userPermission.findMany({
+      where: { userId: { in: userIds }, permissionId: { in: permIds } },
+      select: {
+        id: true,
+        userId: true,
+        permissionId: true,
+        moduleId: true,
+        formId: true,
+        pagePath: true,
+      },
+    });
+    const existingIdByTuple = new Map(
+      existingRows.map((r) => [tupleKey(r as any), r.id])
+    );
+
+    // Partition: brand-new rows (createMany) vs existing rows (updateMany).
+    // Updates are grouped by an identical-data signature so each distinct
+    // (granted, reason, grantedBy, expiresAt, isActive) combo is ONE updateMany
+    // — in practice 1–2 groups, since the matrix only varies `granted`.
+    const toCreate: any[] = [];
+    const updateGroups = new Map<string, { data: any; ids: string[] }>();
+    const now = new Date();
+    for (const u of deduped) {
+      const data = {
+        granted: u.granted,
+        reason: u.reason ?? "Manual override",
+        grantedBy: u.grantedBy ?? null,
+        expiresAt: u.expiresAt ?? null,
+        isActive: u.isActive ?? true,
+      };
+      const existingId = existingIdByTuple.get(tupleKey(u));
+      if (existingId) {
+        const sig = JSON.stringify(data);
+        const grp = updateGroups.get(sig);
+        if (grp) grp.ids.push(existingId);
+        else updateGroups.set(sig, { data, ids: [existingId] });
+      } else {
+        toCreate.push({
+          userId: u.userId,
+          permissionId: u.permissionId,
+          moduleId: u.moduleId,
+          formId: u.formId,
+          pagePath: u.pagePath,
+          grantedAt: now,
+          ...data,
+        });
+      }
+    }
+
     await prisma.$transaction(
       async (tx) => {
-        for (const u of validUpdates) {
-          await tx.userPermission.upsert({
-            where: {
-              unique_user_permission: {
-                userId: u.userId,
-                permissionId: u.permissionId,
-                moduleId: u.moduleId,
-                formId: u.formId,
-              },
-            },
-            update: {
-              granted: u.granted,
-              reason: u.reason ?? "Manual override",
-              grantedBy: u.grantedBy ?? null,
-              expiresAt: u.expiresAt ?? null,
-              isActive: u.isActive ?? true,
-            },
-            create: {
-              userId: u.userId,
-              permissionId: u.permissionId,
-              moduleId: u.moduleId,
-              formId: u.formId,
-              granted: u.granted,
-              reason: u.reason ?? "Manual override",
-              grantedBy: u.grantedBy ?? null,
-              grantedAt: new Date(),
-              expiresAt: u.expiresAt ?? null,
-              isActive: u.isActive ?? true,
-            },
+        if (toCreate.length > 0) {
+          await tx.userPermission.createMany({
+            data: toCreate,
+            skipDuplicates: true,
+          });
+        }
+        for (const { data, ids } of updateGroups.values()) {
+          await tx.userPermission.updateMany({
+            where: { id: { in: ids } },
+            data,
           });
         }
       },
@@ -727,6 +900,7 @@ export async function getUserPermissions(userId?: string): Promise<any[]> {
       permissionId: up.permissionId,
       moduleId: up.moduleId,
       formId: up.formId,
+      pagePath: up.pagePath,
       resourceType: up.resourceType,
       resourceId: up.resourceId,
       canView: up.canView,

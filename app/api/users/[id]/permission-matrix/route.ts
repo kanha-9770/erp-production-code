@@ -306,50 +306,90 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
       return true;
     });
 
-    // Single transaction: deactivate removed rows, then upsert the new set.
-    // Using a transaction means a partial write never escapes — either every
-    // change lands or none does.
-    const result = await prisma.$transaction(async (tx) => {
-      let removed = 0;
-      if (removeIds.length > 0) {
-        // Verify each ID belongs to THIS user before flipping it inactive.
-        const owned = await tx.userPermission.findMany({
-          where: { id: { in: removeIds }, userId },
-          select: { id: true },
-        });
-        const ownedIds = owned.map((o) => o.id);
-        if (ownedIds.length > 0) {
+    // Resolve everything we need in BULK *before* the transaction, so the
+    // write phase is a small, fixed number of statements (one createMany + a
+    // couple of updateMany) instead of 2×N sequential round-trips.
+    //
+    // The previous per-item `findFirst` + `update`/`create` loop issued two
+    // queries per upsert INSIDE the transaction; against a remote DB that
+    // easily exceeded Prisma's 5s interactive-transaction timeout, which then
+    // rolled the transaction back and made the next query throw P2028
+    // ("Transaction not found"). Bulk reads + batched writes keep the
+    // transaction tiny regardless of how many rows the matrix touches.
+    const tupleKey = (t: {
+      permissionId: string;
+      moduleId: string | null;
+      formId: string | null;
+    }) => `${t.permissionId}|${t.moduleId ?? ""}|${t.formId ?? ""}`;
+
+    // Dedupe upserts by scope tuple (last one wins) so a single payload can't
+    // ask us to insert two rows for the same scope.
+    const dedupedUpserts = Array.from(
+      new Map(safeUpserts.map((u) => [tupleKey(u), u])).values(),
+    );
+
+    // One read for every module/form-scoped override row this user has (active
+    // OR previously soft-deleted), keyed by scope tuple — mirrors the old
+    // per-item lookup's `resourceType: null, resourceId: null` filter.
+    const existingRows = await prisma.userPermission.findMany({
+      where: { userId, resourceType: null, resourceId: null },
+      select: { id: true, permissionId: true, moduleId: true, formId: true },
+    });
+    const existingByTuple = new Map(
+      existingRows.map((r) => [
+        tupleKey({
+          permissionId: r.permissionId ?? "",
+          moduleId: r.moduleId,
+          formId: r.formId,
+        }),
+        r.id,
+      ]),
+    );
+
+    // Partition the deduped upserts into creates (no row yet) and updates
+    // (row exists — reactivate + set granted). Updates are grouped by the
+    // target `granted` value so each group is a single updateMany.
+    const toCreate: UpsertItem[] = [];
+    const updateGrantTrue: string[] = [];
+    const updateGrantFalse: string[] = [];
+    for (const u of dedupedUpserts) {
+      const existingId = existingByTuple.get(tupleKey(u));
+      if (existingId) {
+        (u.granted ? updateGrantTrue : updateGrantFalse).push(existingId);
+      } else {
+        toCreate.push(u);
+      }
+    }
+
+    // Owned-row check for removals is a read — do it before the transaction so
+    // only the writes run inside it.
+    const ownedRemoveIds =
+      removeIds.length > 0
+        ? (
+            await prisma.userPermission.findMany({
+              where: { id: { in: removeIds }, userId },
+              select: { id: true },
+            })
+          ).map((o) => o.id)
+        : [];
+
+    // Transaction now holds only batched writes — fast and well within the
+    // timeout. A generous timeout is still set as a guard for very large
+    // matrices over a high-latency connection.
+    const result = await prisma.$transaction(
+      async (tx) => {
+        let removed = 0;
+        if (ownedRemoveIds.length > 0) {
           const r = await tx.userPermission.updateMany({
-            where: { id: { in: ownedIds } },
+            where: { id: { in: ownedRemoveIds } },
             data: { isActive: false },
           });
           removed = r.count;
         }
-      }
 
-      let upserted = 0;
-      for (const u of safeUpserts) {
-        // Locate an existing row at this scope (active OR previously soft-deleted).
-        const existing = await tx.userPermission.findFirst({
-          where: {
-            userId,
-            permissionId: u.permissionId,
-            moduleId: u.moduleId,
-            formId: u.formId,
-            resourceType: null,
-            resourceId: null,
-          },
-          select: { id: true },
-        });
-
-        if (existing) {
-          await tx.userPermission.update({
-            where: { id: existing.id },
-            data: { granted: u.granted, isActive: true },
-          });
-        } else {
-          await tx.userPermission.create({
-            data: {
+        if (toCreate.length > 0) {
+          await tx.userPermission.createMany({
+            data: toCreate.map((u) => ({
               userId,
               permissionId: u.permissionId,
               moduleId: u.moduleId,
@@ -360,14 +400,32 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
               canEdit: false,
               canDelete: false,
               isActive: true,
-            },
+            })),
+            skipDuplicates: true,
           });
         }
-        upserted++;
-      }
 
-      return { upserted, removed };
-    });
+        if (updateGrantTrue.length > 0) {
+          await tx.userPermission.updateMany({
+            where: { id: { in: updateGrantTrue } },
+            data: { granted: true, isActive: true },
+          });
+        }
+        if (updateGrantFalse.length > 0) {
+          await tx.userPermission.updateMany({
+            where: { id: { in: updateGrantFalse } },
+            data: { granted: false, isActive: true },
+          });
+        }
+
+        return {
+          upserted:
+            toCreate.length + updateGrantTrue.length + updateGrantFalse.length,
+          removed,
+        };
+      },
+      { timeout: 20000, maxWait: 10000 },
+    );
 
     return NextResponse.json({
       success: true,

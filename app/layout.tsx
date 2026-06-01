@@ -1,13 +1,15 @@
 import type React from "react";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import Script from "next/script";
+import { cookies } from "next/headers";
 import "./globals.css";
 import { ConditionalLayout } from "@/components/layout/ConditionalLayout";
+import { DensityClientSync } from "@/components/layout/density-client-sync";
 import { ReduxProvider } from "@/lib/providers/StoreProvider";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import PushInit from "@/components/push/push-init";
+import { DENSITY_COOKIE, parseDensityCookie } from "@/lib/density-cookie";
 const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "ERP System",
@@ -29,62 +31,27 @@ export const viewport = {
   initialScale: 1,
   viewportFit: "cover" as const,
 };
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Density is rendered server-side from a cookie so first paint matches
+  // the user's preference. Previously this was an inline bootstrap script,
+  // but React 19 (Next.js 16) won't execute <script> tags inside
+  // components and emits a warning for them — see lib/density-cookie.ts.
+  const { density, scale } = parseDensityCookie(
+    (await cookies()).get(DENSITY_COOKIE)?.value,
+  );
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      data-density={density}
+      style={{ ["--density-scale" as string]: String(scale) } as React.CSSProperties}
+    >
       <body className={inter.className}>
-        {/*
-          Density bootstrap. Runs before hydration so the user never sees a
-          flash at the wrong size. Reads the same localStorage key
-          PreferencesTab writes to. next/script with beforeInteractive
-          injects this outside React's render tree — required under React 19,
-          which otherwise refuses to execute <script> tags inside components.
-        */}
-        <Script id="density-bootstrap" strategy="beforeInteractive">
-          {`
-            (function(){
-              try {
-                var raw = localStorage.getItem('profile.preferences.v1');
-                if (raw) {
-                  var p = JSON.parse(raw);
-                  var d = p && p.density === 'compact' ? 'compact' : 'comfortable';
-                  document.documentElement.dataset.density = d;
-                  var s = (p && typeof p.densityScale === 'number') ? p.densityScale : 1;
-                  if (d === 'compact') {
-                    if (s < 0.85) s = 0.85;
-                    if (s > 1) s = 1;
-                  } else {
-                    s = 1;
-                  }
-                  document.documentElement.style.setProperty('--density-scale', String(s));
-                  return;
-                }
-                // No saved preference: mobile defaults to compact @ 85%, desktop stays at 100%.
-                // 768px matches the project's MOBILE_BREAKPOINT (hooks/use-mobile.tsx).
-                function applyMobileAware(){
-                  var isMobile = window.matchMedia('(max-width: 767px)').matches;
-                  if (isMobile) {
-                    document.documentElement.dataset.density = 'compact';
-                    document.documentElement.style.setProperty('--density-scale', '0.85');
-                  } else {
-                    document.documentElement.dataset.density = 'comfortable';
-                    document.documentElement.style.setProperty('--density-scale', '1');
-                  }
-                }
-                applyMobileAware();
-                try {
-                  var mql = window.matchMedia('(max-width: 767px)');
-                  if (mql.addEventListener) mql.addEventListener('change', applyMobileAware);
-                  else if (mql.addListener) mql.addListener(applyMobileAware);
-                } catch (e) {}
-              } catch (e) {}
-            })();
-          `}
-        </Script>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
@@ -92,6 +59,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <ReduxProvider>
+            <DensityClientSync />
             <ConditionalLayout>{children}</ConditionalLayout>
             <PushInit />
             <Toaster />

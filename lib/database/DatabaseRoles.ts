@@ -907,33 +907,37 @@ export class DatabaseRoles {
         where: { id: userId }
       })
 
-      // If not found by ID, try to find by email in recordData
+      // If not found by ID, treat the argument as an email and match it inside
+      // Postgres (same two shapes as getUserByEmail) instead of scanning the
+      // whole table in Node. Case-sensitive, to preserve the original behavior.
       if (!userRecord) {
-        
-        // Get all records and search for matching email
-        const allRecords = await prisma.formRecord15.findMany()
-        
-        for (const record of allRecords) {
-          const recordData = record.recordData as any
-          if (recordData && typeof recordData === 'object') {
-            // Check direct email property
-            if (recordData.email === userId) {
-              userRecord = record
-              break
-            }
-            
-            // Check field-based structure for email
-            for (const fieldId in recordData) {
-              const field = recordData[fieldId]
-              if (field && typeof field === 'object' && field.value) {
-                if (field.type === 'email' && field.value === userId) {
-                  userRecord = record
-                  break
-                }
-              }
-            }
-            
-            if (userRecord) break
+        const rows = await prisma.$queryRaw<Array<{
+          id: string
+          record_data: any
+          created_at: Date
+          updated_at: Date
+          employee_id: string | null
+          status: string
+        }>>`
+          SELECT id, record_data, created_at, updated_at, employee_id, status
+          FROM form_records_15
+          WHERE (record_data::jsonb)->>'email' = ${userId}
+             OR EXISTS (
+               SELECT 1 FROM jsonb_each(record_data::jsonb) AS kv
+               WHERE kv.value->>'type' = 'email'
+                 AND kv.value->>'value' = ${userId}
+             )
+          LIMIT 1
+        `
+        if (rows.length > 0) {
+          const r = rows[0]
+          return {
+            id: r.id,
+            recordData: r.record_data,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+            employee_id: r.employee_id,
+            status: r.status,
           }
         }
       }
@@ -961,40 +965,41 @@ export class DatabaseRoles {
    */
   static async getUserByEmail(email: string): Promise<any | null> {
     try {
-      // Get all records and search for matching email
-      const allRecords = await prisma.formRecord15.findMany()
-      
-      for (const record of allRecords) {
-        const recordData = record.recordData as any
-        if (recordData && typeof recordData === 'object') {
-          // Check direct email property
-          if (recordData.email && recordData.email.toLowerCase() === email.toLowerCase()) {
-            return {
-              id: record.id,
-              recordData: record.recordData,
-              createdAt: record.createdAt,
-              updatedAt: record.updatedAt,
-              employee_id: record.employee_id,
-              status: record.status
-            }
-          }
-          
-          // Check field-based structure for email
-          for (const fieldId in recordData) {
-            const field = recordData[fieldId]
-            if (field && typeof field === 'object' && field.value) {
-              if (field.type === 'email' && field.value.toLowerCase() === email.toLowerCase()) {
-                return {
-                  id: record.id,
-                  recordData: record.recordData,
-                  createdAt: record.createdAt,
-                  updatedAt: record.updatedAt,
-                  employee_id: record.employee_id,
-                  status: record.status
-                }
-              }
-            }
-          }
+      // FAST PATH: match the email inside Postgres instead of loading the
+      // entire form_records_15 table into Node and scanning every row. This
+      // mirrors EXACTLY the two shapes the old in-memory scan understood:
+      //   1. recordData.email                                (top-level string)
+      //   2. recordData[<fieldId>] = { type:'email', value } (form-field shape)
+      // Case-insensitive, LIMIT 1, single round-trip. The ::jsonb casts make
+      // this work whether the column is stored as json or jsonb.
+      const rows = await prisma.$queryRaw<Array<{
+        id: string
+        record_data: any
+        created_at: Date
+        updated_at: Date
+        employee_id: string | null
+        status: string
+      }>>`
+        SELECT id, record_data, created_at, updated_at, employee_id, status
+        FROM form_records_15
+        WHERE lower((record_data::jsonb)->>'email') = lower(${email})
+           OR EXISTS (
+             SELECT 1 FROM jsonb_each(record_data::jsonb) AS kv
+             WHERE kv.value->>'type' = 'email'
+               AND lower(kv.value->>'value') = lower(${email})
+           )
+        LIMIT 1
+      `
+
+      if (rows.length > 0) {
+        const r = rows[0]
+        return {
+          id: r.id,
+          recordData: r.record_data,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+          employee_id: r.employee_id,
+          status: r.status,
         }
       }
 
