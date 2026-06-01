@@ -22,6 +22,7 @@ import {
   formatDateLong,
   formatHM,
   formatTimeShort,
+  hhmmTo12h,
   mapsLink,
   workedMinutesFor,
 } from "./attendance-format";
@@ -163,7 +164,7 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
             <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <PunchPanel
                 title="Check-In"
-                time={record.checkInAt ? formatTimeShort(record.checkInAt) : record.checkInTime || "—"}
+                time={record.checkInAt ? formatTimeShort(record.checkInAt) : hhmmTo12h(record.checkInTime)}
                 photo={record.checkInPhoto}
                 lat={record.checkInLat}
                 lng={record.checkInLng}
@@ -180,7 +181,7 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
               />
               <PunchPanel
                 title="Check-Out"
-                time={record.checkOutAt ? formatTimeShort(record.checkOutAt) : record.checkOutTime || "—"}
+                time={record.checkOutAt ? formatTimeShort(record.checkOutAt) : hhmmTo12h(record.checkOutTime)}
                 photo={record.checkOutPhoto}
                 lat={record.checkOutLat}
                 lng={record.checkOutLng}

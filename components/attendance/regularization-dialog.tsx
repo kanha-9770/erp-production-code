@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save } from "lucide-react";
 import type { AttendanceRecord } from "./attendance-record-detail";
-import { formatDateLong } from "./attendance-format";
+import { formatDateLong, hhmmTo12h } from "./attendance-format";
 
 interface Props {
   open: boolean;
@@ -147,7 +147,7 @@ export function RegularizationDialog({
               />
               {record?.checkInTime && (
                 <div className="text-[11px] text-gray-500">
-                  Current: {record.checkInTime}
+                  Current: {hhmmTo12h(record.checkInTime)}
                 </div>
               )}
             </div>
@@ -161,7 +161,7 @@ export function RegularizationDialog({
               />
               {record?.checkOutTime && (
                 <div className="text-[11px] text-gray-500">
-                  Current: {record.checkOutTime}
+                  Current: {hhmmTo12h(record.checkOutTime)}
                 </div>
               )}
             </div>

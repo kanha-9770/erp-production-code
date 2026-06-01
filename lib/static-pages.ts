@@ -41,15 +41,16 @@ export interface StaticPage {
 }
 
 export type StaticPageGroup =
-  | 'Attendance'
-  | 'Leave Management'
-  | 'Payroll'
-  | 'HR & Employees'
-  | 'Employee Engagement'
+  // HR module sub-folders (sidebar order). "HR Core" is a parent folder that
+  // nests PayRoll / Attendance / Leave Management / Onboarding / Offboarding
+  // as sub-folders (see STATIC_PAGE_SUBGROUPS below).
+  | 'HR Core'
+  | 'Recruitment'
   | 'Performance'
+  | 'Employee Engagement'
+  | 'Asset & Admin'
   | 'Real Estate'
   | 'Inventory'
-  | 'Asset & Admin'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -59,21 +60,21 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/attendance',
     label: 'My Attendance',
-    group: 'Attendance',
+    group: 'HR Core',
     description: 'Punch in/out, see today’s status',
     icon: 'clock',
   },
   {
     path: '/attendance/regularizations',
     label: 'Attendance Regularizations',
-    group: 'Attendance',
+    group: 'HR Core',
     description: 'Submit / review missed-punch corrections',
     icon: 'edit',
   },
   {
     path: '/attendance/team',
     label: 'Team Attendance',
-    group: 'Attendance',
+    group: 'HR Core',
     description: 'See team attendance history',
     adminOnly: true,
     icon: 'users',
@@ -81,7 +82,7 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/settings/attendance-config',
     label: 'Attendance Configuration',
-    group: 'Attendance',
+    group: 'HR Core',
     description: 'Shift, geofence, IP whitelist, face capture',
     adminOnly: true,
     icon: 'settings',
@@ -91,21 +92,21 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/leave',
     label: 'My Leaves',
-    group: 'Leave Management',
+    group: 'HR Core',
     description: 'Apply, view balance, see history',
     icon: 'calendar',
   },
   {
     path: '/leave/approvals',
     label: 'Leave Approvals',
-    group: 'Leave Management',
+    group: 'HR Core',
     description: 'Inbox of pending leave requests',
     icon: 'inbox',
   },
   {
     path: '/leave/admin',
     label: 'Leave Allocations',
-    group: 'Leave Management',
+    group: 'HR Core',
     description: 'Set yearly balances per employee',
     adminOnly: true,
     icon: 'wallet',
@@ -113,7 +114,7 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/leave/config',
     label: 'Leave Configuration',
-    group: 'Leave Management',
+    group: 'HR Core',
     description: 'Notice days, consecutive caps, deduction & approval rules',
     adminOnly: true,
     icon: 'settings',
@@ -121,7 +122,7 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/settings/holidays',
     label: 'Holiday Calendar',
-    group: 'Leave Management',
+    group: 'HR Core',
     description: 'Manage org-wide holidays',
     adminOnly: true,
     icon: 'calendar-heart',
@@ -131,66 +132,67 @@ export const STATIC_PAGES: StaticPage[] = [
   {
     path: '/payroll',
     label: 'Payroll',
-    group: 'Payroll',
+    group: 'HR Core',
     description: 'View / run monthly payroll',
     icon: 'wallet',
   },
   {
     path: '/payroll/configure',
     label: 'Payroll Configuration',
-    group: 'Payroll',
+    group: 'HR Core',
     description: 'Form mappings, leave-type rules',
     adminOnly: true,
     icon: 'settings',
   },
 
-  // ── HR & Employees ─────────────────────────────────────────────────────
+  // ── Recruitment ────────────────────────────────────────────────────────
+  // Employee directory + the hiring pipeline (staffing → offer → appointment).
   {
     path: '/employee-master',
     label: 'Employee Master',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Directory of all employees — list, filters, inline edit',
     icon: 'users',
   },
   {
     path: '/hr/recruitment/staffing-plan',
     label: 'Staffing Plan',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Workforce planning — vacancies, profile and cost estimation',
     icon: 'briefcase',
   },
   {
     path: '/hr/recruitment/job-opening',
     label: 'Job Opening',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Live recruitment postings — publish jobs and track vacancies',
     icon: 'megaphone',
   },
   {
     path: '/hr/recruitment/job-application',
     label: 'Job Application',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Applicants for live job openings — screening and ratings',
     icon: 'user-plus',
   },
   {
     path: '/hr/recruitment/job-offer',
     label: 'Job Offer',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Formal offers to shortlisted candidates — terms and status',
     icon: 'file-signature',
   },
   {
     path: '/hr/recruitment/appointment-letter',
     label: 'Appointment Letter',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Appointment letters issued to accepted candidates',
     icon: 'scroll-text',
   },
   {
     path: '/hr/recruitment/employee-referral',
     label: 'Employee Referral',
-    group: 'HR & Employees',
+    group: 'Recruitment',
     description: 'Candidate referrals submitted by existing employees',
     icon: 'user-plus',
   },
@@ -676,18 +678,179 @@ export const STATIC_PAGES: StaticPage[] = [
 ];
 
 /**
+ * Optional 2nd-level bucketing of a group's pages into sub-folders.
+ *
+ * Most groups render flat (pages directly inside the group folder). A group
+ * listed here is instead split into the named sub-folders below — used by the
+ * sidebar to tame large modules. The Real Estate (MLM) module has ~40 pages,
+ * far too many for one flat folder, so it's bucketed into functional areas.
+ *
+ * `paths` are matched against `StaticPage.path` exactly and render in the
+ * order listed here. Any enabled page in the group that is NOT placed in a
+ * sub-folder is hoisted as a flat leaf by the sidebar, so adding a new page to
+ * the registry can never silently hide it — it just appears un-bucketed until
+ * someone slots it into a sub-folder here.
+ */
+export interface StaticPageSubgroup {
+  /** Sub-folder label shown in the sidebar. */
+  label: string;
+  /** Lucide icon NAME — resolved by the sidebar's icon switch. */
+  icon: string;
+  /** Page paths in this sub-folder, in display order. */
+  paths: string[];
+}
+
+export const STATIC_PAGE_SUBGROUPS: Partial<
+  Record<StaticPageGroup, StaticPageSubgroup[]>
+> = {
+  // HR Core is a parent folder: each entry below renders as an expandable
+  // sub-folder under it, opening to its own pages (e.g. Attendance → My
+  // Attendance, Regularizations, Team, Config). Every page whose group is
+  // 'HR Core' MUST appear in exactly one sub-folder here, otherwise the
+  // sidebar hoists it as a loose leaf under HR Core (the documented catch-all).
+  'HR Core': [
+    {
+      label: 'PayRoll',
+      icon: 'wallet',
+      paths: ['/payroll', '/payroll/configure'],
+    },
+    {
+      label: 'Attendance',
+      icon: 'clock',
+      paths: [
+        '/attendance',
+        '/attendance/regularizations',
+        '/attendance/team',
+        '/settings/attendance-config',
+      ],
+    },
+    {
+      label: 'Leave Management',
+      icon: 'calendar',
+      paths: [
+        '/leave',
+        '/leave/approvals',
+        '/leave/admin',
+        '/leave/config',
+        '/settings/holidays',
+      ],
+    },
+    {
+      label: 'Onboarding',
+      icon: 'user-plus',
+      paths: ['/hr/onboarding', '/hr/onboarding/templates'],
+    },
+    {
+      label: 'Offboarding',
+      icon: 'user-minus',
+      paths: ['/hr/offboarding'],
+    },
+  ],
+  'Real Estate': [
+    {
+      label: 'Dashboard',
+      icon: 'activity',
+      paths: [
+        '/real-estate',
+        '/real-estate/dashboards/sales',
+        '/real-estate/dashboards/network',
+      ],
+    },
+    {
+      label: 'Properties & Leads',
+      icon: 'building2',
+      paths: [
+        '/real-estate/properties',
+        '/real-estate/leads',
+        '/real-estate/viewings',
+      ],
+    },
+    {
+      label: 'Agents & Teams',
+      icon: 'users',
+      paths: [
+        '/real-estate/agents',
+        '/real-estate/agents/ranks',
+        '/real-estate/my-team',
+        '/real-estate/members/active',
+        '/real-estate/members/pending',
+        '/real-estate/members/kyc',
+        '/real-estate/admin/rank-promotions',
+        '/real-estate/admin/sub-admins',
+      ],
+    },
+    {
+      label: 'Hierarchies',
+      icon: 'network',
+      paths: [
+        '/real-estate/agents/tree',
+        '/real-estate/agents/hierarchy-list',
+        '/real-estate/agents/binary',
+        '/real-estate/agents/sponsor',
+      ],
+    },
+    {
+      label: 'Financial',
+      icon: 'wallet',
+      paths: [
+        '/real-estate/transactions',
+        '/real-estate/wallet',
+        '/real-estate/payouts',
+        '/real-estate/admin/wallets',
+        '/real-estate/admin/post-commissions',
+        '/real-estate/admin/payouts',
+        '/real-estate/admin/commission-rules',
+        '/real-estate/admin/fund-credit',
+      ],
+    },
+    {
+      label: 'Compliance',
+      icon: 'shield',
+      paths: [
+        '/real-estate/compliance',
+        '/real-estate/admin/compliance',
+        '/real-estate/admin/duplicates',
+      ],
+    },
+    {
+      label: 'Plan & Settings',
+      icon: 'settings',
+      paths: [
+        '/real-estate/admin/plan-designer',
+        '/real-estate/comp-plan',
+        '/real-estate/admin/settings',
+      ],
+    },
+    {
+      label: 'Reports',
+      icon: 'file-text',
+      paths: [
+        '/real-estate/reports',
+        '/real-estate/reports/joining',
+        '/real-estate/reports/member-income',
+        '/real-estate/reports/sales',
+        '/real-estate/reports/payouts',
+        '/real-estate/reports/top-earners',
+        '/real-estate/reports/fund-transfer',
+        '/real-estate/reports/point-history',
+      ],
+    },
+  ],
+};
+
+/**
  * Group order for display in the sidebar / matrix UIs. New groups append.
  */
 export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
-  'Attendance',
-  'Leave Management',
-  'Payroll',
-  'HR & Employees',
-  'Employee Engagement',
+  // HR module sub-folders, in the order they appear under "HR" in the sidebar.
+  'HR Core',
+  'Recruitment',
   'Performance',
+  'Employee Engagement',
+  'Asset & Admin',
+  // Other modules + always-on groups.
   'Real Estate',
   'Inventory',
-  'Asset & Admin',
   'Settings',
   'Profile',
   'AI & Tools',

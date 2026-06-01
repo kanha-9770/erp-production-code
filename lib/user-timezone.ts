@@ -100,7 +100,7 @@ function toDate(input: DateInput): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-/** "10:58" — hour:minute, 24-hour, in the user's timezone. */
+/** "10:58 AM" — hour:minute, 12-hour AM/PM, in the user's timezone. */
 export function formatTimeInUserZone(input: DateInput, fallback = "—"): string {
   const d = toDate(input);
   if (!d) return fallback;
@@ -109,14 +109,14 @@ export function formatTimeInUserZone(input: DateInput, fallback = "—"): string
       timeZone: getUserTimezone(),
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     }).format(d);
   } catch {
     return d.toLocaleTimeString();
   }
 }
 
-/** "10:58:42" — hour:minute:second, 24-hour, in the user's timezone. */
+/** "10:58:42 AM" — hour:minute:second, 12-hour AM/PM, in the user's timezone. */
 export function formatTimeWithSecondsInUserZone(
   input: DateInput,
   fallback = "—",
@@ -129,7 +129,7 @@ export function formatTimeWithSecondsInUserZone(
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-      hour12: false,
+      hour12: true,
     }).format(d);
   } catch {
     return d.toLocaleTimeString();
@@ -153,7 +153,7 @@ export function formatDateInUserZone(input: DateInput, fallback = "—"): string
   }
 }
 
-/** "Thu, 07 May 2026, 10:58" — long-form date + time, in the user's zone. */
+/** "Thu, 07 May 2026, 10:58 AM" — long-form date + time, in the user's zone. */
 export function formatDateTimeInUserZone(
   input: DateInput,
   fallback = "—",
@@ -169,7 +169,7 @@ export function formatDateTimeInUserZone(
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     }).format(d);
   } catch {
     return d.toLocaleString();

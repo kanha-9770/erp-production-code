@@ -12,6 +12,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { sendPushToUsers } from "@/lib/push/server";
 
 export type ExitTaskSeed = {
   title: string;
@@ -133,6 +134,13 @@ async function notifyExitInitiated(organizationId: string, checklist: any) {
       link: `/hr/offboarding/${checklist.id}`,
     })),
   });
+
+  void sendPushToUsers(recipientIds, {
+    title: `Offboarding initiated: ${empName}`,
+    body: `${checklist.tasks?.length ?? 0} exit tasks created. Assign owners.`,
+    url: `/hr/offboarding/${checklist.id}`,
+    tag: `offboarding:${checklist.id}`,
+  }).catch(() => {});
 }
 
 export async function recomputeExitChecklistProgress(
@@ -231,4 +239,11 @@ async function notifyExitCompleted(
       link: `/hr/offboarding/${checklistId}`,
     })),
   });
+
+  void sendPushToUsers(recipientIds, {
+    title: `Offboarding complete: ${empName}`,
+    body: `All exit tasks done. Employee deactivated and final settlement marked SETTLED.`,
+    url: `/hr/offboarding/${checklistId}`,
+    tag: `offboarding:${checklistId}`,
+  }).catch(() => {});
 }

@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sendPushToUsers } from "@/lib/push/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 
@@ -151,6 +152,12 @@ async function maybeNotifyOnStatusChange(args: {
           link: `/performance/appraisal/${appraisal.id}`,
         },
       });
+      void sendPushToUsers([appraisal.reviewerId], {
+        title: `Appraisal assigned: ${appraisal.employeeName}`,
+        body: `${appraisal.cycle} ${appraisal.year} cycle is ready for your review.`,
+        url: `/performance/appraisal/${appraisal.id}`,
+        tag: `appraisal:${appraisal.id}`,
+      }).catch(() => {});
     }
     if (appraisal.status === "COMPLETED" && appraisal.employeeId) {
       // Look up the employee's user to notify the subject.
@@ -170,6 +177,12 @@ async function maybeNotifyOnStatusChange(args: {
             link: `/performance/appraisal/${appraisal.id}`,
           },
         });
+        void sendPushToUsers([emp.userId], {
+          title: `Your appraisal is ready`,
+          body: `${appraisal.cycle} ${appraisal.year} review by ${appraisal.reviewerName} is complete.`,
+          url: `/performance/appraisal/${appraisal.id}`,
+          tag: `appraisal:${appraisal.id}`,
+        }).catch(() => {});
       }
     }
   } catch (err) {

@@ -167,7 +167,7 @@ export default function RealEstateDashboard() {
                 {viewingsQ.data.data.map((v) => {
                   const when = new Date(v.scheduledAt);
                   const day = when.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-                  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+                  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true });
                   return (
                     <li key={v.id} className="px-4 sm:px-5 py-3 hover:bg-muted/30 transition-colors">
                       <Link href={`/real-estate/leads/${v.leadId}`} className="flex items-center gap-3">

@@ -75,6 +75,7 @@ export async function PUT(request: NextRequest) {
         permissionId,
         moduleId = null,
         formId = null,
+        pagePath = null,
         granted,
         ...rest
       } = raw;
@@ -83,7 +84,7 @@ export async function PUT(request: NextRequest) {
         continue;
       }
 
-      const scopeKey = `${userId}|${formId || "module"}|${moduleId || "global"}`;
+      const scopeKey = `${userId}|${pagePath || formId || "module"}|${moduleId || "global"}`;
       if (!groupedUpdates[scopeKey]) {
         groupedUpdates[scopeKey] = [];
       }
@@ -93,6 +94,7 @@ export async function PUT(request: NextRequest) {
         permissionId,
         moduleId,
         formId,
+        pagePath,
         granted: Boolean(granted),
         reason: rest.reason || "Manual assignment",
         grantedBy: rest.grantedBy || null,

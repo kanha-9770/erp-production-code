@@ -88,14 +88,33 @@ if (process.env.NODE_ENV !== "production") {
 function buildClient(url: string, label: string): Redis {
   const options: RedisOptions = {
     lazyConnect: true,
-    maxRetriesPerRequest: 2,
-    connectTimeout: 5_000,
+    // Bound how long a single command waits while the connection is down before
+    // it rejects — keeps a sustained outage from hanging requests. Combined with
+    // the offline queue below, brief reconnect windows are absorbed silently.
+    maxRetriesPerRequest: 3,
+    connectTimeout: 10_000,
     enableReadyCheck: true,
-    enableOfflineQueue: false,
-    keepAlive: 10_000,
+    // RIDE OUT brief reconnects. Upstash closes idle TCP connections; with the
+    // offline queue ON, the first command after an idle gap is held for the
+    // ~tens-of-ms reconnect instead of being rejected with "Connection is
+    // closed". maxRetriesPerRequest still caps the wait during a real outage.
+    enableOfflineQueue: true,
+    // TCP keepalive probes keep the idle socket warm so Upstash is less likely
+    // to drop it in the first place.
+    keepAlive: 30_000,
+    // NEVER permanently give up. A long-running server must always try to
+    // recover — returning null here (the old behavior) put the client into a
+    // terminal "end" state after 10 failed retries, after which EVERY command
+    // failed with "Connection is closed" until the process was restarted.
     retryStrategy(times) {
-      if (times > 10) return null;
-      return Math.min(times * 200, 10_000);
+      return Math.min(times * 200, 5_000);
+    },
+    // Upstash/managed Redis can return connection-level errors (e.g. READONLY
+    // during a failover). Force a reconnect + resend rather than surfacing them.
+    reconnectOnError(err) {
+      const msg = err.message.toUpperCase();
+      if (msg.includes("READONLY") || msg.includes("ECONNRESET")) return 2; // 2 = reconnect AND resend the failed command
+      return false;
     },
   };
 
@@ -112,6 +131,19 @@ function buildClient(url: string, label: string): Redis {
     loggedError = false;
     console.log(`[redis:${label}] connected`);
   });
+
+  // Heartbeat: PING every 60s to keep the connection warm. Upstash (and most
+  // managed Redis) close connections idle for too long at the proxy layer,
+  // where TCP keepalive doesn't reset their timer — an application-level PING
+  // does. `.unref()` so this timer never keeps the Node process alive on its
+  // own. Failures are swallowed; the error/retry handlers above own recovery.
+  const heartbeat = setInterval(() => {
+    if (client.status === "ready") {
+      client.ping().catch(() => {});
+    }
+  }, 60_000);
+  heartbeat.unref?.();
+  client.on("end", () => clearInterval(heartbeat));
 
   return client;
 }

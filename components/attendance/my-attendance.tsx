@@ -40,7 +40,7 @@ const RegularizationDialog = dynamic(
   { ssr: false },
 );
 import {
-  formatHM, formatTimeShort, shiftDays, todayIso, workedMinutesFor,
+  formatHM, formatTimeShort, hhmmTo12h, shiftDays, todayIso, workedMinutesFor,
 } from "./attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
 import { setOrgTimezone, useOrgTimezone } from "@/lib/org-timezone";
@@ -307,27 +307,43 @@ export function MyAttendance() {
           );
           if (!reason) return badge;
           // Pair the badge with a small info icon so the tooltip is
-          // discoverable. The HoverCard opens on hover (desktop) and on
-          // tap (mobile), and we stop propagation so clicking the icon
-          // doesn't accidentally open the row detail panel underneath.
+          // discoverable. HoverCard only fires on pointer hover, which
+          // never happens on touch devices — so we share one trigger
+          // between a HoverCard (desktop hover) and a Popover (tap/click on
+          // mobile, and click on desktop). Both render the same reason, so
+          // whichever opens, the user sees it. stopPropagation keeps the tap
+          // from also opening the row detail panel underneath.
           return (
             <HoverCard openDelay={100} closeDelay={100}>
-              <HoverCardTrigger
-                asChild
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className="inline-flex items-center gap-1 cursor-help">
-                  {badge}
-                  <Info className="h-3 w-3 text-muted-foreground" />
-                </span>
-              </HoverCardTrigger>
-              <HoverCardContent
-                side="bottom"
-                align="start"
-                className="text-xs w-64 p-3 leading-snug"
-              >
-                {reason}
-              </HoverCardContent>
+              <Popover>
+                <HoverCardTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 cursor-pointer text-left"
+                    >
+                      {badge}
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                </HoverCardTrigger>
+                <HoverCardContent
+                  side="bottom"
+                  align="start"
+                  className="text-xs w-64 p-3 leading-snug"
+                >
+                  {reason}
+                </HoverCardContent>
+                <PopoverContent
+                  side="bottom"
+                  align="start"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-xs w-64 p-3 leading-snug"
+                >
+                  {reason}
+                </PopoverContent>
+              </Popover>
             </HoverCard>
           );
         },
@@ -341,11 +357,11 @@ export function MyAttendance() {
         // chosen timezone — the legacy `checkInTime` HH:mm string is in
         // server-local time (UTC in prod), which made My Attendance
         // disagree with Team Attendance for the same row.
-        copyValue: (r) => r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? ""),
+        copyValue: (r) => r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ? hhmmTo12h(r.checkInTime) : ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkInAt ? formatTimeShort(r.checkInAt) : (r.checkInTime ?? "—")}</span>
+            <span className="font-mono">{r.checkInAt ? formatTimeShort(r.checkInAt) : hhmmTo12h(r.checkInTime)}</span>
             {r.lateMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 +{r.lateMinutes}m
@@ -359,11 +375,11 @@ export function MyAttendance() {
         header: "Check-out",
         width: 130,
         sortKey: "checkOutAt",
-        copyValue: (r) => r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? ""),
+        copyValue: (r) => r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ? hhmmTo12h(r.checkOutTime) : ""),
         cell: (r) => (
           <div className="flex items-center gap-1.5 text-sm">
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="font-mono">{r.checkOutAt ? formatTimeShort(r.checkOutAt) : (r.checkOutTime ?? "—")}</span>
+            <span className="font-mono">{r.checkOutAt ? formatTimeShort(r.checkOutAt) : hhmmTo12h(r.checkOutTime)}</span>
             {r.earlyOutMinutes > 0 && (
               <span className="text-[10px] text-amber-700 font-semibold">
                 -{r.earlyOutMinutes}m

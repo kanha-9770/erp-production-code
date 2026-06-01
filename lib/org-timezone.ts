@@ -88,7 +88,7 @@ function toDate(input: DateInput): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-/** "10:58" — hour:minute, 24-hour, in the org's reportTimezone. */
+/** "10:58 AM" — hour:minute, 12-hour AM/PM, in the org's reportTimezone. */
 export function formatTimeInOrgZone(input: DateInput, fallback = "—"): string {
   const d = toDate(input);
   if (!d) return fallback;
@@ -97,7 +97,7 @@ export function formatTimeInOrgZone(input: DateInput, fallback = "—"): string 
       timeZone: getOrgTimezone(),
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     }).format(d);
   } catch {
     return d.toLocaleTimeString();

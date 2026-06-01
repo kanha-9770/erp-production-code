@@ -713,7 +713,7 @@ export function AttendanceFormDialog({
       if (result.success) {
         toast({
           title: "✓ Check-In Successful",
-          description: `Checked in at ${new Date(checkInTime).toLocaleTimeString()}`,
+          description: `Checked in at ${new Date(checkInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`,
         })
 
         await fetchTodayAttendance()
@@ -802,7 +802,7 @@ export function AttendanceFormDialog({
       if (result.success) {
         toast({
           title: "✓ Check-Out Successful",
-          description: `Checked out at ${new Date(checkOutTime).toLocaleTimeString()}. Working hours: ${workingHoursCalculated.toFixed(2)}h`,
+          description: `Checked out at ${new Date(checkOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}. Working hours: ${workingHoursCalculated.toFixed(2)}h`,
         })
 
         await fetchTodayAttendance()
