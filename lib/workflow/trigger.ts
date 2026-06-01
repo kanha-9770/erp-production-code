@@ -1133,6 +1133,66 @@ export type WorkflowTriggerKind =
   | "record-delete"
 
 /**
+ * Is "today" (in the org's timezone) a non-working day for the org — i.e. a
+ * weekly-off (from AttendanceConfiguration.weeklyOffDays) or a non-optional
+ * Holiday in the Holiday Calendar?
+ *
+ * Used to skip SCHEDULED workflow runs on holidays/weekends so daily reminders
+ * (check-in nudges, attendance prompts, etc.) don't fire when nobody works.
+ * Manual "Run now" / Test Run deliberately bypass this so admins can still
+ * test. Best-effort: any lookup failure returns false (don't skip) so a config
+ * glitch never silently swallows a legitimate run.
+ */
+async function isOrgNonWorkingDay(organizationId: string): Promise<{
+  skip: boolean
+  reason: string | null
+}> {
+  try {
+    const { orgTimezone, todayKey } = await import("@/lib/hr/attendance-service")
+    const cfg = await (prisma as any).attendanceConfiguration.findFirst({
+      where: { organizationId },
+      select: { reportTimezone: true, weeklyOffDays: true },
+    })
+    const tz = orgTimezone(cfg)
+    const today = todayKey(new Date(), tz) // YYYY-MM-DD in org tz
+
+    // Weekly-off check. weeklyOffDays is a JSON array of 0..6 (0 = Sunday).
+    // Derive today's weekday in the org tz without pulling another helper.
+    const weekdayName = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "short",
+    }).format(new Date())
+    const dowMap: Record<string, number> = {
+      Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+    }
+    const dow = dowMap[weekdayName]
+    const offDays: number[] = Array.isArray(cfg?.weeklyOffDays)
+      ? (cfg.weeklyOffDays as any[]).map((n) => Number(n)).filter((n) => !Number.isNaN(n))
+      : []
+    if (dow !== undefined && offDays.includes(dow)) {
+      return { skip: true, reason: `weekly-off (${weekdayName})` }
+    }
+
+    // Holiday Calendar check — non-optional holiday on today's date.
+    const holiday = await (prisma as any).holiday.findFirst({
+      where: { organizationId, date: today, isOptional: false },
+      select: { name: true },
+    })
+    if (holiday) {
+      return { skip: true, reason: `holiday (${holiday.name})` }
+    }
+
+    return { skip: false, reason: null }
+  } catch (err: any) {
+    console.warn(
+      `[workflow] isOrgNonWorkingDay(${organizationId}) failed — not skipping:`,
+      err?.message || err,
+    )
+    return { skip: false, reason: null }
+  }
+}
+
+/**
  * Execute every action on a single rule without a triggering record. Used by
  * the scheduler and the manual "Run now" admin endpoint. Always writes a
  * WorkflowExecution row capturing per-action results.
@@ -1176,6 +1236,24 @@ export async function runWorkflowRule(
   if (!rule.active) {
     console.log(`[workflow] runWorkflowRule(${ruleId}) — rule inactive, skipping`)
     return { success: true, status: "skipped", results, error: "rule inactive" }
+  }
+
+  // Holiday / weekly-off gate — only for scheduled (cron) runs. A daily
+  // reminder shouldn't fire on company holidays or weekly-offs. Manual
+  // "Run now" / Test Run bypass this on purpose so admins can still test.
+  if (trigger === "schedule") {
+    const nonWorking = await isOrgNonWorkingDay(rule.organizationId)
+    if (nonWorking.skip) {
+      console.log(
+        `[workflow] runWorkflowRule "${rule.name}" — skipped, today is a ${nonWorking.reason}`,
+      )
+      return {
+        success: true,
+        status: "skipped",
+        results,
+        error: `non-working day: ${nonWorking.reason}`,
+      }
+    }
   }
 
   const actions = normalizeActions(rule.instantActions)
