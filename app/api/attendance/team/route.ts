@@ -10,6 +10,7 @@ import {
 } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
+import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { userHasRouteAccess } from '@/lib/auth/route-meta';
 import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
 
@@ -138,12 +139,30 @@ export async function GET(request: NextRequest) {
       username: true,
       first_name: true,
       last_name: true,
+      // Role IDs per user so the late-half-day rule can be scoped per role /
+      // per user the same way Route Permissions are. Cheap join — we already
+      // page these users for the dashboard.
+      unitAssignments: { select: { roleId: true } },
       employee: {
         select: { id: true, employeeName: true, department: true, designation: true },
       },
     },
     orderBy: { email: 'asc' },
   });
+
+  // userId → role IDs, used to resolve the per-user late-half-day verdict below.
+  const roleIdsByUser = new Map<string, string[]>(
+    users.map((u) => [
+      u.id,
+      Array.from(
+        new Set(
+          ((u as any).unitAssignments ?? [])
+            .map((a: { roleId: string | null }) => a.roleId)
+            .filter((r: string | null): r is string => !!r),
+        ),
+      ),
+    ]),
+  );
 
   const userIds = users.map((u) => u.id);
   const records = await prisma.attendance.findMany({
@@ -162,6 +181,7 @@ export async function GET(request: NextRequest) {
   // is a separate decision that's only about *blocking* — visibility
   // shouldn't depend on it.
   const cfg = await getAttendanceConfig(authUser.organizationId);
+  const lateScope = lateHalfDayScopeOf(cfg);
   const fenceActive =
     cfg.geofenceLat != null &&
     cfg.geofenceLng != null &&
@@ -273,6 +293,11 @@ export async function GET(request: NextRequest) {
           {
             halfDayMinHours: cfg.halfDayMinHours,
             fullDayMinHours: cfg.fullDayMinHours,
+            lateHalfDay: lateHalfDayAppliesTo(
+              lateScope,
+              r.userId,
+              roleIdsByUser.get(r.userId) ?? [],
+            ),
           },
         );
         return {

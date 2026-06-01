@@ -48,6 +48,22 @@ function pickWeeklyOff(raw: unknown): number[] | undefined {
   return out;
 }
 
+// Generic string-id list picker (deduped, trimmed). Used for the
+// late-half-day role/user exception lists. Returns undefined when the field
+// is absent so a partial PUT doesn't clobber the stored value.
+function pickIdList(raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) return undefined;
+  return Array.from(
+    new Set(
+      raw
+        .filter((v): v is string => typeof v === 'string')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    ),
+  );
+}
+
 function pickIpList(raw: unknown): string[] | undefined {
   if (raw === undefined) return undefined;
   if (!Array.isArray(raw)) return undefined;
@@ -136,6 +152,17 @@ export async function PUT(request: NextRequest) {
   if (hd !== undefined) patch.halfDayMinHours = hd;
   const fd = pickOptionalNumber(body.fullDayMinHours);
   if (fd !== undefined) patch.fullDayMinHours = fd;
+  // Opt-in tardiness rule: when on, a late check-in makes the day half even
+  // with full hours. Default off = lateness is info only.
+  if (typeof body.lateHalfDay === 'boolean') patch.lateHalfDay = body.lateHalfDay;
+  // Late-half-day exception lists (Route-Permissions-style): roles the rule is
+  // off for, plus per-user force-off / force-on overrides.
+  const lhdExRoles = pickIdList(body.lateHalfDayExcludedRoleIds);
+  if (lhdExRoles !== undefined) patch.lateHalfDayExcludedRoleIds = lhdExRoles;
+  const lhdExUsers = pickIdList(body.lateHalfDayExcludedUserIds);
+  if (lhdExUsers !== undefined) patch.lateHalfDayExcludedUserIds = lhdExUsers;
+  const lhdInUsers = pickIdList(body.lateHalfDayIncludedUserIds);
+  if (lhdInUsers !== undefined) patch.lateHalfDayIncludedUserIds = lhdInUsers;
   const ot = pickOptionalNumber(body.overtimeAfterHours);
   if (ot !== undefined) patch.overtimeAfterHours = ot;
   const bm = pickOptionalNumber(body.breakMinutes);
@@ -159,6 +186,17 @@ export async function PUT(request: NextRequest) {
   }
   const wo = pickWeeklyOff(body.weeklyOffDays);
   if (wo !== undefined) patch.weeklyOffDays = wo;
+  // Check-in reminder lead time (minutes before each employee's shift start).
+  // Accept null / 0 to disable; otherwise clamp 1..180 in the config layer.
+  if ('checkInReminderMinutes' in body) {
+    const raw = (body as any).checkInReminderMinutes;
+    if (raw === null || raw === '' || raw === 0) {
+      patch.checkInReminderMinutes = null;
+    } else {
+      const n = pickOptionalNumber(raw);
+      if (n !== undefined) patch.checkInReminderMinutes = Math.max(1, Math.min(180, Math.floor(n)));
+    }
+  }
   const ac = pickOptionalNullableString(body.autoCheckoutAt);
   if (ac !== undefined) patch.autoCheckoutAt = ac;
   const gMode = pickGeofenceMode(body.geofenceMode);

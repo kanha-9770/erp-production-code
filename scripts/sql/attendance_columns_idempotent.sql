@@ -88,6 +88,10 @@ CREATE TABLE IF NOT EXISTS attendance_configurations (
 -- Idempotent column adds for tenants whose table was created before the
 -- newest fields landed. Each ALTER is a no-op when the column exists.
 ALTER TABLE attendance_configurations
+  ADD COLUMN IF NOT EXISTS late_half_day                BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS late_half_day_excluded_role_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS late_half_day_excluded_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS late_half_day_included_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS workflow_module_name         TEXT DEFAULT 'Attendance',
   ADD COLUMN IF NOT EXISTS enforce_employee_active      BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS min_punch_gap_seconds        INTEGER NOT NULL DEFAULT 5,

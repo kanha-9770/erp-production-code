@@ -29,6 +29,17 @@ export interface AttendanceConfig {
   graceMinutes: number;
   halfDayMinHours: number;
   fullDayMinHours: number;
+  /** When true, a check-in past shift+grace makes the day a half-day even
+   *  with full hours worked. When false (default), lateness is info only.
+   *  This is the MASTER switch; the *-RoleIds / *-UserIds lists below carve
+   *  out exceptions when it is on (see lib/hr/late-half-day.ts). */
+  lateHalfDay: boolean;
+  /** Roles the late-half-day rule is turned OFF for (everyone else covered). */
+  lateHalfDayExcludedRoleIds: string[];
+  /** Individual users forced OFF, overriding their role. */
+  lateHalfDayExcludedUserIds: string[];
+  /** Individual users forced ON, overriding an excluded role. */
+  lateHalfDayIncludedUserIds: string[];
   overtimeAfterHours: number;
   breakMinutes: number;
   /** # of half-day occurrences the company forgives each month. Beyond this
@@ -49,6 +60,9 @@ export interface AttendanceConfig {
    *  OT on. False keeps the legacy "anything past overtimeAfterHours" path. */
   overtimeRequiresOptIn: boolean;
   weeklyOffDays: number[]; // 0=Sun … 6=Sat
+  /** Minutes before each employee's own shift start to send a check-in
+   *  reminder push. null / 0 = reminders disabled. Admin/HR-configurable. */
+  checkInReminderMinutes: number | null;
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
   geofenceLat: number | null;
@@ -89,6 +103,10 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   graceMinutes: 15,
   halfDayMinHours: 4,
   fullDayMinHours: 8,
+  lateHalfDay: false,
+  lateHalfDayExcludedRoleIds: [],
+  lateHalfDayExcludedUserIds: [],
+  lateHalfDayIncludedUserIds: [],
   overtimeAfterHours: 9,
   breakMinutes: 60,
   monthlyHalfDayQuota: 0,
@@ -101,6 +119,7 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   overtimeMaxHoursPerDay: 4,
   overtimeRequiresOptIn: true,
   weeklyOffDays: [0],
+  checkInReminderMinutes: null,
   autoCheckoutAt: null,
   geofenceMode: 'OFF',
   geofenceLat: null,
@@ -212,6 +231,15 @@ function coerceSendHour(raw: unknown): number {
   return Math.min(23, Math.max(0, Math.floor(n)));
 }
 
+// Check-in reminder lead time, minutes. null/0/blank = disabled. Capped at
+// 180 min (3h) so a typo can't schedule an absurd lead time.
+function coerceReminderMinutes(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(180, Math.floor(n));
+}
+
 export async function getAttendanceConfig(
   organizationId: string | null,
 ): Promise<AttendanceConfig> {
@@ -249,6 +277,10 @@ async function loadAttendanceConfigFromDb(
       graceMinutes: row.graceMinutes ?? 15,
       halfDayMinHours: Number(row.halfDayMinHours ?? 4),
       fullDayMinHours: Number(row.fullDayMinHours ?? 8),
+      lateHalfDay: row.lateHalfDay === undefined ? false : !!row.lateHalfDay,
+      lateHalfDayExcludedRoleIds: coerceRoleIds(row.lateHalfDayExcludedRoleIds),
+      lateHalfDayExcludedUserIds: coerceRoleIds(row.lateHalfDayExcludedUserIds),
+      lateHalfDayIncludedUserIds: coerceRoleIds(row.lateHalfDayIncludedUserIds),
       overtimeAfterHours: Number(row.overtimeAfterHours ?? 9),
       breakMinutes: row.breakMinutes ?? 60,
       monthlyHalfDayQuota: Number.isFinite(row.monthlyHalfDayQuota)
@@ -269,6 +301,7 @@ async function loadAttendanceConfigFromDb(
       overtimeRequiresOptIn:
         row.overtimeRequiresOptIn === undefined ? true : !!row.overtimeRequiresOptIn,
       weeklyOffDays: coerceWeeklyOff(row.weeklyOffDays),
+      checkInReminderMinutes: coerceReminderMinutes(row.checkInReminderMinutes),
       autoCheckoutAt: row.autoCheckoutAt ?? null,
       geofenceMode: coerceGeofenceMode(row.geofenceMode),
       geofenceLat: row.geofenceLat ?? null,
@@ -326,6 +359,10 @@ export interface AttendanceConfigUpdate {
   graceMinutes?: number;
   halfDayMinHours?: number;
   fullDayMinHours?: number;
+  lateHalfDay?: boolean;
+  lateHalfDayExcludedRoleIds?: string[];
+  lateHalfDayExcludedUserIds?: string[];
+  lateHalfDayIncludedUserIds?: string[];
   overtimeAfterHours?: number;
   breakMinutes?: number;
   monthlyHalfDayQuota?: number;
@@ -335,6 +372,7 @@ export interface AttendanceConfigUpdate {
   overtimeMaxHoursPerDay?: number;
   overtimeRequiresOptIn?: boolean;
   weeklyOffDays?: number[];
+  checkInReminderMinutes?: number | null;
   autoCheckoutAt?: string | null;
   geofenceMode?: GeofenceMode;
   geofenceLat?: number | null;

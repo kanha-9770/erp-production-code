@@ -113,7 +113,8 @@ function effectiveStatus(record: AttendanceRecord): string {
   if (record.effectiveStatus) return record.effectiveStatus;
   if (record.checkedIn && !record.checkedOut) return "WORKING";
   if (record.isAutoCheckedOut) return "AUTO_CHECKOUT";
-  if (record.checkedOut && (record.lateMinutes ?? 0) > 0) return "HALF_DAY";
+  // A late check-in no longer implies half-day (org policy: full hours =
+  // full day); lateness is shown as info only.
   const s = (record.status ?? "").toUpperCase();
   if (s === "HALF") return "HALF_DAY";
   if (s) return s;

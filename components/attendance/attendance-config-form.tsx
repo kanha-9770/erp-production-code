@@ -46,6 +46,10 @@ interface AttendanceConfig {
   graceMinutes: number;
   halfDayMinHours: number;
   fullDayMinHours: number;
+  lateHalfDay: boolean;
+  lateHalfDayExcludedRoleIds: string[];
+  lateHalfDayExcludedUserIds: string[];
+  lateHalfDayIncludedUserIds: string[];
   overtimeAfterHours: number;
   breakMinutes: number;
   monthlyHalfDayQuota: number;
@@ -55,6 +59,7 @@ interface AttendanceConfig {
   overtimeMaxHoursPerDay: number;
   overtimeRequiresOptIn: boolean;
   weeklyOffDays: number[];
+  checkInReminderMinutes: number | null;
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
   geofenceLat: number | null;
@@ -95,6 +100,10 @@ export function AttendanceConfigForm() {
     graceMinutes: string;
     halfDayMinHours: string;
     fullDayMinHours: string;
+    lateHalfDay: boolean;
+    lateHalfDayExcludedRoleIds: string[];
+    lateHalfDayExcludedUserIds: string[];
+    lateHalfDayIncludedUserIds: string[];
     overtimeAfterHours: string;
     breakMinutes: string;
     monthlyHalfDayQuota: string;
@@ -104,6 +113,8 @@ export function AttendanceConfigForm() {
     overtimeMaxHoursPerDay: string;
     overtimeRequiresOptIn: boolean;
     weeklyOffDays: number[];
+    checkInReminderEnabled: boolean;
+    checkInReminderMinutes: string;
     autoCheckoutEnabled: boolean;
     autoCheckoutAt: string;
     geofenceMode: GeofenceMode;
@@ -135,6 +146,13 @@ export function AttendanceConfigForm() {
   // fresh enough since admins rarely add modules mid-session.
   const [modules, setModules] = useState<{ id: string; name: string; depth: number }[]>([]);
   const [roles, setRoles] = useState<{ id: string; name: string; isAdmin: boolean }[]>([]);
+  // Org users + their role IDs, loaded for the late-half-day exception picker
+  // (mirrors the Route Permissions page: roles expand to their users).
+  const [orgUsers, setOrgUsers] = useState<
+    { id: string; name: string; email: string; roleIds: string[] }[]
+  >([]);
+  // Which role rows are expanded in the late-half-day selector.
+  const [lhdExpandedRoles, setLhdExpandedRoles] = useState<Set<string>>(new Set());
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -156,6 +174,16 @@ export function AttendanceConfigForm() {
         graceMinutes: String(c.graceMinutes),
         halfDayMinHours: String(c.halfDayMinHours),
         fullDayMinHours: String(c.fullDayMinHours),
+        lateHalfDay: c.lateHalfDay ?? false,
+        lateHalfDayExcludedRoleIds: Array.isArray(c.lateHalfDayExcludedRoleIds)
+          ? [...c.lateHalfDayExcludedRoleIds]
+          : [],
+        lateHalfDayExcludedUserIds: Array.isArray(c.lateHalfDayExcludedUserIds)
+          ? [...c.lateHalfDayExcludedUserIds]
+          : [],
+        lateHalfDayIncludedUserIds: Array.isArray(c.lateHalfDayIncludedUserIds)
+          ? [...c.lateHalfDayIncludedUserIds]
+          : [],
         overtimeAfterHours: String(c.overtimeAfterHours),
         breakMinutes: String(c.breakMinutes),
         monthlyHalfDayQuota: String(c.monthlyHalfDayQuota ?? 0),
@@ -165,6 +193,8 @@ export function AttendanceConfigForm() {
         overtimeMaxHoursPerDay: String(c.overtimeMaxHoursPerDay ?? 4),
         overtimeRequiresOptIn: c.overtimeRequiresOptIn ?? true,
         weeklyOffDays: c.weeklyOffDays ?? [],
+        checkInReminderEnabled: !!c.checkInReminderMinutes,
+        checkInReminderMinutes: String(c.checkInReminderMinutes ?? 15),
         autoCheckoutEnabled: !!c.autoCheckoutAt,
         autoCheckoutAt: c.autoCheckoutAt ?? "23:00",
         geofenceMode: c.geofenceMode,
@@ -268,6 +298,43 @@ export function AttendanceConfigForm() {
     };
   }, []);
 
+  // Org users + their role IDs for the late-half-day exception picker. Same
+  // source the Route Permissions page uses (/api/admin/users → unitAssignments),
+  // so the two stay in sync with the org's roles.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/users", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.success || !Array.isArray(j.data)) return;
+        setOrgUsers(
+          (j.data as any[])
+            .map((u) => {
+              const name =
+                [u.first_name, u.last_name].filter(Boolean).join(" ").trim() ||
+                u.username ||
+                u.email ||
+                "(unnamed)";
+              const roleIds = Array.from(
+                new Set(
+                  (u.unitAssignments ?? u.unitsAndRoles ?? [])
+                    .map((a: any) => a?.role?.id ?? a?.roleId)
+                    .filter((x: any): x is string => typeof x === "string"),
+                ),
+              );
+              return { id: String(u.id), name, email: String(u.email ?? ""), roleIds };
+            })
+            .filter((u) => u.id),
+        );
+      })
+      .catch(() => {
+        // Users list stays empty; the role-level toggles still work.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const isDirty = useMemo(() => {
     if (!config || !form) return false;
     return (
@@ -276,6 +343,13 @@ export function AttendanceConfigForm() {
       Number(form.graceMinutes) !== config.graceMinutes ||
       Number(form.halfDayMinHours) !== config.halfDayMinHours ||
       Number(form.fullDayMinHours) !== config.fullDayMinHours ||
+      form.lateHalfDay !== !!config.lateHalfDay ||
+      JSON.stringify([...form.lateHalfDayExcludedRoleIds].sort()) !==
+        JSON.stringify([...(config.lateHalfDayExcludedRoleIds ?? [])].sort()) ||
+      JSON.stringify([...form.lateHalfDayExcludedUserIds].sort()) !==
+        JSON.stringify([...(config.lateHalfDayExcludedUserIds ?? [])].sort()) ||
+      JSON.stringify([...form.lateHalfDayIncludedUserIds].sort()) !==
+        JSON.stringify([...(config.lateHalfDayIncludedUserIds ?? [])].sort()) ||
       Number(form.overtimeAfterHours) !== config.overtimeAfterHours ||
       Number(form.breakMinutes) !== config.breakMinutes ||
       Number(form.monthlyHalfDayQuota) !== (config.monthlyHalfDayQuota ?? 0) ||
@@ -288,6 +362,10 @@ export function AttendanceConfigForm() {
       form.overtimeRequiresOptIn !== (config.overtimeRequiresOptIn ?? true) ||
       JSON.stringify([...form.weeklyOffDays].sort()) !==
         JSON.stringify([...(config.weeklyOffDays ?? [])].sort()) ||
+      form.checkInReminderEnabled !== !!config.checkInReminderMinutes ||
+      (form.checkInReminderEnabled
+        ? Number(form.checkInReminderMinutes) !== (config.checkInReminderMinutes ?? 0)
+        : false) ||
       form.autoCheckoutEnabled !== !!config.autoCheckoutAt ||
       (form.autoCheckoutEnabled
         ? form.autoCheckoutAt !== (config.autoCheckoutAt ?? "")
@@ -360,6 +438,85 @@ export function AttendanceConfigForm() {
       if (set.has(day)) set.delete(day);
       else set.add(day);
       return { ...prev, weeklyOffDays: Array.from(set).sort() };
+    });
+  }, []);
+
+  // ── Late-half-day exception helpers ──────────────────────────────────
+  // Master ON = rule applies to everyone EXCEPT excluded roles, with per-user
+  // overrides winning. These mirror the resolver in lib/hr/late-half-day.ts so
+  // the UI preview ("Applies / Excluded") matches what the server will decide.
+  const toggleLhdRole = useCallback((roleId: string) => {
+    setForm((prev) => {
+      if (!prev) return prev;
+      const set = new Set(prev.lateHalfDayExcludedRoleIds);
+      if (set.has(roleId)) set.delete(roleId);
+      else set.add(roleId);
+      return { ...prev, lateHalfDayExcludedRoleIds: Array.from(set) };
+    });
+  }, []);
+
+  // Resolve a single user's effective verdict from current form state, used to
+  // drive the per-user toggle's checked state and the row label.
+  const lhdUserApplies = useCallback(
+    (user: { id: string; roleIds: string[] }): boolean => {
+      if (!form) return false;
+      if (!form.lateHalfDay) return false;
+      if (form.lateHalfDayIncludedUserIds.includes(user.id)) return true;
+      if (form.lateHalfDayExcludedUserIds.includes(user.id)) return false;
+      if (
+        user.roleIds.some((r) => form.lateHalfDayExcludedRoleIds.includes(r))
+      )
+        return false;
+      return true;
+    },
+    [form],
+  );
+
+  // Flip one user. We compute their role-default and only store an override
+  // when the desired state differs from it — keeps the lists minimal and means
+  // a later role change still flows through for non-overridden users.
+  const toggleLhdUser = useCallback(
+    (user: { id: string; roleIds: string[] }) => {
+      setForm((prev) => {
+        if (!prev) return prev;
+        const inc = new Set(prev.lateHalfDayIncludedUserIds);
+        const exc = new Set(prev.lateHalfDayExcludedUserIds);
+        const roleDefault =
+          prev.lateHalfDay &&
+          !user.roleIds.some((r) =>
+            prev.lateHalfDayExcludedRoleIds.includes(r),
+          );
+        // Current effective state.
+        const current = inc.has(user.id)
+          ? true
+          : exc.has(user.id)
+            ? false
+            : roleDefault;
+        const desired = !current;
+        // Clear any existing override first.
+        inc.delete(user.id);
+        exc.delete(user.id);
+        // Only persist an override when it diverges from the role default.
+        if (desired !== roleDefault) {
+          if (desired) inc.add(user.id);
+          else exc.add(user.id);
+        }
+        return {
+          ...prev,
+          lateHalfDayIncludedUserIds: Array.from(inc),
+          lateHalfDayExcludedUserIds: Array.from(exc),
+        };
+      });
+    },
+    [],
+  );
+
+  const toggleLhdRoleExpanded = useCallback((roleId: string) => {
+    setLhdExpandedRoles((prev) => {
+      const next = new Set(prev);
+      if (next.has(roleId)) next.delete(roleId);
+      else next.add(roleId);
+      return next;
     });
   }, []);
 
@@ -465,6 +622,10 @@ export function AttendanceConfigForm() {
         graceMinutes,
         halfDayMinHours,
         fullDayMinHours,
+        lateHalfDay: form.lateHalfDay,
+        lateHalfDayExcludedRoleIds: form.lateHalfDayExcludedRoleIds,
+        lateHalfDayExcludedUserIds: form.lateHalfDayExcludedUserIds,
+        lateHalfDayIncludedUserIds: form.lateHalfDayIncludedUserIds,
         overtimeAfterHours,
         breakMinutes,
         monthlyHalfDayQuota,
@@ -474,6 +635,9 @@ export function AttendanceConfigForm() {
         overtimeMaxHoursPerDay,
         overtimeRequiresOptIn,
         weeklyOffDays: form.weeklyOffDays,
+        checkInReminderMinutes: form.checkInReminderEnabled
+          ? Math.max(1, Math.min(180, Math.floor(Number(form.checkInReminderMinutes) || 0)))
+          : null,
         autoCheckoutAt: form.autoCheckoutEnabled ? form.autoCheckoutAt : null,
         geofenceMode: form.geofenceMode,
         geofenceLat: form.geofenceLat ? Number(form.geofenceLat) : null,
@@ -694,6 +858,149 @@ export function AttendanceConfigForm() {
                 />
               </Field>
             </div>
+            {/* Late check-in → half-day: master toggle + per-role / per-user
+                scope. Mirrors the Route Permissions model — ON applies to
+                everyone, and the list below carves out exceptions. */}
+            <div className="mt-3 rounded-lg border">
+              <div className="flex items-center justify-between gap-3 p-3">
+                <div>
+                  <Label className="text-sm">Late check-in counts as half-day</Label>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    When ON, a check-in after shift + grace makes the day a
+                    half-day even if full hours were worked. When OFF, lateness
+                    is recorded for info only and the day is judged purely on
+                    hours.
+                  </p>
+                </div>
+                <Switch
+                  id="lateHalfDay"
+                  checked={form.lateHalfDay}
+                  onCheckedChange={(v) => updateForm("lateHalfDay", v)}
+                  className="shrink-0"
+                />
+              </div>
+
+              {form.lateHalfDay && (
+                <div className="border-t">
+                  <div className="px-3 py-2 text-[11px] text-gray-500 bg-gray-50">
+                    Applies to <strong>everyone</strong> by default. Turn a role
+                    off to exclude all its users, or expand a role to override
+                    individual users. A user toggle wins over their role.
+                  </div>
+                  {roles.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-gray-500">
+                      No roles found. Create roles under Settings → Profiles.
+                    </div>
+                  ) : (
+                    <ul className="divide-y">
+                      {roles.map((role) => {
+                        const roleExcluded =
+                          form.lateHalfDayExcludedRoleIds.includes(role.id);
+                        const roleApplies = !roleExcluded;
+                        const usersInRole = orgUsers.filter((u) =>
+                          u.roleIds.includes(role.id),
+                        );
+                        const expanded = lhdExpandedRoles.has(role.id);
+                        return (
+                          <li key={role.id}>
+                            <div className="flex items-center justify-between gap-2 px-3 py-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleLhdRoleExpanded(role.id)}
+                                className="flex items-center gap-2 min-w-0 text-left"
+                              >
+                                <span
+                                  className={cn(
+                                    "text-gray-400 text-xs transition-transform",
+                                    expanded && "rotate-90",
+                                  )}
+                                >
+                                  ▶
+                                </span>
+                                <span className="text-xs font-medium text-gray-900 truncate">
+                                  {role.name}
+                                  {role.isAdmin && (
+                                    <span className="ml-1 text-[10px] text-emerald-700 font-normal">
+                                      (admin)
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-[10px] text-gray-400">
+                                  {usersInRole.length}{" "}
+                                  {usersInRole.length === 1 ? "user" : "users"}
+                                </span>
+                              </button>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span
+                                  className={cn(
+                                    "text-[10px] px-1.5 py-0.5 rounded-full",
+                                    roleApplies
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-gray-100 text-gray-500",
+                                  )}
+                                >
+                                  {roleApplies ? "Applies" : "Excluded"}
+                                </span>
+                                <Switch
+                                  checked={roleApplies}
+                                  onCheckedChange={() => toggleLhdRole(role.id)}
+                                />
+                              </div>
+                            </div>
+                            {expanded && (
+                              <div className="bg-gray-50/60 border-t">
+                                {usersInRole.length === 0 ? (
+                                  <div className="px-8 py-2 text-[11px] text-gray-400">
+                                    No users in this role.
+                                  </div>
+                                ) : (
+                                  usersInRole.map((u) => {
+                                    const applies = lhdUserApplies(u);
+                                    const overridden =
+                                      form.lateHalfDayIncludedUserIds.includes(
+                                        u.id,
+                                      ) ||
+                                      form.lateHalfDayExcludedUserIds.includes(
+                                        u.id,
+                                      );
+                                    return (
+                                      <div
+                                        key={u.id}
+                                        className="flex items-center justify-between gap-2 px-8 py-1.5"
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="text-xs text-gray-800 truncate">
+                                            {u.name}
+                                            {overridden && (
+                                              <span className="ml-1 text-[10px] text-blue-600">
+                                                (override)
+                                              </span>
+                                            )}
+                                          </div>
+                                          {u.email && (
+                                            <div className="text-[10px] text-gray-400 truncate">
+                                              {u.email}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <Switch
+                                          checked={applies}
+                                          onCheckedChange={() => toggleLhdUser(u)}
+                                        />
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           </Section>
 
           <Section
@@ -879,6 +1186,54 @@ export function AttendanceConfigForm() {
                     }
                     className="w-full max-w-[200px]"
                   />
+                </Field>
+              )}
+            </div>
+          </Section>
+
+          <Section
+            title="Check-in reminder"
+            hint="Nudge employees before their shift starts"
+          >
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="checkInReminderEnabled"
+                  checked={form.checkInReminderEnabled}
+                  onCheckedChange={(v: boolean) =>
+                    updateForm("checkInReminderEnabled", v)
+                  }
+                />
+                <Label
+                  htmlFor="checkInReminderEnabled"
+                  className="cursor-pointer text-xs"
+                >
+                  Enable check-in reminder
+                </Label>
+              </div>
+              {form.checkInReminderEnabled && (
+                <Field label="Remind before shift start" htmlFor="checkInReminderMinutes">
+                  <Select
+                    value={form.checkInReminderMinutes}
+                    onValueChange={(v) => updateForm("checkInReminderMinutes", v)}
+                  >
+                    <SelectTrigger id="checkInReminderMinutes" className="w-full max-w-[200px]">
+                      <SelectValue placeholder="Select lead time" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5">5 minutes before</SelectItem>
+                      <SelectItem value="10">10 minutes before</SelectItem>
+                      <SelectItem value="15">15 minutes before</SelectItem>
+                      <SelectItem value="30">30 minutes before</SelectItem>
+                      <SelectItem value="45">45 minutes before</SelectItem>
+                      <SelectItem value="60">1 hour before</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Sent relative to each employee's own shift start (from
+                    Employee Master), so staff on different shifts are reminded
+                    at the right time. Skipped on holidays &amp; weekly-offs.
+                  </p>
                 </Field>
               )}
             </div>

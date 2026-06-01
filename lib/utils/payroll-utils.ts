@@ -16,6 +16,9 @@ import {
 } from './payroll-store';
 import { prisma } from '@/lib/prisma';
 import { effectiveStatusOf } from '@/lib/hr/attendance-status';
+import { getAttendanceConfig } from '@/lib/hr/attendance-config';
+import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
+import { getRolesForUsers } from '@/lib/database/roles';
 
 interface PayrollCalculation extends PayrollRecord {}
 
@@ -740,6 +743,7 @@ function classifyDay(
         {
           halfDayMinHours: policy.halfDayMinHours,
           fullDayMinHours: policy.fullDayMinHours,
+          lateHalfDay: policy.lateHalfDay,
         },
       );
 
@@ -1104,7 +1108,7 @@ export async function calculatePayroll(
   // `profileCtx` carries the per-employee profile map and the global fallback;
   // it replaces the old single getPayrollFormulas call so each employee can
   // resolve their own pay rules without re-querying inside the hot loop.
-  const [employees, attendance, leaves, holidays, policy, profileCtx, rules] = await Promise.all([
+  const [employees, attendance, leaves, holidays, policy, profileCtx, rules, attendanceCfg] = await Promise.all([
     getEmployeesFromDB(organizationId),
     getAttendanceFromDB(organizationId, targetMonth),
     getLeavesFromDB(organizationId, targetMonth),
@@ -1114,7 +1118,33 @@ export async function calculatePayroll(
     // dated next month won't apply to this month's run.
     getOrgProfilesContext(organizationId, targetMonth),
     loadLeaveRules(),
+    // Authoritative source for the late-half-day scope arrays (the payroll
+    // policy only carries the master boolean). Used to resolve the rule
+    // per employee below so pay matches the per-user attendance badges.
+    getAttendanceConfig(organizationId),
   ]);
+
+  // Resolve the late-half-day rule per employee BEFORE the sync classify loop.
+  // The master switch + role/user exception lists decide it; we batch-fetch
+  // every employee's roles in one query (no N+1), then store the resolved
+  // boolean per employeeId so the loop just looks it up.
+  const lateScope = lateHalfDayScopeOf(attendanceCfg);
+  const rolesByUser = lateScope.lateHalfDay
+    ? await getRolesForUsers(
+        organizationId,
+        employees.map((e) => e.userId).filter((u): u is string => !!u),
+      )
+    : new Map<string, string[]>();
+  const lateHalfDayByEmployeeId = new Map<string, boolean>(
+    employees.map((e) => [
+      e.employeeId,
+      lateHalfDayAppliesTo(
+        lateScope,
+        e.userId ?? null,
+        e.userId ? rolesByUser.get(e.userId) ?? [] : [],
+      ),
+    ]),
+  );
 
   // Index attendance and leaves by the same matchKey scheme employees expose,
   // so the per-employee join is a quick lookup instead of a full scan.
@@ -1155,13 +1185,21 @@ export async function calculatePayroll(
     }
 
     const resolution = resolveEmployeeFormulas(profileCtx, emp.employeeId);
+    // Per-employee policy: identical to the org policy except `lateHalfDay`,
+    // which is resolved from the role/user exception lists for THIS employee.
+    // classifyDay reads policy.lateHalfDay, so this is all that's needed —
+    // no signature changes downstream.
+    const empPolicy: PayrollPolicy = {
+      ...policy,
+      lateHalfDay: lateHalfDayByEmployeeId.get(emp.employeeId) ?? false,
+    };
     return calculateForEmployee(
       emp,
       empAtt,
       empLeaves,
       holidays,
       rules,
-      policy,
+      empPolicy,
       resolution.formulas,
       targetMonth,
       {

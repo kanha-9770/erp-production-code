@@ -182,10 +182,10 @@ export default function WorkflowExecutionsPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <Button
             variant="ghost"
             size="sm"
@@ -305,7 +305,7 @@ export default function WorkflowExecutionsPage() {
         <span className="text-xs text-muted-foreground mr-1">Filters:</span>
 
         <Select value={windowChoice} onValueChange={(v) => { setWindowChoice(v as WindowChoice); setPage(0) }}>
-          <SelectTrigger className="h-8 text-xs w-32">
+          <SelectTrigger className="h-8 text-xs w-full sm:w-32">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -317,7 +317,7 @@ export default function WorkflowExecutionsPage() {
         </Select>
 
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as ExecutionStatus); setPage(0) }}>
-          <SelectTrigger className="h-8 text-xs w-32">
+          <SelectTrigger className="h-8 text-xs w-full sm:w-32">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -330,7 +330,7 @@ export default function WorkflowExecutionsPage() {
         </Select>
 
         <Select value={triggerFilter} onValueChange={(v) => { setTriggerFilter(v as ExecutionTrigger); setPage(0) }}>
-          <SelectTrigger className="h-8 text-xs w-32">
+          <SelectTrigger className="h-8 text-xs w-full sm:w-32">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -344,7 +344,7 @@ export default function WorkflowExecutionsPage() {
         </Select>
 
         <Select value={ruleFilter} onValueChange={(v) => { setRuleFilter(v); setPage(0) }}>
-          <SelectTrigger className="h-8 text-xs w-56">
+          <SelectTrigger className="h-8 text-xs w-full sm:w-56">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -377,7 +377,7 @@ export default function WorkflowExecutionsPage() {
 
       {/* Log table */}
       <div className="bg-background border rounded-md overflow-hidden">
-        <Table>
+        <Table className="min-w-[720px]">
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               <TableHead className="w-8" />

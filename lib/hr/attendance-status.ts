@@ -21,8 +21,14 @@
  *      inflated 24h-cap hours.)
  *   3. Hours worked < halfDayMinHours        → ABSENT (no pay)
  *   4. Hours worked < fullDayMinHours        → HALF_DAY
- *   5. Late check-in past grace              → HALF_DAY (tardiness penalty)
+ *   5. Late past grace AND lateHalfDay on    → HALF_DAY (opt-in tardiness rule)
  *   6. Otherwise                             → PRESENT
+ *
+ * Step 5 is OPT-IN: the lateness→half-day downgrade only fires when the org
+ * enables `lateHalfDay` in Attendance Configuration. When off (default), a
+ * late check-in never costs half a day once full hours are met — lateMinutes
+ * is still computed and surfaced as info (and drives the "Late by Nm"
+ * tooltip), it just doesn't change the pay classification.
  *
  * Hours-worked thresholds come from AttendanceConfiguration so admins
  * can tune them per-org. Lateness is already shift-aware (the punch
@@ -69,6 +75,11 @@ export interface AttendanceStatusThresholds {
   halfDayMinHours: number;
   /** Worked hours required to count as full day. */
   fullDayMinHours: number;
+  /** When true, a check-in past shift+grace (lateMinutes > 0) downgrades an
+   *  otherwise-full day to HALF_DAY. When false/omitted, lateness is info
+   *  only and the day is judged purely on hours worked. Admin-configurable
+   *  via Attendance Configuration. */
+  lateHalfDay?: boolean;
 }
 
 export interface AttendanceStatusResult {
@@ -83,6 +94,7 @@ export interface AttendanceStatusResult {
 export const DEFAULT_STATUS_THRESHOLDS: AttendanceStatusThresholds = {
   halfDayMinHours: 4,
   fullDayMinHours: 8,
+  lateHalfDay: false,
 };
 
 function safeThresholds(
@@ -99,6 +111,7 @@ function safeThresholds(
       Number.isFinite(full) && full > 0
         ? full
         : DEFAULT_STATUS_THRESHOLDS.fullDayMinHours,
+    lateHalfDay: !!raw?.lateHalfDay,
   };
 }
 
@@ -158,11 +171,12 @@ export function computeEffectiveStatus(
     };
   }
 
-  // Cleared the full-day bar but was late past grace → tardiness still
-  // costs half a day. lateMinutes is already grace-adjusted by the punch
-  // service (a user arriving within the grace window has lateMinutes=0
-  // and reaches PRESENT below).
-  if (lateMinutes > 0) {
+  // Tardiness → half-day, but ONLY when the org opted in via the
+  // `lateHalfDay` toggle in Attendance Configuration. lateMinutes is already
+  // grace-adjusted by the punch service (arriving within grace → 0). When
+  // the toggle is off (default) we fall through to PRESENT and keep the
+  // lateness purely as info on the row — "full hours = full day".
+  if (t.lateHalfDay && lateMinutes > 0) {
     return {
       status: 'HALF_DAY',
       reason: `Late by ${lateMinutes}m past grace — half-day even with ${h}h worked.`,
@@ -173,6 +187,13 @@ export function computeEffectiveStatus(
     return {
       status: 'PRESENT',
       reason: `Auto-checkout, but OT was on. Paid for ${h}h (OT capped per org policy).`,
+    };
+  }
+
+  if (lateMinutes > 0) {
+    return {
+      status: 'PRESENT',
+      reason: `Late by ${lateMinutes}m past grace, but worked ${h}h — counts as a full day.`,
     };
   }
 

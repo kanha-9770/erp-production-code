@@ -70,6 +70,18 @@ export async function register() {
       } catch (err) {
         console.error("[instrumentation] workflow scheduler boot failed:", err)
       }
+
+      // Per-employee, shift-aware check-in reminder ticker. Gated by the same
+      // DISABLE_WORKFLOW_SCHEDULER env as the workflow scheduler so a multi-
+      // replica deploy fires reminders from a single replica only.
+      try {
+        const { startCheckInReminderScheduler } = await import(
+          "@/lib/hr/checkin-reminder"
+        )
+        startCheckInReminderScheduler()
+      } catch (err) {
+        console.error("[instrumentation] check-in reminder boot failed:", err)
+      }
     }
 
     // ── 4. Optional cache warmup ──────────────────────────────────────────

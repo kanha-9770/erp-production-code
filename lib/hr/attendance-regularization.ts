@@ -323,15 +323,23 @@ export async function approveRegularization(input: ReviewInput): Promise<void> {
   const expectedInMins = parseTimeToMinutes(shift.start) + cfg.graceMinutes;
   const expectedOutMins = parseTimeToMinutes(shift.end);
 
+  const tz = orgTimezone(cfg);
   let lateMinutes = 0;
   let earlyOutMinutes = 0;
   let overtimeMinutes = 0;
   if (requestedIn) {
-    const inMins = requestedIn.getHours() * 60 + requestedIn.getMinutes();
+    // Derive the wall-clock minute-of-day in the ORG timezone, the same way
+    // the live punch path does (recordPunch builds its grace boundary with
+    // dateAtHHmm in `tz`). Using requestedIn.getHours() here would read the
+    // *server's* local clock — on a UTC deployment that shifts the value by
+    // the tz offset, so an admin-corrected row earns a tardiness half-day
+    // that an identical wall-clock live punch would not. shift.start is a
+    // plain "HH:mm", so we must compare against the same org-tz wall clock.
+    const inMins = parseTimeToMinutes(formatHHmm(requestedIn, tz));
     lateMinutes = Math.max(0, inMins - expectedInMins);
   }
   if (requestedOut) {
-    const outMins = requestedOut.getHours() * 60 + requestedOut.getMinutes();
+    const outMins = parseTimeToMinutes(formatHHmm(requestedOut, tz));
     earlyOutMinutes = Math.max(0, expectedOutMins - outMins);
   }
   if (requestedIn && requestedOut) {

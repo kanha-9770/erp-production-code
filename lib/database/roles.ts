@@ -455,6 +455,40 @@ export async function getCallerRoleContext(
 }
 
 /**
+ * Batch variant of `getCallerRoleContext` for the payroll engine: given many
+ * user IDs, return a Map of userId → distinct role IDs in ONE query. Users
+ * with no assignments are simply absent from the map (callers treat that as
+ * an empty role list). Used to resolve the per-user late-half-day rule for a
+ * whole org's payroll run without an N+1 query per employee.
+ */
+export async function getRolesForUsers(
+  organizationId: string,
+  userIds: string[],
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const ids = Array.from(new Set(userIds.filter((u): u is string => !!u)));
+  if (ids.length === 0) return map;
+
+  const rows = await prisma.userUnitAssignment.findMany({
+    where: {
+      userId: { in: ids },
+      role: { organizationId },
+    },
+    select: { userId: true, roleId: true },
+  });
+
+  for (const r of rows) {
+    const list = map.get(r.userId);
+    if (list) {
+      if (!list.includes(r.roleId)) list.push(r.roleId);
+    } else {
+      map.set(r.userId, [r.roleId]);
+    }
+  }
+  return map;
+}
+
+/**
  * Walk the role tree downward from `rootRoleIds` and return every active
  * descendant role id (NOT including the roots themselves). Implemented as
  * a single PostgreSQL `WITH RECURSIVE` query so deep trees are one round

@@ -4,6 +4,8 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { distanceMeters, orgTimezone, todayKey } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
+import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
+import { getCallerRoleContext } from '@/lib/database/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +67,15 @@ export async function GET(request: NextRequest) {
   // `geofenceMode` — visibility is decoupled from enforcement so admins
   // can see out-of-radius punches even when mode is still OFF.
   const cfg = await getAttendanceConfig(authUser.organizationId);
+
+  // This view is always the caller's own attendance, so resolve their roles
+  // once and compute the late-half-day verdict for every row from it.
+  const roleCtx = await getCallerRoleContext(authUser.id, authUser.organizationId);
+  const lateHalfDayForUser = lateHalfDayAppliesTo(
+    lateHalfDayScopeOf(cfg),
+    authUser.id,
+    roleCtx.roleIds,
+  );
   const fenceActive =
     cfg.geofenceLat != null &&
     cfg.geofenceLng != null &&
@@ -193,6 +204,7 @@ export async function GET(request: NextRequest) {
           {
             halfDayMinHours: cfg.halfDayMinHours,
             fullDayMinHours: cfg.fullDayMinHours,
+            lateHalfDay: lateHalfDayForUser,
           },
         );
         return {

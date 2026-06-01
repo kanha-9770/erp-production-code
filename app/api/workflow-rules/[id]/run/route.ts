@@ -80,7 +80,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
   }
 
   try {
-    const result = await runWorkflowRule(ruleId, "manual")
+    // A cron-secret call is the external scheduler firing on a cadence, so it
+    // must respect the holiday / weekly-off skip. An admin "Run now" click is
+    // a manual test and bypasses that gate.
+    const result = await runWorkflowRule(ruleId, secretOk ? "schedule" : "manual")
     return NextResponse.json({
       success: result.success,
       status: result.status,
