@@ -1192,8 +1192,8 @@ export function AttendanceConfigForm() {
           </Section>
 
           <Section
-            title="Check-in reminder"
-            hint="Nudge employees before their shift starts"
+            title="Check-in / check-out reminder"
+            hint="Nudge employees before their shift starts and ends"
           >
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -1208,11 +1208,11 @@ export function AttendanceConfigForm() {
                   htmlFor="checkInReminderEnabled"
                   className="cursor-pointer text-xs"
                 >
-                  Enable check-in reminder
+                  Enable check-in &amp; check-out reminders
                 </Label>
               </div>
               {form.checkInReminderEnabled && (
-                <Field label="Remind before shift start" htmlFor="checkInReminderMinutes">
+                <Field label="Remind before shift start / end" htmlFor="checkInReminderMinutes">
                   <Select
                     value={form.checkInReminderMinutes}
                     onValueChange={(v) => updateForm("checkInReminderMinutes", v)}
@@ -1230,9 +1230,11 @@ export function AttendanceConfigForm() {
                     </SelectContent>
                   </Select>
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Sent relative to each employee's own shift start (from
-                    Employee Master), so staff on different shifts are reminded
-                    at the right time. Skipped on holidays &amp; weekly-offs.
+                    One reminder before each employee's shift <strong>start</strong>{" "}
+                    (to check in) and another before their shift{" "}
+                    <strong>end</strong> (to check out), using the same lead
+                    time. Timed to each person's own shift (from Employee
+                    Master), and skipped on holidays &amp; weekly-offs.
                   </p>
                 </Field>
               )}

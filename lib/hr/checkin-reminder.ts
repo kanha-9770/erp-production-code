@@ -179,58 +179,96 @@ async function runOrgReminders(organizationId: string): Promise<void> {
     const userId = emp.userId
     if (!userId) continue
 
-    const dedupKey = `${userId}:${dateKey}`
-    if (sentToday.has(dedupKey)) continue
-
-    // Per-employee shift start.
+    // Per-employee shift window (Employee Master inTime/outTime → org default).
     const shift = await getEffectiveShift(userId, cfg)
     const startMin = hhmmToMinutes(shift.start)
-    if (startMin == null) continue
+    const endMin = hhmmToMinutes(shift.end)
 
-    const remindAt = startMin - lead
-    // Fire only on the exact minute the reminder is due (the job ticks once a
-    // minute). A small ±0 window keeps it to a single send.
-    if (nowMin !== remindAt) continue
-
-    // Skip if already checked in today.
-    const row = await prisma.attendance.findFirst({
-      where: { userId, date: dateKey },
-      select: { checkedIn: true },
-    })
-    if (row?.checkedIn) {
-      sentToday.add(dedupKey) // nothing to remind; don't re-check this minute
-      continue
+    // ── Check-IN reminder: `lead` minutes before the shift START ──────────
+    if (startMin != null && nowMin === startMin - lead) {
+      const dedupKey = `in:${userId}:${dateKey}`
+      if (!sentToday.has(dedupKey)) {
+        const row = await prisma.attendance.findFirst({
+          where: { userId, date: dateKey },
+          select: { checkedIn: true },
+        })
+        // Only nudge people who haven't checked in yet.
+        if (row?.checkedIn) {
+          sentToday.add(dedupKey)
+        } else {
+          await sendReminder(
+            userId,
+            organizationId,
+            dateKey,
+            "in",
+            "⏰ Shift starting soon",
+            `Your shift starts at ${formatHHmm12(shift.start)}. Don't forget to check in!`,
+          )
+          sentToday.add(dedupKey)
+        }
+      }
     }
 
-    // Send the reminder (push + in-app bell row).
-    const title = "⏰ Shift starting soon"
-    const body = `Your shift starts at ${formatHHmm12(shift.start)}. Don't forget to check in!`
-    try {
-      await (prisma as any).notification.create({
-        data: {
-          recipientId: userId,
-          organizationId,
-          title,
-          body,
-          moduleName: "Attendance",
-          link: "/attendance",
-        },
-      })
-    } catch (err: any) {
-      console.warn(
-        `[checkin-reminder] in-app notification failed for ${userId}:`,
-        err?.message || err,
-      )
+    // ── Check-OUT reminder: `lead` minutes before the shift END ───────────
+    if (endMin != null && nowMin === endMin - lead) {
+      const dedupKey = `out:${userId}:${dateKey}`
+      if (!sentToday.has(dedupKey)) {
+        const row = await prisma.attendance.findFirst({
+          where: { userId, date: dateKey },
+          select: { checkedIn: true, checkedOut: true },
+        })
+        // Only remind people who ARE checked in but haven't checked out yet —
+        // no point reminding someone who never came in or already left.
+        if (row?.checkedIn && !row?.checkedOut) {
+          await sendReminder(
+            userId,
+            organizationId,
+            dateKey,
+            "out",
+            "🔔 Shift ending soon",
+            `Your shift ends at ${formatHHmm12(shift.end)}. Don't forget to check out!`,
+          )
+        }
+        sentToday.add(dedupKey)
+      }
     }
-    void sendPushToUsers([userId], {
-      title,
-      body,
-      url: "/attendance",
-      tag: `checkin-reminder:${dateKey}`,
-    }).catch(() => {})
-
-    sentToday.add(dedupKey)
   }
+}
+
+// Send one reminder via both channels (in-app bell row + phone push). `kind`
+// keeps the push tag distinct so a check-in and check-out reminder on the same
+// day don't collapse into one banner.
+async function sendReminder(
+  userId: string,
+  organizationId: string,
+  dateKey: string,
+  kind: "in" | "out",
+  title: string,
+  body: string,
+): Promise<void> {
+  try {
+    await (prisma as any).notification.create({
+      data: {
+        recipientId: userId,
+        organizationId,
+        title,
+        body,
+        moduleName: "Attendance",
+        link: "/attendance",
+      },
+    })
+  } catch (err: any) {
+    console.warn(
+      `[checkin-reminder] in-app notification failed for ${userId}:`,
+      err?.message || err,
+    )
+  }
+  void sendPushToUsers([userId], {
+    title,
+    body,
+    url: "/attendance",
+    tag: `${kind === "in" ? "checkin" : "checkout"}-reminder:${dateKey}`,
+  }).catch(() => {})
 }
 
 // "09:30" → "9:30 AM". Local copy so we don't pull the client-only helper.
