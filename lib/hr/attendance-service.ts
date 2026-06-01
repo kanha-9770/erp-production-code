@@ -1521,6 +1521,63 @@ function fmtHM(minutes: number): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
 
+// Whole minutes the actual check-in beat the expected shift start. 0 if the
+// punch was at/after expected, or if either timestamp is missing/invalid.
+function minutesEarly(
+  checkInAtIso: string | null,
+  expectedInAtIso: string | null,
+): number {
+  if (!checkInAtIso || !expectedInAtIso) return 0;
+  const actual = new Date(checkInAtIso).getTime();
+  const expected = new Date(expectedInAtIso).getTime();
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return 0;
+  const diffMin = Math.floor((expected - actual) / 60000);
+  return diffMin > 0 ? diffMin : 0;
+}
+
+// Count consecutive prior days (ending today) the user checked in on time —
+// i.e. with lateMinutes = 0. Today's row counts because the punch that
+// triggered this notification is already persisted. Walks back day-by-day and
+// stops at the first non-on-time day or a gap (no row). Capped at 60 days so a
+// long history can't make this loop unbounded. Best-effort: any error returns
+// 0 so a streak hiccup never blocks the notification.
+async function countOnTimeStreak(
+  userId: string,
+  todayDateKey: string,
+): Promise<number> {
+  try {
+    const rows = await prisma.attendance.findMany({
+      where: { userId, date: { lte: todayDateKey } },
+      orderBy: { date: 'desc' },
+      take: 60,
+      select: { date: true, checkedIn: true, lateMinutes: true },
+    });
+    let streak = 0;
+    let cursor = todayDateKey;
+    for (const r of rows) {
+      // Require contiguous dates ending at `cursor`. A gap (weekend/holiday
+      // with no row) ends the streak — we only count days actually worked.
+      if (r.date !== cursor) break;
+      if (!r.checkedIn || (r.lateMinutes ?? 0) > 0) break;
+      streak++;
+      cursor = shiftDateKey(cursor, -1);
+    }
+    return streak;
+  } catch {
+    return 0;
+  }
+}
+
+// YYYY-MM-DD ± n days, in plain calendar terms (UTC math on the date parts so
+// no tz drift). Used only for streak contiguity checks.
+function shiftDateKey(dateKey: string, deltaDays: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  if (!y || !m || !d) return dateKey;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
 // Build + insert the per-punch notification. Kept separate so the punch
 // path stays linear.
 async function createPunchNotification(args: {
@@ -1540,16 +1597,37 @@ async function createPunchNotification(args: {
   const fields: Array<{ label: string; apiName: string; value: string }> = [];
 
   if (type === 'IN') {
-    title = `Checked in at ${hhmmTo12h(status.checkInTime)}`;
+    const at = hhmmTo12h(status.checkInTime);
     if (status.lateMinutes > 0) {
-      body = `Late by ${fmtHM(status.lateMinutes)}.`;
+      // Keep it factual + lightly encouraging — never scolding.
+      title = `Checked in at ${at}`;
+      body = `Late by ${fmtHM(status.lateMinutes)} — let's make today count! 💼`;
       fields.push({
         label: 'Late by',
         apiName: 'lateMinutes',
         value: fmtHM(status.lateMinutes),
       });
     } else {
-      body = `On time. Shift ends at ${hhmmTo12h(status.shift.end)}.`;
+      // On-time or early. Detect "early" by comparing the actual punch to the
+      // expected shift-start; both are ISO timestamps on the status object.
+      const earlyMin = minutesEarly(status.checkInAt, status.expectedInAt);
+      if (earlyMin >= 1) {
+        title = `🚀 Early bird! Checked in at ${at}`;
+        body = `${fmtHM(earlyMin)} ahead of your shift — great start! Keep it up. 🌟`;
+      } else {
+        title = `🌟 Right on time! Checked in at ${at}`;
+        body = `Perfect timing. Have a productive day! 💪`;
+      }
+      // On-time streak — appended only when it's worth celebrating.
+      const streak = await countOnTimeStreak(userId, status.date);
+      if (streak >= 3) {
+        body += ` 🔥 ${streak}-day on-time streak!`;
+        fields.push({
+          label: 'On-time streak',
+          apiName: 'onTimeStreak',
+          value: `${streak} days`,
+        });
+      }
     }
     fields.push({
       label: 'Shift',
@@ -1557,7 +1635,7 @@ async function createPunchNotification(args: {
       value: `${hhmmTo12h(status.shift.start)} – ${hhmmTo12h(status.shift.end)}`,
     });
   } else {
-    title = `Checked out at ${hhmmTo12h(status.checkOutTime)}`;
+    const at = hhmmTo12h(status.checkOutTime);
     const parts: string[] = [];
     if (status.workedMinutes > 0) {
       parts.push(`Worked ${fmtHM(status.workedMinutes)}`);
@@ -1585,6 +1663,15 @@ async function createPunchNotification(args: {
     }
     if (status.isAutoCheckedOut) {
       parts.push('auto-closed by policy');
+    }
+    // Appreciation on checkout — emoji + tone scale with the day.
+    const fullDayMin = 8 * 60;
+    if (status.overtimeMinutes > 0) {
+      title = `🏆 Checked out at ${at} — extra mile today!`;
+    } else if (status.workedMinutes >= fullDayMin && status.earlyOutMinutes === 0) {
+      title = `💪 Checked out at ${at} — solid full day!`;
+    } else {
+      title = `Checked out at ${at}`;
     }
     body = parts.length > 0 ? parts.join(', ') + '.' : 'Working time recorded.';
   }

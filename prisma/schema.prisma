@@ -2398,6 +2398,12 @@ model AttendanceConfiguration {
   // Working week: 0 = Sun … 6 = Sat. Listed days are WEEKLY-OFF.
   weeklyOffDays Json @default("[0]") @map("weekly_off_days")
 
+  // Check-in reminder lead time, in minutes BEFORE each employee's own shift
+  // start (resolved via getEffectiveShift → Employee Master inTime, falling
+  // back to the org default). A scheduled job nudges anyone who hasn't punched
+  // in yet. null / 0 = reminders disabled. Admin/HR-configurable.
+  checkInReminderMinutes Int? @map("check_in_reminder_minutes")
+
   // Auto-checkout (HH:mm). When the nightly worker fires, anyone still
   // checked in is auto-checked-out at this wall time. Empty = disabled.
   autoCheckoutAt String? @map("auto_checkout_at")
