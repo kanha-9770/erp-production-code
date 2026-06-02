@@ -2,24 +2,29 @@
 
 /**
  * RoleStaticPagesMatrix — single-role view of every static page with a
- * tri-state cell (Default / Grant / Deny).
+ * GRANULAR permission grid (View / Create / Edit / Delete / Import / Export /
+ * Print / Approval), exactly like the form/module permission matrix.
  *
- * Used inside the "By Role" tab on /settings/permission/static-page-permission
- * so an admin who picks a role from the left rail immediately sees ALL static
- * pages and can grant / deny them in one save.
+ * Used inside the "By Role" tab on /settings/permission/static-page-permission.
+ * Pick a role on the left rail → see every static page grouped by area, with a
+ * checkbox per action.
  *
  * Persistence
  * -----------
- * Same RoutePermission + RouteRoleAccess plumbing as StaticPagesRolesMatrix:
- *   - Each path gets a RoutePermission row (auto-created on first save).
- *   - Per-role grant/deny lives on RouteRoleAccess (granted: true|false).
- *   - "Default" leaves the row alone — open-by-default semantics in
- *     resolveRouteAccess decide.
- *   - After save, refreshAuthMeta is called so the caller's sidebar reflects
- *     the change without a hard reload.
+ * Reuses the SAME RolePermission engine as form modules. Each cell is a row in
+ * `role_permissions` scoped by `pagePath` (the page's registry path) instead of
+ * moduleId/formId:
+ *   - GET  /api/role-permissions?roleId=…&scope=page  → existing page grants.
+ *   - GET  /api/permissions?scope=page                → the 8 page actions
+ *                                                        (with real permission ids).
+ *   - PUT  /api/role-permissions                       → [{ roleId, permissionId,
+ *                                                          pagePath, granted }]
+ * The sidebar gates each static page on the VIEW action via the same
+ * usePermissions resolver that gates modules, so granting VIEW here makes the
+ * page appear in that role's sidebar.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Card,
   CardContent,
@@ -30,6 +35,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Collapsible,
   CollapsibleContent,
@@ -37,64 +43,31 @@ import {
 } from "@/components/ui/collapsible"
 import {
   Globe,
-  Info,
   Lock,
   RefreshCw,
   Save,
   Search,
-  ShieldAlert,
-  ShieldCheck,
   Undo2,
   ChevronDown,
   ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import {
-  useCreateRoutePermissionMutation,
-  useGetRoutePermissionsQuery,
-  useRefreshAuthMetaMutation,
-  useUpdateRouteAccessMutation,
-} from "@/lib/api/route-permissions"
 import { useToast } from "@/hooks/use-toast"
 import {
-  STATIC_PAGES,
-  STATIC_PAGE_GROUP_ORDER,
   staticPagesByGroup,
   type StaticPage,
   type StaticPageGroup,
 } from "@/lib/static-pages"
 
-type AccessState = "granted" | "denied" | "inherit"
-
-const STATE_META: Record<AccessState, {
-  short: string
-  badgeClass: string
-  Icon: React.ElementType
-}> = {
-  granted: {
-    short: "Grant",
-    badgeClass:
-      "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400",
-    Icon: ShieldCheck,
-  },
-  denied: {
-    short: "Deny",
-    badgeClass:
-      "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-900/30 dark:text-rose-400",
-    Icon: ShieldAlert,
-  },
-  inherit: {
-    short: "Default",
-    badgeClass:
-      "bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800/40 dark:text-slate-400",
-    Icon: Globe,
-  },
+interface PagePermission {
+  id: string
+  name: string
 }
 
-const CYCLE_NEXT: Record<AccessState, AccessState> = {
-  inherit: "granted",
-  granted: "denied",
-  denied: "inherit",
+interface RolePagePermissionRow {
+  permissionId: string
+  pagePath: string | null
+  granted: boolean
 }
 
 interface RoleStaticPagesMatrixProps {
@@ -102,100 +75,96 @@ interface RoleStaticPagesMatrixProps {
   roleName: string
 }
 
+// key = `${pagePath}::${permissionId}`
+const cellKey = (path: string, permId: string) => `${path}::${permId}`
+
 export function RoleStaticPagesMatrix({
   roleId,
   roleName,
 }: RoleStaticPagesMatrixProps) {
   const { toast } = useToast()
-  const {
-    data: routesResp,
-    isLoading: routesLoading,
-    refetch: refetchRoutes,
-  } = useGetRoutePermissionsQuery()
-  const [createRoute] = useCreateRoutePermissionMutation()
-  const [updateAccess] = useUpdateRouteAccessMutation()
-  const [refreshMeta] = useRefreshAuthMetaMutation()
 
-  const routes = routesResp?.data ?? []
-  const routeByPath = useMemo(() => {
-    const m = new Map<string, (typeof routes)[number]>()
-    for (const r of routes) m.set(r.pattern, r)
-    return m
-  }, [routes])
-
-  const savedState = (path: string): AccessState => {
-    const route = routeByPath.get(path)
-    if (!route) return "inherit"
-    const ra = route.roleAccess.find((x) => x.roleId === roleId)
-    if (!ra) return "inherit"
-    return ra.granted ? "granted" : "denied"
-  }
-
-  const [pending, setPending] = useState<Map<string, AccessState>>(new Map())
+  const [permissions, setPermissions] = useState<PagePermission[]>([])
+  const [serverGranted, setServerGranted] = useState<Set<string>>(new Set())
+  const [pending, setPending] = useState<Map<string, boolean>>(new Map())
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState("")
   const [collapsed, setCollapsed] = useState<Set<StaticPageGroup>>(new Set())
 
-  // Reset pending when role switches so changes from a previous role don't
-  // leak into the newly selected one.
+  // ── Load the 8 page actions once (stable across roles). ──────────────────
   useEffect(() => {
+    let cancelled = false
+    fetch("/api/permissions?scope=page", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.success) return
+        setPermissions((j.data ?? []).map((p: any) => ({ id: p.id, name: p.name })))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // ── Load this role's existing page grants whenever the role changes. ─────
+  const loadRoleGrants = useCallback(() => {
+    let cancelled = false
+    setLoading(true)
     setPending(new Map())
+    fetch(`/api/role-permissions?roleId=${encodeURIComponent(roleId)}&scope=page`, {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled) return
+        const rows: RolePagePermissionRow[] = j?.success ? j.data ?? [] : []
+        const next = new Set<string>()
+        for (const row of rows) {
+          if (row.granted && row.pagePath) {
+            next.add(cellKey(row.pagePath, row.permissionId))
+          }
+        }
+        setServerGranted(next)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [roleId])
 
-  // If a refetch caught us up, prune pending entries that now match server.
   useEffect(() => {
-    setPending((prev) => {
-      const next = new Map(prev)
-      for (const [p, state] of Array.from(next)) {
-        if (savedState(p) === state) next.delete(p)
-      }
-      return next
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routes])
+    const cleanup = loadRoleGrants()
+    return cleanup
+  }, [loadRoleGrants])
 
-  const stateFor = (path: string): AccessState =>
-    pending.has(path) ? pending.get(path)! : savedState(path)
+  // ── Cell state helpers ────────────────────────────────────────────────────
+  const isGranted = useCallback(
+    (path: string, permId: string): boolean => {
+      const key = cellKey(path, permId)
+      if (pending.has(key)) return pending.get(key)!
+      return serverGranted.has(key)
+    },
+    [pending, serverGranted],
+  )
 
-  const setStateForPath = (path: string, next: AccessState) => {
-    setPending((prev) => {
-      const m = new Map(prev)
-      const baseline = savedState(path)
-      if (next === baseline) m.delete(path)
-      else m.set(path, next)
-      return m
-    })
-  }
-
-  const cycle = (path: string) => setStateForPath(path, CYCLE_NEXT[stateFor(path)])
-
-  const setGroup = (g: StaticPageGroup, next: AccessState) => {
-    setPending((prev) => {
-      const m = new Map(prev)
-      for (const p of STATIC_PAGES.filter((x) => x.group === g)) {
-        const baseline = savedState(p.path)
-        if (next === baseline) m.delete(p.path)
-        else m.set(p.path, next)
-      }
-      return m
-    })
-  }
-
-  const setAll = (next: AccessState) => {
-    setPending((prev) => {
-      const m = new Map(prev)
-      for (const p of STATIC_PAGES) {
-        const baseline = savedState(p.path)
-        if (next === baseline) m.delete(p.path)
-        else m.set(p.path, next)
-      }
-      return m
-    })
-  }
-
-  const dirtyCount = pending.size
-  const isDirty = dirtyCount > 0
-  const reset = () => setPending(new Map())
+  const setCell = useCallback(
+    (path: string, permId: string, next: boolean) => {
+      const key = cellKey(path, permId)
+      setPending((prev) => {
+        const m = new Map(prev)
+        const baseline = serverGranted.has(key)
+        if (next === baseline) m.delete(key)
+        else m.set(key, next)
+        return m
+      })
+    },
+    [serverGranted],
+  )
 
   const groups = useMemo(() => staticPagesByGroup(), [])
   const filteredGroups = useMemo(() => {
@@ -206,64 +175,83 @@ export function RoleStaticPagesMatrix({
         ...g,
         pages: g.pages.filter(
           (p) =>
-            p.label.toLowerCase().includes(q) ||
-            p.path.toLowerCase().includes(q),
+            p.label.toLowerCase().includes(q) || p.path.toLowerCase().includes(q),
         ),
       }))
       .filter((g) => g.pages.length > 0)
   }, [groups, search])
 
+  // Grant/clear one action for every page in a group (column bulk action).
+  const setColumnForGroup = (pages: StaticPage[], permId: string, next: boolean) => {
+    setPending((prev) => {
+      const m = new Map(prev)
+      for (const p of pages) {
+        const key = cellKey(p.path, permId)
+        const baseline = serverGranted.has(key)
+        if (next === baseline) m.delete(key)
+        else m.set(key, next)
+      }
+      return m
+    })
+  }
+
+  // Grant/clear every action for one page (row bulk action).
+  const setRowForPage = (path: string, next: boolean) => {
+    setPending((prev) => {
+      const m = new Map(prev)
+      for (const perm of permissions) {
+        const key = cellKey(path, perm.id)
+        const baseline = serverGranted.has(key)
+        if (next === baseline) m.delete(key)
+        else m.set(key, next)
+      }
+      return m
+    })
+  }
+
+  const dirtyCount = pending.size
+  const isDirty = dirtyCount > 0
+  const reset = () => setPending(new Map())
+
   const save = async () => {
     if (!isDirty || saving) return
     setSaving(true)
     try {
-      // Walk pending in the same order pages appear in the registry so a
-      // partial-failure trail is predictable.
-      const orderedPaths = Array.from(pending.keys()).sort((a, b) => {
-        const ga = STATIC_PAGES.find((p) => p.path === a)?.group
-        const gb = STATIC_PAGES.find((p) => p.path === b)?.group
-        const oa = ga ? STATIC_PAGE_GROUP_ORDER.indexOf(ga) : 99
-        const ob = gb ? STATIC_PAGE_GROUP_ORDER.indexOf(gb) : 99
-        if (oa !== ob) return oa - ob
-        return a.localeCompare(b)
+      const updates = Array.from(pending.entries()).map(([key, granted]) => {
+        const sep = key.lastIndexOf("::")
+        const pagePath = key.slice(0, sep)
+        const permissionId = key.slice(sep + 2)
+        return {
+          roleId,
+          permissionId,
+          pagePath,
+          moduleId: null,
+          formId: null,
+          granted,
+          canDelegate: false,
+        }
       })
 
-      let savedRows = 0
-      for (const path of orderedPaths) {
-        const next = pending.get(path)!
-        if (next === "inherit") continue // API has no delete; inherit is a no-op for already-absent rows
-        let routeId = routeByPath.get(path)?.id
-        if (!routeId) {
-          const meta = STATIC_PAGES.find((p) => p.path === path)
-          const created = await createRoute({
-            pattern: path,
-            description: meta?.label ?? path,
-          }).unwrap()
-          routeId = created.data.id
-        }
-        await updateAccess({
-          routeId: routeId!,
-          roleUpdates: [{ roleId, granted: next === "granted" }],
-        }).unwrap()
-        savedRows++
+      const res = await fetch("/api/role-permissions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(updates),
+      })
+      const j = await res.json()
+      if (!res.ok || !j?.success) {
+        throw new Error(j?.error || j?.details || "Save failed")
       }
-
-      try {
-        await refreshMeta().unwrap()
-      } catch {
-        /* non-fatal */
-      }
-      await refetchRoutes()
 
       toast({
         title: "Permissions saved",
-        description: `${savedRows} static page${savedRows === 1 ? "" : "s"} updated for ${roleName}.`,
+        description: `${updates.length} change${updates.length === 1 ? "" : "s"} applied for ${roleName}.`,
       })
-      setPending(new Map())
+      loadRoleGrants()
     } catch (e: any) {
       toast({
         title: "Save failed",
-        description: e?.data?.error ?? e?.message ?? "Try again",
+        description: e?.message ?? "Try again",
         variant: "destructive",
       })
     } finally {
@@ -278,23 +266,15 @@ export function RoleStaticPagesMatrix({
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <Globe className="h-4 w-4 text-purple-600" />
-              Static page access — {roleName}
-              <span
-                title="Click a cell to cycle Default → Grant → Deny. Once any role is granted, the page is whitelist-only."
-                className="inline-flex items-center text-muted-foreground hover:text-foreground cursor-help"
-              >
-                <Info className="h-4 w-4" />
-              </span>
+              Static page permissions — {roleName}
             </CardTitle>
             <CardDescription className="text-xs mt-1">
-              Grant or deny this role access to each static page. Use the group
-              buttons or "All" to apply changes in bulk.
+              Grant this role granular actions on each static page. Granting{" "}
+              <strong>View</strong> makes the page appear in the sidebar, just
+              like a module.
             </CardDescription>
           </div>
           <div className="flex gap-2 shrink-0 flex-wrap">
-            <BulkButton onClick={() => setAll("granted")} label="Grant all" tone="grant" />
-            <BulkButton onClick={() => setAll("denied")} label="Deny all" tone="deny" />
-            <BulkButton onClick={() => setAll("inherit")} label="Reset all" tone="neutral" />
             <Button variant="outline" size="sm" onClick={reset} disabled={!isDirty || saving}>
               <Undo2 className="h-4 w-4 mr-1" />
               Undo
@@ -322,7 +302,7 @@ export function RoleStaticPagesMatrix({
           />
         </div>
 
-        {routesLoading ? (
+        {loading || permissions.length === 0 ? (
           <div className="space-y-2">
             {[0, 1, 2, 3, 4].map((i) => (
               <div key={i} className="h-10 bg-muted/40 rounded animate-pulse" />
@@ -336,9 +316,6 @@ export function RoleStaticPagesMatrix({
           <div className="space-y-2">
             {filteredGroups.map((g) => {
               const isCollapsed = collapsed.has(g.group)
-              const grantedCount = g.pages.filter((p) => stateFor(p.path) === "granted").length
-              const deniedCount = g.pages.filter((p) => stateFor(p.path) === "denied").length
-
               return (
                 <Collapsible
                   key={g.group}
@@ -364,58 +341,101 @@ export function RoleStaticPagesMatrix({
                         <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                           {g.pages.length}
                         </Badge>
-                        {grantedCount > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="h-5 px-1.5 text-[10px] border-emerald-200 bg-emerald-50 text-emerald-800"
-                          >
-                            {grantedCount} grant
-                          </Badge>
-                        )}
-                        {deniedCount > 0 && (
-                          <Badge
-                            variant="outline"
-                            className="h-5 px-1.5 text-[10px] border-rose-200 bg-rose-50 text-rose-800"
-                          >
-                            {deniedCount} deny
-                          </Badge>
-                        )}
                       </CollapsibleTrigger>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <BulkButton
-                          onClick={() => setGroup(g.group, "granted")}
-                          label="Grant group"
-                          tone="grant"
-                          compact
-                        />
-                        <BulkButton
-                          onClick={() => setGroup(g.group, "denied")}
-                          label="Deny group"
-                          tone="deny"
-                          compact
-                        />
-                        <BulkButton
-                          onClick={() => setGroup(g.group, "inherit")}
-                          label="Reset"
-                          tone="neutral"
-                          compact
-                        />
-                      </div>
                     </div>
 
                     <CollapsibleContent>
-                      <ul className="divide-y">
-                        {g.pages.map((p) => (
-                          <PageRow
-                            key={p.path}
-                            page={p}
-                            state={stateFor(p.path)}
-                            isPending={pending.has(p.path)}
-                            onCycle={() => cycle(p.path)}
-                            onSet={(s) => setStateForPath(p.path, s)}
-                          />
-                        ))}
-                      </ul>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[680px] text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/10">
+                              <th className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-xs font-semibold text-muted-foreground">
+                                Page
+                              </th>
+                              {permissions.map((perm) => (
+                                <th
+                                  key={perm.id}
+                                  className="px-1 py-2 text-center text-[10px] font-semibold uppercase tracking-tight text-muted-foreground"
+                                >
+                                  <button
+                                    type="button"
+                                    className="hover:text-foreground"
+                                    title={`Toggle ${perm.name} for all pages in ${g.group}`}
+                                    onClick={() => {
+                                      const allOn = g.pages.every((p) =>
+                                        isGranted(p.path, perm.id),
+                                      )
+                                      setColumnForGroup(g.pages, perm.id, !allOn)
+                                    }}
+                                  >
+                                    {perm.name}
+                                  </button>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.pages.map((p) => {
+                              const rowAllOn = permissions.every((perm) =>
+                                isGranted(p.path, perm.id),
+                              )
+                              return (
+                                <tr
+                                  key={p.path}
+                                  className="border-b last:border-0 hover:bg-muted/20"
+                                >
+                                  <td className="sticky left-0 z-10 bg-card px-3 py-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        className="text-sm font-medium truncate hover:text-primary text-left"
+                                        title="Toggle all actions for this page"
+                                        onClick={() => setRowForPage(p.path, !rowAllOn)}
+                                      >
+                                        {p.label}
+                                      </button>
+                                      {p.adminOnly && (
+                                        <Badge
+                                          variant="outline"
+                                          className="h-4 px-1 text-[9px] border-amber-300 bg-amber-50 text-amber-800"
+                                        >
+                                          <Lock className="h-2.5 w-2.5 mr-0.5" />
+                                          Admin
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <code className="text-[10px] text-muted-foreground">
+                                      {p.path}
+                                    </code>
+                                  </td>
+                                  {permissions.map((perm) => {
+                                    const key = cellKey(p.path, perm.id)
+                                    const checked = isGranted(p.path, perm.id)
+                                    const dirty = pending.has(key)
+                                    return (
+                                      <td
+                                        key={perm.id}
+                                        className={cn(
+                                          "px-1 py-2 text-center",
+                                          dirty && "bg-amber-50/50 dark:bg-amber-900/10",
+                                        )}
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          disabled={saving}
+                                          onCheckedChange={(v) =>
+                                            setCell(p.path, perm.id, v === true)
+                                          }
+                                        />
+                                      </td>
+                                    )
+                                  })}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </CollapsibleContent>
                   </div>
                 </Collapsible>
@@ -425,145 +445,5 @@ export function RoleStaticPagesMatrix({
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function PageRow({
-  page,
-  state,
-  isPending,
-  onCycle,
-  onSet,
-}: {
-  page: StaticPage
-  state: AccessState
-  isPending: boolean
-  onCycle: () => void
-  onSet: (s: AccessState) => void
-}) {
-  const meta = STATE_META[state]
-  const Icon = meta.Icon
-  return (
-    <li
-      className={cn(
-        "flex items-center gap-3 px-3 py-2",
-        isPending && "bg-amber-50/40 dark:bg-amber-900/10",
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium truncate">{page.label}</span>
-          {page.adminOnly && (
-            <Badge
-              variant="outline"
-              className="h-4 px-1 text-[9px] border-amber-300 bg-amber-50 text-amber-800"
-            >
-              <Lock className="h-2.5 w-2.5 mr-0.5" />
-              Admin
-            </Badge>
-          )}
-        </div>
-        <code className="text-[10px] text-muted-foreground">{page.path}</code>
-      </div>
-      <button
-        type="button"
-        onClick={onCycle}
-        className={cn(
-          "inline-flex items-center gap-1 h-7 px-2 rounded-md border text-[11px] font-medium transition-colors",
-          meta.badgeClass,
-        )}
-        title="Click to cycle: Default → Grant → Deny"
-      >
-        <Icon className="h-3 w-3" />
-        {meta.short}
-        {isPending && <span className="ml-1 opacity-60">·</span>}
-      </button>
-      <div className="hidden sm:flex items-center gap-0.5">
-        <SmallToggle
-          active={state === "inherit"}
-          onClick={() => onSet("inherit")}
-          icon={<Globe className="h-3 w-3" />}
-          tone="neutral"
-          title="Default"
-        />
-        <SmallToggle
-          active={state === "granted"}
-          onClick={() => onSet("granted")}
-          icon={<ShieldCheck className="h-3 w-3" />}
-          tone="grant"
-          title="Grant"
-        />
-        <SmallToggle
-          active={state === "denied"}
-          onClick={() => onSet("denied")}
-          icon={<ShieldAlert className="h-3 w-3" />}
-          tone="deny"
-          title="Deny"
-        />
-      </div>
-    </li>
-  )
-}
-
-function SmallToggle({
-  active,
-  onClick,
-  icon,
-  tone,
-  title,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  tone: "neutral" | "grant" | "deny"
-  title: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-pressed={active}
-      className={cn(
-        "h-6 w-6 inline-flex items-center justify-center rounded transition-colors",
-        active
-          ? tone === "grant"
-            ? "bg-emerald-500 text-white"
-            : tone === "deny"
-            ? "bg-rose-500 text-white"
-            : "bg-slate-600 text-white"
-          : "text-muted-foreground hover:bg-muted",
-      )}
-    >
-      {icon}
-    </button>
-  )
-}
-
-function BulkButton({
-  onClick,
-  label,
-  tone,
-  compact,
-}: {
-  onClick: () => void
-  label: string
-  tone: "grant" | "deny" | "neutral"
-  compact?: boolean
-}) {
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={onClick}
-      className={cn(
-        compact ? "h-6 px-1.5 text-[10px]" : "",
-        tone === "grant" &&
-          "border-emerald-300 text-emerald-700 hover:bg-emerald-50",
-        tone === "deny" && "border-rose-300 text-rose-700 hover:bg-rose-50",
-      )}
-    >
-      {label}
-    </Button>
   )
 }

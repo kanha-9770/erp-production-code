@@ -186,6 +186,17 @@ export async function PUT(request: NextRequest) {
   }
   const wo = pickWeeklyOff(body.weeklyOffDays);
   if (wo !== undefined) patch.weeklyOffDays = wo;
+  // Check-in reminder lead time (minutes before each employee's shift start).
+  // Accept null / 0 to disable; otherwise clamp 1..180 in the config layer.
+  if ('checkInReminderMinutes' in body) {
+    const raw = (body as any).checkInReminderMinutes;
+    if (raw === null || raw === '' || raw === 0) {
+      patch.checkInReminderMinutes = null;
+    } else {
+      const n = pickOptionalNumber(raw);
+      if (n !== undefined) patch.checkInReminderMinutes = Math.max(1, Math.min(180, Math.floor(n)));
+    }
+  }
   const ac = pickOptionalNullableString(body.autoCheckoutAt);
   if (ac !== undefined) patch.autoCheckoutAt = ac;
   const gMode = pickGeofenceMode(body.geofenceMode);

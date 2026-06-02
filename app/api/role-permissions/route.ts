@@ -23,6 +23,10 @@ export async function GET(request: NextRequest) {
     // used to cost 5 round-trips, now 1.
     const roleIdsParam = request.nextUrl.searchParams.get("roleIds");
     let formId = request.nextUrl.searchParams.get("formId");
+    // Static-page scoping. `scope=page` returns only page-scoped rows
+    // (pagePath set); an explicit `pagePath=/x` narrows to a single page.
+    const scope = request.nextUrl.searchParams.get("scope");
+    const pagePathParam = request.nextUrl.searchParams.get("pagePath");
 
     if (formId === "" || formId === "null" || formId === "undefined") {
       formId = null;
@@ -30,10 +34,16 @@ export async function GET(request: NextRequest) {
 
     const whereClause: any = {
       role: { organizationId },
-      // Only return module/form-level permissions, not section/field-level
+      // Only return module/form/page-level permissions, not section/field-level
       sectionId: null,
       formFieldId: null,
     };
+
+    if (pagePathParam) {
+      whereClause.pagePath = pagePathParam;
+    } else if (scope === "page") {
+      whereClause.pagePath = { not: null };
+    }
 
     if (roleIdsParam) {
       const ids = roleIdsParam
@@ -62,6 +72,7 @@ export async function GET(request: NextRequest) {
         permissionId: true,
         moduleId: true,
         formId: true,
+        pagePath: true,
         granted: true,
         canDelegate: true,
         permission: {
@@ -144,6 +155,7 @@ async function handleUpdate(request: NextRequest) {
       permissionId: string;
       moduleId: string | null;
       formId: string | null;
+      pagePath: string | null;
       granted: boolean;
       canDelegate: boolean;
     }> = [];
@@ -157,6 +169,7 @@ async function handleUpdate(request: NextRequest) {
         permissionId,
         moduleId = null,
         formId = null,
+        pagePath = null,
         granted,
         canDelegate = false,
       } = item;
@@ -172,6 +185,7 @@ async function handleUpdate(request: NextRequest) {
         permissionId,
         moduleId: moduleId ?? null,
         formId: formId ?? null,
+        pagePath: pagePath ?? null,
         granted: Boolean(granted),
         canDelegate: Boolean(canDelegate),
       });
@@ -219,11 +233,15 @@ async function handleUpdate(request: NextRequest) {
     // Group by (roleId, formId) to issue fewer, broader deletes.
     await prisma.$transaction(
       async (tx) => {
-        // Collect all unique (roleId, permissionId, formId) combos to delete
+        // Collect all unique (roleId, permissionId, formId, pagePath) combos to
+        // delete. Including pagePath keeps a page-scoped save from wiping a
+        // sibling page's rows (all page rows share formId=null), and keeps a
+        // module/form save (pagePath=null) from touching page rows.
         const deleteFilters = finalItems.map((item) => ({
           roleId: item.roleId,
           permissionId: item.permissionId,
           formId: item.formId,
+          pagePath: item.pagePath,
           sectionId: null as string | null,
           formFieldId: null as string | null,
         }));
@@ -243,6 +261,7 @@ async function handleUpdate(request: NextRequest) {
             permissionId: item.permissionId,
             moduleId: item.moduleId,
             formId: item.formId,
+            pagePath: item.pagePath,
             sectionId: null as string | null,
             formFieldId: null as string | null,
             granted: true,

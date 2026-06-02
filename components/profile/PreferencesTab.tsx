@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
 import { notifyTimezoneChanged } from "@/lib/user-timezone"
+import { writeDensityCookie } from "@/lib/density-cookie"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -250,6 +251,11 @@ export default function PreferencesTab() {
       setSaved(merged)
       setDraft(merged)
       applyDensity(merged.density, merged.densityScale)
+      // Migrate existing users from localStorage-only → cookie + localStorage.
+      // The root layout SSRs density from the cookie, so without this an
+      // existing user would briefly see "comfortable" on every page load
+      // until they next opened PreferencesTab and clicked Save.
+      if (raw) writeDensityCookie(merged.density, merged.densityScale)
     } catch {
       /* ignore */
     } finally {
@@ -286,6 +292,9 @@ export default function PreferencesTab() {
     setBusy(true)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+      // Cookie is what app/layout.tsx reads on the server for first-paint
+      // density — keep it in lockstep with localStorage on every save.
+      writeDensityCookie(draft.density, draft.densityScale)
       await fetch("/api/auth/preferences", {
         method: "PUT",
         credentials: "include",

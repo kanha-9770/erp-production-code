@@ -491,7 +491,17 @@ export default function LeavePage() {
         align: "right",
         cell: (r) => {
           const cancellable = r.status === 'PENDING' || (r.status === 'APPROVED' && r.startDate > todayStr());
-          const shortenable = r.status === 'APPROVED' && r.endDate > todayStr() && r.shortenStatus !== 'PENDING';
+          // Early return only applies to a multi-day leave that has already
+          // STARTED and hasn't ended yet. It needs at least one valid earlier
+          // end date (newEndDate must be >= start and < end), so a single-day
+          // leave (start === end) can't be shortened — Cancel it instead. A
+          // not-yet-started leave likewise has no valid earlier date.
+          const shortenable =
+            r.status === 'APPROVED' &&
+            r.startDate < r.endDate &&
+            r.startDate <= todayStr() &&
+            r.endDate >= todayStr() &&
+            r.shortenStatus !== 'PENDING';
           return (
             <div className="flex justify-end gap-1">
               {shortenable && (

@@ -83,8 +83,15 @@ import {
 } from "@/lib/api/modules";
 import { usePermissionContext } from "@/context/PermissionContext";
 import { useRouteAccess } from "@/hooks/use-route-access";
-import { STATIC_PAGES, type StaticPage } from "@/lib/static-pages";
-import { getEnabledGroups } from "@/lib/erp-modules";
+import {
+  STATIC_PAGES,
+  staticPagesByGroup,
+  STATIC_PAGE_GROUP_ORDER,
+  STATIC_PAGE_SUBGROUPS,
+  type StaticPage,
+  type StaticPageGroup,
+} from "@/lib/static-pages";
+import { getEnabledGroups, ERP_MODULES } from "@/lib/erp-modules";
 
 interface FormModule {
   id: string;
@@ -157,15 +164,27 @@ interface CrmSidebarProps {
 const ACCENT = "#5a4d96";
 const ACCENT_HOVER = "#6b5da8";
 
-// ─── Static-page injection ────────────────────────────────────────────────
-// Static pages (Leave / Attendance / Payroll / Holidays / etc.) are anchored
-// under tenant-configured dynamic modules. The mapping is loaded from
-// /api/static-page-anchors and applied at tree-build time as synthetic
-// `system-route` leaves attached to each anchor module.
+// Master switch for the form-builder ("dynamic") modules in the sidebar.
+// When false, the sidebar renders ONLY the curated static-page structure
+// (HR, MLM, …); the dynamic FormModule folders are hidden and the
+// create-module affordances are suppressed (creating a module that can't
+// appear would be confusing). The modules/forms are untouched in the DB and
+// stay URL-reachable — flip this to `true` to bring the whole dynamic
+// section (and its "New module" button) back.
+const SHOW_DYNAMIC_MODULES = false;
+
+// ─── Static-page groups ───────────────────────────────────────────────────
+// Static pages (Leave / Attendance / Payroll / Holidays / etc.) appear in the
+// sidebar BY DEFAULT, organised into one top-level collapsible folder per
+// registry group (Attendance, Leave Management, Payroll, …). There is no
+// manual "placement" step — visibility is driven purely by permissions, the
+// same way dynamic modules are gated by their VIEW permission.
 //
-// Pages with no anchor are simply absent from the sidebar — they remain URL-
-// accessible to anyone the route-permission system grants. Admins set
-// placement at /settings/permission/static-pages.
+// Each page is gated by the route-permission system:
+//   - `adminOnly` pages are hidden from non-admins unless explicitly granted.
+//   - all other pages are open-by-default (shown unless explicitly denied).
+//   - `enabledGroups` (the org's selected ERP modules) hides whole groups the
+//     org hasn't opted into (e.g. Real Estate) without touching permissions.
 //
 // Defined outside the component so the function's referential identity is
 // stable across renders.
@@ -174,75 +193,228 @@ function syntheticIdFor(prefix: string, key: string) {
   return `__sys__${prefix}__${key.replace(/[^a-z0-9]+/gi, "_")}`;
 }
 
-export interface AnchorRecord {
-  path: string;
-  moduleId: string;
-  sortOrder: number;
+// Default folder icon for each static-page group. Returns an icon NAME that
+// staticPageIcon() can resolve — keeps icon resolution centralised in one
+// switch. Unknown groups fall back to the Folder icon.
+function groupIconName(group: string): string {
+  switch (group) {
+    case "HR Core":
+      return "briefcase";
+    case "Recruitment":
+      return "user-plus";
+    case "Employee Engagement":
+      return "sparkles";
+    case "Performance":
+      return "trending-up";
+    case "Real Estate":
+      return "building2";
+    case "Inventory":
+      return "package";
+    case "Asset & Admin":
+      return "boxes";
+    case "Settings":
+      return "settings";
+    case "Profile":
+      return "user";
+    case "AI & Tools":
+      return "bot";
+    default:
+      return "folder";
+  }
 }
 
 /**
- * Builds a `Map<moduleId, leafNode[]>` of system-route leaves that should be
- * injected as children of each anchor module. Filters by the per-leaf
- * canAccess gate and the registry's adminOnly hint so non-admins don't see
- * dead-ends.
+ * Builds the top-level static-page tree for the sidebar as a 3-tier hierarchy:
+ *
+ *   ERP module folder  →  group sub-folder  →  page leaves
+ *   (e.g. "HR & Workforce" → "Performance" → "Key Result Areas")
+ *
+ * The grouping comes from `ERP_MODULES` (which group belongs to which module)
+ * and `STATIC_PAGE_GROUP_ORDER` (the within-module order of the groups). Two
+ * pragmatic rules keep the tree tidy:
+ *
+ *   - SINGLE-GROUP COLLAPSE: a module that owns exactly one visible group
+ *     (e.g. Real Estate, Inventory) renders as ONE folder labelled with the
+ *     module name, holding the pages directly — no redundant
+ *     module → identical-single-group → pages nesting.
+ *   - ALWAYS-ON GROUPS at top level: groups not owned by any ERP module
+ *     (Settings, Profile, AI & Tools) render as standalone top-level folders
+ *     after the module folders, exactly as before.
+ *
+ * Visibility gating is unchanged and applied at the leaf:
+ *   - `canViewPage(path)` is the role/user VIEW grant (admins always pass),
+ *   - groups outside `enabledGroups` are skipped entirely (org opt-out),
+ *   - any folder that ends up with no visible pages is dropped, so non-admins
+ *     never see a folder that opens to nothing.
+ *
+ * The returned folders sort AFTER the org's dynamic modules; the caller
+ * appends them to the module roots.
  */
-function buildAnchorChildrenMap(args: {
-  anchors: AnchorRecord[];
-  isAdmin: boolean;
-  canAccess: (path: string) => boolean;
-  /** Whitelist check — true ONLY when the path was explicitly granted to
-   *  this user/role. Used to override the `adminOnly` hint so a non-admin
-   *  with an explicit grant still sees the page. */
-  isPermitted: (path: string) => boolean;
+function buildStaticGroupFolders(args: {
+  /** True when this role/user may SEE the page in the sidebar. Static pages
+   *  are open-by-default (shown unless explicitly denied); `adminOnly` pages
+   *  are whitelist (hidden unless admin or explicitly granted). Both resolve
+   *  through the route-access system — admins always pass. */
+  canViewPage: (page: StaticPage) => boolean;
   /** Static-page groups the org has opted into. Pages outside this set are
-   *  hidden from the sidebar regardless of anchors or route permissions. */
+   *  hidden from the sidebar regardless of permissions. */
   enabledGroups: Set<string>;
-}): Map<string, any[]> {
-  const { anchors, isAdmin, canAccess, isPermitted, enabledGroups } = args;
-  const byPath = new Map<string, StaticPage>();
-  for (const p of STATIC_PAGES) {
-    // Skip pages whose group is not part of any selected ERP module —
-    // this is how disabling "Real Estate" removes /real-estate/* from the
-    // sidebar without touching anchor or permission records.
-    if (!enabledGroups.has(p.group)) continue;
-    byPath.set(p.path, p);
+}): any[] {
+  const { canViewPage, enabledGroups } = args;
+
+  // group -> its (already label-sorted) pages, honouring the org opt-out.
+  const pagesByGroup = new Map<string, StaticPage[]>();
+  for (const { group, pages } of staticPagesByGroup()) {
+    if (enabledGroups.has(group)) pagesByGroup.set(group, pages);
   }
 
-  const result = new Map<string, any[]>();
-  // Stable order: respect the admin-configured sortOrder when set, otherwise
-  // fall back to the registry order (StaticPage's order in STATIC_PAGES).
-  const ordered = [...anchors].sort((a, b) => {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    return a.path.localeCompare(b.path);
+  // path -> page, so a subgroup config (which lists paths) can resolve each
+  // page's label / icon without re-scanning the registry per lookup.
+  const pageByPath = new Map<string, StaticPage>();
+  for (const p of STATIC_PAGES) pageByPath.set(p.path, p);
+
+  // Build one `system-route` leaf for a page.
+  const makeLeaf = (group: string, page: StaticPage, order: number): any => ({
+    id: syntheticIdFor("page", page.path),
+    name: page.label,
+    parentId: syntheticIdFor("group", group),
+    level: 2, // depth is recomputed by the renderer based on parent
+    sort_order: order,
+    module_type: "system-route" as const,
+    children: [],
+    system_route: page.path,
+    system_icon: page.icon,
   });
 
-  for (const a of ordered) {
-    const meta = byPath.get(a.path);
-    if (!meta) continue; // anchor references a path that's no longer in the registry
-    // adminOnly is a *hint*, not a hard lock — if the admin has granted this
-    // page to a role via Settings → Permission → Route Permissions, the
-    // role's members must see it in their sidebar. Without this branch, the
-    // hard `!isAdmin` skip would silently swallow the explicit grant.
-    if (meta.adminOnly && !isAdmin && !isPermitted(meta.path)) continue;
-    if (!canAccess(meta.path)) continue;
+  // Children for one group folder. A group listed in STATIC_PAGE_SUBGROUPS is
+  // split into sub-folders (each a `system-folder`); any of its pages not
+  // placed in a sub-folder is hoisted as a flat leaf so nothing is hidden.
+  // All other groups render flat. Returns [] when nothing passes the VIEW
+  // gate, so empty folders are dropped upstream.
+  const buildGroupChildren = (group: string): any[] => {
+    const pages = pagesByGroup.get(group) ?? [];
+    const subgroupCfg = STATIC_PAGE_SUBGROUPS[group as StaticPageGroup];
 
-    const node = {
-      id: syntheticIdFor("page", meta.path),
-      name: meta.label,
-      parentId: a.moduleId,
-      level: 1, // depth is recomputed by the renderer based on parent
-      sort_order: a.sortOrder,
-      module_type: "system-route" as const,
-      children: [],
-      system_route: meta.path,
-      system_icon: meta.icon,
-    };
+    if (!subgroupCfg) {
+      // Flat group — leaves directly.
+      const leaves: any[] = [];
+      let order = 0;
+      for (const page of pages) {
+        if (!canViewPage(page)) continue;
+        leaves.push(makeLeaf(group, page, order++));
+      }
+      return leaves;
+    }
 
-    const list = result.get(a.moduleId) ?? [];
-    list.push(node);
-    result.set(a.moduleId, list);
+    const out: any[] = [];
+    const placed = new Set<string>();
+
+    for (const sg of subgroupCfg) {
+      const leaves: any[] = [];
+      let order = 0;
+      for (const path of sg.paths) {
+        const page = pageByPath.get(path);
+        if (!page) continue; // stale path in config — skip, don't crash
+        placed.add(path);
+        if (!canViewPage(page)) continue;
+        leaves.push(makeLeaf(group, page, order++));
+      }
+      if (leaves.length === 0) continue; // drop empty sub-folder
+      out.push({
+        id: syntheticIdFor("subgroup", `${group}__${sg.label}`),
+        name: sg.label,
+        level: 1,
+        sort_order: out.length,
+        module_type: "system-folder" as const,
+        children: leaves,
+        system_icon: sg.icon,
+      });
+    }
+
+    // Catch-all: enabled pages in this group that no sub-folder claimed.
+    let tailOrder = 0;
+    for (const page of pages) {
+      if (placed.has(page.path)) continue;
+      if (!canViewPage(page)) continue;
+      out.push(makeLeaf(group, page, tailOrder++));
+    }
+
+    return out;
+  };
+
+  // Every group that belongs to some ERP module — used to know which groups
+  // are "owned" (nested under a module) vs. always-on (top-level).
+  const ownedGroups = new Set<string>();
+  for (const m of ERP_MODULES) for (const g of m.groups) ownedGroups.add(g);
+
+  const folders: any[] = [];
+  // Large base so these always sort after dynamic modules (whose sort_order
+  // values come from the DB and are small).
+  let topIndex = 0;
+
+  // ── Tier 1: one folder per ERP module (catalog order) ──────────────────
+  for (const mod of ERP_MODULES) {
+    const subFolders: any[] = [];
+    let subIndex = 0;
+
+    // Iterate the canonical group order so sub-folders are stably sorted.
+    for (const group of STATIC_PAGE_GROUP_ORDER) {
+      if (!mod.groups.includes(group)) continue;
+      if (!pagesByGroup.has(group)) continue; // disabled group or no pages
+      const children = buildGroupChildren(group);
+      if (children.length === 0) continue;
+
+      subFolders.push({
+        id: syntheticIdFor("group", group),
+        name: group,
+        level: 1,
+        sort_order: subIndex++,
+        module_type: "system-folder" as const,
+        children,
+        system_icon: groupIconName(group),
+      });
+    }
+
+    if (subFolders.length === 0) continue; // module has nothing visible
+
+    const moduleLabel = mod.sidebarLabel ?? mod.label;
+
+    folders.push({
+      id: syntheticIdFor("module", mod.id),
+      name: moduleLabel,
+      level: 0,
+      sort_order: 10_000 + topIndex,
+      module_type: "system-folder" as const,
+      // Single-group collapse: hoist the lone group's pages directly under
+      // the module folder instead of nesting an identical sub-folder.
+      children:
+        subFolders.length === 1 ? subFolders[0].children : subFolders,
+      system_icon: mod.icon,
+    });
+    topIndex++;
   }
-  return result;
+
+  // ── Tier 1 (cont.): always-on groups not owned by any module ───────────
+  // Settings / Profile / AI & Tools stay as standalone top-level folders.
+  for (const { group } of staticPagesByGroup()) {
+    if (ownedGroups.has(group)) continue;
+    if (!enabledGroups.has(group)) continue;
+    const leaves = buildGroupChildren(group);
+    if (leaves.length === 0) continue;
+
+    folders.push({
+      id: syntheticIdFor("group", group),
+      name: group,
+      level: 0,
+      sort_order: 10_000 + topIndex,
+      module_type: "system-folder" as const,
+      children: leaves,
+      system_icon: groupIconName(group),
+    });
+    topIndex++;
+  }
+
+  return folders;
 }
 
 // Resolve a Lucide component for a static-page icon name. Centralised so
@@ -387,35 +559,6 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     description: "",
     parentId: "",
   });
-
-  // Static-page anchors — admin-configured "page → module" mapping. Refetched
-  // when the user changes (admin flag affects adminOnly pages) AND on every
-  // navigation, so leaving the static-pages config page or the attendance
-  // integrations card picks up the new anchor set without a hard reload. The
-  // server also auto-derives anchors from attendance config form bindings, so
-  // a fresh fetch here surfaces those without admin involvement.
-  const [staticAnchors, setStaticAnchors] = useState<AnchorRecord[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/static-page-anchors", { cache: "no-store", credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (cancelled || !j?.success) return;
-        setStaticAnchors(
-          (j.anchors ?? []).map((a: any) => ({
-            path: a.path,
-            moduleId: a.moduleId,
-            sortOrder: a.sortOrder ?? 0,
-          })),
-        );
-      })
-      .catch(() => {
-        /* silent — sidebar stays functional without anchors */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userData?.user?.id, isAdmin, pathname]);
 
   // Real-estate-agent-only detection. A user whose ONLY unit assignment is
   // the auto-provisioned "Real Estate Agent" role gets a stripped-down
@@ -588,7 +731,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     //   3. Form-builder modules fall through to getModuleIcon().
     const systemIconName = (module as any).system_icon as string | undefined;
     const IconComponent =
-      isSystemRoute && systemIconName
+      (isSystemRoute || isSystemFolder) && systemIconName
         ? staticPageIcon(systemIconName)
         : isSystemRoute || isSystemFolder
           ? Folder
@@ -725,44 +868,25 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
         }));
     };
 
-    // Inject admin-configured static-page leaves under their anchor modules.
-    // Done BEFORE filtering so the per-leaf canAccess gate can keep a host
-    // module visible (via the "any child has access" branch) even when the
-    // user has no VIEW permission on the module itself.
-    //
     // `enabledGroups` is derived from the org's selectedModules; if the org
-    // hasn't opted into a module's page-group, the corresponding pages are
-    // dropped before anchors are evaluated. Missing/undefined data is
-    // treated as "everything enabled" so legacy orgs without the field
-    // backfilled don't lose access.
+    // hasn't opted into a group's ERP module, that whole group of static
+    // pages is dropped from the sidebar. Missing/undefined data is treated as
+    // "everything enabled" so legacy orgs without the field backfilled don't
+    // lose access.
     const orgSelectedModules: string[] = Array.isArray(
       (userData?.user?.organization as any)?.selectedModules
     )
       ? ((userData!.user!.organization as any).selectedModules as string[])
       : [];
-    const hasModuleSelectionData = !!(userData?.user?.organization as any)
-      ?.selectedModules;
+    // Treat an EMPTY (or missing) selection as "everything enabled" rather
+    // than "everything disabled". An empty array almost always means the org
+    // was never configured through the module picker — hiding the entire
+    // workspace in that case strands the user with a near-empty sidebar.
+    // Only a NON-EMPTY selection actually narrows the visible groups.
+    const hasModuleSelectionData = orgSelectedModules.length > 0;
     const enabledGroups: Set<string> = hasModuleSelectionData
       ? (getEnabledGroups(orgSelectedModules) as unknown as Set<string>)
       : new Set(STATIC_PAGES.map((p) => p.group));
-
-    const anchorChildrenByModule = buildAnchorChildrenMap({
-      anchors: staticAnchors,
-      isAdmin,
-      canAccess,
-      isPermitted,
-      enabledGroups,
-    });
-
-    const injectAnchorLeaves = (items: ModuleNode[]): ModuleNode[] =>
-      items.map((node) => {
-        const recursedChildren = injectAnchorLeaves(node.children);
-        const extra = anchorChildrenByModule.get(node.id);
-        const children = extra
-          ? [...recursedChildren, ...(extra as unknown as ModuleNode[])]
-          : recursedChildren;
-        return { ...node, children };
-      });
 
     const filterByPermission = (items: ModuleNode[]): ModuleNode[] => {
       if (isAdmin) return items;
@@ -799,10 +923,37 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       return items.filter(hasRebmLeaf);
     };
 
-    const sorted = sortModules(roots as ModuleNode[]);
-    const withAnchors = injectAnchorLeaves(sorted);
-    return filterForRebmAgent(filterByPermission(withAnchors));
-  }, [modules, isAdmin, checkPermission, canAccess, isPermitted, staticAnchors, isRebmOnlyAgent]);
+    const sortedModules = sortModules(roots as ModuleNode[]);
+    const permittedModules = filterByPermission(sortedModules);
+
+    // Static-page group folders render BY DEFAULT (no placement step). Pages
+    // are gated by the ROUTE-access system (the same one the middleware and
+    // page guards use), NOT the module-permission engine:
+    //   - normal pages are open-by-default — shown unless explicitly DENIED
+    //     (`canAccess`), so a fresh org with no per-page grants still sees its
+    //     workspace instead of an empty sidebar;
+    //   - `adminOnly` pages are whitelist — hidden unless the user is an admin
+    //     or has an explicit grant (`isPermitted`).
+    // Admins pass both. This matches the documented contract in
+    // lib/static-pages.ts; gating these with checkPermission("VIEW", …) made
+    // every page whitelist-only and emptied the sidebar for non-admins.
+    const staticFolders = buildStaticGroupFolders({
+      canViewPage: (page: StaticPage) =>
+        page.adminOnly ? isPermitted(page.path) : canAccess(page.path),
+      enabledGroups,
+    }) as unknown as ModuleNode[];
+
+    // Dynamic, form-builder modules are intentionally HIDDEN from the sidebar
+    // — only the curated static-page structure (HR, MLM, …) is shown. The
+    // dynamic tree is still computed above so the data/permission pipeline is
+    // untouched and the modules stay URL-reachable; flip the file-scope
+    // SHOW_DYNAMIC_MODULES back to `true` to render them after the static
+    // folders again.
+    const combined = SHOW_DYNAMIC_MODULES
+      ? [...permittedModules, ...staticFolders]
+      : [...staticFolders];
+    return filterForRebmAgent(combined);
+  }, [modules, isAdmin, checkPermission, canAccess, isPermitted, isRebmOnlyAgent, userData]);
 
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;
@@ -894,27 +1045,30 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       for (const id of ancestorsByLeaf.get(bestPath)!) toExpand.add(id);
     }
 
-    // (2) MLM-agent first-load expansion of Real Estate.
+    // (2) MLM-agent first-load expansion of the MLM module. The module folder
+    //     now nests sub-folders (Dashboard, Hierarchies, Financial, …) rather
+    //     than route leaves directly, so we expand the TOP-LEVEL folder whose
+    //     subtree contains a `/real-estate` leaf, plus its immediate
+    //     sub-folders, so the agent lands on a fully-revealed menu instead of
+    //     a single collapsed row.
     if (isRebmOnlyAgent && !autoExpandedForRebmRef.current) {
-      const findRebmModule = (items: any[]): string | null => {
-        for (const m of items) {
-          const childIsRebm = m.children?.some(
-            (c: any) =>
-              c.module_type === "system-route" &&
-              typeof c.system_route === "string" &&
-              c.system_route.startsWith("/real-estate"),
-          );
-          if (childIsRebm) return m.id;
-          if (m.children?.length) {
-            const inner = findRebmModule(m.children);
-            if (inner) return inner;
-          }
+      const subtreeHasRebmLeaf = (n: any): boolean => {
+        if (
+          n.module_type === "system-route" &&
+          typeof n.system_route === "string" &&
+          n.system_route.startsWith("/real-estate")
+        ) {
+          return true;
         }
-        return null;
+        return (n.children ?? []).some(subtreeHasRebmLeaf);
       };
-      const rebmId = findRebmModule(moduleTree as any);
-      if (rebmId) {
-        toExpand.add(rebmId);
+      const rebmModule = (moduleTree as any[]).find(subtreeHasRebmLeaf);
+      if (rebmModule) {
+        toExpand.add(rebmModule.id);
+        // Reveal the sub-folders one level down too.
+        for (const child of rebmModule.children ?? []) {
+          if (child.module_type === "system-folder") toExpand.add(child.id);
+        }
         autoExpandedForRebmRef.current = true;
       }
     }
@@ -934,6 +1088,24 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
       });
     }
   }, [moduleTree, pathname, isRebmOnlyAgent]);
+
+  // First-load: expand the top-level static MODULE folders (HR & Workforce,
+  // MLM, Inventory, …) so their group sub-folders are visible immediately
+  // rather than hidden behind a single collapsed row — otherwise a freshly
+  // loaded sidebar reads as "nothing here". One-shot and additive: it never
+  // collapses anything the user toggled, runs once per mount, and the
+  // URL-based auto-expand above still drills deeper into the active page.
+  const defaultExpandedRef = useRef(false);
+  useEffect(() => {
+    if (defaultExpandedRef.current) return;
+    if (moduleTree.length === 0) return;
+    const topFolderIds = (moduleTree as any[])
+      .filter((n) => n.module_type === "system-folder" && n.children?.length)
+      .map((n) => n.id as string);
+    if (topFolderIds.length === 0) return;
+    defaultExpandedRef.current = true;
+    setExpandedModules((prev) => new Set([...Array.from(prev), ...topFolderIds]));
+  }, [moduleTree]);
 
   const handleCreateModule = async () => {
     if (!moduleData.name.trim()) {
@@ -1157,7 +1329,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
               </h2>
             </div>
             <div className="flex items-center gap-0.5">
-              {canManageModules && view === "modules" && (
+              {SHOW_DYNAMIC_MODULES && canManageModules && view === "modules" && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -1232,20 +1404,39 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
           <div className="sidebar-scroll flex-1 overflow-y-auto overflow-x-hidden px-2 pb-3">
             {view === "modules" ? (
               <>
-                {isLoading ? (
+                {/* Loading gate: the static structure only needs the USER
+                    (permissions) to be loaded. The modules lite query is just
+                    extra when dynamic modules are hidden, so we don't block on
+                    it — and we never show its error in static-only mode. */}
+                {(SHOW_DYNAMIC_MODULES && isLoading) || isUserLoading ? (
                   <div className="space-y-2 px-1 py-2">
                     {Array.from({ length: 6 }).map((_, i) => (
                       <Skeleton key={i} className="h-8 w-full rounded-md bg-black/5" />
                     ))}
                   </div>
-                ) : error ? (
+                ) : SHOW_DYNAMIC_MODULES && error ? (
                   <div className="mx-1 rounded-md bg-red-50 p-3 text-xs text-red-700">
                     Failed to load modules
                   </div>
-                ) : modules.length === 0 ? (
+                ) : filteredTree.length > 0 ? (
+                  // `filteredTree` includes BOTH the org's dynamic modules AND
+                  // the static-page group folders, so we render it whenever it
+                  // has anything. (Previously this branch was gated on the raw
+                  // dynamic-`modules` array being non-empty, which hid every
+                  // static page for orgs with no form-builder modules.)
+                  <nav className="space-y-0.5 px-1 min-w-0">
+                    {filteredTree.map((m) => renderModule(m, 0))}
+                  </nav>
+                ) : searchQuery ? (
+                  <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
+                    No matches for "{searchQuery}"
+                  </div>
+                ) : (
+                  // Genuinely nothing to show — no dynamic modules AND no
+                  // visible static pages.
                   <div className="mx-1 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
                     No modules yet
-                    {canManageModules && (
+                    {SHOW_DYNAMIC_MODULES && canManageModules && (
                       <button
                         onClick={() => setIsCreateDialogOpen(true)}
                         className="mt-2 block w-full text-[12px] font-medium text-[#5a4d96] hover:text-[#6b5da8]"
@@ -1254,14 +1445,6 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
                       </button>
                     )}
                   </div>
-                ) : filteredTree.length === 0 ? (
-                  <div className="mx-1 mt-2 rounded-md border border-dashed border-black/10 dark:border-white/10 bg-white/40 dark:bg-white/5 px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400">
-                    No matches for "{searchQuery}"
-                  </div>
-                ) : (
-                  <nav className="space-y-0.5 px-1 min-w-0">
-                    {filteredTree.map((m) => renderModule(m, 0))}
-                  </nav>
                 )}
               </>
             ) : (

@@ -1,10 +1,14 @@
 // pages/api/permissions.ts
-import { getPermissions } from "@/lib/database/database";
-import { NextResponse } from "next/server";
+import { getPermissions, getPagePermissions } from "@/lib/database/database";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const permissions = await getPermissions();
+    // `?scope=page` returns the static-page permission set (standard 7 +
+    // APPROVAL). Default scope keeps the form/module set (7, no APPROVAL).
+    const scope = request.nextUrl.searchParams.get("scope");
+    const permissions =
+      scope === "page" ? await getPagePermissions() : await getPermissions();
     return NextResponse.json({
       success: true,
       data: permissions,

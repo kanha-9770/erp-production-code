@@ -59,6 +59,7 @@ interface AttendanceConfig {
   overtimeMaxHoursPerDay: number;
   overtimeRequiresOptIn: boolean;
   weeklyOffDays: number[];
+  checkInReminderMinutes: number | null;
   autoCheckoutAt: string | null;
   geofenceMode: GeofenceMode;
   geofenceLat: number | null;
@@ -112,6 +113,8 @@ export function AttendanceConfigForm() {
     overtimeMaxHoursPerDay: string;
     overtimeRequiresOptIn: boolean;
     weeklyOffDays: number[];
+    checkInReminderEnabled: boolean;
+    checkInReminderMinutes: string;
     autoCheckoutEnabled: boolean;
     autoCheckoutAt: string;
     geofenceMode: GeofenceMode;
@@ -190,6 +193,8 @@ export function AttendanceConfigForm() {
         overtimeMaxHoursPerDay: String(c.overtimeMaxHoursPerDay ?? 4),
         overtimeRequiresOptIn: c.overtimeRequiresOptIn ?? true,
         weeklyOffDays: c.weeklyOffDays ?? [],
+        checkInReminderEnabled: !!c.checkInReminderMinutes,
+        checkInReminderMinutes: String(c.checkInReminderMinutes ?? 15),
         autoCheckoutEnabled: !!c.autoCheckoutAt,
         autoCheckoutAt: c.autoCheckoutAt ?? "23:00",
         geofenceMode: c.geofenceMode,
@@ -357,6 +362,10 @@ export function AttendanceConfigForm() {
       form.overtimeRequiresOptIn !== (config.overtimeRequiresOptIn ?? true) ||
       JSON.stringify([...form.weeklyOffDays].sort()) !==
         JSON.stringify([...(config.weeklyOffDays ?? [])].sort()) ||
+      form.checkInReminderEnabled !== !!config.checkInReminderMinutes ||
+      (form.checkInReminderEnabled
+        ? Number(form.checkInReminderMinutes) !== (config.checkInReminderMinutes ?? 0)
+        : false) ||
       form.autoCheckoutEnabled !== !!config.autoCheckoutAt ||
       (form.autoCheckoutEnabled
         ? form.autoCheckoutAt !== (config.autoCheckoutAt ?? "")
@@ -626,6 +635,9 @@ export function AttendanceConfigForm() {
         overtimeMaxHoursPerDay,
         overtimeRequiresOptIn,
         weeklyOffDays: form.weeklyOffDays,
+        checkInReminderMinutes: form.checkInReminderEnabled
+          ? Math.max(1, Math.min(180, Math.floor(Number(form.checkInReminderMinutes) || 0)))
+          : null,
         autoCheckoutAt: form.autoCheckoutEnabled ? form.autoCheckoutAt : null,
         geofenceMode: form.geofenceMode,
         geofenceLat: form.geofenceLat ? Number(form.geofenceLat) : null,
@@ -1174,6 +1186,56 @@ export function AttendanceConfigForm() {
                     }
                     className="w-full max-w-[200px]"
                   />
+                </Field>
+              )}
+            </div>
+          </Section>
+
+          <Section
+            title="Check-in / check-out reminder"
+            hint="Nudge employees before their shift starts and ends"
+          >
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="checkInReminderEnabled"
+                  checked={form.checkInReminderEnabled}
+                  onCheckedChange={(v: boolean) =>
+                    updateForm("checkInReminderEnabled", v)
+                  }
+                />
+                <Label
+                  htmlFor="checkInReminderEnabled"
+                  className="cursor-pointer text-xs"
+                >
+                  Enable check-in &amp; check-out reminders
+                </Label>
+              </div>
+              {form.checkInReminderEnabled && (
+                <Field label="Remind before shift start / end" htmlFor="checkInReminderMinutes">
+                  <Select
+                    value={form.checkInReminderMinutes}
+                    onValueChange={(v) => updateForm("checkInReminderMinutes", v)}
+                  >
+                    <SelectTrigger id="checkInReminderMinutes" className="w-full max-w-[200px]">
+                      <SelectValue placeholder="Select lead time" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5">5 minutes before</SelectItem>
+                      <SelectItem value="10">10 minutes before</SelectItem>
+                      <SelectItem value="15">15 minutes before</SelectItem>
+                      <SelectItem value="30">30 minutes before</SelectItem>
+                      <SelectItem value="45">45 minutes before</SelectItem>
+                      <SelectItem value="60">1 hour before</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    One reminder before each employee's shift <strong>start</strong>{" "}
+                    (to check in) and another before their shift{" "}
+                    <strong>end</strong> (to check out), using the same lead
+                    time. Timed to each person's own shift (from Employee
+                    Master), and skipped on holidays &amp; weekly-offs.
+                  </p>
                 </Field>
               )}
             </div>

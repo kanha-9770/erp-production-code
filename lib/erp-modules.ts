@@ -22,8 +22,12 @@ import type { StaticPageGroup } from "./static-pages";
 export interface ErpModuleDef {
   /** Stable identifier persisted on Organization.selectedModules. */
   id: string;
-  /** Display label for the selection UI. */
+  /** Display label for the selection UI (org-creation picker, settings). */
   label: string;
+  /** Optional label for the sidebar's top-level module folder. Falls back to
+   *  `label`. Lets the picker keep a short name (e.g. "HR", "MLM") while the
+   *  sidebar shows a friendlier heading (e.g. "HR & Workforce"). */
+  sidebarLabel?: string;
   /** One-line description shown under the label. */
   description: string;
   /** Lucide icon name (resolved by the picker component). */
@@ -51,19 +55,22 @@ export const ERP_MODULES: ErpModuleDef[] = [
   {
     id: "hr",
     label: "HR",
+    sidebarLabel: "HR",
     description:
       "Attendance, leave, payroll, employees, recruitment, engagement, performance, assets",
     icon: "users",
-    // NOTE: "Asset & Admin" is folded into HR (it appears as a sub-folder of
-    // the HR module in the default sidebar blueprint) so a default new org
-    // gets the asset register without a separate module toggle.
+    // The HR module renders as five sub-folders (sidebar order below):
+    //   - "HR Core"  → a parent folder nesting PayRoll / Attendance /
+    //     Leave Management / Onboarding / Offboarding (see STATIC_PAGE_SUBGROUPS).
+    //   - "Recruitment" → employee directory + hiring pipeline.
+    //   - "Performance", "Employee Engagement", "Asset & Admin".
+    // "Asset & Admin" is folded into HR so a default new org gets the asset
+    // register without a separate module toggle.
     groups: [
-      "Attendance",
-      "Leave Management",
-      "Payroll",
-      "HR & Employees",
-      "Employee Engagement",
+      "HR Core",
+      "Recruitment",
       "Performance",
+      "Employee Engagement",
       "Asset & Admin",
     ],
     routePrefixes: [
@@ -81,6 +88,7 @@ export const ERP_MODULES: ErpModuleDef[] = [
   {
     id: "real_estate",
     label: "MLM",
+    sidebarLabel: "MLM",
     description:
       "Properties, agents, leads, transactions, commissions, MLM hierarchy",
     icon: "building2",

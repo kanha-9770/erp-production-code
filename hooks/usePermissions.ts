@@ -9,6 +9,7 @@ export interface RolePermission {
   permissionId: string
   moduleId: string | null
   formId: string | null
+  pagePath?: string | null
   granted: boolean
   canDelegate: boolean
   permission: {
@@ -34,6 +35,7 @@ interface UserPermissionRecord {
   permissionId: string | null
   moduleId: string | null
   formId: string | null
+  pagePath?: string | null
   resourceType: string | null
   resourceId: string | null
   granted: boolean
@@ -76,8 +78,8 @@ export interface PermissionsState {
   isLoading: boolean
   error: string | null
   isAdmin: boolean
-  hasPermission: (permissionName: string, moduleId?: string | null, formId?: string | null) => boolean
-  hasAnyPermission: (permissionNames: string[], moduleId?: string | null, formId?: string | null) => boolean
+  hasPermission: (permissionName: string, moduleId?: string | null, formId?: string | null, pagePath?: string | null) => boolean
+  hasAnyPermission: (permissionNames: string[], moduleId?: string | null, formId?: string | null, pagePath?: string | null) => boolean
   canDelegate: (permissionName: string, moduleId?: string | null, formId?: string | null) => boolean
   refreshPermissions: () => Promise<void>
 }
@@ -227,6 +229,13 @@ export function usePermissions(): PermissionsState {
         const formOnlyKey = `${permName}::${perm.formId}`
         if (!map.has(formOnlyKey)) map.set(formOnlyKey, perm)
       }
+
+      // Static-page scope — gated exactly like a module's VIEW permission,
+      // keyed on the page's path so it never collides with module/form keys.
+      if (perm.pagePath) {
+        const pageKey = `${permName}:page:${perm.pagePath}`
+        if (!map.has(pageKey)) map.set(pageKey, perm)
+      }
     }
 
     // 2. User-level permissions (override role-level)
@@ -258,10 +267,11 @@ export function usePermissions(): PermissionsState {
         if (granted) {
           // Granted user override propagates to all applicable scope keys so
           // hasPermission lookups at any scope find the grant.
-          const keys: string[] = [permName]
+          const keys: string[] = up.pagePath ? [] : [permName]
           if (up.moduleId) keys.push(`${permName}:${up.moduleId}`)
           if (up.moduleId && up.formId) keys.push(`${permName}:${up.moduleId}:${up.formId}`)
           if (up.formId) keys.push(`${permName}::${up.formId}`)
+          if (up.pagePath) keys.push(`${permName}:page:${up.pagePath}`)
 
           for (const key of keys) {
             map.set(key, {
@@ -292,6 +302,9 @@ export function usePermissions(): PermissionsState {
             denyKeys.push(`${permName}:${up.moduleId}`)
           } else if (up.formId) {
             denyKeys.push(`${permName}::${up.formId}`)
+          } else if (up.pagePath) {
+            // Page-specific deny — only this page, never a global deny.
+            denyKeys.push(`${permName}:page:${up.pagePath}`)
           } else {
             denyKeys.push(permName)
           }
@@ -309,10 +322,18 @@ export function usePermissions(): PermissionsState {
   }, [permissions, userPermissions])
 
   const hasPermission = useCallback(
-    (permissionName: string, moduleId?: string | null, formId?: string | null): boolean => {
+    (permissionName: string, moduleId?: string | null, formId?: string | null, pagePath?: string | null): boolean => {
       if (isAdmin) return true
       const permName = permissionName.toLowerCase()
       const denied = (permissionMap as any).__denied as Set<string> | undefined
+
+      // Static-page scope — checked first (most specific). A page deny wins;
+      // a page grant returns true. Otherwise fall through to a global grant.
+      if (pagePath) {
+        const pageKey = `${permName}:page:${pagePath}`
+        if (denied?.has(pageKey)) return false
+        if (permissionMap.has(pageKey)) return true
+      }
 
       if (moduleId && formId) {
         const formKey = `${permName}:${moduleId}:${formId}`
@@ -338,9 +359,9 @@ export function usePermissions(): PermissionsState {
   )
 
   const hasAnyPermission = useCallback(
-    (permissionNames: string[], moduleId?: string | null, formId?: string | null): boolean => {
+    (permissionNames: string[], moduleId?: string | null, formId?: string | null, pagePath?: string | null): boolean => {
       if (isAdmin) return true
-      return permissionNames.some((name) => hasPermission(name, moduleId, formId))
+      return permissionNames.some((name) => hasPermission(name, moduleId, formId, pagePath))
     },
     [isAdmin, hasPermission]
   )
