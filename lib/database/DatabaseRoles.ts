@@ -129,15 +129,16 @@ export class DatabaseRoles {
 
   static async deleteRole(id: string): Promise<void> {
     try {
-      // Check if role is in use (just for reference, not permissions)
-      const usersWithRole = await prisma.formRecord15.count({
-        where: {
-          recordData: {
-            path: ["roleId"],
-            equals: id
-          }
-        }
-      })
+      // Check if role is in use. Uses the `(record_data::jsonb)->>'roleId'`
+      // expression so the matching btree index (idx_form_records_15_role_id)
+      // is used — the old Prisma `path/equals` filter generated a different
+      // expression and seq-scanned the whole users table.
+      const roleUseRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*)::bigint AS count
+        FROM form_records_15
+        WHERE (record_data::jsonb) ->> 'roleId' = ${id}
+      `
+      const usersWithRole = Number(roleUseRows[0]?.count ?? 0)
 
       if (usersWithRole > 0) {
         throw new Error(`Cannot delete role. ${usersWithRole} users are assigned to this role.`)

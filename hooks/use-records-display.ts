@@ -193,23 +193,6 @@ export function useRecordsDisplay({
     FormFieldWithSection[]
   >([]);
 
-  React.useEffect(() => {
-    console.log("[Hook] Fields state updated:", {
-      formFieldsWithSectionsCount: formFieldsWithSections.length,
-      formFieldsWithSections: formFieldsWithSections.map((f) => ({
-        id: f.id,
-        label: f.label,
-        type: f.type,
-      })),
-      enhancedFormFieldsCount: enhancedFormFields.length,
-      enhancedFormFields: enhancedFormFields.map((f) => ({
-        id: f.id,
-        label: f.label,
-        type: f.type,
-      })),
-    });
-  }, [formFieldsWithSections, enhancedFormFields]);
-
   // ── Derived flags ────────────────────────────────────────────────────────────
 
   const isMergedMode = activeTab === "merged";
@@ -220,43 +203,19 @@ export function useRecordsDisplay({
   React.useEffect(() => {
     const mergeFormulas = async () => {
       try {
-        console.log("[Hook] Fetching formulas from /api/testing...");
         const res = await fetch("/api/testing");
-        console.log("[Hook] API response status:", res.status);
         const result = await res.json();
-        console.log("[Hook] API response:", {
-          success: result.success,
-          dataCount: Array.isArray(result.data) ? result.data.length : 0,
-          data: result.data,
-        });
 
         if (!result.success || !Array.isArray(result.data)) {
-          console.warn("[Hook] API response invalid - no formulas loaded", {
-            success: result.success,
-            hasData: Array.isArray(result.data),
-          });
           setEnhancedFormFields(formFieldsWithSections);
           return;
         }
 
         const formulas = result.data;
-        console.log("[Hook] Processing formulas:", {
-          count: formulas.length,
-          formulas: formulas.map((f: any) => ({
-            formFieldId: f.formFieldId,
-            expression: f.expression,
-            returnType: f.returnType,
-          })),
-        });
 
         const updated = formFieldsWithSections.map((field) => {
           const match = formulas.find((f: any) => f.formFieldId === field.id);
           if (!match) return field;
-          console.log("[Hook] Found formula match:", {
-            fieldId: field.id,
-            fieldLabel: field.label,
-            expression: match.expression,
-          });
           return {
             ...field,
             type: "formula",
@@ -272,13 +231,6 @@ export function useRecordsDisplay({
               },
             },
           } as FormFieldWithSection;
-        });
-
-        console.log("[Hook] Enhanced fields created:", {
-          total: updated.length,
-          formulas: updated
-            .filter((f) => f.type === "formula")
-            .map((f) => ({ id: f.id, label: f.label })),
         });
 
         setEnhancedFormFields(updated);

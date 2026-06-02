@@ -189,21 +189,9 @@ export async function getFormModules() {
           isPublished: true,
           _count: {
             select: {
-              records1: true,
-              records2: true,
-              records3: true,
-              records4: true,
-              records5: true,
-              records6: true,
-              records7: true,
-              records8: true,
-              records9: true,
-              records10: true,
-              records11: true,
-              records12: true,
-              records13: true,
-              records14: true,
-              records15: true,
+              // Unified table only (kept complete via dual-write); was 16
+              // correlated COUNT subqueries per form.
+              records: true,
               sections: true,
             },
           },
@@ -229,10 +217,7 @@ export async function getFormModules() {
     childCount: m.children.length,
     forms: m.forms.map((f) => {
       const totalRecords =
-        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
-        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
-        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
-        f._count.records13 + f._count.records14 + f._count.records15;
+        f._count.records;
       return {
         id: f.id,
         name: f.name,
@@ -243,10 +228,7 @@ export async function getFormModules() {
     }),
     totalRecords: m.forms.reduce((sum, f) => {
       return sum +
-        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
-        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
-        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
-        f._count.records13 + f._count.records14 + f._count.records15;
+        f._count.records;
     }, 0),
   }));
 }
@@ -1136,10 +1118,8 @@ export async function getUserDashboardData(dateRange: string) {
           isPublished: true,
           _count: {
             select: {
-              records1: true, records2: true, records3: true, records4: true,
-              records5: true, records6: true, records7: true, records8: true,
-              records9: true, records10: true, records11: true, records12: true,
-              records13: true, records14: true, records15: true,
+              // Unified table only (kept complete via dual-write).
+              records: true,
               sections: true,
             },
           },
@@ -1161,34 +1141,27 @@ export async function getUserDashboardData(dateRange: string) {
     moduleType: m.moduleType,
     forms: m.forms.map((f) => {
       const totalRecords =
-        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
-        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
-        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
-        f._count.records13 + f._count.records14 + f._count.records15;
+        f._count.records;
       return { id: f.id, name: f.name, isPublished: f.isPublished, totalRecords, sectionCount: f._count.sections };
     }),
     totalRecords: m.forms.reduce((sum, f) => {
       return sum +
-        f._count.records1 + f._count.records2 + f._count.records3 + f._count.records4 +
-        f._count.records5 + f._count.records6 + f._count.records7 + f._count.records8 +
-        f._count.records9 + f._count.records10 + f._count.records11 + f._count.records12 +
-        f._count.records13 + f._count.records14 + f._count.records15;
+        f._count.records;
     }, 0),
   }));
 
-  // Count user's submissions only in permitted forms
+  // Count user's submissions only in permitted forms. One query against the
+  // unified table (complete via dual-write, indexed on userId/formId/submittedAt)
+  // instead of 15 sequential per-shard counts.
   let mySubmissions = 0;
   if (permittedFormIds.length > 0) {
-    for (let t = 1; t <= 15; t++) {
-      const model = `formRecord${t}` as keyof typeof prisma;
-      mySubmissions += await (prisma[model] as any).count({
-        where: {
-          userId,
-          formId: { in: permittedFormIds },
-          submittedAt: { gte: startDate, lte: endDate },
-        },
-      });
-    }
+    mySubmissions = await prisma.formRecord.count({
+      where: {
+        userId,
+        formId: { in: permittedFormIds },
+        submittedAt: { gte: startDate, lte: endDate },
+      },
+    });
   }
 
   // User's attendance in period
@@ -1216,24 +1189,22 @@ export async function getUserDashboardData(dateRange: string) {
     },
   });
 
-  // User's submission time series scoped to permitted forms
+  // User's submission time series scoped to permitted forms. One unified-table
+  // query instead of 15 sequential per-shard findManys.
   const timeSeries: Record<string, number> = {};
   if (permittedFormIds.length > 0) {
-    for (let t = 1; t <= 15; t++) {
-      const model = `formRecord${t}` as keyof typeof prisma;
-      const records = await (prisma[model] as any).findMany({
-        where: {
-          userId,
-          formId: { in: permittedFormIds },
-          submittedAt: { gte: startDate, lte: endDate },
-        },
-        select: { submittedAt: true },
-      });
-      records.forEach((r: any) => {
-        const d = new Date(r.submittedAt).toISOString().split('T')[0];
-        timeSeries[d] = (timeSeries[d] || 0) + 1;
-      });
-    }
+    const records = await prisma.formRecord.findMany({
+      where: {
+        userId,
+        formId: { in: permittedFormIds },
+        submittedAt: { gte: startDate, lte: endDate },
+      },
+      select: { submittedAt: true },
+    });
+    records.forEach((r: any) => {
+      const d = new Date(r.submittedAt).toISOString().split('T')[0];
+      timeSeries[d] = (timeSeries[d] || 0) + 1;
+    });
   }
 
   const myTimeSeries = Object.entries(timeSeries)

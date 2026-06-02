@@ -7,7 +7,6 @@ import {
   Clock, TrendingUp, ArrowUpRight, ChevronDown, Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,6 +22,7 @@ import {
   useGetDashboardRecentActivityQuery,
 } from '@/lib/api/dashboard';
 import { AttendanceWidget } from '@/components/attendance/attendance-widget';
+import { EmployeeProfileCard } from '@/components/dashboard/employee-profile-card';
 
 // Each stat card uses a distinct accent tone so the row reads as four
 // glanceable signals rather than four near-identical white tiles. The
@@ -68,36 +68,6 @@ const statCards = [
   },
 ] as const;
 
-// Time-of-day greeting. Falls back to "Hello" outside daylight hours so
-// late-night users don't get told "good morning" at 2am.
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return 'Hello';
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  if (h < 22) return 'Good evening';
-  return 'Hello';
-}
-
-// "Tuesday, May 26" — keeps the page anchored in real time without
-// needing a relative-date library.
-function todayLabel(): string {
-  return new Date().toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
-// Two-letter initials from a display name. Defensive against empty
-// strings, single-word names, and accidental whitespace.
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 export function UserDashboardContent() {
   // First-paint query — fires on mount, light enough to land in tens of ms.
   // Everything below the stat cards is gated behind explicit user intent so
@@ -119,57 +89,12 @@ export function UserDashboardContent() {
 
   return (
     <div className="space-y-6 sm:space-y-8 py-4 px-3 sm:px-6 max-w-7xl mx-auto">
-      {/* ── Hero ────────────────────────────────────────────────────────
-          Single anchor card: time-of-day greeting + name + role context +
-          today's date. Avatar (initials only — the API doesn't ship an
-          image) gives the page a face. Subtle gradient + primary-tinted
-          ring keep it visually distinct from the plain content cards
-          below without resorting to candy colours. */}
-      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-primary/[0.03] to-transparent">
-        <CardContent className="p-5 sm:p-6">
-          <div className="flex items-start gap-4">
-            <Avatar className="h-14 w-14 sm:h-16 sm:w-16 ring-2 ring-primary/20 shrink-0">
-              <AvatarFallback className="bg-primary/15 text-primary font-semibold text-lg">
-                {initialsOf(user.name)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs sm:text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                {greeting()}
-              </p>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight mt-0.5 truncate">
-                {user.name}
-              </h1>
-              <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span>{todayLabel()}</span>
-                {(user.designation || user.department) && (
-                  <>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="font-medium text-foreground/80 truncate">
-                      {[user.designation, user.department].filter(Boolean).join(' · ')}
-                    </span>
-                  </>
-                )}
-              </p>
-              {user.roles.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {user.roles.slice(0, 4).map((r, i) => (
-                    <Badge key={i} variant="secondary" className="text-[11px] font-normal bg-background/70 backdrop-blur-sm">
-                      {r.roleName}
-                      <span className="text-muted-foreground/70 ml-1">· {r.unitName}</span>
-                    </Badge>
-                  ))}
-                  {user.roles.length > 4 && (
-                    <Badge variant="secondary" className="text-[11px] font-normal bg-background/70">
-                      +{user.roles.length - 4} more
-                    </Badge>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* ── Profile ─────────────────────────────────────────────────────
+          Social-media-style profile header: gradient cover, overlapping
+          avatar, identity, a tenure/shift/hours/team stat strip, and a
+          contact row. Renders instantly from the summary payload and
+          enriches from /api/auth/me (avatar, shift, contact, etc.). */}
+      <EmployeeProfileCard summary={user} />
 
       {/* ── Attendance ──────────────────────────────────────────────────
           Reuses the same `<AttendanceWidget />` the sidebar and mobile

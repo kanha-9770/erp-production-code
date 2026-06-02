@@ -98,9 +98,6 @@ export async function middleware(request: NextRequest) {
 
   // ── 4b. Staleness check — force refresh if cookie is too old ──────────────
   if (authMeta.ts && Date.now() - authMeta.ts > AUTH_META_MAX_AGE) {
-    console.log(
-      `[MW] path=${pathname} auth-meta STALE (age=${Math.round((Date.now() - authMeta.ts) / 1000)}s) → refreshing`
-    );
     const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
     refreshUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(refreshUrl);
@@ -165,9 +162,6 @@ export async function middleware(request: NextRequest) {
 
   if (routeResult === false) {
     // Explicitly denied by the most specific matching pattern
-    console.log(
-      `[MW] path=${pathname} DENIED (specificity match) roles=[${authMeta.roleNames}]`
-    );
     return NextResponse.redirect(buildRedirectUrl(request, "/unauthorized"));
   }
 

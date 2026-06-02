@@ -3,8 +3,7 @@ import { validateSession } from '@/lib/auth';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
-  getFormModules, getSubmissionTimeSeries,
-  checkIsAdmin, getAdminPulse,
+  getFormModules, getSubmissionTimeSeries, getAdminPulse,
 } from '@/app/actions/analytics';
 import { DashboardContent } from '@/components/dashboard/dashboard-content';
 import { UserDashboardContent } from '@/components/dashboard/user-dashboard-content';
@@ -30,7 +29,17 @@ export default async function HomePage() {
     redirect('/login');
   }
 
-  const isAdmin = await checkIsAdmin();
+  // Derive admin status from the session we just validated instead of
+  // calling checkIsAdmin() — that helper runs requireAuth(), which validates
+  // the session a SECOND time over the network before computing the exact
+  // same boolean from unitAssignments. On a remote DB that redundant
+  // round-trip was a measurable chunk of the landing-page TTFB. Same logic
+  // as /api/auth/me.
+  const isOrgOwner = !!(session.user as any).ownedOrganization;
+  const hasAdminRole = session.user.unitAssignments.some(
+    (ua: any) => ua.role.isAdmin || ua.role.name.toLowerCase().includes('admin'),
+  );
+  const isAdmin = isOrgOwner || hasAdminRole;
   const organizationName = session.user.organization?.name ?? '';
 
   return (

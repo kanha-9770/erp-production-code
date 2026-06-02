@@ -145,7 +145,18 @@ async function getValidOrganizationId(): Promise<string> {
 }
 
 // Helper function to ensure standard permissions exist in the database
+// These permission rows use FIXED global ids and only ever need seeding ONCE.
+// They were previously re-upserted (+ a Redis cache invalidation each) on EVERY
+// call to getPagePermissions/getPermissions/updateUserPermissions — i.e. on
+// every permission-matrix load — adding ~8 upserts + 8 cache busts + org
+// lookups of pure overhead per request (the cause of the slow static-page
+// permission load). A per-process success flag makes the seed run at most once
+// per server process; it stays false on failure so a transient error retries.
+let standardPermissionsEnsured = false;
+let pagePermissionsEnsured = false;
+
 async function ensureStandardPermissionsExist(): Promise<void> {
+  if (standardPermissionsEnsured) return;
   const isConnected = await isDatabaseConnected();
   if (!isConnected) {
     return;
@@ -183,6 +194,7 @@ async function ensureStandardPermissionsExist(): Promise<void> {
       // Best-effort — cache failures must not break seeding.
       await invalidatePermissionCache(perm.name).catch(() => {});
     }
+    standardPermissionsEnsured = true;
   } catch (error) {
     console.error("[v0] Failed to ensure standard permissions:", error);
   }
@@ -196,6 +208,7 @@ const PAGE_ONLY_PERMISSIONS = [
 ];
 
 async function ensurePagePermissionsExist(): Promise<void> {
+  if (pagePermissionsEnsured) return;
   const isConnected = await isDatabaseConnected();
   if (!isConnected) return;
 
@@ -218,6 +231,7 @@ async function ensurePagePermissionsExist(): Promise<void> {
       });
       await invalidatePermissionCache(perm.name).catch(() => {});
     }
+    pagePermissionsEnsured = true;
   } catch (error) {
     console.error("[v0] Failed to ensure page permissions:", error);
   }
@@ -545,113 +559,13 @@ export async function getModules(): Promise<any[]> {
   return await getModulesWithForms();
 }
 
-export async function updateRolePermissions(
-  updates: RolePermissionUpdate[]
-): Promise<boolean> {
-  const isConnected = await isDatabaseConnected();
-  if (!isConnected) return true;
-
-  try {
-    await ensureStandardPermissionsExist();
-
-    // 1. BATCH LOAD ALL DATA
-    const [roles, permissions, forms, modules] = await Promise.all([
-      prisma.role.findMany({ select: { id: true } }),
-      prisma.permission.findMany({ select: { id: true } }),
-      prisma.form.findMany({ select: { id: true, moduleId: true } }),
-      prisma.formModule.findMany({ select: { id: true } }),
-    ]);
-
-    const roleSet = new Set(roles.map((r) => r.id));
-    const permSet = new Set(permissions.map((p) => p.id));
-    const formModuleMap = new Map(forms.map((f) => [f.id, f.moduleId]));
-    const moduleSet = new Set(modules.map((m) => m.id));
-
-    // 2. PRE-VALIDATE ALL UPDATES
-    const validUpdates: {
-      roleId: string;
-      permissionId: string;
-      moduleId: string | null;
-      formId: string | null;
-      granted: boolean;
-      canDelegate: boolean;
-    }[] = [];
-
-    for (const u of updates) {
-      if (!u.roleId || !u.permissionId) continue;
-      if (!roleSet.has(u.roleId)) continue;
-      if (!permSet.has(u.permissionId)) continue;
-
-      let moduleId: string | null = null;
-      let formId: string | null = null;
-
-      if (u.formId) {
-        formId = u.formId;
-        moduleId = formModuleMap.get(u.formId) || null;
-        if (!moduleId) continue;
-      } else if (u.moduleId) {
-        const cleanId = u.moduleId.replace(/_self-perm$|_self$/, "");
-        if (!moduleSet.has(cleanId)) continue;
-        moduleId = cleanId;
-      } else {
-        continue;
-      }
-
-      validUpdates.push({
-        roleId: u.roleId,
-        permissionId: u.permissionId,
-        moduleId,
-        formId,
-        granted: u.granted,
-        canDelegate: u.canDelegate ?? false,
-      });
-    }
-
-    if (validUpdates.length === 0) return true;
-
-    // 3. ONE TRANSACTION, NO AWAITS IN LOOP
-    // FIX: Use the correct Prisma compound unique key name.
-    // Schema has: @@unique([roleId, permissionId, moduleId], map: "role_perm_module_unique")
-    // The `map` name is for the DB constraint only. Prisma client uses the auto-generated
-    // compound key: roleId_permissionId_moduleId
-    await prisma.$transaction(
-      async (tx) => {
-        for (const u of validUpdates) {
-          await tx.rolePermission.upsert({
-            where: {
-              roleId_permissionId_moduleId: {
-                roleId: u.roleId,
-                permissionId: u.permissionId,
-                moduleId: u.moduleId!,
-              },
-            },
-            update: {
-              formId: u.formId,
-              granted: u.granted,
-              canDelegate: u.canDelegate,
-            },
-            create: {
-              roleId: u.roleId,
-              permissionId: u.permissionId,
-              moduleId: u.moduleId!,
-              formId: u.formId,
-              sectionId: null,
-              formFieldId: null,
-              granted: u.granted,
-              canDelegate: u.canDelegate,
-            },
-          });
-        }
-      },
-      { timeout: 30000 }
-    );
-
-    return true;
-  } catch (error) {
-    console.error("[v0] Failed to update role permissions:", error);
-    throw error;
-  }
-}
+// NOTE: `updateRolePermissions` was removed (2026-06-01). It was DEAD CODE —
+// no server caller; the live role-permission write path is the bulk
+// delete+create in `PUT /api/role-permissions`. It also carried a latent bug:
+// it upserted on the 3-field key `roleId_permissionId_moduleId`, but the real
+// unique is 4-field `[roleId, permissionId, moduleId, formId]`. Reintroduce via
+// the bulk pattern (see `updateUserPermissions` below) if a server caller is
+// ever needed.
 
 export async function updateUserPermissions(
   updates: UserPermissionUpdate[]

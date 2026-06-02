@@ -7,6 +7,7 @@ import {
   useReducer,
   useEffect,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import type {
@@ -367,8 +368,17 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     }
   }, [state.organizationId, organizationName, ensureOrg, refetchRoles, refetchUnits, toast]);
 
+  // Stable context value — a fresh `{ state, dispatch, refreshData }` literal
+  // every render re-rendered all useRoles() consumers (role/org-unit trees)
+  // on any provider render. `dispatch` is stable (useReducer), `refreshData`
+  // is useCallback-stable, so this only changes when `state` does.
+  const value = useMemo(
+    () => ({ state, dispatch, refreshData }),
+    [state, dispatch, refreshData],
+  );
+
   return (
-    <RoleContext.Provider value={{ state, dispatch, refreshData }}>
+    <RoleContext.Provider value={value}>
       {children}
     </RoleContext.Provider>
   );

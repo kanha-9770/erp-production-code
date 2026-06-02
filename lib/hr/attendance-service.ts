@@ -667,27 +667,43 @@ export async function getStatus(
 ): Promise<AttendanceStatus> {
   const now = new Date();
   // 24-hour cap: close any prior-day rows where the user forgot to check
-  // out, BEFORE we read today's row. Without this, a stale Monday row
-  // would still show as "WORKING" on Tuesday and block today's check-in.
-  await applyDayCapAutoCheckouts({ userId }, now);
+  // out. This sweep only touches rows whose check-in predates today
+  // (checkInAt < start-of-today), so it NEVER touches today's row (which is
+  // keyed on today's `date` below). That independence lets us run it
+  // concurrently with the reads instead of paying a serial round-trip up
+  // front — we kick it off now and join it before returning. It's a
+  // best-effort cleanup, so a failure here is logged, not fatal: a stale
+  // sweep shouldn't blank the whole attendance widget.
+  const dayCapPromise = applyDayCapAutoCheckouts({ userId }, now).catch((e) => {
+    console.warn('[attendance] day-cap auto-checkout sweep failed:', e);
+  });
 
   const cfg = await getAttendanceConfig(organizationId);
-  // Resolve the user's effective shift once up front. Late/grace/OT and the
-  // shift block in the response all use the same window so an employee with
-  // per-row inTime/outTime gets classified against their own hours instead of
-  // the org default.
-  const shift = await getEffectiveShift(userId, cfg);
   const tz = orgTimezone(cfg);
   const date = todayKey(now, tz);
   const month = date.slice(0, 7);
 
-  // Look up the user + linked employee once — both feed leave-matching:
-  // a leave filed against employee id (no email column) still has to
-  // trigger the ON_LEAVE banner for that user.
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { email: true, employee: { select: { id: true } } },
-  });
+  // After cfg, these three reads are mutually independent — they need only
+  // `userId` and the cfg-derived `date`. Firing them together turns three
+  // serial remote round-trips into one:
+  //   - getEffectiveShift: per-employee inTime/outTime override (else org
+  //     default). Late/grace/OT and the shift block all use this window.
+  //   - user + linked employee id: feeds leave-matching (a leave filed
+  //     against employee id, which has no email column, still has to trigger
+  //     the ON_LEAVE banner for this user).
+  //   - today's attendance row.
+  const [shift, user, rowInitial] = await Promise.all([
+    getEffectiveShift(userId, cfg),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, employee: { select: { id: true } } },
+    }),
+    prisma.attendance.findFirst({ where: { userId, date } }),
+  ]);
+  // Join the prior-day sweep before we go on, so its writes have landed
+  // (it's been running concurrently with cfg + the reads above).
+  await dayCapPromise;
+
   const userEmail = user?.email ?? null;
   const employeeId = user?.employee?.id ?? null;
 
@@ -698,9 +714,7 @@ export async function getStatus(
   if (userEmail) userMatchKeys.add(`email:${userEmail.toLowerCase()}`);
   if (employeeId) userMatchKeys.add(`empId:${employeeId.toLowerCase()}`);
 
-  let row = await prisma.attendance.findFirst({
-    where: { userId, date },
-  });
+  let row = rowInitial;
 
   // Holiday and leave detection. Only meaningful when we know the org.
   let isHoliday = false;

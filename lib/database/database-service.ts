@@ -239,8 +239,10 @@ export class DatabaseService {
 
         allVisibleIds = allModules.map((m) => m.id);
       } else {
-        // ── Role-based permissions ───────────────────────────────────────
-        const roleBased = await prisma.$queryRaw<{ id: string }[]>`
+        // ── Role-based + user-based permissions (independent → run in
+        //    PARALLEL instead of two sequential round-trips). ──────────────
+        const [roleBased, userBased] = await Promise.all([
+          prisma.$queryRaw<{ id: string }[]>`
         SELECT DISTINCT fm.id
         FROM users u
         JOIN user_unit_assignments uua ON uua.user_id = u.id
@@ -249,17 +251,16 @@ export class DatabaseService {
         JOIN form_modules fm ON fm.id = rp.module_id AND fm.is_active = TRUE
         WHERE u.id = ${userId}
         AND fm.organization_id = ${organizationId}
-      `;
-
-        // ── User-based permissions ───────────────────────────────────────
-        const userBased = await prisma.$queryRaw<{ id: string }[]>`
+      `,
+          prisma.$queryRaw<{ id: string }[]>`
         SELECT DISTINCT fm.id
         FROM users u
         JOIN user_permissions up ON up.user_id = u.id AND up.granted = TRUE
         JOIN form_modules fm ON fm.id = up.module_id AND fm.is_active = TRUE
         WHERE u.id = ${userId}
         AND fm.organization_id = ${organizationId}
-      `;
+      `,
+        ]);
 
         const directIdsSet = new Set([
           ...roleBased.map((m) => m.id),

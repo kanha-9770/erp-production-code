@@ -60,10 +60,9 @@ export async function GET(request: NextRequest) {
             isPublished: true,
             _count: {
               select: {
-                records1: true, records2: true, records3: true, records4: true,
-                records5: true, records6: true, records7: true, records8: true,
-                records9: true, records10: true, records11: true, records12: true,
-                records13: true, records14: true, records15: true,
+                // Unified table only (kept complete via dual-write); was 16
+                // correlated COUNT subqueries per form.
+                records: true,
                 sections: true,
               },
             },
@@ -81,12 +80,7 @@ export async function GET(request: NextRequest) {
       color: m.color,
       moduleType: m.moduleType,
       forms: m.forms.map((f) => {
-        const totalRecords =
-          f._count.records1 + f._count.records2 + f._count.records3 +
-          f._count.records4 + f._count.records5 + f._count.records6 +
-          f._count.records7 + f._count.records8 + f._count.records9 +
-          f._count.records10 + f._count.records11 + f._count.records12 +
-          f._count.records13 + f._count.records14 + f._count.records15;
+        const totalRecords = f._count.records;
         return {
           id: f.id,
           name: f.name,
@@ -95,16 +89,7 @@ export async function GET(request: NextRequest) {
           sectionCount: f._count.sections,
         };
       }),
-      totalRecords: m.forms.reduce((sum, f) => {
-        return (
-          sum +
-          f._count.records1 + f._count.records2 + f._count.records3 +
-          f._count.records4 + f._count.records5 + f._count.records6 +
-          f._count.records7 + f._count.records8 + f._count.records9 +
-          f._count.records10 + f._count.records11 + f._count.records12 +
-          f._count.records13 + f._count.records14 + f._count.records15
-        );
-      }, 0),
+      totalRecords: m.forms.reduce((sum, f) => sum + f._count.records, 0),
     }));
 
     return NextResponse.json({ success: true, modules: formatted });

@@ -1104,6 +1104,26 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
     );
   };
 
+  // Stable identity for the editor renderer passed to the memoized RecordCell.
+  // `renderFieldEditor` closes over many values (pendingChanges, formula state,
+  // users, …), so recreating it every render gave it a new identity — which
+  // defeated RecordCell's React.memo and re-rendered EVERY cell on any state
+  // change (each keystroke/selection). This latest-ref wrapper keeps a STABLE
+  // function identity (so the memo holds) while always invoking the freshest
+  // closure (so no stale-deps bugs) — safer than hand-auditing a useCallback
+  // deps array for a 500-line closure.
+  const renderFieldEditorRef = React.useRef(renderFieldEditor);
+  renderFieldEditorRef.current = renderFieldEditor;
+  const stableRenderFieldEditor = useCallback(
+    (
+      record: EnhancedFormRecord,
+      fieldDef: FormFieldWithSection,
+      actualValue: any,
+      displayText: string,
+    ) => renderFieldEditorRef.current(record, fieldDef, actualValue, displayText),
+    [],
+  );
+
   return (
     <TooltipProvider>
       <div className="flex h-full min-h-0 bg-gray-50 overflow-x-hidden overflow-y-hidden">
@@ -1293,7 +1313,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                           comments={comments}
                                           getConditionalStyle={getConditionalStyle}
                                           handleCellPointerDown={handleCellPointerDown}
-                                          renderFieldEditor={renderFieldEditor}
+                                          renderFieldEditor={stableRenderFieldEditor}
                                           onCellClick={handleCellClick}
                                           onContextMenu={handleCellContextMenu}
                                           onPreviewClick={handlePreviewClick}
@@ -1324,7 +1344,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                             comments={comments}
                                             getConditionalStyle={getConditionalStyle}
                                             handleCellPointerDown={handleCellPointerDown}
-                                            renderFieldEditor={renderFieldEditor}
+                                            renderFieldEditor={stableRenderFieldEditor}
                                             onCellClick={handleCellClick}
                                             onContextMenu={handleCellContextMenu}
                                             onPreviewClick={handlePreviewClick}
@@ -1382,7 +1402,7 @@ const RecordsDisplay: React.FC<RecordsDisplayProps> = ({
                                         comments={comments}
                                         getConditionalStyle={getConditionalStyle}
                                         handleCellPointerDown={handleCellPointerDown}
-                                        renderFieldEditor={renderFieldEditor}
+                                        renderFieldEditor={stableRenderFieldEditor}
                                         onCellClick={handleCellClick}
                                         onContextMenu={handleCellContextMenu}
                                         onPreviewClick={handlePreviewClick}

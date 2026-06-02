@@ -96,12 +96,45 @@ export async function getAuthenticatedUser(
  * silently misses org owners, roles flagged via `isAdmin`, and roles whose
  * names differ in case/spelling (e.g. "Administrator", "Super Admin").
  */
+// `isUserAdmin` is called from ~90 server call sites and previously hit the DB
+// (org lookup + role JOIN) on EVERY one — the single largest avoidable Postgres
+// load. Admin status changes rarely, so a short two-tier cache removes almost
+// all of it. TTLs are deliberately SHORT: a stale `true` keeps elevated access,
+// which is the unsafe direction, so we bound staleness to ≤60s. Role-mutation
+// paths should call `invalidateAdminCache(userId)` for instant propagation.
+//
+// Key includes organizationId because the org-owner check is org-scoped — a
+// call with org=null must not poison a later call that passes the org.
+const isAdminL1 = new Map<string, { value: boolean; cachedAt: number }>();
+const IS_ADMIN_L1_TTL_MS = 30_000;
+const IS_ADMIN_REDIS_TTL_S = 60;
+const isAdminCacheKey = (userId: string, organizationId?: string | null) =>
+  `${userId}|${organizationId ?? ""}`;
+const isAdminRedisKey = (userId: string, organizationId?: string | null) =>
+  buildKey("auth", "is-admin", isAdminCacheKey(userId, organizationId));
+
 export async function isUserAdmin(
   userId: string,
   organizationId?: string | null
 ): Promise<boolean> {
   if (!userId) return false;
+  const k = isAdminCacheKey(userId, organizationId);
 
+  // L1 — in-process
+  const l1 = isAdminL1.get(k);
+  if (l1 && Date.now() - l1.cachedAt < IS_ADMIN_L1_TTL_MS) return l1.value;
+
+  // L2 — Redis (null on miss OR error → fall through to DB)
+  const l2 = await cacheGet<{ value: boolean }>(
+    "auth",
+    isAdminRedisKey(userId, organizationId)
+  );
+  if (l2) {
+    isAdminL1.set(k, { value: l2.value, cachedAt: Date.now() });
+    return l2.value;
+  }
+
+  // L3 — Postgres (source of truth)
   const [organization, roles] = await Promise.all([
     organizationId
       ? prisma.organization.findUnique({
@@ -117,13 +150,38 @@ export async function isUserAdmin(
     `,
   ]);
 
-  if (organization?.ownerId === userId) return true;
+  const value =
+    organization?.ownerId === userId ||
+    roles.some(
+      (r) =>
+        r.is_admin === true ||
+        (r.role_name ?? "").toLowerCase().includes("admin")
+    );
 
-  return roles.some(
-    (r) =>
-      r.is_admin === true ||
-      (r.role_name ?? "").toLowerCase().includes("admin")
+  isAdminL1.set(k, { value, cachedAt: Date.now() });
+  void cacheSet(
+    "auth",
+    isAdminRedisKey(userId, organizationId),
+    { value },
+    IS_ADMIN_REDIS_TTL_S
   );
+  return value;
+}
+
+/**
+ * Drops the cached admin flag for a user (both tiers, all org keys seen on this
+ * process). Call from any handler that assigns/removes roles or transfers org
+ * ownership so a promotion/demotion takes effect immediately instead of waiting
+ * out the ≤60s TTL.
+ */
+export async function invalidateAdminCache(userId: string): Promise<void> {
+  for (const key of Array.from(isAdminL1.keys())) {
+    if (key.startsWith(`${userId}|`)) isAdminL1.delete(key);
+  }
+  // Best-effort Redis clear for the common (userId, org) and (userId, null) keys.
+  await Promise.allSettled([
+    cacheInvalidate("auth", isAdminRedisKey(userId, null)),
+  ]);
 }
 
 // Permission rows are looked up by name on every `hasFormPermission` call.

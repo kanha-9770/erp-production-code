@@ -71,6 +71,51 @@ export async function GET(request: NextRequest) {
     }
 
     const orgId = authUser.organizationId;
+    // Page-switch fast path: the actions and the roles+users list are
+    // page-INDEPENDENT, so the client loads them once and then asks only for
+    // the per-page grants on each subsequent page selection. This skips the
+    // expensive getPagePermissions() seed-check and the roles×users join.
+    const grantsOnly = request.nextUrl.searchParams.get("grantsOnly") === "1";
+
+    // Per-ROLE grants for THIS page (propagate to the role's users).
+    const fetchRoleGrants = () =>
+      prisma.rolePermission.findMany({
+        where: {
+          pagePath,
+          granted: true,
+          sectionId: null,
+          formFieldId: null,
+          role: { organizationId: orgId },
+        },
+        select: { roleId: true, permissionId: true },
+      });
+    // Per-USER explicit overrides for THIS page. NOT filtered by `granted` — an
+    // explicit DENY (granted:false) must survive a reload so the grid can tell
+    // "explicit deny" from "inherit".
+    const fetchUserGrants = () =>
+      prisma.userPermission.findMany({
+        where: { pagePath, isActive: true, user: { organizationId: orgId } },
+        select: { userId: true, permissionId: true, granted: true },
+      });
+
+    if (grantsOnly) {
+      const [roleGrantRows, userGrantRows] = await Promise.all([
+        fetchRoleGrants(),
+        fetchUserGrants(),
+      ]);
+      return NextResponse.json({
+        success: true,
+        roleGrants: roleGrantRows.map((g) => ({
+          roleId: g.roleId,
+          permissionId: g.permissionId,
+        })),
+        userGrants: userGrantRows.map((g) => ({
+          userId: g.userId,
+          permissionId: g.permissionId,
+          granted: g.granted,
+        })),
+      });
+    }
 
     const [allActions, roleRows, roleGrantRows, userGrantRows] =
       await Promise.all([
@@ -99,28 +144,8 @@ export async function GET(request: NextRequest) {
           },
           orderBy: [{ isAdmin: "desc" }, { name: "asc" }],
         }),
-        // Per-ROLE grants for THIS page (propagate to the role's users).
-        prisma.rolePermission.findMany({
-          where: {
-            pagePath,
-            granted: true,
-            sectionId: null,
-            formFieldId: null,
-            role: { organizationId: orgId },
-          },
-          select: { roleId: true, permissionId: true },
-        }),
-        // Per-USER explicit overrides for THIS page. NOT filtered by `granted`
-        // — an explicit DENY (granted:false) must survive a reload too, so the
-        // grid can distinguish "explicit deny" from "inherit".
-        prisma.userPermission.findMany({
-          where: {
-            pagePath,
-            isActive: true,
-            user: { organizationId: orgId },
-          },
-          select: { userId: true, permissionId: true, granted: true },
-        }),
+        fetchRoleGrants(),
+        fetchUserGrants(),
       ]);
 
     // Keep only CREATE/EDIT/DELETE/VIEW, in column order.

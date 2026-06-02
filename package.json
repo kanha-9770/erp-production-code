@@ -18,7 +18,8 @@
     "seed:re-transactions": "npx tsx scripts/seed-real-estate-transactions.ts",
     "setup:hr": "npx tsx scripts/setup-hr-production.ts",
     "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll",
-    "warm:cache": "npx tsx scripts/warm-cache.ts"
+    "warm:cache": "npx tsx scripts/warm-cache.ts",
+    "db:jsonb-indexes": "npx tsx scripts/apply-jsonb-indexes.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
@@ -86,10 +87,6 @@
     "libphonenumber-js": "^1.12.33",
     "lucide-react": "^0.454.0",
     "mammoth": "^1.12.0",
-    "markmap-common": "^0.18.9",
-    "markmap-lib": "^0.18.12",
-    "markmap-view": "^0.18.12",
-    "moment": "^2.30.1",
     "mongodb": "^7.0.0",
     "next": "16.2.6",
     "next-auth": "^4.24.11",
@@ -100,7 +97,6 @@
     "pdf-parse": "^2.4.5",
     "prisma": "6.19.0",
     "react": "^19",
-    "react-big-calendar": "^1.19.4",
     "react-day-picker": "8.10.1",
     "react-dnd": "latest",
     "react-dnd-html5-backend": "^16.0.1",

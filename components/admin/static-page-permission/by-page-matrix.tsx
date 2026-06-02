@@ -27,7 +27,7 @@
  * Users in an admin role already have everything → shown checked + disabled.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Card,
   CardContent,
@@ -110,8 +110,15 @@ export function ByPageMatrix() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
+  // Lightweight loading flag for page-switches (grants-only refetch) that keeps
+  // the roles tree on screen instead of replacing it with the skeleton.
+  const [grantsLoading, setGrantsLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState("")
+
+  // Once the page-independent actions + roles+users list has loaded, page
+  // switches only refetch the per-page grants (see the `grantsOnly` fast path).
+  const rolesLoadedRef = useRef(false)
 
   const selectedPage = useMemo(() => {
     for (const g of pageGroups) {
@@ -125,11 +132,19 @@ export function ByPageMatrix() {
   const load = useCallback(() => {
     if (!pagePath) return
     let cancelled = false
-    setLoading(true)
+    // Switching pages discards unsaved edits for the previous page.
     setRolePending(new Map())
     setUserPending(new Map())
+
+    // First load fetches everything; subsequent page switches fetch ONLY the
+    // per-page grants (actions + roles+users are page-independent and already
+    // on screen), which is dramatically faster and keeps the tree visible.
+    const grantsOnly = rolesLoadedRef.current
+    if (grantsOnly) setGrantsLoading(true)
+    else setLoading(true)
+
     fetch(
-      `/api/static-page-permission/by-page-users?pagePath=${encodeURIComponent(pagePath)}`,
+      `/api/static-page-permission/by-page-users?pagePath=${encodeURIComponent(pagePath)}${grantsOnly ? "&grantsOnly=1" : ""}`,
       { credentials: "include", cache: "no-store" },
     )
       .then((r) => (r.ok ? r.json() : null))
@@ -141,14 +156,21 @@ export function ByPageMatrix() {
             description: j?.error ?? "Try again",
             variant: "destructive",
           })
-          setActions([])
-          setRoles([])
+          if (!grantsOnly) {
+            setActions([])
+            setRoles([])
+          }
           setRoleGranted(new Set())
           setUserExplicit(new Map())
           return
         }
-        setActions(j.actions ?? [])
-        setRoles(j.roles ?? [])
+        // Only the FULL response carries actions/roles — never overwrite them
+        // with the grants-only payload's undefined.
+        if (!grantsOnly) {
+          setActions(j.actions ?? [])
+          setRoles(j.roles ?? [])
+          rolesLoadedRef.current = true
+        }
         const rg = new Set<string>()
         for (const g of j.roleGrants ?? []) rg.add(rkey(g.roleId, g.permissionId))
         setRoleGranted(rg)
@@ -160,7 +182,10 @@ export function ByPageMatrix() {
         if (!cancelled) toast({ title: "Failed to load", variant: "destructive" })
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          setGrantsLoading(false)
+        }
       })
     return () => {
       cancelled = true
@@ -532,7 +557,13 @@ export function ByPageMatrix() {
             No users match "{search}".
           </div>
         ) : (
-          <div className="rounded-lg border bg-card overflow-x-auto">
+          <div
+            className={cn(
+              "rounded-lg border bg-card overflow-x-auto transition-opacity",
+              grantsLoading && "opacity-60 pointer-events-none",
+            )}
+            aria-busy={grantsLoading}
+          >
             <table className="w-full min-w-[560px] text-sm">
               <thead>
                 <tr className="border-b bg-muted/30">

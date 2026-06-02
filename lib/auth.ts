@@ -59,7 +59,12 @@ export async function createSession(userId: string, ipAddress: string, userAgent
 // Cache key for a session by token. Lives in the `auth` namespace which has
 // its own dedicated Upstash DB, so a forms/HR cache outage can't slow login.
 const sessionCacheKey = (token: string) => buildKey("auth", "session", token)
-const SESSION_CACHE_TTL_S = 60 // short enough that a logout propagates within a minute
+// Logout, password change, and role updates already invalidate the session
+// explicitly (deleteSession / invalidateAllSessionsForUser), so a short TTL
+// isn't needed for correctness — it just caused a steady miss rate that re-ran
+// the deep session include. 5 min cuts that miss rate ~5× on the gate that
+// fronts every authenticated request.
+const SESSION_CACHE_TTL_S = 300
 
 export async function validateSession(token: string) {
   // L1/L2 cache check — Redis returns the full session graph in one round-trip.

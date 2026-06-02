@@ -58,12 +58,7 @@ export async function computeRouteMeta(
   organizationId: string | null,
   roleIds: string[]
 ): Promise<RouteMetaResult> {
-  console.log(
-    `[route-meta] START user=${userId} org=${organizationId} roleIds=[${roleIds}]`
-  );
-
   if (!organizationId) {
-    console.log(`[route-meta] no org → returning empty (all routes open)`);
     return { deniedRoutes: [], allowedRoutes: [], allowedModuleIds: [] };
   }
 
@@ -82,49 +77,25 @@ export async function computeRouteMeta(
     },
   });
 
-  console.log(
-    `[route-meta] found ${dbRoutePermissions.length} RoutePermission records for org=${organizationId}`
-  );
-
   const denied: string[] = [];
   const allowed: string[] = [];
 
   for (const rp of dbRoutePermissions) {
     // Route exists in DB but no access rules configured yet — open by default.
     // Don't add to either list so it stays unrestricted.
-    if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) {
-      console.log(`[route-meta]   pattern="${rp.pattern}" → OPEN (no access rules configured)`);
-      continue;
-    }
+    if (rp.roleAccess.length === 0 && rp.userAccess.length === 0) continue;
 
     // User-level override (most specific — if found, it wins)
     const userEntry = rp.userAccess.find((ua) => ua.userId === userId);
     if (userEntry) {
-      if (userEntry.granted) {
-        allowed.push(rp.pattern);
-        console.log(`[route-meta]   pattern="${rp.pattern}" → ALLOWED (user-level grant)`);
-      } else {
-        denied.push(rp.pattern);
-        console.log(`[route-meta]   pattern="${rp.pattern}" → DENIED (user-level denial)`);
-      }
+      (userEntry.granted ? allowed : denied).push(rp.pattern);
       continue;
     }
 
     // Role-level check
     const matchingRoleAccess = rp.roleAccess.filter((ra) => roleIds.includes(ra.roleId));
     const hasRoleGrant = matchingRoleAccess.some((ra) => ra.granted);
-
-    if (hasRoleGrant) {
-      allowed.push(rp.pattern);
-      console.log(
-        `[route-meta]   pattern="${rp.pattern}" → ALLOWED (role grant) matchingRoles=${matchingRoleAccess.length}`
-      );
-    } else {
-      denied.push(rp.pattern);
-      console.log(
-        `[route-meta]   pattern="${rp.pattern}" → DENIED (no role grant) totalRoleAccess=${rp.roleAccess.length} matchingRoles=${matchingRoleAccess.length}`
-      );
-    }
+    (hasRoleGrant ? allowed : denied).push(rp.pattern);
   }
 
   // ── 2. Module-level VIEW access ────────────────────────────────────────────
@@ -140,10 +111,6 @@ export async function computeRouteMeta(
       },
       select: { moduleId: true, roleId: true },
     });
-
-    console.log(
-      `[route-meta] found ${roleModulePerms.length} role VIEW module permissions`
-    );
 
     for (const rmp of roleModulePerms) {
       if (rmp.moduleId) allowedModuleIdSet.add(rmp.moduleId);
@@ -161,8 +128,6 @@ export async function computeRouteMeta(
     select: { moduleId: true, canView: true, granted: true },
   });
 
-  console.log(`[route-meta] found ${userModulePerms.length} user module permissions`);
-
   for (const ump of userModulePerms) {
     if (!ump.moduleId) continue;
     if (ump.canView && ump.granted) {
@@ -173,10 +138,6 @@ export async function computeRouteMeta(
   }
 
   const allowedModuleIds = [...allowedModuleIdSet];
-
-  console.log(
-    `[route-meta] RESULT denied=[${denied}] allowed=[${allowed}] allowedModules=${allowedModuleIds.length}`
-  );
 
   return { deniedRoutes: denied, allowedRoutes: allowed, allowedModuleIds };
 }

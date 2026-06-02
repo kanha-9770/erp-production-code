@@ -451,18 +451,18 @@ export class DatabaseRecords {
         where: { id: recordId },
       })
 
-      // ─── Fallback: scan legacy tables ───────────────────────────
+      // ─── Fallback: probe legacy shards in PARALLEL (1 round-trip, not up
+      //     to 15 sequential). Only runs for legacy records absent from the
+      //     unified mirror. ──────────────────────────────────────────────
       if (!record) {
-        for (let i = 1; i <= 15; i++) {
-          try {
-            record = await (prisma as any)[`formRecord${i}`].findUnique({
-              where: { id: recordId },
-            })
-            if (record) break
-          } catch {
-            // Continue to next table
-          }
-        }
+        const probes = await Promise.all(
+          Array.from({ length: 15 }, (_, i) =>
+            (prisma as any)[`formRecord${i + 1}`]
+              .findUnique({ where: { id: recordId } })
+              .catch(() => null),
+          ),
+        )
+        record = probes.find(Boolean) ?? null
       }
 
       if (!record) return null
@@ -506,22 +506,24 @@ export class DatabaseRecords {
         tableName = "form_records_unified"
       }
 
-      // Fallback: scan legacy tables
+      // Fallback: probe legacy shards in PARALLEL (1 round-trip, not up to 15
+      // sequential). Only runs for records absent from the unified mirror.
       if (!record) {
-        for (let i = 1; i <= 15; i++) {
-          const currentTable = `formRecord${i}`
-          try {
-            record = await (prisma as any)[currentTable].findUnique({
-              where: { id: recordId },
-              select: { id: true, formId: true },
-            })
-            if (record) {
-              tableName = `form_records_${i}`
-              break
-            }
-          } catch (error) {
-            // Continue to next table
-          }
+        const probes = await Promise.all(
+          Array.from({ length: 15 }, (_, i) =>
+            (prisma as any)[`formRecord${i + 1}`]
+              .findUnique({
+                where: { id: recordId },
+                select: { id: true, formId: true },
+              })
+              .then((r: any) => (r ? { r, idx: i + 1 } : null))
+              .catch(() => null),
+          ),
+        )
+        const hit = probes.find(Boolean) as { r: any; idx: number } | undefined
+        if (hit) {
+          record = hit.r
+          tableName = `form_records_${hit.idx}`
         }
       }
 
@@ -707,29 +709,30 @@ export class DatabaseRecords {
 
   static async deleteFormRecord(recordId: string): Promise<void> {
     try {
-      // First, find which table contains this record
+      // First, find which table contains this record.
       let tableName = ""
-      let record = null
+      let record: any = null
 
-      // Try each table until we find the record
-      for (let i = 1; i <= 15; i++) {
-        const currentTable = `formRecord${i}`
-        try {
-          record = await (prisma as any)[currentTable].findUnique({
-            where: { id: recordId },
-            select: { id: true },
-          })
-
-          if (record) {
-            tableName = `form_records_${i}`
-            break
-          }
-        } catch (error) {
-          // Continue to next table
-        }
+      // Probe the 15 shards in PARALLEL (one round-trip instead of up to 15
+      // sequential). We deliberately identify the SHARD first (not unified):
+      // dual-write keeps a copy in both, and the delete below must remove the
+      // shard copy as well as the unified mirror — finding it only in unified
+      // would orphan the shard row.
+      const probes = await Promise.all(
+        Array.from({ length: 15 }, (_, i) =>
+          (prisma as any)[`formRecord${i + 1}`]
+            .findUnique({ where: { id: recordId }, select: { id: true } })
+            .then((r: any) => (r ? i + 1 : null))
+            .catch(() => null),
+        ),
+      )
+      const idx = probes.find((x) => x != null)
+      if (idx != null) {
+        record = { id: recordId }
+        tableName = `form_records_${idx}`
       }
 
-      // Also try unified table
+      // Fallback: a unified-only record (no shard copy).
       if (!record) {
         try {
           record = await prisma.formRecord.findUnique({

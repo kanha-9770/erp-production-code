@@ -9,8 +9,10 @@ import { useDispatch } from "react-redux"
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-/** How often (ms) to poll for permission changes */
-const POLL_INTERVAL = 15_000 // 15 seconds
+/** How often (ms) to poll for permission changes. Permission changes are rare;
+ *  at 15s every open tab hit /api/auth/perm-version 4×/min (2 DB queries each).
+ *  60s cuts that background load 4× while staying responsive enough. */
+const POLL_INTERVAL = 60_000 // 60 seconds
 
 /** Routes that never require permission checks (unauthenticated pages) */
 const PUBLIC_ROUTES = [

@@ -289,26 +289,14 @@ export class DatabaseTransforms {
         return tableName
       }
 
-      // For regular forms, find the least used table (1-13)
-      const tableCounts = await Promise.all([
-        prisma.formRecord1.count(),
-        prisma.formRecord2.count(),
-        prisma.formRecord3.count(),
-        prisma.formRecord4.count(),
-        prisma.formRecord5.count(),
-        prisma.formRecord6.count(),
-        prisma.formRecord7.count(),
-        prisma.formRecord8.count(),
-        prisma.formRecord9.count(),
-        prisma.formRecord10.count(),
-        prisma.formRecord11.count(),
-        prisma.formRecord12.count(),
-        prisma.formRecord13.count(),
-      ])
-
-      // Find the table with the least records
-      const minCount = Math.min(...tableCounts)
-      const tableIndex = tableCounts.indexOf(minCount) + 1
+      // For regular forms, spread across shards 1–13 by a DETERMINISTIC HASH
+      // of the formId — not by COUNT(*)-ing all 13 partitions. The old approach
+      // ran 13 full-table counts (sequential seq-scans on a remote DB) on the
+      // first write of every new form, a cost that grew with total data. The
+      // mapping is created once and then cached in formTableMapping, so we only
+      // need a roughly even spread, not exact balancing — a hash gives that for
+      // free at zero query cost.
+      const tableIndex = DatabaseTransforms.hashFormIdToShard(formId, 13)
       const tableName = `form_records_${tableIndex}`
 
       // Create mapping
@@ -333,5 +321,22 @@ export class DatabaseTransforms {
     } catch (error: any) {
       console.error("Error creating table mapping:", error)
     }
+  }
+
+  /**
+   * Deterministically map a formId to a shard in [1, buckets] using a 32-bit
+   * FNV-1a hash. Pure + stable: the same formId always yields the same shard,
+   * and the spread across buckets is even enough for load-balancing without
+   * touching the database. Used by getFormRecordTable to replace the old
+   * 13×COUNT(*) "least-used table" probe.
+   */
+  private static hashFormIdToShard(formId: string, buckets: number): number {
+    let h = 0x811c9dc5 // FNV offset basis
+    for (let i = 0; i < formId.length; i++) {
+      h ^= formId.charCodeAt(i)
+      h = Math.imul(h, 0x01000193) // FNV prime
+    }
+    // `>>> 0` coerces the (possibly negative) 32-bit result to unsigned.
+    return ((h >>> 0) % buckets) + 1
   }
 }

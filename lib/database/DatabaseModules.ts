@@ -143,22 +143,10 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  // Unified table only — kept complete via dual-write. Counting
+                  // all 15 shards too was 16 correlated COUNT subqueries per
+                  // form; transformForm() reads this single `records` count.
                   records: true,
-                  records1: true,
-                  records2: true,
-                  records3: true,
-                  records4: true,
-                  records5: true,
-                  records6: true,
-                  records7: true,
-                  records8: true,
-                  records9: true,
-                  records10: true,
-                  records11: true,
-                  records12: true,
-                  records13: true,
-                  records14: true,
-                  records15: true,
                 },
               },
             },
@@ -245,22 +233,10 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  // Unified table only — kept complete via dual-write. Counting
+                  // all 15 shards too was 16 correlated COUNT subqueries per
+                  // form; transformForm() reads this single `records` count.
                   records: true,
-                  records1: true,
-                  records2: true,
-                  records3: true,
-                  records4: true,
-                  records5: true,
-                  records6: true,
-                  records7: true,
-                  records8: true,
-                  records9: true,
-                  records10: true,
-                  records11: true,
-                  records12: true,
-                  records13: true,
-                  records14: true,
-                  records15: true,
                 },
               },
             },
@@ -308,22 +284,10 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  // Unified table only — kept complete via dual-write. Counting
+                  // all 15 shards too was 16 correlated COUNT subqueries per
+                  // form; transformForm() reads this single `records` count.
                   records: true,
-                  records1: true,
-                  records2: true,
-                  records3: true,
-                  records4: true,
-                  records5: true,
-                  records6: true,
-                  records7: true,
-                  records8: true,
-                  records9: true,
-                  records10: true,
-                  records11: true,
-                  records12: true,
-                  records13: true,
-                  records14: true,
-                  records15: true,
                 },
               },
             },
@@ -378,22 +342,10 @@ export class DatabaseModules {
               },
               _count: {
                 select: {
+                  // Unified table only — kept complete via dual-write. Counting
+                  // all 15 shards too was 16 correlated COUNT subqueries per
+                  // form; transformForm() reads this single `records` count.
                   records: true,
-                  records1: true,
-                  records2: true,
-                  records3: true,
-                  records4: true,
-                  records5: true,
-                  records6: true,
-                  records7: true,
-                  records8: true,
-                  records9: true,
-                  records10: true,
-                  records11: true,
-                  records12: true,
-                  records13: true,
-                  records14: true,
-                  records15: true,
                 },
               },
             },
@@ -501,22 +453,10 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              // Unified table only — kept complete via dual-write (was 16
+              // correlated COUNT subqueries per form); transformForm() reads
+              // this single `records` count.
               records: true,
-              records1: true,
-              records2: true,
-              records3: true,
-              records4: true,
-              records5: true,
-              records6: true,
-              records7: true,
-              records8: true,
-              records9: true,
-              records10: true,
-              records11: true,
-              records12: true,
-              records13: true,
-              records14: true,
-              records15: true,
             },
           },
         },
@@ -549,22 +489,10 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              // Unified table only — kept complete via dual-write (was 16
+              // correlated COUNT subqueries per form); transformForm() reads
+              // this single `records` count.
               records: true,
-              records1: true,
-              records2: true,
-              records3: true,
-              records4: true,
-              records5: true,
-              records6: true,
-              records7: true,
-              records8: true,
-              records9: true,
-              records10: true,
-              records11: true,
-              records12: true,
-              records13: true,
-              records14: true,
-              records15: true,
             },
           },
         },
@@ -705,22 +633,10 @@ export class DatabaseModules {
           },
           _count: {
             select: {
+              // Unified table only — kept complete via dual-write (was 16
+              // correlated COUNT subqueries per form); transformForm() reads
+              // this single `records` count.
               records: true,
-              records1: true,
-              records2: true,
-              records3: true,
-              records4: true,
-              records5: true,
-              records6: true,
-              records7: true,
-              records8: true,
-              records9: true,
-              records10: true,
-              records11: true,
-              records12: true,
-              records13: true,
-              records14: true,
-              records15: true,
             },
           },
         },

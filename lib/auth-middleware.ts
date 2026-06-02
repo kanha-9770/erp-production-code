@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateSession, AuthContext } from './auth';
-import { prisma } from './prisma';
 
 // Add try-catch wrapper for better error handling
 const safeAsync = (fn: Function) => {
@@ -42,17 +41,16 @@ export const withAuth = (
         );
       }
 
-      console.log(`[withAuth] Session found for user: ${session.user.email}, ID: ${session.user.id}`);
-
-      // Get user's role assignments
-      const userAssignments = await prisma.userUnitAssignment.findMany({
-        where: { userId: session.user.id },
-        select: { roleId: true, role: { select: { name: true } } },
-      });
-
-      console.log(`[withAuth] Found ${userAssignments.length} role assignments for user ${session.user.email}:`, userAssignments);
-
-      const roleIds = userAssignments.map((assignment: any) => assignment.roleId);
+      // Role assignments are ALREADY on the cached session graph
+      // (validateSession deep-includes unitAssignments→role), so derive them
+      // here instead of firing a fresh per-request DB query. Also dropped the
+      // per-request console.log spew (PII + blocking I/O on every call).
+      const assignments: any[] = (session.user as any).unitAssignments ?? [];
+      const roleIds = assignments
+        .map((a) => a.roleId ?? a.role?.id)
+        .filter(Boolean);
+      const roleName =
+        assignments.length > 0 ? assignments[0].role?.name ?? null : null;
 
       // Attach user and auth context to request
       (req as any).user = session.user;
@@ -61,16 +59,8 @@ export const withAuth = (
         userEmail: session.user.email,
         roleId: roleIds[0] || null,
         roleIds: roleIds,
-        roleName: userAssignments.length > 0 ? userAssignments[0].role?.name || null : null,
+        roleName,
       };
-
-      console.log(`[withAuth] Successfully authenticated user: ${session.user.email}`);
-      console.log(`[withAuth] Auth context:`, {
-        userId: session.user.id,
-        userEmail: session.user.email,
-        roleIds: roleIds,
-        roleName: userAssignments.length > 0 ? userAssignments[0].role?.name || null : null
-      });
 
       // Call the handler with context if provided (for API routes with params)
       if (context) {

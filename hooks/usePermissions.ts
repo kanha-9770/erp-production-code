@@ -389,15 +389,33 @@ export function usePermissions(): PermissionsState {
     refetchUser()
   }, [refetchUser])
 
-  return {
-    permissions,
-    user,
-    isLoading,
-    isAdmin,
-    error,
-    hasPermission,
-    hasAnyPermission,
-    canDelegate: canDelegateFn,
-    refreshPermissions,
-  }
+  // Memoize the returned object so its identity is stable across renders.
+  // This object is the value of PermissionContext (wraps the whole app), so an
+  // unstable identity re-rendered every consumer (sidebar tree, every gated
+  // button) on any unrelated render. The inner fns are already useCallback-
+  // stable, so this makes the context value change only when permissions do.
+  return useMemo(
+    () => ({
+      permissions,
+      user,
+      isLoading,
+      isAdmin,
+      error,
+      hasPermission,
+      hasAnyPermission,
+      canDelegate: canDelegateFn,
+      refreshPermissions,
+    }),
+    [
+      permissions,
+      user,
+      isLoading,
+      isAdmin,
+      error,
+      hasPermission,
+      hasAnyPermission,
+      canDelegateFn,
+      refreshPermissions,
+    ],
+  )
 }
