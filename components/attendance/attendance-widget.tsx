@@ -73,6 +73,13 @@ interface AttendanceStatusPayload {
   isOnLeave: boolean;
   leaveType: string | null;
   isHalfDayLeave: boolean;
+  // Short leave is a fixed few-hour window the employee works around — the day
+  // stays a normal working day (check-in CTA active), with this note surfaced.
+  isShortLeave: boolean;
+  shortLeaveWindow: { start: string; end: string } | null;
+  // Note for ANY partial leave today (half-day or short) — the day stays a
+  // normal working day; the widget shows this and keeps the check-in CTA active.
+  partialLeaveNote: string | null;
   isAutoCheckedOut: boolean;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
@@ -420,6 +427,9 @@ function useAttendance(enabled: boolean): UseAttendanceState {
   // refetch — only OTHER mounted widgets (dashboard card, sidebar pill,
   // mobile bottom-nav) act on it.
   const ownPunchKeysRef = useRef<Set<string>>(new Set());
+  // Set true for one IN punch when the user chose "Return early & check in" on
+  // a full-day-leave day. Read when building the punch body, reset after.
+  const endLeaveEarlyRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     if (!enabled) return;
@@ -551,6 +561,7 @@ function useAttendance(enabled: boolean): UseAttendanceState {
             photoUrl,
             faceMatch,
             livenessPassed,
+            endLeaveEarly: endLeaveEarlyRef.current,
           }),
         });
         const json = await res.json();
@@ -594,6 +605,7 @@ function useAttendance(enabled: boolean): UseAttendanceState {
         }
       } finally {
         setBusy(false);
+        endLeaveEarlyRef.current = false;
       }
     },
     [busy, status, fetchStatus],
@@ -797,7 +809,11 @@ export function AttendanceWidget({
   }, [checkInTimestamp, now, status?.checkedOut, status?.checkOutAt]);
 
   const handleClick = useCallback(
-    async (type: "IN" | "OUT") => {
+    async (type: "IN" | "OUT", opts?: { endLeaveEarly?: boolean }) => {
+      // Set fresh on every click so the flag never leaks from a prior,
+      // abandoned attempt. It rides through the face-capture flow (if any)
+      // until the actual punch reads it, then punch() resets it.
+      endLeaveEarlyRef.current = type === "IN" && !!opts?.endLeaveEarly;
       // Face-capture flow: if the org has it on, defer the actual punch
       // until the dialog produces (or skips) a photo.
       const mode = status?.faceCapture.mode ?? "OFF";
@@ -834,6 +850,13 @@ export function AttendanceWidget({
     },
     [punchWithGeoCheck, toast, status?.faceCapture.mode],
   );
+
+  // Self-service early return: end today's full-day leave and check in. The
+  // backend (recordPunch) shortens/cancels the leave when it sees endLeaveEarly.
+  const handleReturnEarly = useCallback(async () => {
+    await handleClick("IN", { endLeaveEarly: true });
+    setOpen(false);
+  }, [handleClick]);
 
   const handleCapturedPhoto = useCallback(
     async (
@@ -1196,6 +1219,12 @@ export function AttendanceWidget({
               <span>{error}</span>
             </div>
           )}
+          {status.partialLeaveNote && (
+            <div className="mb-2 flex items-start gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-2 text-[11px] text-sky-800">
+              <Clock className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <span>{status.partialLeaveNote}</span>
+            </div>
+          )}
           <OvertimeToggle
             status={status}
             now={new Date(now)}
@@ -1208,6 +1237,7 @@ export function AttendanceWidget({
               await handleClick(t);
               setOpen(false);
             }}
+            onReturnEarly={handleReturnEarly}
           />
           <Link
             href="/attendance"
@@ -1452,11 +1482,65 @@ function ActionButton({
   status,
   busy,
   onClick,
+  onReturnEarly,
 }: {
   status: AttendanceStatusPayload;
   busy: boolean;
   onClick: (type: "IN" | "OUT") => Promise<void>;
+  onReturnEarly?: () => void;
 }) {
+  const [confirmingReturn, setConfirmingReturn] = useState(false);
+
+  // Full-day leave today: instead of nothing, offer a self-service early
+  // return — ending the leave from today onward and checking in. (Partial
+  // leaves never reach ON_LEAVE; they keep the normal check-in button.)
+  if (status.state === "ON_LEAVE" && status.isOnLeave && onReturnEarly) {
+    if (!confirmingReturn) {
+      return (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setConfirmingReturn(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+        >
+          <LogIn className="h-4 w-4" />
+          Return early &amp; check in
+        </button>
+      );
+    }
+    return (
+      <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2.5">
+        <p className="text-[11px] text-amber-800">
+          End your {status.leaveType ? `${status.leaveType} ` : ""}leave early and
+          return today? Today onward is freed and the days are refunded to your
+          balance.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmingReturn(false)}
+            className="flex-1 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setConfirmingReturn(false);
+              onReturnEarly();
+            }}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Confirm &amp; check in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (
     status.state === "HOLIDAY" ||
     status.state === "ON_LEAVE" ||

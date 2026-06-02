@@ -130,9 +130,26 @@ export interface SampleLeave {
   matchKey: string;
   email: string;
   leaveType: string; // raw string from the form, matched against LeaveRule.name
+  /** LeaveType.id, when the leave came from the schema-backed table. Needed to
+   *  look up the per-type paid quota (LeaveBalance) for the "within quota =
+   *  paid" payroll rule. Empty for legacy/form-derived rows. */
+  leaveTypeId: string;
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   isHalfDay: boolean;
+  /** LeaveRequest.duration — 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND'.
+   *  Tells attendance WHICH half of a half-day leave is off (1st = morning,
+   *  2nd = afternoon) so it can shift the expected check-in / check-out. */
+  duration: string | null;
+  /** LeaveType.category — 'FULL_DAY' | 'HALF_DAY' | 'SHORT_LEAVE' | 'HOURLY'.
+   *  Lets attendance/payroll distinguish a SHORT_LEAVE (a fixed few-hour window
+   *  the employee still works around) from a real HALF_DAY — both ride on the
+   *  same non-FULL_DAY `duration`, so `isHalfDay` alone can't tell them apart. */
+  category: string | null;
+  /** Short-leave slot window in the org's shift clock ("HH:MM"), when the row
+   *  is a SHORT_LEAVE. Null otherwise. Used to compute the docked hours. */
+  startTime: string | null;
+  endTime: string | null;
   days: number | null; // optional override; ignored when start/end are present
   status: 'approved' | 'pending' | 'rejected' | 'unknown';
 }
@@ -493,6 +510,18 @@ export interface PayrollRecord {
     absentDays: number; // unmarked absence — straight LOP
     outOfServiceDays: number; // before joining or after leaving
     leaveByType: Record<string, number>; // sum of days per LeaveRule.name (or "Unmatched")
+    /** Half-day overflow covered from paid leave (see lib/hr/half-day-cover.ts).
+     *  Present only when the cover actually applied. The Generate step reads
+     *  `halfDayCover.draws` to deduct the leave balances; compute never writes
+     *  balances. Omitted in preview-with-no-cover to keep payloads lean. */
+    halfDayCover?: {
+      userId: string | null;
+      year: number;
+      coveredHalfDays: number;
+      leaveDaysConsumed: number;
+      draws: { leaveTypeId: string; leaveTypeName: string; days: number }[];
+      remainingDockedHalfDays: number;
+    };
   };
 }
 
@@ -1820,7 +1849,7 @@ async function readApprovedLeavesFromTable(
     }),
     (prisma as any).leaveType.findMany({
       where: { id: { in: typeIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, category: true },
     }),
   ]);
   const userById = new Map(users.map((u: any) => [u.id, u]));
@@ -1842,9 +1871,14 @@ async function readApprovedLeavesFromTable(
       matchKey,
       email: email ?? '',
       leaveType: t?.name ?? '',
+      leaveTypeId: r.leaveTypeId ?? '',
       startDate: r.startDate,
       endDate: r.endDate,
       isHalfDay,
+      duration: typeof r.duration === 'string' ? r.duration : null,
+      category: t?.category ?? null,
+      startTime: typeof r.startTime === 'string' ? r.startTime : null,
+      endTime: typeof r.endTime === 'string' ? r.endTime : null,
       days: Number.isFinite(totalDays as number) ? (totalDays as number) : null,
       status: 'approved',
     });
@@ -1861,6 +1895,79 @@ export async function getLeavesFromDB(
   // longer link a leave form on the Attendance Configuration page, so the
   // table is the only place approved leaves can live.
   return readApprovedLeavesFromTable(organizationId, month);
+}
+
+/** Per (userId|leaveTypeId) paid-quota context for the "within quota = paid"
+ *  payroll rule. `paidQuota` = allocated + carriedForward for the year;
+ *  `usedBeforeMonth` = approved days of that type dated BEFORE the target
+ *  month (so the yearly quota is consumed chronologically, earliest first). */
+export interface LeaveQuotaContext {
+  paidQuota: number;
+  usedBeforeMonth: number;
+}
+
+/**
+ * Build the paid-quota context for every (user, leaveType) with activity this
+ * year, so payroll can price each month's leave against the remaining yearly
+ * paid allowance. Keyed `${userId}|${leaveTypeId}`.
+ *
+ * - paidQuota comes from LeaveBalance (allocated + carriedForward) for the year.
+ * - usedBeforeMonth = sum of APPROVED totalDays for that type with startDate
+ *   strictly BEFORE the target month's first day. Chronological consumption:
+ *   earlier months eat the quota first, so a later month correctly flips to
+ *   LOP once the year's allowance is gone.
+ *
+ * Returns an empty map on any error (table missing) so payroll degrades to the
+ * legacy behaviour rather than throwing.
+ */
+export async function getLeaveQuotaContext(
+  organizationId: string,
+  month: string,
+): Promise<Map<string, LeaveQuotaContext>> {
+  const out = new Map<string, LeaveQuotaContext>();
+  const [yStr] = month.split('-');
+  const year = Number(yStr);
+  if (!Number.isInteger(year)) return out;
+  const monthStart = `${month}-01`;
+
+  try {
+    const [balances, priorRows] = await Promise.all([
+      (prisma as any).leaveBalance.findMany({
+        where: { organizationId, year },
+        select: { userId: true, leaveTypeId: true, allocated: true, carriedForward: true },
+      }),
+      (prisma as any).leaveRequest.findMany({
+        where: {
+          organizationId,
+          status: 'APPROVED',
+          // dated earlier in the same year, before this month
+          startDate: { gte: `${year}-01-01`, lt: monthStart },
+        },
+        select: { userId: true, leaveTypeId: true, totalDays: true },
+      }),
+    ]);
+
+    for (const b of balances as any[]) {
+      const key = `${b.userId}|${b.leaveTypeId}`;
+      const paidQuota =
+        Number(b.allocated?.toString?.() ?? b.allocated ?? 0) +
+        Number(b.carriedForward?.toString?.() ?? b.carriedForward ?? 0);
+      const existing = out.get(key);
+      if (existing) existing.paidQuota = paidQuota;
+      else out.set(key, { paidQuota, usedBeforeMonth: 0 });
+    }
+
+    for (const r of priorRows as any[]) {
+      const key = `${r.userId}|${r.leaveTypeId}`;
+      const days = Number(r.totalDays?.toString?.() ?? r.totalDays ?? 0);
+      const existing = out.get(key);
+      if (existing) existing.usedBeforeMonth += days;
+      else out.set(key, { paidQuota: 0, usedBeforeMonth: days });
+    }
+  } catch {
+    return new Map();
+  }
+  return out;
 }
 
 /**

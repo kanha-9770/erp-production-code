@@ -3318,6 +3318,14 @@ model LeaveRequest {
   duration  LeaveDuration @default(FULL_DAY)
   totalDays Decimal       @map("total_days") // computed at apply time, excludes weekly-off + holidays
 
+  // Short-leave slot window (HH:MM, in the org's shift clock). Populated only
+  // for SHORT_LEAVE requests, derived server-side from the shift +
+  // AttendanceConfig.shortLeaveHours at apply time so the exact window is
+  // preserved for approvers/payroll even if the config later changes. Null for
+  // half-day and full-day leaves.
+  startTime String? @map("start_time")
+  endTime   String? @map("end_time")
+
   reason        String? @db.Text
   attachmentUrl String? @map("attachment_url")
 

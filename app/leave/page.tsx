@@ -58,6 +58,16 @@ import {
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   LeaveCalendar,
   LeaveCalendarLegend,
   type CalendarHoliday,
@@ -80,6 +90,10 @@ import {
   type ColumnDef,
   FilterChips,
 } from '@/components/real-estate/workspace';
+import {
+  computeShortLeaveSlots,
+  formatWindowHours,
+} from '@/lib/hr/short-leave-slots';
 
 
 type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
@@ -107,6 +121,9 @@ interface LeaveRequest {
   endDate: string;
   duration: Duration;
   totalDays: number;
+  // Short-leave slot window ("HH:MM"); null for half/full-day leaves.
+  startTime: string | null;
+  endTime: string | null;
   reason: string | null;
   status: LeaveStatus;
   appliedAt: string;
@@ -157,10 +174,18 @@ export default function LeavePage() {
   
   const [busyId, setBusyId] = useState<string | null>(null);
   const [shortenTarget, setShortenTarget] = useState<LeaveRequest | null>(null);
+  // Id of the request awaiting cancel confirmation. Drives a styled
+  // AlertDialog instead of the browser's native confirm() popup.
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [shortenDate, setShortenDate] = useState('');
   const [shortenReason, setShortenReason] = useState('');
 
   const [monthlyShortLeaveQuota, setMonthlyShortLeaveQuota] = useState<number | null>(null);
+  // Shift + short-leave window from Attendance Configuration, used to derive
+  // the preset short-leave slots offered in the apply form.
+  const [shortLeaveHours, setShortLeaveHours] = useState<number | null>(null);
+  const [shiftStart, setShiftStart] = useState<string | null>(null);
+  const [shiftEnd, setShiftEnd] = useState<string | null>(null);
 
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date();
@@ -177,7 +202,7 @@ export default function LeavePage() {
     setRefreshing(true);
     try {
       const { from, to } = monthBounds(calendarMonth);
-      const [bRes, rRes, cRes, aRes] = await Promise.all([
+      const [bRes, rRes, cRes, aRes, tRes] = await Promise.all([
         fetch('/api/leaves/balance', { cache: 'no-store', credentials: 'include' }),
         fetch('/api/leaves?limit=200', { cache: 'no-store', credentials: 'include' }),
         fetch(`/api/leaves/calendar?from=${from}&to=${to}&scope=mine`, {
@@ -188,11 +213,21 @@ export default function LeavePage() {
           cache: 'no-store',
           credentials: 'include',
         }),
+        // Employee's effective shift (their inTime/outTime override, else the
+        // org default) — used to anchor the short-leave slots to the same
+        // clock the employee checks in/out against. Best-effort: this is a
+        // non-critical extra, so a network rejection resolves to null instead
+        // of failing the whole Promise.all and blocking the leave data.
+        fetch('/api/attendance/today', {
+          cache: 'no-store',
+          credentials: 'include',
+        }).catch(() => null),
       ]);
       const bJson = await bRes.json();
       const rJson = await rRes.json();
       const cJson = await cRes.json();
       const aJson = await aRes.json().catch(() => ({ success: false }));
+      const tJson = tRes ? await tRes.json().catch(() => ({ success: false })) : { success: false };
       if (bJson.success) setBalances(bJson.balances ?? []);
       if (rJson.success) setRequests(rJson.requests ?? []);
       if (aJson?.success && aJson.config) {
@@ -200,6 +235,28 @@ export default function LeavePage() {
         setMonthlyShortLeaveQuota(
           Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : 0,
         );
+        const slh = Number(aJson.config.shortLeaveHours);
+        setShortLeaveHours(Number.isFinite(slh) ? Math.max(0, slh) : null);
+        // Org-default shift is the fallback; the employee's own shift (below)
+        // overrides it when available.
+        setShiftStart(
+          typeof aJson.config.defaultShiftStart === 'string'
+            ? aJson.config.defaultShiftStart
+            : null,
+        );
+        setShiftEnd(
+          typeof aJson.config.defaultShiftEnd === 'string'
+            ? aJson.config.defaultShiftEnd
+            : null,
+        );
+      }
+      // Prefer the employee's effective shift so the slot windows match their
+      // personal check-in/out timing. Runs after the config block so these
+      // setState calls win.
+      const empShift = tJson?.success ? tJson.status?.shift : null;
+      if (empShift && typeof empShift.start === 'string' && typeof empShift.end === 'string') {
+        setShiftStart(empShift.start);
+        setShiftEnd(empShift.end);
       }
       if (cJson.success) {
         setCalendarData({
@@ -312,7 +369,6 @@ export default function LeavePage() {
   }, [shortenTarget, shortenDate, shortenReason, toast, closeShorten, refresh]);
 
   const cancel = useCallback(async (id: string) => {
-    if (!confirm('Cancel this leave request?')) return;
     setBusyId(id);
     try {
       const res = await fetch(`/api/leaves/${id}/cancel`, {
@@ -374,13 +430,38 @@ export default function LeavePage() {
         id: "days",
         header: "Days",
         width: 80,
-        cell: (r) => <span className="tabular-nums text-sm">{r.totalDays.toFixed(1)}</span>,
+        // Short leaves are shown as their org-fixed window (e.g. "2.5h") so the
+        // amount matches the apply screen and the slot window in the Duration
+        // column — not "1.0" days. Everything else shows day count.
+        cell: (r) =>
+          r.startTime && r.endTime ? (
+            <span className="tabular-nums text-sm">
+              {formatWindowHours(slotWindowHours(r.startTime, r.endTime))}
+            </span>
+          ) : (
+            <span className="tabular-nums text-sm">{r.totalDays.toFixed(1)}</span>
+          ),
       },
       {
         id: "duration",
         header: "Duration",
         width: 130,
-        cell: (r) => <span className="text-sm">{durationLabel(r.duration)}</span>,
+        cell: (r) => (
+          <span className="text-sm">
+            {/* Short leaves carry a slot window — surface the concrete times
+                so approvers see exactly when, not just "1st half". */}
+            {r.startTime && r.endTime ? (
+              <>
+                Short leave
+                <span className="block text-[11px] text-muted-foreground tabular-nums">
+                  {r.startTime}–{r.endTime}
+                </span>
+              </>
+            ) : (
+              durationLabel(r.duration)
+            )}
+          </span>
+        ),
       },
       {
         id: "status",
@@ -439,7 +520,7 @@ export default function LeavePage() {
                 </Button>
               )}
               {cancellable && (
-                <Button size="sm" variant="ghost" disabled={busyId === r.id} onClick={() => cancel(r.id)}>
+                <Button size="sm" variant="ghost" disabled={busyId === r.id} onClick={() => setCancelTargetId(r.id)}>
                   <X className="h-3 w-3 mr-1" /> Cancel
                 </Button>
               )}
@@ -448,7 +529,7 @@ export default function LeavePage() {
         },
       },
     ],
-    [typeName, busyId, cancel, openShorten]
+    [typeName, busyId, openShorten]
   );
 
   const filteredRequests = useMemo(() => {
@@ -533,9 +614,31 @@ export default function LeavePage() {
                         b.leaveType.category !== 'HOURLY' &&
                         b.leaveType.code !== 'HOURLY_LEAVE',
                     )
-                    .map((b) => (
-                      <BalanceCard key={b.leaveType.id} b={b} />
-                    ))}
+                    .map((b) =>
+                      b.leaveType.category === 'SHORT_LEAVE' ? (
+                        // Short leave is a MONTHLY allowance that resets each
+                        // month (unused ones expire) — so we show this month's
+                        // quota and usage, not the yearly LeaveBalance.
+                        <BalanceCard
+                          key={b.leaveType.id}
+                          b={{
+                            ...b,
+                            allocated: monthlyShortLeaveQuota ?? b.allocated,
+                            carriedForward: 0,
+                            used: shortLeaveUsedThisMonth,
+                            pending: 0,
+                            available: Math.max(
+                              0,
+                              (monthlyShortLeaveQuota ?? b.allocated) -
+                                shortLeaveUsedThisMonth,
+                            ),
+                          }}
+                          periodHint="this month · resets monthly"
+                        />
+                      ) : (
+                        <BalanceCard key={b.leaveType.id} b={b} />
+                      ),
+                    )}
                 </div>
               )}
 
@@ -609,12 +712,48 @@ export default function LeavePage() {
         existingLeaves={allMyActiveLeaves}
         monthlyShortLeaveQuota={monthlyShortLeaveQuota}
         shortLeaveUsedThisMonth={shortLeaveUsedThisMonth}
+        shortLeaveHours={shortLeaveHours}
+        shiftStart={shiftStart}
+        shiftEnd={shiftEnd}
         onApplied={() => {
           setApplyOpen(false);
           refresh();
         }}
       />
       
+      {/* Cancel confirmation — styled in-app dialog, replaces the native
+          window.confirm() popup. */}
+      <AlertDialog
+        open={!!cancelTargetId}
+        onOpenChange={(o) => {
+          if (!o) setCancelTargetId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this leave request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This withdraws the request and releases any pending balance hold.
+              You can apply again later if you change your mind.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!busyId}>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!!busyId}
+              onClick={() => {
+                const id = cancelTargetId;
+                setCancelTargetId(null);
+                if (id) cancel(id);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Cancel leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={!!shortenTarget} onOpenChange={(o) => !o && closeShorten()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -686,7 +825,7 @@ export default function LeavePage() {
 // vertical space in half on first paint; full details are one tap away.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BalanceCard({ b }: { b: BalanceRow }) {
+function BalanceCard({ b, periodHint }: { b: BalanceRow; periodHint?: string }) {
   const [expanded, setExpanded] = useState(false);
   const total = b.allocated + b.carriedForward;
   const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
@@ -746,6 +885,11 @@ function BalanceCard({ b }: { b: BalanceRow }) {
             />
           </div>
         </div>
+        {periodHint && (
+          <div className="text-[9px] text-muted-foreground/80 -mt-0.5 leading-none">
+            {periodHint}
+          </div>
+        )}
         {/* Expanded details — progress bar + Used / Pending counters. */}
         {expanded && (
           <>
@@ -868,6 +1012,16 @@ function durationLabel(d: Duration) {
   return d === 'FULL_DAY' ? 'Full Day' : d === 'HALF_DAY_FIRST' ? '½ (1st half)' : '½ (2nd half)';
 }
 
+// Hours spanned by a short-leave slot window ("HH:MM"–"HH:MM"). Used so the
+// "Days" column shows the org-fixed window (e.g. "2.5h") for short leaves,
+// matching the apply screen — instead of a misleading "0.5 / 1.0 day".
+function slotWindowHours(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => !Number.isFinite(n))) return 0;
+  return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Apply form — uses the date-range picker with overlap detection.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -881,6 +1035,9 @@ function ApplyLeaveSheet({
   existingLeaves,
   monthlyShortLeaveQuota,
   shortLeaveUsedThisMonth,
+  shortLeaveHours,
+  shiftStart,
+  shiftEnd,
   onApplied,
 }: {
   open: boolean;
@@ -893,6 +1050,11 @@ function ApplyLeaveSheet({
   monthlyShortLeaveQuota: number | null;
   /** PENDING + APPROVED short-leave occurrences in the current calendar month. */
   shortLeaveUsedThisMonth: number;
+  /** Fixed short-leave window length in hours (Attendance Config). */
+  shortLeaveHours: number | null;
+  /** Org shift bounds ("HH:MM") — anchor the preset short-leave slots. */
+  shiftStart: string | null;
+  shiftEnd: string | null;
   onApplied: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -917,10 +1079,16 @@ function ApplyLeaveSheet({
   const [isEmergency, setIsEmergency] = useState(false);
 
   // The leave-type CATEGORY drives which Duration options are valid.
-  //   FULL_DAY    → all three (Full / ½ AM / ½ PM)
+  //   FULL_DAY    → full day only ("full day means full day"). Half-days are NOT
+  //                 selectable here; an employee who needs a half-day uses the
+  //                 Half Day type, which cascades into the Full Day quota once
+  //                 its own quota is exhausted (lib/hr/leave-service.ts reroute).
   //   HALF_DAY    → only ½ AM / ½ PM (a half-day leave is, by definition, half a day)
-  //   SHORT_LEAVE → fixed at HALF_DAY_FIRST so totalDays=0.5 and date picker
-  //                 stays single-day; the selector is hidden entirely
+  //   SHORT_LEAVE → two preset slots (start-of-shift / end-of-shift), each a
+  //                 FIXED window of `shortLeaveHours`, so the date picker stays
+  //                 single-day and the half/full grid is replaced by a slot
+  //                 picker. The duration value still rides on HALF_DAY_FIRST
+  //                 (start-anchored) / HALF_DAY_SECOND (end-anchored).
   // The model field (LeaveRequest.duration) is unchanged; we just constrain
   // which values the form can produce so the request the user submits matches
   // the type name (no more "Half Day Leave for 1.0 day").
@@ -928,7 +1096,21 @@ function ApplyLeaveSheet({
     balances.find((b) => b.leaveType.id === leaveTypeId)?.leaveType.category ?? null;
   const isHalfDayType = selectedCategory === 'HALF_DAY';
   const isShortLeaveType = selectedCategory === 'SHORT_LEAVE';
-  const durationLocked = isShortLeaveType; // selector hidden entirely
+  // Show the half/full-day grid ONLY for Half Day leave types. Full Day leaves
+  // are always a full day (no half-day sub-options), and short leave gets the
+  // slot picker instead — so both hide this grid.
+  const durationLocked = !isHalfDayType;
+  // Preset short-leave slots derived from the org shift + window. Empty when
+  // the org hasn't configured a shift/window yet → the form shows a hint.
+  const shortLeaveSlots = useMemo(
+    () =>
+      isShortLeaveType
+        ? computeShortLeaveSlots(shiftStart, shiftEnd, shortLeaveHours)
+        : [],
+    [isShortLeaveType, shiftStart, shiftEnd, shortLeaveHours],
+  );
+  const activeShortSlot =
+    shortLeaveSlots.find((s) => s.id === duration) ?? null;
 
   const defaultDurationFor = (category: string | null): Duration => {
     if (category === 'HALF_DAY' || category === 'SHORT_LEAVE') return 'HALF_DAY_FIRST';
@@ -973,7 +1155,8 @@ function ApplyLeaveSheet({
   // never contradict the type name:
   //   HALF_DAY  → snap FULL_DAY to HALF_DAY_FIRST
   //   SHORT     → snap to HALF_DAY_FIRST (selector is hidden anyway)
-  //   FULL_DAY  → leave as-is (all three are valid)
+  //   FULL_DAY  → snap any half value back to FULL_DAY (the grid is hidden, so
+  //               the user can't fix a leftover half value themselves)
   useEffect(() => {
     if (!selectedCategory) return;
     if (
@@ -981,6 +1164,8 @@ function ApplyLeaveSheet({
       duration === 'FULL_DAY'
     ) {
       setDuration('HALF_DAY_FIRST');
+    } else if (selectedCategory === 'FULL_DAY' && duration !== 'FULL_DAY') {
+      setDuration('FULL_DAY');
     }
   }, [selectedCategory, duration]);
 
@@ -1115,6 +1300,24 @@ function ApplyLeaveSheet({
     }
     return count;
   }, [range, duration, weeklyOffDays, holidays]);
+
+  // Half Day → Full Day quota cascade hint. When the selected type is a Half
+  // Day leave and its quota is exhausted, the server reroutes the request onto
+  // the Full Day quota (or marks it unpaid if that's gone too). Mirror that
+  // decision here so the employee sees it BEFORE submitting. Mirrors the
+  // server logic in lib/hr/leave-service.ts (apply-time reroute).
+  const cascadeHintText = useMemo<string | null>(() => {
+    if (!isHalfDayType || !balance) return null;
+    if (balance.available > 1e-9) return null; // still within Half Day quota
+    const fullDay = balances.find(
+      (b) => b.leaveType.category === 'FULL_DAY',
+    );
+    const fullAvail = fullDay?.available ?? 0;
+    if (fullAvail > 1e-9) {
+      return 'Half Day quota is used up — this request will draw 0.5 day from your Full Day quota.';
+    }
+    return 'Half Day and Full Day quota are both used up — this day will be unpaid (LOP).';
+  }, [isHalfDayType, balance, balances]);
 
   const formatYmd = (s: string) => {
     const [y, m, d] = s.split('-').map(Number);
@@ -1263,33 +1466,21 @@ function ApplyLeaveSheet({
             </div>
           )}
 
-          {/* Duration selector — its options depend on the leave-type category:
-              SHORT_LEAVE hides it entirely (the request is fixed at 0.5 day on
-              a single date); HALF_DAY drops the "Full" choice because a
-              half-day leave is, by definition, half a day; FULL_DAY shows all
-              three so a paid full-day quota can also be drawn down in halves. */}
+          {/* Duration selector — only shown for HALF_DAY types (½ AM / ½ PM).
+              FULL_DAY is always a full day so it has no selector; SHORT_LEAVE
+              uses the slot picker below instead. */}
           {!durationLocked && (
             <div className="space-y-2">
               <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" />
                 Duration
               </Label>
-              <div
-                className={`grid gap-1 rounded-md border p-1 bg-muted/20 ${
-                  isHalfDayType ? 'grid-cols-2' : 'grid-cols-3'
-                }`}
-              >
+              <div className="grid grid-cols-2 gap-1 rounded-md border p-1 bg-muted/20">
                 {(
-                  isHalfDayType
-                    ? ([
-                        ['HALF_DAY_FIRST', '½ AM'],
-                        ['HALF_DAY_SECOND', '½ PM'],
-                      ] as const)
-                    : ([
-                        ['FULL_DAY', 'Full'],
-                        ['HALF_DAY_FIRST', '½ AM'],
-                        ['HALF_DAY_SECOND', '½ PM'],
-                      ] as const)
+                  [
+                    ['HALF_DAY_FIRST', '½ AM'],
+                    ['HALF_DAY_SECOND', '½ PM'],
+                  ] as const
                 ).map(([val, lbl]) => (
                   <button
                     key={val}
@@ -1309,6 +1500,55 @@ function ApplyLeaveSheet({
             </div>
           )}
 
+          {/* Short-leave slot picker — two fixed-length windows anchored to the
+              org shift, sourced from Attendance Configuration. The chosen slot
+              sets `duration` (HALF_DAY_FIRST = start, HALF_DAY_SECOND = end).
+              Falls back to a hint when the org hasn't set a shift/window. */}
+          {isShortLeaveType && (
+            <div className="space-y-2">
+              <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" />
+                Short leave slot
+                {shortLeaveHours != null && shortLeaveHours > 0 && (
+                  <span className="ml-auto font-normal text-muted-foreground/70 normal-case">
+                    fixed {formatWindowHours(shortLeaveHours)}
+                  </span>
+                )}
+              </Label>
+              {shortLeaveSlots.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {shortLeaveSlots.map((slot) => (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      onClick={() => setDuration(slot.id)}
+                      aria-pressed={duration === slot.id}
+                      className={`flex flex-col items-start gap-0.5 rounded-md border p-2.5 text-left transition-colors ${
+                        duration === slot.id
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                          : 'border-input hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="text-xs font-semibold">{slot.label}</span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {slot.startTime}–{slot.endTime}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 flex items-start gap-1.5">
+                  <Info className="h-3 w-3 mt-0.5 shrink-0" />
+                  <span>
+                    Short-leave slots aren&apos;t configured yet. Ask your admin
+                    to set the shift times and a short-leave window in Attendance
+                    Configuration.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Dates */}
           <div className="space-y-2">
             <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -1324,6 +1564,11 @@ function ApplyLeaveSheet({
               singleDateOnly={duration !== 'FULL_DAY'}
               minNoticeDays={minNoticeDays}
               placeholder={duration === 'FULL_DAY' ? 'Pick start and end' : 'Pick a date'}
+              shortLeaveDurationLabel={
+                isShortLeaveType && shortLeaveHours != null && shortLeaveHours > 0
+                  ? formatWindowHours(shortLeaveHours)
+                  : null
+              }
             />
             {minNoticeDays > 0 ? (
               <p className="text-[11px] text-muted-foreground flex items-center gap-1">
@@ -1376,17 +1621,29 @@ function ApplyLeaveSheet({
               <div className="flex items-center justify-between gap-2 text-sm">
                 <span className="font-medium truncate">{balance.leaveType.name}</span>
                 <span className="tabular-nums shrink-0">
-                  {reqDays.toFixed(1)} day{reqDays === 1 ? '' : 's'}
+                  {isShortLeaveType && shortLeaveHours != null && shortLeaveHours > 0
+                    ? formatWindowHours(shortLeaveHours)
+                    : `${reqDays.toFixed(1)} day${reqDays === 1 ? '' : 's'}`}
                 </span>
               </div>
               <div className="text-xs text-muted-foreground tabular-nums">
                 {formatYmd(range.startDate)}
-                {range.endDate && range.endDate !== range.startDate
-                  ? ` → ${formatYmd(range.endDate)}`
-                  : duration !== 'FULL_DAY'
-                    ? ` · ${duration === 'HALF_DAY_FIRST' ? 'first half' : 'second half'}`
-                    : ''}
+                {/* Short leave: show the concrete slot window (09:30–11:30).
+                    Multi-day full leave: show the end date. Half-day: which
+                    half. */}
+                {isShortLeaveType && activeShortSlot
+                  ? ` · ${activeShortSlot.startTime}–${activeShortSlot.endTime}`
+                  : range.endDate && range.endDate !== range.startDate
+                    ? ` → ${formatYmd(range.endDate)}`
+                    : duration !== 'FULL_DAY'
+                      ? ` · ${duration === 'HALF_DAY_FIRST' ? 'first half' : 'second half'}`
+                      : ''}
               </div>
+              {cascadeHintText && (
+                <div className="mt-1 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800">
+                  {cascadeHintText}
+                </div>
+              )}
             </div>
           )}
         </div>

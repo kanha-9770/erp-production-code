@@ -164,6 +164,7 @@ export async function POST(request: NextRequest) {
       photoUrl,
       faceMatch,
       livenessPassed,
+      endLeaveEarly: body.endLeaveEarly === true,
     });
 
     // The punch changed the day's attendance row, which means the cached

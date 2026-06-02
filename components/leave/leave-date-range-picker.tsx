@@ -51,6 +51,10 @@ export interface LeaveDateRangePickerProps {
   minNoticeDays?: number;
   /** Force half-day mode → end date locks to start. */
   singleDateOnly?: boolean;
+  /** When set (e.g. "2.5h"), the summary shows this fixed short-leave window
+   *  instead of a "Working days 0.5" count — short leaves are a fixed hourly
+   *  window, not a fraction of a day. Implies single-date selection. */
+  shortLeaveDurationLabel?: string | null;
 
   placeholder?: string;
   disabled?: boolean;
@@ -65,6 +69,7 @@ export function LeaveDateRangePicker({
   existingLeaves = [],
   minNoticeDays = 0,
   singleDateOnly = false,
+  shortLeaveDurationLabel = null,
   placeholder = 'Pick dates',
   disabled = false,
   className,
@@ -206,7 +211,9 @@ export function LeaveDateRangePicker({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {singleDateOnly
-              ? 'Pick a single date for this half-day leave.'
+              ? shortLeaveDurationLabel
+                ? 'Pick a single date for this short leave.'
+                : 'Pick a single date for this half-day leave.'
               : 'Click a start date, then an end date. Or click Done after one date for a single-day leave.'}
           </DialogDescription>
         </DialogHeader>
@@ -237,9 +244,15 @@ export function LeaveDateRangePicker({
           {value.startDate ? (
             <div className="text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Working days</span>
+                <span className="text-muted-foreground">
+                  {shortLeaveDurationLabel ? 'Short leave' : 'Working days'}
+                </span>
                 <span className="font-semibold tabular-nums">
-                  {singleDateOnly ? 0.5 : summary.working}
+                  {shortLeaveDurationLabel
+                    ? shortLeaveDurationLabel
+                    : singleDateOnly
+                      ? 0.5
+                      : summary.working}
                 </span>
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">

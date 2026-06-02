@@ -142,4 +142,14 @@ CREATE INDEX IF NOT EXISTS attendance_regularizations_status_idx
 CREATE INDEX IF NOT EXISTS attendance_regularizations_requested_by_id_idx
   ON attendance_regularizations(requested_by_id);
 
+-- ─────────────────────────────────────────────────────────────────────
+-- leave_requests — short-leave slot window columns. Added with the
+-- short-leave feature; without them Prisma's default SELECT (which lists
+-- every mapped column) generates SQL referencing start_time / end_time and
+-- every /api/leaves read 500s ("column does not exist"). Idempotent.
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE leave_requests
+  ADD COLUMN IF NOT EXISTS start_time TEXT,
+  ADD COLUMN IF NOT EXISTS end_time   TEXT;
+
 COMMIT;

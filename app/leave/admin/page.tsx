@@ -319,14 +319,21 @@ export default function LeaveAdminPage() {
         </TabsContent>
 
         <TabsContent value="usage">
-          <UsageSummary employees={filteredEmployees} allTypes={allTypes} loading={loading} />
+          {/* Short leave is a monthly org-wide allowance (not a yearly balance),
+              so it's excluded from this yearly-balance usage roll-up. */}
+          <UsageSummary
+            employees={filteredEmployees}
+            allTypes={allTypes.filter((t) => t.category !== 'SHORT_LEAVE')}
+            loading={loading}
+          />
         </TabsContent>
       </Tabs>
 
       <BulkAllocateDialog
         open={bulkOpen}
         onOpenChange={setBulkOpen}
-        leaveTypes={allTypes}
+        // Short leave is a monthly org-wide allowance — not bulk-allocated here.
+        leaveTypes={allTypes.filter((t) => t.category !== 'SHORT_LEAVE')}
         year={year}
         onDone={() => {
           setBulkOpen(false);
@@ -460,6 +467,10 @@ function AllocationsGrid({
                         used={b?.used ?? 0}
                         pending={b?.pending ?? 0}
                         allocated={b?.allocated ?? 0}
+                        // Short leave is a MONTHLY org-wide allowance (set in
+                        // Attendance Config), not a per-employee yearly balance,
+                        // so it's read-only here.
+                        readOnly={t.category === 'SHORT_LEAVE'}
                         saving={savingCell === cellId}
                         onAdjust={(delta) => onAdjust(e.id, t.id, delta)}
                       />
@@ -480,6 +491,7 @@ function BalanceCell({
   used,
   pending,
   allocated,
+  readOnly = false,
   saving,
   onAdjust,
 }: {
@@ -487,11 +499,27 @@ function BalanceCell({
   used: number;
   pending: number;
   allocated: number;
+  readOnly?: boolean;
   saving: boolean;
   onAdjust: (delta: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState('');
+
+  // Short leave is a monthly org-wide allowance, not a per-employee yearly
+  // balance — show it as informational and non-editable.
+  if (readOnly) {
+    return (
+      <div className="px-2 py-1">
+        <div className="text-xs font-medium text-muted-foreground leading-tight whitespace-nowrap">
+          Monthly
+        </div>
+        <div className="text-[10px] text-muted-foreground/80 leading-tight mt-0.5 whitespace-nowrap">
+          set in Attendance Config
+        </div>
+      </div>
+    );
+  }
 
   const startEdit = () => {
     setVal(String(allocated));
@@ -510,7 +538,8 @@ function BalanceCell({
       <Input
         type="number"
         autoFocus
-        step="0.5"
+        step={wholeUnits ? '1' : '0.5'}
+        min={0}
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onBlur={commit}
@@ -861,7 +890,7 @@ function BulkAllocateDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  leaveTypes: { id: string; name: string }[];
+  leaveTypes: { id: string; name: string; category?: string }[];
   year: number;
   onDone: () => void;
 }) {
@@ -871,16 +900,21 @@ function BulkAllocateDialog({
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Short leave is allocated in WHOLE units (1 short leave = 1).
+  const wholeUnits =
+    leaveTypes.find((t) => t.id === leaveTypeId)?.category === 'SHORT_LEAVE';
+
   useEffect(() => {
     if (open) setLeaveTypeId(leaveTypes[0]?.id ?? '');
   }, [open, leaveTypes]);
 
   const submit = async () => {
-    const a = Number(amount);
+    let a = Number(amount);
     if (!leaveTypeId || !Number.isFinite(a)) {
       toast({ title: 'Pick type and amount', variant: 'destructive' });
       return;
     }
+    if (wholeUnits) a = Math.trunc(a); // no fractional short-leave grants
     setSubmitting(true);
     try {
       const res = await fetch('/api/leaves/allocate', {
@@ -932,10 +966,15 @@ function BulkAllocateDialog({
             <Label>Amount (use a negative number to subtract)</Label>
             <Input
               type="number"
-              step="0.5"
+              step={wholeUnits ? '1' : '0.5'}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
+            {wholeUnits && (
+              <p className="text-[11px] text-muted-foreground">
+                Short leave is granted in whole units (1 = one short leave).
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Note (audit trail)</Label>
