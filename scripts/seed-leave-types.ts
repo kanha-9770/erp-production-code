@@ -109,16 +109,27 @@ async function seedLeaveTypes() {
 
   await prisma.leaveRule.upsert({
     where: { id: "short-leave-rule" },
-    update: {},
+    // Short leave is a PAID monthly perk: every employee gets a fixed number
+    // of short leaves per month (Attendance Config → monthlyShortLeaveQuota),
+    // the window is paid, and unused ones expire at month end (the monthly
+    // count quota enforces this — there is no carry-over). `update` is set so
+    // re-running the seed corrects older rows that were created as unpaid.
+    update: {
+      name: "Short Leave",
+      description: "Paid short leave — fixed monthly allowance, window is paid",
+      deductionPercentage: 0,
+      isPaid: true,
+      requiresApproval: false,
+    },
     create: {
       id: "short-leave-rule",
       leaveTypeId: shortLeave.id,
       name: "Short Leave",
-      description: "Short leave (1-2 hours) with hourly deduction",
-      deductionPercentage: 100,
+      description: "Paid short leave — fixed monthly allowance, window is paid",
+      deductionPercentage: 0,
       hoursEquivalent: 2,
       requiresApproval: false,
-      isPaid: false,
+      isPaid: true,
       affectsAttendance: false,
     },
   });

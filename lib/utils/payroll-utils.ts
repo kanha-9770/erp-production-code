@@ -157,6 +157,17 @@ function workedHoursFromAttendance(att: {
   return calculateWorkingHours(att.checkInTime, att.checkOutTime || undefined);
 }
 
+// Hours spanned by a short-leave slot window ("HH:MM"–"HH:MM"). Returns 0 on a
+// malformed/empty window so callers can fall back to the org's shortLeaveHours.
+function slotHours(start: string, end: string): number {
+  const m1 = /^(\d{1,2}):(\d{2})$/.exec(start.trim());
+  const m2 = /^(\d{1,2}):(\d{2})$/.exec(end.trim());
+  if (!m1 || !m2) return 0;
+  const a = Number(m1[1]) * 60 + Number(m1[2]);
+  const b = Number(m2[1]) * 60 + Number(m2[2]);
+  return b > a ? (b - a) / 60 : 0;
+}
+
 // ---- LeaveRule policy book -------------------------------------------------
 // LeaveRule rows are global (not org-scoped in the schema), so we pull every
 // active rule once per payroll run and expose a name → rule lookup. The seed
@@ -658,6 +669,9 @@ interface DayClassification {
   outOfService: number;
   leaveTypeName?: string; // for grouping in breakdown
   hours: number; // attendance hours that landed today
+  // Paid short-leave hours folded into `hours` for grading/pay. Tracked so OT
+  // (which is based on hours actually WORKED) can exclude this granted time.
+  shortLeaveCreditHours: number;
 }
 
 function classifyDay(
@@ -688,6 +702,7 @@ function classifyDay(
     absent: 0,
     outOfService: 0,
     hours: 0,
+    shortLeaveCreditHours: 0,
   };
 
   // Out-of-service trumps everything else: a day before joining or after
@@ -715,8 +730,25 @@ function classifyDay(
     const hasIn = !!(att.checkInTime || att.checkInAt);
     const hasOut = !!(att.checkOutTime || att.checkOutAt);
     if (hasIn || hasOut) {
-      const hours = workedHoursFromAttendance(att);
+      // A PAID short leave on a day the employee ALSO checked in: credit the
+      // granted (and paid) short-leave window toward worked hours, so coming
+      // in late around a short leave doesn't wipe the whole day to LOP. Only
+      // for an explicit short-leave LEAVE request (not the attendance-deficit
+      // free quota below, which is skipped for these days).
+      const slHit = leaveByDate.get(dateStr);
+      const shortLeaveCreditH =
+        slHit && slHit.rule.category === 'SHORT_LEAVE' && slHit.rule.isPaid
+          ? slHit.leave.startTime && slHit.leave.endTime
+            ? slotHours(slHit.leave.startTime, slHit.leave.endTime)
+            : Math.max(0, (policy as any).shortLeaveHours ?? 0)
+          : 0;
+      const fullDayH =
+        policy.fullDayMinHours && policy.fullDayMinHours > 0 ? policy.fullDayMinHours : 8;
+
+      const hours = workedHoursFromAttendance(att) + shortLeaveCreditH;
       z.hours = hours;
+      z.shortLeaveCreditHours = shortLeaveCreditH;
+      if (shortLeaveCreditH > 0) z.leaveTypeName = slHit!.rule.name;
 
       // Today's still-open punch: don't commit a verdict yet. Leave all
       // counters at zero so the day contributes nothing to gross until
@@ -769,13 +801,26 @@ function classifyDay(
           // reach this branch — the classifier returns PRESENT/HALF_DAY
           // for them, and the downstream OT block credits the capped OT
           // minutes from the row.
-          z.absent = 1;
-          z.hours = 0;
+          if (shortLeaveCreditH > 0) {
+            // A PAID short leave still pays its own hours even when the worked
+            // remainder grades absent — don't zero the whole day.
+            z.hours = shortLeaveCreditH;
+            z.paidLeave = Math.min(1, shortLeaveCreditH / fullDayH);
+          } else {
+            z.absent = 1;
+            z.hours = 0;
+          }
           break;
         case 'ABSENT':
-          // Below the configured half-day floor (e.g. <4h) — no pay.
-          z.absent = 1;
-          z.hours = 0;
+          // Below the configured half-day floor (e.g. <4h) — no pay, UNLESS a
+          // paid short leave is in play, which always pays its granted hours.
+          if (shortLeaveCreditH > 0) {
+            z.hours = shortLeaveCreditH;
+            z.paidLeave = Math.min(1, shortLeaveCreditH / fullDayH);
+          } else {
+            z.absent = 1;
+            z.hours = 0;
+          }
           break;
         case 'HALF_DAY':
           z.half = 1;
@@ -810,6 +855,35 @@ function classifyDay(
   if (leaveHit) {
     const { leave, rule } = leaveHit;
     z.leaveTypeName = rule.name;
+
+    // ── Short leave (fixed few-hour window) ──────────────────────────────
+    // Reaching this branch means the employee filed a SHORT leave AND never
+    // checked in that day (a real check-in would have been classified above —
+    // "check-in beats leave"). Policy: dock ONLY the short-leave window hours
+    // as a fraction of a full day — never half or full. The employee declared
+    // a short absence, so we don't pile extra LOP on the untracked remainder.
+    if (rule.category === 'SHORT_LEAVE' || leave.category === 'SHORT_LEAVE') {
+      const fullDay =
+        policy.fullDayMinHours && policy.fullDayMinHours > 0
+          ? policy.fullDayMinHours
+          : 8;
+      let windowH =
+        leave.startTime && leave.endTime
+          ? slotHours(leave.startTime, leave.endTime)
+          : 0;
+      if (windowH <= 0) windowH = policy.shortLeaveHours ?? 0;
+      const frac = Math.max(0, Math.min(1, fullDay > 0 ? windowH / fullDay : 0));
+      // Short leave is PAID by org policy (deductionPercentage 0 → isPaid). The
+      // deduction percentage still drives this so an org that flips it to unpaid
+      // keeps working: paid orgs dock nothing, unpaid orgs dock the window.
+      const ded = Math.min(100, Math.max(0, rule.deductionPercentage)) / 100;
+      const lop = frac * ded;
+      z.unpaidLeaveLOP = lop;
+      z.unpaidLeaveDays = lop; // only the actually-docked portion
+      z.paidLeave = frac - lop; // the paid window
+      return z;
+    }
+
     const halfDay = leave.isHalfDay || rule.category === 'HALF_DAY';
     const dayValue = halfDay ? 0.5 : 1;
 
@@ -1019,7 +1093,11 @@ function calculateForEmployee(
       c.hours > 0 &&
       (c.present > 0 || c.half > 0) &&
       !holidaySet.has(dateStr) &&
-      !policy.weeklyOffDays.includes(weekday)
+      !policy.weeklyOffDays.includes(weekday) &&
+      // Skip days that already have an explicit short-leave REQUEST — those
+      // were credited directly in classifyDay; the deficit free-quota is only
+      // for implicit shortfalls with no leave on file.
+      leaveByDate.get(dateStr)?.rule.category !== 'SHORT_LEAVE'
     ) {
       const deficit = fullDayHours - c.hours;
       if (deficit > 0 && deficit <= shortLeaveWindow) {
@@ -1059,13 +1137,16 @@ function calculateForEmployee(
         else if (isWeeklyOff) weekendOtHours += otHours;
         else weekdayOtHours += otHours;
       } else {
-        // Legacy fall-back: derive from worked hours.
+        // Legacy fall-back: derive from worked hours. Exclude any paid
+        // short-leave hours folded into c.hours — OT is for time actually
+        // WORKED, and the granted short-leave window wasn't worked.
+        const workedH = Math.max(0, c.hours - (c.shortLeaveCreditHours ?? 0));
         if (isHoliday) {
-          holidayOtHours += capHours(c.hours);
+          holidayOtHours += capHours(workedH);
         } else if (isWeeklyOff) {
-          weekendOtHours += capHours(c.hours);
+          weekendOtHours += capHours(workedH);
         } else {
-          const excess = c.hours - ot.weekdayThresholdHours;
+          const excess = workedH - ot.weekdayThresholdHours;
           if (excess > 0) weekdayOtHours += capHours(excess);
         }
       }

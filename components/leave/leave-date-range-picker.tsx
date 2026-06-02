@@ -211,7 +211,9 @@ export function LeaveDateRangePicker({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {singleDateOnly
-              ? 'Pick a single date for this half-day leave.'
+              ? shortLeaveDurationLabel
+                ? 'Pick a single date for this short leave.'
+                : 'Pick a single date for this half-day leave.'
               : 'Click a start date, then an end date. Or click Done after one date for a single-day leave.'}
           </DialogDescription>
         </DialogHeader>

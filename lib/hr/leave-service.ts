@@ -220,6 +220,10 @@ export async function computeTotalDays(input: {
   startDate: string;
   endDate: string;
   duration: LeaveDuration;
+  /** LeaveType category. A SHORT_LEAVE is ONE indivisible unit (the org-fixed
+   *  window), so it consumes 1 whole short-leave from the quota — never 0.5.
+   *  Half-day leaves stay 0.5. */
+  category?: string | null;
 }): Promise<number> {
   if (input.duration !== 'FULL_DAY') {
     if (input.startDate !== input.endDate) {
@@ -228,6 +232,11 @@ export async function computeTotalDays(input: {
         'Half-day leaves must be on a single date.',
       );
     }
+    // A short leave is a complete unit fixed by the organization — count it as
+    // 1 whole short-leave so the balance reads "0 / 1" after one use, not
+    // "0.5 / 1". The actual hours it represents are surfaced separately (the
+    // slot window) and used by payroll for any LOP.
+    if (input.category === 'SHORT_LEAVE') return 1;
     return 0.5;
   }
   const off = await getWeeklyOffDays(input.organizationId);
@@ -430,6 +439,7 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
     startDate: input.startDate,
     endDate: input.endDate,
     duration: input.duration,
+    category: lt.type.category,
   });
   if (totalDays <= 0) {
     throw new LeaveError(
@@ -497,12 +507,15 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
     }
   }
 
-  // Atomic: ensure balance row, increment pending, create the request.
-  // Balance is no longer gated at apply-time — employees can request any
+  // Short leave is governed ENTIRELY by the monthly quota (1/month, paid,
+  // expires monthly) — it does NOT draw from a yearly LeaveBalance. So we skip
+  // all balance bookkeeping for it. Half/full-day still consume the balance.
+  const consumesBalance = lt.type.category !== 'SHORT_LEAVE';
+
+  // Atomic: (optionally) ensure balance row + increment pending, create the
+  // request. Balance is not gated at apply-time — employees can request any
   // amount; any overrun is settled by payroll / approver discretion.
   const created = await prisma.$transaction(async (tx: any) => {
-    const balance = await ensureBalance(tx, input.organizationId, input.userId, effectiveLeaveTypeId, year);
-
     const req = await tx.leaveRequest.create({
       data: {
         organizationId: input.organizationId,
@@ -525,10 +538,19 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
       },
     });
 
-    await tx.leaveBalance.update({
-      where: { id: balance.id },
-      data: { pending: { increment: totalDays } },
-    });
+    if (consumesBalance) {
+      const balance = await ensureBalance(
+        tx,
+        input.organizationId,
+        input.userId,
+        effectiveLeaveTypeId,
+        year,
+      );
+      await tx.leaveBalance.update({
+        where: { id: balance.id },
+        data: { pending: { increment: totalDays } },
+      });
+    }
 
     return req;
   });
@@ -575,49 +597,58 @@ export async function decideLeave(input: DecideLeaveInput): Promise<LeaveRequest
     const totalDays = toNumber(req.totalDays);
     const year = yearOf(req.startDate);
 
-    const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
+    // Short leave doesn't touch the yearly balance (monthly-quota governed), so
+    // there's no pending hold to release / convert on a decision.
+    const lt = await tx.leaveType.findUnique({
+      where: { id: req.leaveTypeId },
+      select: { category: true },
+    });
+    const consumesBalance = lt?.category !== 'SHORT_LEAVE';
 
-    if (input.decision === 'APPROVED') {
-      // pending -= totalDays, used += totalDays
-      await tx.leaveBalance.update({
-        where: { id: balance.id },
-        data: {
-          pending: { decrement: totalDays },
-          used: { increment: totalDays },
-        },
-      });
-      await tx.leaveAllocation.create({
-        data: {
-          organizationId: req.organizationId,
-          userId: req.userId,
-          leaveTypeId: req.leaveTypeId,
-          year,
-          delta: -totalDays,
-          reason: 'APPROVED',
-          referenceId: req.id,
-          note: input.note ?? null,
-          createdById: input.decidedById,
-        },
-      });
-    } else {
-      // REJECTED: just release the pending hold.
-      await tx.leaveBalance.update({
-        where: { id: balance.id },
-        data: { pending: { decrement: totalDays } },
-      });
-      await tx.leaveAllocation.create({
-        data: {
-          organizationId: req.organizationId,
-          userId: req.userId,
-          leaveTypeId: req.leaveTypeId,
-          year,
-          delta: 0,
-          reason: 'REJECTED',
-          referenceId: req.id,
-          note: input.note ?? null,
-          createdById: input.decidedById,
-        },
-      });
+    if (consumesBalance) {
+      const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
+      if (input.decision === 'APPROVED') {
+        // pending -= totalDays, used += totalDays
+        await tx.leaveBalance.update({
+          where: { id: balance.id },
+          data: {
+            pending: { decrement: totalDays },
+            used: { increment: totalDays },
+          },
+        });
+        await tx.leaveAllocation.create({
+          data: {
+            organizationId: req.organizationId,
+            userId: req.userId,
+            leaveTypeId: req.leaveTypeId,
+            year,
+            delta: -totalDays,
+            reason: 'APPROVED',
+            referenceId: req.id,
+            note: input.note ?? null,
+            createdById: input.decidedById,
+          },
+        });
+      } else {
+        // REJECTED: just release the pending hold.
+        await tx.leaveBalance.update({
+          where: { id: balance.id },
+          data: { pending: { decrement: totalDays } },
+        });
+        await tx.leaveAllocation.create({
+          data: {
+            organizationId: req.organizationId,
+            userId: req.userId,
+            leaveTypeId: req.leaveTypeId,
+            year,
+            delta: 0,
+            reason: 'REJECTED',
+            referenceId: req.id,
+            note: input.note ?? null,
+            createdById: input.decidedById,
+          },
+        });
+      }
     }
 
     return tx.leaveRequest.update({
@@ -669,34 +700,44 @@ export async function cancelLeave(input: CancelLeaveInput): Promise<LeaveRequest
 
     const totalDays = toNumber(req.totalDays);
     const year = yearOf(req.startDate);
-    const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
 
-    if (req.status === 'PENDING') {
-      await tx.leaveBalance.update({
-        where: { id: balance.id },
-        data: { pending: { decrement: totalDays } },
-      });
-    } else if (req.status === 'APPROVED') {
-      // Refund: used -= totalDays
-      await tx.leaveBalance.update({
-        where: { id: balance.id },
-        data: { used: { decrement: totalDays } },
+    // Short leave doesn't touch the yearly balance, so there's nothing to
+    // release/refund on cancel — the monthly quota frees up by itself (this
+    // request stops counting toward the month once it's CANCELLED).
+    const lt = await tx.leaveType.findUnique({
+      where: { id: req.leaveTypeId },
+      select: { category: true },
+    });
+    const consumesBalance = lt?.category !== 'SHORT_LEAVE';
+
+    if (consumesBalance) {
+      const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
+      if (req.status === 'PENDING') {
+        await tx.leaveBalance.update({
+          where: { id: balance.id },
+          data: { pending: { decrement: totalDays } },
+        });
+      } else if (req.status === 'APPROVED') {
+        // Refund: used -= totalDays
+        await tx.leaveBalance.update({
+          where: { id: balance.id },
+          data: { used: { decrement: totalDays } },
+        });
+      }
+      await tx.leaveAllocation.create({
+        data: {
+          organizationId: req.organizationId,
+          userId: req.userId,
+          leaveTypeId: req.leaveTypeId,
+          year,
+          delta: req.status === 'APPROVED' ? totalDays : 0,
+          reason: 'CANCELLED',
+          referenceId: req.id,
+          note: input.reason ?? null,
+          createdById: input.cancelledById,
+        },
       });
     }
-
-    await tx.leaveAllocation.create({
-      data: {
-        organizationId: req.organizationId,
-        userId: req.userId,
-        leaveTypeId: req.leaveTypeId,
-        year,
-        delta: req.status === 'APPROVED' ? totalDays : 0,
-        reason: 'CANCELLED',
-        referenceId: req.id,
-        note: input.reason ?? null,
-        createdById: input.cancelledById,
-      },
-    });
 
     return tx.leaveRequest.update({
       where: { id: req.id },
@@ -900,6 +941,145 @@ export async function decideEarlyReturn(input: DecideEarlyReturnInput): Promise<
   });
 
   return serializeRequest(updated);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Self-service early return (no approval) — used when an employee on a
+// multi-day full-day leave shows up and checks in. Ending the leave for today
+// onward frees the day so attendance can be marked, and refunds the balance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EndLeaveEarlyTodayInput {
+  userId: string;
+  organizationId: string;
+  /** The day the employee is returning (today), YYYY-MM-DD. */
+  date: string;
+}
+
+export interface EndLeaveEarlyResult {
+  ended: boolean; // a covering leave was found and modified
+  cancelled: boolean; // the whole leave was cancelled (return on day 1)
+  leaveTypeId: string | null;
+  newEndDate: string | null;
+}
+
+function previousDayStr(d: string): string {
+  const [y, m, dd] = d.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, dd));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    dt.getUTCDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * End an in-progress FULL-DAY leave early so the employee can return and mark
+ * attendance on `date`. Self-service: no approver needed.
+ *   • Returning on the leave's FIRST day  → cancel the whole leave.
+ *   • Returning mid-leave                 → shorten endDate to the day before
+ *                                           `date` and refund the freed days.
+ * No-op (ended:false) when there's no covering full-day leave. Partial leaves
+ * (half-day / short) are NOT touched — those already keep the day workable.
+ */
+export async function endLeaveEarlyToday(
+  input: EndLeaveEarlyTodayInput,
+): Promise<EndLeaveEarlyResult> {
+  return prisma.$transaction(async (tx: any) => {
+    const req = await tx.leaveRequest.findFirst({
+      where: {
+        userId: input.userId,
+        organizationId: input.organizationId,
+        status: 'APPROVED',
+        duration: 'FULL_DAY',
+        startDate: { lte: input.date },
+        endDate: { gte: input.date },
+      },
+      orderBy: { startDate: 'asc' },
+    });
+    if (!req) {
+      return { ended: false, cancelled: false, leaveTypeId: null, newEndDate: null };
+    }
+
+    const year = yearOf(req.startDate);
+    const balance = await ensureBalance(tx, req.organizationId, req.userId, req.leaveTypeId, year);
+    const NOTE = 'Early return — employee checked in';
+
+    // Returning on the first day → cancel the leave entirely and refund all.
+    if (req.startDate === input.date) {
+      const totalDays = toNumber(req.totalDays);
+      if (totalDays > 0) {
+        await tx.leaveBalance.update({
+          where: { id: balance.id },
+          data: { used: { decrement: totalDays } },
+        });
+        await tx.leaveAllocation.create({
+          data: {
+            organizationId: req.organizationId,
+            userId: req.userId,
+            leaveTypeId: req.leaveTypeId,
+            year,
+            delta: totalDays,
+            reason: 'CANCELLED',
+            referenceId: req.id,
+            note: NOTE,
+            createdById: req.userId,
+          },
+        });
+      }
+      await tx.leaveRequest.update({
+        where: { id: req.id },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: NOTE },
+      });
+      return { ended: true, cancelled: true, leaveTypeId: req.leaveTypeId, newEndDate: null };
+    }
+
+    // Mid-leave → shorten to the day before today and refund the freed days.
+    const newEnd = previousDayStr(input.date);
+    const newTotalDays = await computeTotalDays({
+      organizationId: req.organizationId,
+      startDate: req.startDate,
+      endDate: newEnd,
+      duration: req.duration,
+    });
+    const refundDays = toNumber(req.totalDays) - newTotalDays;
+    if (refundDays > 0) {
+      await tx.leaveBalance.update({
+        where: { id: balance.id },
+        data: { used: { decrement: refundDays } },
+      });
+      await tx.leaveAllocation.create({
+        data: {
+          organizationId: req.organizationId,
+          userId: req.userId,
+          leaveTypeId: req.leaveTypeId,
+          year,
+          delta: refundDays,
+          reason: 'SHORTENED',
+          referenceId: req.id,
+          note: NOTE,
+          createdById: req.userId,
+        },
+      });
+    }
+    await tx.leaveRequest.update({
+      where: { id: req.id },
+      data: {
+        endDate: newEnd,
+        totalDays: newTotalDays,
+        originalEndDate: req.originalEndDate ?? req.endDate,
+        // Record the self-service shorten as already-decided so the approvals
+        // queue doesn't show a phantom pending request.
+        shortenRequestedEndDate: newEnd,
+        shortenRequestedReason: NOTE,
+        shortenRequestedAt: new Date(),
+        shortenStatus: 'APPROVED',
+        shortenDecidedAt: new Date(),
+        shortenDecidedById: req.userId,
+        shortenDecisionNote: 'Self-service early return on check-in',
+      },
+    });
+    return { ended: true, cancelled: false, leaveTypeId: req.leaveTypeId, newEndDate: newEnd };
+  });
 }
 
 export async function getBalance(

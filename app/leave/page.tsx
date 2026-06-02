@@ -430,7 +430,17 @@ export default function LeavePage() {
         id: "days",
         header: "Days",
         width: 80,
-        cell: (r) => <span className="tabular-nums text-sm">{r.totalDays.toFixed(1)}</span>,
+        // Short leaves are shown as their org-fixed window (e.g. "2.5h") so the
+        // amount matches the apply screen and the slot window in the Duration
+        // column — not "1.0" days. Everything else shows day count.
+        cell: (r) =>
+          r.startTime && r.endTime ? (
+            <span className="tabular-nums text-sm">
+              {formatWindowHours(slotWindowHours(r.startTime, r.endTime))}
+            </span>
+          ) : (
+            <span className="tabular-nums text-sm">{r.totalDays.toFixed(1)}</span>
+          ),
       },
       {
         id: "duration",
@@ -604,9 +614,31 @@ export default function LeavePage() {
                         b.leaveType.category !== 'HOURLY' &&
                         b.leaveType.code !== 'HOURLY_LEAVE',
                     )
-                    .map((b) => (
-                      <BalanceCard key={b.leaveType.id} b={b} />
-                    ))}
+                    .map((b) =>
+                      b.leaveType.category === 'SHORT_LEAVE' ? (
+                        // Short leave is a MONTHLY allowance that resets each
+                        // month (unused ones expire) — so we show this month's
+                        // quota and usage, not the yearly LeaveBalance.
+                        <BalanceCard
+                          key={b.leaveType.id}
+                          b={{
+                            ...b,
+                            allocated: monthlyShortLeaveQuota ?? b.allocated,
+                            carriedForward: 0,
+                            used: shortLeaveUsedThisMonth,
+                            pending: 0,
+                            available: Math.max(
+                              0,
+                              (monthlyShortLeaveQuota ?? b.allocated) -
+                                shortLeaveUsedThisMonth,
+                            ),
+                          }}
+                          periodHint="this month · resets monthly"
+                        />
+                      ) : (
+                        <BalanceCard key={b.leaveType.id} b={b} />
+                      ),
+                    )}
                 </div>
               )}
 
@@ -793,7 +825,7 @@ export default function LeavePage() {
 // vertical space in half on first paint; full details are one tap away.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BalanceCard({ b }: { b: BalanceRow }) {
+function BalanceCard({ b, periodHint }: { b: BalanceRow; periodHint?: string }) {
   const [expanded, setExpanded] = useState(false);
   const total = b.allocated + b.carriedForward;
   const pct = total > 0 ? Math.min(100, ((b.used + b.pending) / total) * 100) : 0;
@@ -853,6 +885,11 @@ function BalanceCard({ b }: { b: BalanceRow }) {
             />
           </div>
         </div>
+        {periodHint && (
+          <div className="text-[9px] text-muted-foreground/80 -mt-0.5 leading-none">
+            {periodHint}
+          </div>
+        )}
         {/* Expanded details — progress bar + Used / Pending counters. */}
         {expanded && (
           <>
@@ -975,6 +1012,16 @@ function durationLabel(d: Duration) {
   return d === 'FULL_DAY' ? 'Full Day' : d === 'HALF_DAY_FIRST' ? '½ (1st half)' : '½ (2nd half)';
 }
 
+// Hours spanned by a short-leave slot window ("HH:MM"–"HH:MM"). Used so the
+// "Days" column shows the org-fixed window (e.g. "2.5h") for short leaves,
+// matching the apply screen — instead of a misleading "0.5 / 1.0 day".
+function slotWindowHours(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => !Number.isFinite(n))) return 0;
+  return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Apply form — uses the date-range picker with overlap detection.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1032,7 +1079,10 @@ function ApplyLeaveSheet({
   const [isEmergency, setIsEmergency] = useState(false);
 
   // The leave-type CATEGORY drives which Duration options are valid.
-  //   FULL_DAY    → all three (Full / ½ AM / ½ PM)
+  //   FULL_DAY    → full day only ("full day means full day"). Half-days are NOT
+  //                 selectable here; an employee who needs a half-day uses the
+  //                 Half Day type, which cascades into the Full Day quota once
+  //                 its own quota is exhausted (lib/hr/leave-service.ts reroute).
   //   HALF_DAY    → only ½ AM / ½ PM (a half-day leave is, by definition, half a day)
   //   SHORT_LEAVE → two preset slots (start-of-shift / end-of-shift), each a
   //                 FIXED window of `shortLeaveHours`, so the date picker stays
@@ -1046,9 +1096,10 @@ function ApplyLeaveSheet({
     balances.find((b) => b.leaveType.id === leaveTypeId)?.leaveType.category ?? null;
   const isHalfDayType = selectedCategory === 'HALF_DAY';
   const isShortLeaveType = selectedCategory === 'SHORT_LEAVE';
-  // Hide the half/full-day grid for short leave (it gets the slot picker
-  // instead) and for nothing else.
-  const durationLocked = isShortLeaveType;
+  // Show the half/full-day grid ONLY for Half Day leave types. Full Day leaves
+  // are always a full day (no half-day sub-options), and short leave gets the
+  // slot picker instead — so both hide this grid.
+  const durationLocked = !isHalfDayType;
   // Preset short-leave slots derived from the org shift + window. Empty when
   // the org hasn't configured a shift/window yet → the form shows a hint.
   const shortLeaveSlots = useMemo(
@@ -1104,7 +1155,8 @@ function ApplyLeaveSheet({
   // never contradict the type name:
   //   HALF_DAY  → snap FULL_DAY to HALF_DAY_FIRST
   //   SHORT     → snap to HALF_DAY_FIRST (selector is hidden anyway)
-  //   FULL_DAY  → leave as-is (all three are valid)
+  //   FULL_DAY  → snap any half value back to FULL_DAY (the grid is hidden, so
+  //               the user can't fix a leftover half value themselves)
   useEffect(() => {
     if (!selectedCategory) return;
     if (
@@ -1112,6 +1164,8 @@ function ApplyLeaveSheet({
       duration === 'FULL_DAY'
     ) {
       setDuration('HALF_DAY_FIRST');
+    } else if (selectedCategory === 'FULL_DAY' && duration !== 'FULL_DAY') {
+      setDuration('FULL_DAY');
     }
   }, [selectedCategory, duration]);
 
@@ -1412,33 +1466,21 @@ function ApplyLeaveSheet({
             </div>
           )}
 
-          {/* Duration selector — its options depend on the leave-type category:
-              SHORT_LEAVE swaps this out for the slot picker below; HALF_DAY
-              drops the "Full" choice because a half-day leave is, by
-              definition, half a day; FULL_DAY shows all three so a paid
-              full-day quota can also be drawn down in halves. */}
+          {/* Duration selector — only shown for HALF_DAY types (½ AM / ½ PM).
+              FULL_DAY is always a full day so it has no selector; SHORT_LEAVE
+              uses the slot picker below instead. */}
           {!durationLocked && (
             <div className="space-y-2">
               <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5" />
                 Duration
               </Label>
-              <div
-                className={`grid gap-1 rounded-md border p-1 bg-muted/20 ${
-                  isHalfDayType ? 'grid-cols-2' : 'grid-cols-3'
-                }`}
-              >
+              <div className="grid grid-cols-2 gap-1 rounded-md border p-1 bg-muted/20">
                 {(
-                  isHalfDayType
-                    ? ([
-                        ['HALF_DAY_FIRST', '½ AM'],
-                        ['HALF_DAY_SECOND', '½ PM'],
-                      ] as const)
-                    : ([
-                        ['FULL_DAY', 'Full'],
-                        ['HALF_DAY_FIRST', '½ AM'],
-                        ['HALF_DAY_SECOND', '½ PM'],
-                      ] as const)
+                  [
+                    ['HALF_DAY_FIRST', '½ AM'],
+                    ['HALF_DAY_SECOND', '½ PM'],
+                  ] as const
                 ).map(([val, lbl]) => (
                   <button
                     key={val}

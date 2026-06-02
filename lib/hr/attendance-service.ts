@@ -27,6 +27,7 @@ import { acquireSlot, commitSlot } from './attendance-rate-limit';
 import { triggerWorkflowsForRecord } from '@/lib/workflow/trigger';
 import { logAudit } from '@/lib/api-helpers';
 import { sendPushToUsers } from '@/lib/push/server';
+import { endLeaveEarlyToday } from './leave-service';
 
 export type PunchType = 'IN' | 'OUT';
 export type PunchSource = 'WEB' | 'MOBILE' | 'BIOMETRIC' | 'ADMIN';
@@ -66,6 +67,11 @@ export interface PunchInput {
   // false = static (would have been rejected upstream unless WARN), null
   // = not checked. Persisted for audit even when not enforced.
   livenessPassed?: boolean | null;
+  // Self-service early return: when the user is on a multi-day FULL-DAY leave
+  // and chooses to come back today, the widget sends this on the IN punch. We
+  // end the leave for today onward (cancel if it's day 1, else shorten) and
+  // let the punch through instead of blocking with ON_APPROVED_LEAVE.
+  endLeaveEarly?: boolean;
 }
 
 export interface AttendanceStatus {
@@ -98,6 +104,16 @@ export interface AttendanceStatus {
   // Half-day leaves don't fully block punching — the user can still check
   // in for the other half. Widget reads this to leave the CTA active.
   isHalfDayLeave: boolean;
+  // A short leave is a fixed few-hour window (e.g. 09:30–12:00) the employee
+  // works AROUND — it is NOT a day off. We deliberately do NOT set isOnLeave
+  // for it (that would flip `state` to ON_LEAVE and hide the check-in CTA).
+  // Instead the widget shows it as a small note and keeps the day normal.
+  isShortLeave: boolean;
+  shortLeaveWindow: { start: string; end: string } | null;
+  // Human note for ANY partial leave (half-day or short) the employee has
+  // today — the widget renders it and keeps the check-in CTA active. Null when
+  // there's no partial leave (or a full-day leave, which blocks instead).
+  partialLeaveNote: string | null;
   isAutoCheckedOut: boolean;
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
@@ -447,6 +463,12 @@ async function getLeavesCached(
   }
 }
 
+/** Drop the cached leaves for an org+month so the next read reflects a leave
+ *  that was just modified (e.g. a self-service early return on check-in). */
+function invalidateLeavesCache(organizationId: string, month: string): void {
+  hlCache.leaves.delete(`${organizationId}|${month}`);
+}
+
 // Find an approved leave covering `date` for this user. Matches against
 // every known identity key the user has — email plus employee id — so a
 // leave filed by Employee ID (with no email column) still triggers the
@@ -464,6 +486,95 @@ function findLeaveForToday(
     if (l.startDate <= date && date <= l.endDate) return l;
   }
   return null;
+}
+
+// ── Partial-leave attendance helpers ────────────────────────────────────────
+// A "partial" leave (half-day or short leave) covers only PART of the working
+// day, so the day stays a normal working day: the employee can punch, and
+// lateness / early-out are measured against the WORKING portion, not the full
+// shift. These helpers compute the EXCUSED window (the part they're off) so the
+// expected check-in / check-out can be shifted accordingly. Full-day leaves are
+// not partial — they block the punch entirely (handled separately).
+
+function hhmmToMin(s: string | null | undefined): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((s ?? '').trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function minToHHmm(total: number): string {
+  const t = ((Math.round(total) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The excused window for a partial leave, as "HH:mm" start/end in the shift
+ * clock — or null when the leave isn't partial / can't be resolved.
+ *   • SHORT_LEAVE       → its fixed slot window (startTime–endTime).
+ *   • HALF_DAY_FIRST    → [shift start, shift midpoint]  (morning off).
+ *   • HALF_DAY_SECOND   → [shift midpoint, shift end]    (afternoon off).
+ */
+function excusedLeaveWindow(
+  leave: Pick<SampleLeave, 'duration' | 'category' | 'startTime' | 'endTime' | 'isHalfDay'> | null,
+  shift: { start: string; end: string },
+): { start: string; end: string } | null {
+  if (!leave || !leave.isHalfDay) return null; // full-day / no leave → no window
+  if (leave.category === 'SHORT_LEAVE') {
+    return leave.startTime && leave.endTime
+      ? { start: leave.startTime, end: leave.endTime }
+      : null;
+  }
+  const s = hhmmToMin(shift.start);
+  const e = hhmmToMin(shift.end);
+  if (s == null || e == null || e <= s) return null;
+  const mid = minToHHmm(Math.round((s + e) / 2));
+  if (leave.duration === 'HALF_DAY_FIRST') return { start: shift.start, end: mid };
+  if (leave.duration === 'HALF_DAY_SECOND') return { start: mid, end: shift.end };
+  return null;
+}
+
+/**
+ * Whether a partial leave's excused window sits at the START of the shift
+ * (employee comes in later → shift expected check-IN) or the END (employee
+ * leaves earlier → shift expected check-OUT). Derived from the duration, which
+ * is robust even if the employee's shift was edited after the leave was booked
+ * (a clock-time comparison against the current shift would break in that case).
+ *   HALF_DAY_FIRST  → morning off / start-of-shift short leave → 'START'
+ *   HALF_DAY_SECOND → afternoon off / end-of-shift short leave → 'END'
+ */
+function excusedAnchorOf(duration: string | null | undefined): 'START' | 'END' | null {
+  if (duration === 'HALF_DAY_FIRST') return 'START';
+  if (duration === 'HALF_DAY_SECOND') return 'END';
+  return null;
+}
+
+/** Short, human note for the widget describing a partial leave, or null. The
+ *  wording adapts to whether the employee has already checked in so it never
+ *  tells someone to "check in" when they already have. */
+function partialLeaveNote(
+  leave: Pick<SampleLeave, 'duration' | 'category' | 'leaveType' | 'isHalfDay'>,
+  excused: { start: string; end: string } | null,
+  checkedIn: boolean,
+): string | null {
+  if (!leave.isHalfDay) return null;
+  if (leave.category === 'SHORT_LEAVE') {
+    const w = excused ? ` (${excused.start}–${excused.end})` : '';
+    return checkedIn
+      ? `Short leave today${w} — the rest of the shift is a normal working day.`
+      : `Short leave today${w}. You can still check in for the rest of your shift.`;
+  }
+  if (leave.duration === 'HALF_DAY_FIRST') {
+    return checkedIn
+      ? 'Half-day leave — 1st half (morning) off. Working the second half.'
+      : 'Half-day leave — 1st half (morning) off. Check in for the second half.';
+  }
+  if (leave.duration === 'HALF_DAY_SECOND') {
+    return 'Half-day leave — 2nd half (afternoon) off. You can check out at the half-day mark.';
+  }
+  return 'Half-day leave today — you can still check in for the other half.';
 }
 
 // ---- Status ---------------------------------------------------------------
@@ -708,6 +819,17 @@ export async function getStatus(
   let isOnLeave = false;
   let leaveType: string | null = null;
   let isHalfDayLeave = false;
+  let isShortLeave = false;
+  let shortLeaveWindow: { start: string; end: string } | null = null;
+  // Excused window for a partial leave (half-day or short) — the part of the
+  // shift the employee is off. Used below to shift the expected check-in/out.
+  let excusedWindow: { start: string; end: string } | null = null;
+  let excusedAnchor: 'START' | 'END' | null = null;
+  // The matched partial leave, kept so the human note can be built once the
+  // checked-in state is known (so it never says "check in" after you have).
+  let partialLeave:
+    | Pick<SampleLeave, 'duration' | 'category' | 'leaveType' | 'isHalfDay'>
+    | null = null;
   if (organizationId) {
     const [holidays, leaves] = await Promise.all([
       getHolidaysCached(organizationId, month),
@@ -720,9 +842,23 @@ export async function getStatus(
     }
     const leave = findLeaveForToday(leaves, userMatchKeys, date);
     if (leave) {
-      isOnLeave = true;
       leaveType = leave.leaveType || null;
-      isHalfDayLeave = !!leave.isHalfDay;
+      if (leave.isHalfDay) {
+        // PARTIAL leave (half-day OR short leave): the employee works the rest
+        // of the day, so keep it a normal working day — do NOT set isOnLeave
+        // (that would flip `state` to ON_LEAVE and hide the check-in CTA). The
+        // excused window shifts the expected in/out so they aren't flagged
+        // late / early-out for the time they were granted off.
+        isShortLeave = leave.category === 'SHORT_LEAVE';
+        isHalfDayLeave = !isShortLeave;
+        excusedWindow = excusedLeaveWindow(leave, shift);
+        excusedAnchor = excusedAnchorOf(leave.duration);
+        if (isShortLeave) shortLeaveWindow = excusedWindow;
+        partialLeave = leave;
+      } else {
+        // Full-day leave → blocks the whole day.
+        isOnLeave = true;
+      }
     }
   }
 
@@ -751,8 +887,21 @@ export async function getStatus(
     }
   }
 
-  const expectedInAt = dateAtHHmm(now, shift.start, tz);
-  const expectedOutAt = dateAtHHmm(now, shift.end, tz);
+  let expectedInAt = dateAtHHmm(now, shift.start, tz);
+  let expectedOutAt = dateAtHHmm(now, shift.end, tz);
+  // A partial leave (half-day or short) excuses a window at the start or end of
+  // the shift — shift the expected check-in (start-anchored → move to window
+  // end) or check-out (end-anchored → move to window start) so the employee is
+  // NOT flagged late / early-out for the time they were granted off. Anchoring
+  // comes from the duration (not a clock-time match), so it's correct even if
+  // the shift was edited after the leave was booked.
+  if (excusedWindow) {
+    if (excusedAnchor === 'START') {
+      expectedInAt = dateAtHHmm(now, excusedWindow.end, tz);
+    } else if (excusedAnchor === 'END') {
+      expectedOutAt = dateAtHHmm(now, excusedWindow.start, tz);
+    }
+  }
   // Day-of-week must be read in the org tz, not server-local: near the
   // UTC/IST boundary `now.getDay()` can name yesterday's weekday. Noon-UTC of
   // the tz-local calendar date is unambiguous.
@@ -835,6 +984,11 @@ export async function getStatus(
     isOnLeave,
     leaveType,
     isHalfDayLeave,
+    isShortLeave,
+    shortLeaveWindow,
+    partialLeaveNote: partialLeave
+      ? partialLeaveNote(partialLeave, excusedWindow, checkedIn)
+      : null,
     isAutoCheckedOut: !!(row as any)?.isAutoCheckedOut,
     checkInPhoto: (row as any)?.checkInPhoto ?? null,
     checkOutPhoto: (row as any)?.checkOutPhoto ?? null,
@@ -1183,25 +1337,55 @@ export async function recordPunch(
   // works if the leave was approved mid-day. Source-of-truth is the same
   // cached leaves reader used by getStatus, so the widget's `canCheckIn`
   // flag and this guard never disagree.
-  if (input.type === 'IN' && input.organizationId) {
+  // Approved leave covering today (any kind), resolved once. Drives both the
+  // full-day IN block guard below AND the short-leave expected in/out shift so
+  // a start/end-of-shift short leave isn't recorded as late / early-out.
+  let onLeaveToday: SampleLeave | null = null;
+  if (input.organizationId) {
     const monthKey = date.slice(0, 7);
     const leavesToday = await getLeavesCached(input.organizationId, monthKey);
     const matchKeys = new Set<string>();
     if (actor.email) matchKeys.add(`email:${actor.email.toLowerCase()}`);
     if (actor.employeeId) matchKeys.add(`empId:${actor.employeeId.toLowerCase()}`);
-    const onLeave = findLeaveForToday(leavesToday, matchKeys, date);
-    if (onLeave && !onLeave.isHalfDay) {
+    onLeaveToday = findLeaveForToday(leavesToday, matchKeys, date);
+  }
+  if (input.type === 'IN' && input.organizationId && onLeaveToday && !onLeaveToday.isHalfDay) {
+    if (input.endLeaveEarly) {
+      // Self-service early return: end the full-day leave for today onward, then
+      // let the punch proceed. Bust the in-memory leaves cache so the freshly
+      // shortened/cancelled leave doesn't re-trigger this guard on re-read.
+      const leaveName = onLeaveToday.leaveType ?? null;
+      const result = await endLeaveEarlyToday({
+        userId: input.userId,
+        organizationId: input.organizationId,
+        date,
+      });
+      if (result.ended) {
+        invalidateLeavesCache(input.organizationId, date.slice(0, 7));
+        onLeaveToday = null;
+        await safeAudit(
+          auditEmail,
+          input.userId,
+          input.organizationId,
+          `${auditAction} early-return (${result.cancelled ? 'leave cancelled' : 'leave shortened'})`,
+          { date, code: 'EARLY_RETURN', source, leaveType: leaveName },
+          input.ip ?? null,
+          input.userAgent ?? null,
+          null,
+        );
+      }
+    } else {
       await safeAudit(
         auditEmail,
         input.userId,
         input.organizationId,
         `${auditAction} rejected (ON_APPROVED_LEAVE)`,
-        { date, code: 'ON_APPROVED_LEAVE', source, leaveType: onLeave.leaveType ?? null },
+        { date, code: 'ON_APPROVED_LEAVE', source, leaveType: onLeaveToday.leaveType ?? null },
         input.ip ?? null,
         input.userAgent ?? null,
         null,
       );
-      const nice = onLeave.leaveType ? `${onLeave.leaveType} ` : '';
+      const nice = onLeaveToday.leaveType ? `${onLeaveToday.leaveType} ` : '';
       throw new AttendanceError(
         'ON_APPROVED_LEAVE',
         `You are on approved ${nice}leave today. Cancel the leave first if you need to clock in.`,
@@ -1209,6 +1393,11 @@ export async function recordPunch(
       );
     }
   }
+  // Excused window for today's PARTIAL leave (half-day or short), used below to
+  // shift the expected check-in / check-out so the granted time off isn't
+  // recorded as late / early-out. Null for a full-day leave (blocks) or none.
+  const todaysExcusedWindow = excusedLeaveWindow(onLeaveToday, shift);
+  const todaysExcusedAnchor = excusedAnchorOf(onLeaveToday?.duration);
 
   const existing = await prisma.attendance.findFirst({
     where: { userId: input.userId, date },
@@ -1266,7 +1455,13 @@ export async function recordPunch(
       };
     }
 
-    const expectedIn = dateAtHHmm(now, shift.start, tz);
+    // A start-anchored partial leave (1st-half off, or a start-of-shift short
+    // leave) excuses the first window — the employee is expected to clock in
+    // only after it ends, so lateness is measured from the window end.
+    let expectedIn = dateAtHHmm(now, shift.start, tz);
+    if (todaysExcusedWindow && todaysExcusedAnchor === 'START') {
+      expectedIn = dateAtHHmm(now, todaysExcusedWindow.end, tz);
+    }
     const graceEnd = new Date(expectedIn.getTime() + cfg.graceMinutes * 60_000);
     const lateMinutes = Math.max(0, diffMinutes(now, graceEnd));
 
@@ -1369,7 +1564,13 @@ export async function recordPunch(
     const checkInAt = (existing as any).checkInAt
       ? new Date((existing as any).checkInAt)
       : null;
-    const expectedOut = dateAtHHmm(now, shift.end, tz);
+    // An end-anchored partial leave (2nd-half off, or an end-of-shift short
+    // leave) excuses the last window — the employee may leave when it starts
+    // without being flagged early-out, so the expected check-out moves there.
+    let expectedOut = dateAtHHmm(now, shift.end, tz);
+    if (todaysExcusedWindow && todaysExcusedAnchor === 'END') {
+      expectedOut = dateAtHHmm(now, todaysExcusedWindow.start, tz);
+    }
     const earlyOutMinutes = Math.max(0, diffMinutes(expectedOut, now));
 
     // Overtime computation. Two paths depending on the org policy:

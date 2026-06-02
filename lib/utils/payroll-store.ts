@@ -137,6 +137,19 @@ export interface SampleLeave {
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   isHalfDay: boolean;
+  /** LeaveRequest.duration — 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND'.
+   *  Tells attendance WHICH half of a half-day leave is off (1st = morning,
+   *  2nd = afternoon) so it can shift the expected check-in / check-out. */
+  duration: string | null;
+  /** LeaveType.category — 'FULL_DAY' | 'HALF_DAY' | 'SHORT_LEAVE' | 'HOURLY'.
+   *  Lets attendance/payroll distinguish a SHORT_LEAVE (a fixed few-hour window
+   *  the employee still works around) from a real HALF_DAY — both ride on the
+   *  same non-FULL_DAY `duration`, so `isHalfDay` alone can't tell them apart. */
+  category: string | null;
+  /** Short-leave slot window in the org's shift clock ("HH:MM"), when the row
+   *  is a SHORT_LEAVE. Null otherwise. Used to compute the docked hours. */
+  startTime: string | null;
+  endTime: string | null;
   days: number | null; // optional override; ignored when start/end are present
   status: 'approved' | 'pending' | 'rejected' | 'unknown';
 }
@@ -1836,7 +1849,7 @@ async function readApprovedLeavesFromTable(
     }),
     (prisma as any).leaveType.findMany({
       where: { id: { in: typeIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, category: true },
     }),
   ]);
   const userById = new Map(users.map((u: any) => [u.id, u]));
@@ -1862,6 +1875,10 @@ async function readApprovedLeavesFromTable(
       startDate: r.startDate,
       endDate: r.endDate,
       isHalfDay,
+      duration: typeof r.duration === 'string' ? r.duration : null,
+      category: t?.category ?? null,
+      startTime: typeof r.startTime === 'string' ? r.startTime : null,
+      endTime: typeof r.endTime === 'string' ? r.endTime : null,
       days: Number.isFinite(totalDays as number) ? (totalDays as number) : null,
       status: 'approved',
     });
