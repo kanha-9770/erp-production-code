@@ -9,6 +9,7 @@ import {
 } from '@/lib/utils/payroll-live';
 import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { prisma } from '@/lib/prisma';
+import { consumeHalfDayCoverForMonth } from '@/lib/hr/leave-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,6 +128,40 @@ export async function POST(request: NextRequest) {
     // Persist after computing so the in-memory result is always authoritative
     // for this request and DB write failures degrade gracefully.
     await persistPayrollRecords(authUser.id, month, payrolls);
+
+    // Apply the half-day-overflow paid-leave deductions the engine decided.
+    // This is the ONLY place balances actually move (preview never deducts).
+    // Idempotent per (user, month) so re-generating won't double-deduct.
+    const coverConsumptions = payrolls
+      .map((p) => {
+        const hdc = (p.breakdown as any)?.halfDayCover;
+        if (!hdc?.userId || !Array.isArray(hdc.draws) || hdc.draws.length === 0) {
+          return null;
+        }
+        return {
+          userId: hdc.userId as string,
+          draws: hdc.draws.map((d: any) => ({ leaveTypeId: d.leaveTypeId, days: d.days })),
+        };
+      })
+      .filter((c): c is { userId: string; draws: { leaveTypeId: string; days: number }[] } => !!c);
+    if (coverConsumptions.length > 0) {
+      try {
+        const summary = await consumeHalfDayCoverForMonth(
+          authUser.organizationId,
+          month,
+          authUser.id,
+          coverConsumptions,
+        );
+        console.log(
+          `[payroll] half-day cover for ${month}: ${summary.usersProcessed} applied, ` +
+            `${summary.usersSkipped} already-applied, ${summary.daysDeducted} leave-days deducted`,
+        );
+      } catch (err) {
+        // Never block payroll generation on the cover deduction — pay is
+        // already computed/persisted; the balance ledger can be reconciled.
+        console.error('[payroll] half-day cover deduction failed:', err);
+      }
+    }
 
     const totalNet = payrolls.reduce((sum, p) => sum + p.netSalary, 0);
     const totalGross = payrolls.reduce((sum, p) => sum + p.grossSalary, 0);

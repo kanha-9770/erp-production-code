@@ -5,6 +5,7 @@ import {
   getLeavesFromDB,
   getOrgProfilesContext,
   getPayrollPolicy,
+  getLeaveQuotaContext,
   resolveEmployeeFormulas,
   PayrollFormulas,
   PayrollRecord,
@@ -13,12 +14,16 @@ import {
   SampleEmployee,
   SampleHoliday,
   SampleLeave,
+  type LeaveQuotaContext,
 } from './payroll-store';
 import { prisma } from '@/lib/prisma';
 import { effectiveStatusOf } from '@/lib/hr/attendance-status';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { getRolesForUsers } from '@/lib/database/roles';
+import { splitLeavePayByQuota } from '@/lib/hr/leave-quota-pay';
+import { computeHalfDayCover, type PaidLeaveSource } from '@/lib/hr/half-day-cover';
+import { getPaidLeaveBalancesForUsers } from '@/lib/hr/leave-service';
 
 interface PayrollCalculation extends PayrollRecord {}
 
@@ -663,6 +668,14 @@ function classifyDay(
   holidaySet: Set<string>,
   attendanceByDate: Map<string, SampleAttendance>,
   leaveByDate: Map<string, { leave: SampleLeave; rule: ResolvedLeaveRule }>,
+  // "Within quota = paid" support. `quotaByType` is the per-type yearly paid
+  // allowance (allocated + carriedForward). `quotaConsumed` is a MUTABLE
+  // running counter (leaveTypeId → days already charged to the paid quota,
+  // seeded from prior months) that classifyDay increments as it walks the
+  // month in date order, so the quota is consumed chronologically. Omitted →
+  // falls back to the legacy isPaid-based behaviour.
+  quotaByType?: Map<string, number>,
+  quotaConsumed?: Map<string, number>,
 ): DayClassification {
   const z: DayClassification = {
     present: 0,
@@ -800,6 +813,43 @@ function classifyDay(
     const halfDay = leave.isHalfDay || rule.category === 'HALF_DAY';
     const dayValue = halfDay ? 0.5 : 1;
 
+    // ── "Within quota = paid" pricing ────────────────────────────────────
+    // Company policy: a leave day is PAID while it falls within the leave
+    // type's allocated yearly quota; once that quota is exhausted, the day is
+    // loss-of-pay. This supersedes the old per-type isPaid flag: pay is now
+    // decided by remaining quota, not by whether the type was flagged paid.
+    // We consume the quota chronologically via the running `quotaConsumed`
+    // counter so earlier months eat the allowance first.
+    //
+    // Falls back to the legacy isPaid behaviour only when quota context is
+    // unavailable (no leaveTypeId on the row, or maps not supplied) — keeps
+    // older/form-derived data working.
+    const typeId = leave.leaveTypeId;
+    if (quotaByType && quotaConsumed && typeId) {
+      const paidQuota = quotaByType.get(typeId) ?? 0;
+      const usedBefore = quotaConsumed.get(typeId) ?? 0;
+      const split = splitLeavePayByQuota({
+        allocated: paidQuota,
+        usedBefore,
+        daysTaken: dayValue,
+      });
+      // Advance the running counter by the days we actually charged against
+      // the paid quota (the paid portion). LOP days don't consume quota.
+      quotaConsumed.set(typeId, usedBefore + split.paidDays);
+
+      z.paidLeave = split.paidDays;
+      z.unpaidLeaveLOP = split.lopDays;
+      z.unpaidLeaveDays = split.lopDays;
+      if (halfDay) {
+        // The other half of the day has no attendance → pure absence (LOP),
+        // unchanged from the legacy treatment.
+        z.unpaidLeaveLOP += 0.5;
+        z.absent = 0.5;
+      }
+      return z;
+    }
+
+    // ── Legacy fallback (no quota context) ───────────────────────────────
     if (rule.isPaid) {
       z.paidLeave = dayValue;
       // The other half of a half-day paid leave still has to be classified —
@@ -841,12 +891,36 @@ function calculateForEmployee(
   month: string,
   profileMeta?: { profileId: string | null; profileName: string | null; source: string },
   baseSalaryOverride?: number | null,
+  // Paid-leave balances this employee can draw on to cover half-day overflow
+  // beyond the monthly quota. Pre-fetched + sorted by the caller. Empty/omitted
+  // → no cover. Compute is read-only; the Generate step does the real deduction.
+  paidLeaveSources?: PaidLeaveSource[],
+  // "Within quota = paid" context for THIS employee: leaveTypeId →
+  // { paidQuota, usedBeforeMonth }. Seeds the chronological quota counter so
+  // leave within the yearly allowance is paid and the overflow is LOP. Omitted
+  // → classifyDay falls back to the legacy isPaid behaviour.
+  leaveQuota?: Map<string, LeaveQuotaContext>,
 ): PayrollCalculation {
   const [yStr, mStr] = month.split('-');
   const year = Number(yStr);
   const monthIndex = Number(mStr) - 1;
   const days = eachDayOfMonth(year, monthIndex);
   const daysInMonth = days.length;
+
+  // Build the per-type paid quota + a MUTABLE running counter seeded from prior
+  // months' usage, so classifyDay can consume the yearly allowance in date
+  // order (earliest leaves paid first, overflow → LOP).
+  const quotaByType = new Map<string, number>();
+  const quotaConsumed = new Map<string, number>();
+  if (leaveQuota) {
+    for (const [key, ctx] of leaveQuota) {
+      // key is `${userId}|${leaveTypeId}`; this employee's rows were filtered
+      // by the caller, so strip the userId prefix to index by leaveTypeId.
+      const typeId = key.includes('|') ? key.slice(key.indexOf('|') + 1) : key;
+      quotaByType.set(typeId, ctx.paidQuota);
+      quotaConsumed.set(typeId, ctx.usedBeforeMonth);
+    }
+  }
 
   // Pre-index attendance and approved leaves by date for O(1) day lookups.
   const attByDate = new Map<string, SampleAttendance>();
@@ -918,6 +992,8 @@ function calculateForEmployee(
       holidaySet,
       attByDate,
       leaveByDate,
+      quotaByType,
+      quotaConsumed,
     );
     breakdown.presentDays += c.present;
     breakdown.halfDays += c.half;
@@ -1012,6 +1088,30 @@ function calculateForEmployee(
   const halfDayQuota = Math.max(0, policy.monthlyHalfDayQuota ?? 0);
   const halfDaysForgiven = Math.min(breakdown.halfDays, halfDayQuota);
   payable += halfDaysForgiven * 0.5;
+
+  // ── Half-day overflow → paid-leave cover ─────────────────────────────
+  // Half-days BEYOND the monthly quota can be covered from the employee's
+  // remaining paid leave (any paid type, drained by sortOrder). Each covered
+  // half-day spends 0.5 day of leave and restores 0.5 day of pay. This is
+  // read-only here — we compute the cover and stash the per-type draws on the
+  // breakdown; the Generate step performs the actual balance deduction +
+  // audit, idempotently. So preview shows the covered pay, balances move only
+  // on Generate.
+  const excessHalfDays = breakdown.halfDays - halfDaysForgiven;
+  if (excessHalfDays > 0 && paidLeaveSources && paidLeaveSources.length > 0) {
+    const cover = computeHalfDayCover(excessHalfDays, paidLeaveSources);
+    if (cover.coveredHalfDays > 0) {
+      payable += cover.payDaysRestored;
+      breakdown.halfDayCover = {
+        userId: employee.userId ?? null,
+        year,
+        coveredHalfDays: cover.coveredHalfDays,
+        leaveDaysConsumed: cover.leaveDaysConsumed,
+        draws: cover.draws,
+        remainingDockedHalfDays: cover.remainingDockedHalfDays,
+      };
+    }
+  }
 
   // Short-leave handling. The company's `monthlyShortLeaveQuota` is the
   // number of short-leave occurrences forgiven without docking pay. The
@@ -1124,6 +1224,11 @@ export async function calculatePayroll(
     getAttendanceConfig(organizationId),
   ]);
 
+  // "Within quota = paid" context: per (user, leaveType) yearly paid quota +
+  // days already used in earlier months, so leave within the allowance is paid
+  // and the overflow is LOP, consumed chronologically. One batched fetch.
+  const leaveQuotaCtx = await getLeaveQuotaContext(organizationId, targetMonth);
+
   // Resolve the late-half-day rule per employee BEFORE the sync classify loop.
   // The master switch + role/user exception lists decide it; we batch-fetch
   // every employee's roles in one query (no N+1), then store the resolved
@@ -1144,6 +1249,16 @@ export async function calculatePayroll(
         e.userId ? rolesByUser.get(e.userId) ?? [] : [],
       ),
     ]),
+  );
+
+  // Paid-leave balances for the half-day overflow cover, batched in one query
+  // for the payroll year. Map<userId, sources[]>. Only paid types with
+  // available > 0, pre-sorted by sortOrder. Empty map → no cover anywhere.
+  const payrollYear = Number(targetMonth.split('-')[0]);
+  const paidLeaveByUser = await getPaidLeaveBalancesForUsers(
+    organizationId,
+    employees.map((e) => e.userId).filter((u): u is string => !!u),
+    payrollYear,
   );
 
   // Index attendance and leaves by the same matchKey scheme employees expose,
@@ -1208,8 +1323,24 @@ export async function calculatePayroll(
         source: resolution.source,
       },
       resolution.baseSalaryOverride,
+      emp.userId ? paidLeaveByUser.get(emp.userId) ?? [] : [],
+      // This employee's slice of the quota context (keys are `userId|typeId`).
+      emp.userId ? filterQuotaForUser(leaveQuotaCtx, emp.userId) : undefined,
     );
   });
+}
+
+/** Narrow the org-wide quota map to one user's entries (keys `userId|typeId`). */
+function filterQuotaForUser(
+  ctx: Map<string, LeaveQuotaContext>,
+  userId: string,
+): Map<string, LeaveQuotaContext> {
+  const prefix = `${userId}|`;
+  const out = new Map<string, LeaveQuotaContext>();
+  for (const [key, val] of ctx) {
+    if (key.startsWith(prefix)) out.set(key, val);
+  }
+  return out;
 }
 
 interface DailyAttendance {

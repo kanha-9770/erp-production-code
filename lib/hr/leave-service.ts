@@ -20,7 +20,8 @@
  */
 
 import { prisma } from '@/lib/prisma';
-import { getAttendanceConfig } from './attendance-config';
+import { getAttendanceConfig, parseHHmm } from './attendance-config';
+import { slotForDuration } from './short-leave-slots';
 
 export type LeaveDuration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
 export type LeaveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
@@ -43,6 +44,9 @@ export interface LeaveRequestRow {
   endDate: string;
   duration: LeaveDuration;
   totalDays: number;
+  // Short-leave slot window ("HH:MM"). Null for half/full-day leaves.
+  startTime: string | null;
+  endTime: string | null;
   reason: string | null;
   attachmentUrl: string | null;
   isEmergency: boolean;
@@ -308,8 +312,48 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
   // for the start-date's month, the request is rejected and the employee
   // must fall back to half-day or full-day. Counting PENDING + APPROVED
   // (rejected/cancelled don't consume the quota).
+  // Short-leave slot window, derived authoritatively server-side from the org
+  // shift + window so the client can't smuggle in an arbitrary period. Stays
+  // null for half/full-day leaves.
+  let shortLeaveStartTime: string | null = null;
+  let shortLeaveEndTime: string | null = null;
+
   if (lt.type.category === 'SHORT_LEAVE') {
     const cfg = await getAttendanceConfig(input.organizationId);
+    // Slots follow the EMPLOYEE'S effective shift — their own inTime/outTime
+    // override when set, else the org default — so the short-leave window
+    // lines up with the same check-in/out clock attendance uses, not a
+    // one-size-fits-all org shift. Inlined (rather than importing
+    // attendance-service's getEffectiveShift) to keep leave-service free of
+    // that module's heavy dependency graph and avoid a circular import.
+    let shiftStart: string | null | undefined = cfg?.defaultShiftStart;
+    let shiftEnd: string | null | undefined = cfg?.defaultShiftEnd;
+    try {
+      const emp = await (prisma as any).employee.findUnique({
+        where: { userId: input.userId },
+        select: { inTime: true, outTime: true },
+      });
+      // Both ends must be valid HH:mm; a half-set override falls back entirely
+      // to the org default rather than mixing a custom start with a default end.
+      if (emp && parseHHmm(emp.inTime) !== null && parseHHmm(emp.outTime) !== null) {
+        shiftStart = String(emp.inTime).trim();
+        shiftEnd = String(emp.outTime).trim();
+      }
+    } catch {
+      /* employee row/columns missing → keep org default */
+    }
+    // Resolve the chosen preset slot (HALF_DAY_FIRST = start-anchored,
+    // HALF_DAY_SECOND = end-anchored) to concrete clock times.
+    const slot = slotForDuration(
+      input.duration,
+      shiftStart,
+      shiftEnd,
+      cfg?.shortLeaveHours,
+    );
+    if (slot) {
+      shortLeaveStartTime = slot.startTime;
+      shortLeaveEndTime = slot.endTime;
+    }
     const quota = Math.max(0, Math.floor(cfg?.monthlyShortLeaveQuota ?? 0));
     const anchor = new Date(`${input.startDate}T00:00:00`);
     const monthStart = new Date(
@@ -414,22 +458,67 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
 
   const year = yearOf(input.startDate);
 
+  // ── Half Day → Full Day quota cascade (apply-time reroute) ───────────
+  // Policy: a Half Day Leave is charged to the Half Day quota first; once
+  // that quota is fully used, the extra half-day is charged to the Full Day
+  // quota instead (0.5 of a full day per half-day). We implement this by
+  // re-booking the request onto the org's Full Day leave type when the Half
+  // Day balance is exhausted — so the request and the balance it consumes
+  // stay the same type and "My Leaves" reconciles. If Full Day is ALSO
+  // exhausted we leave it on Half Day (it records normally; pay treatment is
+  // governed by payroll). Only triggers for HALF_DAY-category types.
+  let effectiveLeaveTypeId = input.leaveTypeId;
+  let reroutedToFullDay = false;
+  if (lt.type.category === 'HALF_DAY') {
+    const halfAvail = await readAvailableBalance(
+      input.organizationId,
+      input.userId,
+      input.leaveTypeId,
+      year,
+    );
+    if (halfAvail <= 1e-9) {
+      const fullType = await (prisma as any).leaveType.findFirst({
+        where: { category: 'FULL_DAY', isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        select: { id: true },
+      });
+      if (fullType) {
+        const fullAvail = await readAvailableBalance(
+          input.organizationId,
+          input.userId,
+          fullType.id,
+          year,
+        );
+        if (fullAvail > 1e-9) {
+          effectiveLeaveTypeId = fullType.id;
+          reroutedToFullDay = true;
+        }
+      }
+    }
+  }
+
   // Atomic: ensure balance row, increment pending, create the request.
   // Balance is no longer gated at apply-time — employees can request any
   // amount; any overrun is settled by payroll / approver discretion.
   const created = await prisma.$transaction(async (tx: any) => {
-    const balance = await ensureBalance(tx, input.organizationId, input.userId, input.leaveTypeId, year);
+    const balance = await ensureBalance(tx, input.organizationId, input.userId, effectiveLeaveTypeId, year);
 
     const req = await tx.leaveRequest.create({
       data: {
         organizationId: input.organizationId,
         userId: input.userId,
-        leaveTypeId: input.leaveTypeId,
+        leaveTypeId: effectiveLeaveTypeId,
         startDate: input.startDate,
         endDate: input.endDate,
         duration: input.duration,
         totalDays,
-        reason: input.reason ?? null,
+        startTime: shortLeaveStartTime,
+        endTime: shortLeaveEndTime,
+        // Keep an audit breadcrumb when we auto-routed the request so the
+        // employee/approver can see why a "half day" landed on Full Day quota.
+        reason: reroutedToFullDay
+          ? `${input.reason ? input.reason + ' ' : ''}(auto: Half Day quota full → charged to Full Day quota)`
+          : input.reason ?? null,
         attachmentUrl: input.attachmentUrl ?? null,
         isEmergency: !!input.isEmergency,
         status: 'PENDING',
@@ -445,6 +534,23 @@ export async function applyLeave(input: ApplyLeaveInput): Promise<LeaveRequestRo
   });
 
   return serializeRequest(created);
+}
+
+/**
+ * Read a user's available days for one leave type/year OUTSIDE a transaction,
+ * for the apply-time cascade decision. Returns 0 when no balance row exists.
+ */
+async function readAvailableBalance(
+  organizationId: string,
+  userId: string,
+  leaveTypeId: string,
+  year: number,
+): Promise<number> {
+  const b = await (prisma as any).leaveBalance.findUnique({
+    where: { userId_leaveTypeId_year: { userId, leaveTypeId, year } },
+  });
+  if (!b) return 0;
+  return balanceAvailable(b);
 }
 
 export interface DecideLeaveInput {
@@ -852,6 +958,77 @@ export async function getBalance(
   });
 }
 
+/** One paid-leave type's remaining balance for a user, used by the payroll
+ *  half-day-cover feature. `sortOrder` drives the drain priority. */
+export interface PaidLeaveBalanceRow {
+  userId: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  sortOrder: number;
+  available: number;
+}
+
+/**
+ * Batch-fetch PAID leave balances for many users in one round trip, for a
+ * given year. Returns Map<userId, PaidLeaveBalanceRow[]> with only paid types
+ * that have available > 0, pre-sorted by sortOrder. Used by the payroll engine
+ * to cover half-day overflow from paid leave without an N+1 query per employee.
+ *
+ * Only types whose active LeaveRule has isPaid=true are included — unpaid types
+ * can never fund a cover. Users absent from the map have no paid balance.
+ */
+export async function getPaidLeaveBalancesForUsers(
+  organizationId: string,
+  userIds: string[],
+  year: number,
+): Promise<Map<string, PaidLeaveBalanceRow[]>> {
+  const out = new Map<string, PaidLeaveBalanceRow[]>();
+  const ids = Array.from(new Set(userIds.filter((u): u is string => !!u)));
+  if (ids.length === 0) return out;
+
+  // Active paid leave types (the active rule decides paid vs unpaid).
+  const types = await (prisma as any).leaveType.findMany({
+    where: { isActive: true },
+    include: { leaveRules: { where: { isActive: true }, take: 1 } },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+  });
+  const paidTypes = (types as any[]).filter((t) => !!t.leaveRules?.[0]?.isPaid);
+  if (paidTypes.length === 0) return out;
+  const paidTypeById = new Map<string, any>(paidTypes.map((t) => [t.id, t]));
+
+  const balances = await (prisma as any).leaveBalance.findMany({
+    where: {
+      organizationId,
+      year,
+      userId: { in: ids },
+      leaveTypeId: { in: paidTypes.map((t) => t.id) },
+    },
+  });
+
+  for (const b of balances as any[]) {
+    const lt = paidTypeById.get(b.leaveTypeId);
+    if (!lt) continue;
+    const available = balanceAvailable(b);
+    if (available <= 0) continue;
+    const row: PaidLeaveBalanceRow = {
+      userId: b.userId,
+      leaveTypeId: b.leaveTypeId,
+      leaveTypeName: lt.name,
+      sortOrder: Number.isFinite(Number(lt.sortOrder)) ? Number(lt.sortOrder) : 0,
+      available,
+    };
+    const list = out.get(b.userId);
+    if (list) list.push(row);
+    else out.set(b.userId, [row]);
+  }
+
+  // Keep each user's list in drain priority.
+  for (const list of out.values()) {
+    list.sort((a, b) => a.sortOrder - b.sortOrder || a.leaveTypeName.localeCompare(b.leaveTypeName));
+  }
+  return out;
+}
+
 export interface AdminAllocateInput {
   organizationId: string;
   userId: string;
@@ -895,6 +1072,106 @@ export async function adminAllocate(input: AdminAllocateInput) {
     });
     return updated;
   });
+}
+
+/** One employee's half-day-cover deductions for a payroll month, as produced
+ *  by the payroll engine (breakdown.halfDayCover.draws). */
+export interface HalfDayCoverConsumption {
+  userId: string;
+  draws: { leaveTypeId: string; days: number }[];
+}
+
+/**
+ * Apply the half-day-overflow paid-leave deductions decided by the payroll
+ * engine. Called ONLY from the Generate-payroll action — never from preview —
+ * because it mutates LeaveBalance.
+ *
+ * Idempotent per (user, month): every deduction writes a LeaveAllocation with
+ * reason 'HALF_DAY_COVER' and referenceId `hdc:<month>`. On a re-generate we
+ * detect those existing markers per user and skip them, so balances never
+ * double-deduct. `month` is "YYYY-MM"; the year for the balance row is derived
+ * from it.
+ *
+ * Returns a summary for logging/telemetry. Per-user failures are swallowed
+ * (logged) so one bad row can't abort the whole payroll generation — mirrors
+ * persistPayrollRecords' partial-save philosophy.
+ */
+export async function consumeHalfDayCoverForMonth(
+  organizationId: string,
+  month: string,
+  createdById: string,
+  consumptions: HalfDayCoverConsumption[],
+): Promise<{ usersProcessed: number; usersSkipped: number; daysDeducted: number }> {
+  const year = Number(month.split('-')[0]);
+  const referenceId = `hdc:${month}`;
+  let usersProcessed = 0;
+  let usersSkipped = 0;
+  let daysDeducted = 0;
+
+  if (!Number.isInteger(year)) {
+    return { usersProcessed, usersSkipped, daysDeducted };
+  }
+
+  for (const c of consumptions) {
+    const draws = (c.draws ?? []).filter((d) => d.days > 0 && d.leaveTypeId);
+    if (!c.userId || draws.length === 0) continue;
+    try {
+      await prisma.$transaction(async (tx: any) => {
+        // Idempotency guard: if this user already has HALF_DAY_COVER markers
+        // for this month, the cover was applied in a prior generate — skip.
+        const already = await tx.leaveAllocation.findFirst({
+          where: {
+            organizationId,
+            userId: c.userId,
+            year,
+            referenceId,
+            reason: 'HALF_DAY_COVER',
+          },
+          select: { id: true },
+        });
+        if (already) {
+          usersSkipped++;
+          return;
+        }
+
+        for (const d of draws) {
+          const balance = await ensureBalance(
+            tx,
+            organizationId,
+            c.userId,
+            d.leaveTypeId,
+            year,
+          );
+          await tx.leaveBalance.update({
+            where: { id: balance.id },
+            data: { used: { increment: d.days } },
+          });
+          await tx.leaveAllocation.create({
+            data: {
+              organizationId,
+              userId: c.userId,
+              leaveTypeId: d.leaveTypeId,
+              year,
+              delta: -d.days,
+              reason: 'HALF_DAY_COVER',
+              referenceId,
+              note: `Auto: covered half-day overflow for ${month}`,
+              createdById,
+            },
+          });
+          daysDeducted += d.days;
+        }
+        usersProcessed++;
+      });
+    } catch (err) {
+      console.warn(
+        `[leave] half-day cover deduction failed for user ${c.userId} ${month}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  return { usersProcessed, usersSkipped, daysDeducted };
 }
 
 /**
@@ -1013,6 +1290,8 @@ function serializeRequest(r: any): LeaveRequestRow {
     endDate: r.endDate,
     duration: r.duration,
     totalDays: toNumber(r.totalDays),
+    startTime: r.startTime ?? null,
+    endTime: r.endTime ?? null,
     reason: r.reason ?? null,
     attachmentUrl: r.attachmentUrl ?? null,
     isEmergency: !!r.isEmergency,
