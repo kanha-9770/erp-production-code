@@ -10,6 +10,11 @@ import {
 } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
+import {
+  buildSyntheticDays,
+  fetchDayFillContext,
+  leaveInfoForDate,
+} from '@/lib/hr/attendance-day-fill';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { userHasRouteAccess } from '@/lib/auth/route-meta';
 import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
@@ -217,6 +222,33 @@ export async function GET(request: NextRequest) {
     };
   }
 
+  // ── Gap-fill: synthesize Absent / Weekly-off / Holiday / On-leave rows for
+  // every (user, date) in the window that has NO real Attendance row, so the
+  // team view shows a complete per-day calendar instead of only the days people
+  // actually punched. Display only — nothing is written and pay is unaffected
+  // (payroll already books these days via its own calendar walk).
+  const realDatesByUser = new Map<string, Set<string>>();
+  for (const r of records) {
+    const set = realDatesByUser.get(r.userId) ?? new Set<string>();
+    set.add(r.date);
+    realDatesByUser.set(r.userId, set);
+  }
+  const dayFillCtx = await fetchDayFillContext({
+    organizationId: authUser.organizationId,
+    userIds,
+    from,
+    to,
+  });
+  const syntheticRecords = buildSyntheticDays({
+    userIds,
+    from,
+    to,
+    today,
+    weeklyOffDays: cfg.weeklyOffDays ?? [],
+    realDatesByUser,
+    ctx: dayFillCtx,
+  });
+
   return NextResponse.json(
     {
       success: true,
@@ -260,7 +292,8 @@ export async function GET(request: NextRequest) {
         halfDayMinHours: cfg.halfDayMinHours,
         fullDayMinHours: cfg.fullDayMinHours,
       },
-      records: records.map((r) => {
+      records: [
+        ...records.map((r) => {
         const inGeo = annotateGeo(
           (r as any).checkInLat ?? null,
           (r as any).checkInLng ?? null,
@@ -318,6 +351,11 @@ export async function GET(request: NextRequest) {
           status: (r as any).status ?? null,
           effectiveStatus: verdict.status,
           effectiveStatusReason: verdict.reason ?? null,
+          // Approved leave overlapping this day — surfaced even when the
+          // employee also punched (e.g. worked one half, took the other as
+          // half-day leave), so the leave isn't hidden behind an hours-based
+          // Present/Half-Day badge.
+          leave: leaveInfoForDate(r.date, dayFillCtx.leavesByUser.get(r.userId)),
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInLat: (r as any).checkInLat ?? null,
@@ -333,7 +371,21 @@ export async function GET(request: NextRequest) {
           checkOutOutsideRadius: outGeo.outsideRadius,
           checkOutLocationMissing: outGeo.locationMissing,
         };
-      }),
+        }),
+        ...syntheticRecords,
+      ].sort((a, b) =>
+        // date desc, then userId asc — mirrors the original DB orderBy so the
+        // merged real + synthetic list keeps a stable, predictable order.
+        a.date < b.date
+          ? 1
+          : a.date > b.date
+            ? -1
+            : a.userId < b.userId
+              ? -1
+              : a.userId > b.userId
+                ? 1
+                : 0,
+      ),
     },
     {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },

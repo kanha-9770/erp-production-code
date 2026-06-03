@@ -29,6 +29,7 @@ import {
   workedMinutesFor,
 } from "./attendance-format";
 import type { AttendanceRecord } from "./attendance-record-detail";
+import { LeaveChip } from "./leave-chip";
 import { useUserTimezone } from "@/lib/user-timezone";
 
 interface Props {
@@ -85,6 +86,27 @@ function statusBadge(record: AttendanceRecord): {
       return {
         label: "Present",
         className: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      };
+    // Synthetic day-fill statuses (days with no real punch). These come back
+    // from the gap-fill on /api/attendance/team so the table shows a complete
+    // per-day calendar, not just punched days.
+    case "ON_LEAVE":
+      return {
+        label: "On Leave",
+        className: "bg-blue-100 text-blue-800 border-blue-200",
+        reason: record.effectiveStatusReason ?? undefined,
+      };
+    case "HOLIDAY":
+      return {
+        label: "Holiday",
+        className: "bg-purple-100 text-purple-800 border-purple-200",
+        reason: record.effectiveStatusReason ?? undefined,
+      };
+    case "WEEKLY_OFF":
+      return {
+        label: "Weekly Off",
+        className: "bg-slate-100 text-slate-700 border-slate-200",
+        reason: record.effectiveStatusReason ?? undefined,
       };
   }
 
@@ -226,53 +248,62 @@ export function AttendanceRecordsTable({
                   </TableCell>
                 )}
                 <TableCell>
-                  {badge.reason ? (
-                    // Info icon makes the tooltip discoverable — without
-                    // it, employees don't realise the badge is hoverable.
-                    // HoverCard fires only on pointer hover, which touch
-                    // devices never emit, so we share one trigger with a
-                    // Popover that opens on tap/click. side=bottom +
-                    // align=start keeps the popup below the badge so it
-                    // doesn't fight the sticky table header; Radix flips it
-                    // near the viewport edge automatically.
-                    <HoverCard openDelay={100} closeDelay={100}>
-                      <Popover>
-                        <HoverCardTrigger asChild>
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 cursor-pointer text-left"
-                            >
-                              <Badge variant="outline" className={badge.className}>
-                                {badge.label}
-                              </Badge>
-                              <Info className="h-3 w-3 text-muted-foreground" />
-                            </button>
-                          </PopoverTrigger>
-                        </HoverCardTrigger>
-                        <HoverCardContent
-                          side="bottom"
-                          align="start"
-                          className="text-xs w-64 p-3 leading-snug"
-                        >
-                          {badge.reason}
-                        </HoverCardContent>
-                        <PopoverContent
-                          side="bottom"
-                          align="start"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-xs w-64 p-3 leading-snug"
-                        >
-                          {badge.reason}
-                        </PopoverContent>
-                      </Popover>
-                    </HoverCard>
-                  ) : (
-                    <Badge variant="outline" className={badge.className}>
-                      {badge.label}
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {badge.reason ? (
+                      // Info icon makes the tooltip discoverable — without
+                      // it, employees don't realise the badge is hoverable.
+                      // HoverCard fires only on pointer hover, which touch
+                      // devices never emit, so we share one trigger with a
+                      // Popover that opens on tap/click. side=bottom +
+                      // align=start keeps the popup below the badge so it
+                      // doesn't fight the sticky table header; Radix flips it
+                      // near the viewport edge automatically.
+                      <HoverCard openDelay={100} closeDelay={100}>
+                        <Popover>
+                          <HoverCardTrigger asChild>
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 cursor-pointer text-left"
+                              >
+                                <Badge variant="outline" className={badge.className}>
+                                  {badge.label}
+                                </Badge>
+                                <Info className="h-3 w-3 text-muted-foreground" />
+                              </button>
+                            </PopoverTrigger>
+                          </HoverCardTrigger>
+                          <HoverCardContent
+                            side="bottom"
+                            align="start"
+                            className="text-xs w-64 p-3 leading-snug"
+                          >
+                            {badge.reason}
+                          </HoverCardContent>
+                          <PopoverContent
+                            side="bottom"
+                            align="start"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs w-64 p-3 leading-snug"
+                          >
+                            {badge.reason}
+                          </PopoverContent>
+                        </Popover>
+                      </HoverCard>
+                    ) : (
+                      <Badge variant="outline" className={badge.className}>
+                        {badge.label}
+                      </Badge>
+                    )}
+                    {/* Approved-leave chip — shown alongside the hours-based
+                        status so a worked half-day / short-leave day still
+                        reveals the leave at a glance. Full-day leave is already
+                        the "On Leave" badge, so it doesn't get a chip. */}
+                    {r.leave && r.leave.kind !== "FULL_DAY" && (
+                      <LeaveChip leave={r.leave} />
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">
                   {r.checkInAt ? formatTimeShort(r.checkInAt) : hhmmTo12h(r.checkInTime)}
@@ -363,15 +394,20 @@ export function AttendanceRecordsTable({
                     className="text-right whitespace-nowrap"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => onRequestCorrection(r)}
-                    >
-                      <Edit3 className="h-3 w-3 mr-1" />
-                      Fix
-                    </Button>
+                    {/* Synthetic gap-fill rows have no real DB row to correct. */}
+                    {r.synthetic ? (
+                      <span className="text-xs text-gray-400">—</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() => onRequestCorrection(r)}
+                      >
+                        <Edit3 className="h-3 w-3 mr-1" />
+                        Fix
+                      </Button>
+                    )}
                   </TableCell>
                 )}
               </TableRow>

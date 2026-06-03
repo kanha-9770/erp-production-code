@@ -4,6 +4,11 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { distanceMeters, orgTimezone, todayKey } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
+import {
+  buildSyntheticDays,
+  fetchDayFillContext,
+  leaveInfoForDate,
+} from '@/lib/hr/attendance-day-fill';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { getCallerRoleContext } from '@/lib/database/roles';
 
@@ -125,6 +130,29 @@ export async function GET(request: NextRequest) {
     totalOvertimeMinutes += (r as any).overtimeMinutes ?? 0;
   }
 
+  // ── Gap-fill: synthesize Absent / Weekly-off / Holiday / On-leave rows for
+  // every day in the window with no real Attendance row, so My Attendance shows
+  // a complete per-day calendar (not just the days the user punched). Display
+  // only — pay is unaffected; payroll books these days via its own walk.
+  const realDatesByUser = new Map<string, Set<string>>([
+    [authUser.id, new Set(records.map((r) => r.date))],
+  ]);
+  const dayFillCtx = await fetchDayFillContext({
+    organizationId: authUser.organizationId,
+    userIds: [authUser.id],
+    from,
+    to,
+  });
+  const syntheticRecords = buildSyntheticDays({
+    userIds: [authUser.id],
+    from,
+    to,
+    today,
+    weeklyOffDays: cfg.weeklyOffDays ?? [],
+    realDatesByUser,
+    ctx: dayFillCtx,
+  });
+
   return NextResponse.json(
     {
       success: true,
@@ -168,7 +196,8 @@ export async function GET(request: NextRequest) {
         halfDayMinHours: cfg.halfDayMinHours,
         fullDayMinHours: cfg.fullDayMinHours,
       },
-      records: records.map((r) => {
+      records: [
+        ...records.map((r) => {
         const inGeo = annotateGeo(
           (r as any).checkInLat ?? null,
           (r as any).checkInLng ?? null,
@@ -227,6 +256,9 @@ export async function GET(request: NextRequest) {
           // the org's AttendanceConfiguration thresholds.
           effectiveStatus: verdict.status,
           effectiveStatusReason: verdict.reason ?? null,
+          // Approved leave overlapping this day, surfaced even when the user
+          // also punched (worked one half, took the other as half-day leave).
+          leave: leaveInfoForDate(r.date, dayFillCtx.leavesByUser.get(authUser.id)),
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInFaceMatch: (r as any).checkInFaceMatch ?? null,
@@ -245,7 +277,9 @@ export async function GET(request: NextRequest) {
           checkOutOutsideRadius: outGeo.outsideRadius,
           checkOutLocationMissing: outGeo.locationMissing,
         };
-      }),
+        }),
+        ...syntheticRecords,
+      ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
     },
     {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
