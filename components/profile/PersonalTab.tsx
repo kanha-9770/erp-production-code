@@ -52,7 +52,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, Camera, Save, Trash2 } from "lucide-react"
+import {
+  Loader2,
+  Camera,
+  Save,
+  Trash2,
+  ShieldCheck,
+  ShieldAlert,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import PhoneInput, {
   isPossiblePhoneNumber,
@@ -103,6 +110,10 @@ export default function PersonalTab({ user }: PersonalTabProps) {
   const [phoneError, setPhoneError] = useState<string>("")
   const [mobileError, setMobileError] = useState<string>("")
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user.avatar)
+  // Face-enrollment status for the badge under the avatar. `null` while the
+  // status is still loading (or the lookup failed) so we can show a neutral
+  // "checking" state instead of flashing a wrong answer.
+  const [faceEnrolled, setFaceEnrolled] = useState<boolean | null>(null)
 
   // Preview / camera dialog state. `cameraMode` toggles between the static
   // image preview and the live <video> capture inside the same dialog so
@@ -124,6 +135,30 @@ export default function PersonalTab({ user }: PersonalTabProps) {
   useEffect(() => {
     setAvatarPreview(user.avatar)
   }, [user.avatar])
+
+  // Load the user's face-enrollment status once on mount so the badge can
+  // tell them up front whether attendance check-in will recognise them —
+  // without making them attempt a check-in first. Best-effort: on any
+  // failure we leave the badge in its neutral "checking" state rather than
+  // claiming "not enrolled" (which would be misleading on a network blip).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/face/enrollment-status", {
+          credentials: "include",
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled && data?.success) setFaceEnrolled(!!data.enrolled)
+      } catch {
+        /* leave faceEnrolled as null — neutral state */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Stop the webcam track whenever the dialog closes or camera mode is
   // toggled off. Leaking the stream would leave the OS-level camera light
@@ -260,17 +295,20 @@ export default function PersonalTab({ user }: PersonalTabProps) {
       if (res?.url) setAvatarPreview(res.url)
 
       // Also register the photo as the user's reference face so
-      // attendance check-in can match against it later. Best-effort:
-      // failures never block the avatar update. face-api weights (~7
-      // MB) are lazy-loaded only when a photo is actually picked, so
-      // the profile page stays light for users who never change their
-      // photo.
+      // attendance check-in can match against it later. The avatar update
+      // itself already succeeded above, so a failure here never reverts
+      // the photo — but it MUST be surfaced honestly: a silent failure
+      // here is exactly why a user uploads a photo yet still gets blocked
+      // at check-in with "your face is not enrolled". face-api weights
+      // (~7 MB) are lazy-loaded only when a photo is actually picked, so
+      // the profile page stays light for users who never change it.
       let faceMessage: string | undefined
+      let enrolled = false
       try {
-        const { computeDescriptorFromBlobWithTimeout, descriptorToBase64 } =
+        const { computeEnrollmentDescriptor, descriptorToBase64 } =
           await import("@/lib/face/descriptor")
         const { descriptor, faceCount } =
-          await computeDescriptorFromBlobWithTimeout(file)
+          await computeEnrollmentDescriptor(file)
         if (descriptor && faceCount === 1) {
           const enrollFd = new FormData()
           enrollFd.append("descriptor", descriptorToBase64(descriptor))
@@ -280,22 +318,48 @@ export default function PersonalTab({ user }: PersonalTabProps) {
             body: enrollFd,
             credentials: "include",
           })
-          if (!enrollRes.ok) {
+          if (enrollRes.ok) {
+            enrolled = true
+          } else {
             faceMessage =
-              "Saved, but couldn't register the face — attendance check-in may still ask for help."
+              "Couldn't register your face for attendance — check-in may still ask for help. Try uploading the photo again."
           }
         } else if (faceCount === 0) {
           faceMessage =
-            "No face detected in this photo. Pick a clear, front-facing photo so attendance can recognise you."
+            "No face detected, so attendance can't recognise you yet. Upload a clear, front-facing photo (good lighting, face filling most of the frame)."
         } else if (faceCount > 1) {
           faceMessage =
-            "Multiple faces detected. Use a solo photo so attendance can recognise you."
+            "More than one face detected, so attendance couldn't enroll you. Use a solo photo and upload again."
         }
       } catch (err) {
         console.warn("[profile] face reference not registered:", err)
+        faceMessage =
+          "Couldn't process the photo for attendance recognition. Check your connection and try uploading again."
       }
 
-      toast({ title: "Photo updated", description: faceMessage })
+      // Honest outcome: only call it done when the face was actually
+      // enrolled. Otherwise warn loudly so the user retries instead of
+      // assuming success and hitting "face not enrolled" at check-in.
+      // Keep the badge in sync with the outcome we just observed, so the
+      // user sees it flip without reloading. A null faceMessage with no
+      // enrollment means we couldn't tell — leave the badge untouched.
+      if (enrolled) setFaceEnrolled(true)
+      else if (faceMessage) setFaceEnrolled(false)
+
+      if (enrolled) {
+        toast({
+          title: "Photo updated",
+          description: "Your face is enrolled — attendance check-in can now recognise you.",
+        })
+      } else if (faceMessage) {
+        toast({
+          title: "Photo saved, but face not enrolled",
+          description: faceMessage,
+          variant: "destructive",
+        })
+      } else {
+        toast({ title: "Photo updated" })
+      }
     } catch (e: any) {
       toast({
         title: "Upload failed",
@@ -578,6 +642,29 @@ export default function PersonalTab({ user }: PersonalTabProps) {
             >
               Remove
             </button>
+          )}
+        </div>
+
+        {/* ── Face-enrollment status badge — lets the user know up front
+              whether attendance check-in can recognise them, instead of
+              finding out only when a check-in is blocked. Three states:
+              loading (neutral), enrolled (green), not enrolled (amber). */}
+        <div className="mt-3" aria-live="polite">
+          {faceEnrolled === null ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Checking face enrollment…
+            </span>
+          ) : faceEnrolled ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-950/40 dark:text-emerald-400 dark:ring-emerald-400/20">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Face enrolled — check-in can recognise you
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-400 dark:ring-amber-400/20">
+              <ShieldAlert className="h-3.5 w-3.5" />
+              Face not enrolled — upload a clear, front-facing photo
+            </span>
           )}
         </div>
       </div>

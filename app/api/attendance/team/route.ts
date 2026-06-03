@@ -14,6 +14,7 @@ import {
   buildSyntheticDays,
   fetchDayFillContext,
   leaveInfoForDate,
+  leaveDayFractionForStatus,
 } from '@/lib/hr/attendance-day-fill';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { userHasRouteAccess } from '@/lib/auth/route-meta';
@@ -314,6 +315,18 @@ export async function GET(request: NextRequest) {
           checkInMs !== null && checkOutMs !== null && checkOutMs > checkInMs
             ? Math.round((checkOutMs - checkInMs) / 60_000)
             : 0;
+        // Approved leave covering this day — fed into the verdict so a day the
+        // employee was partly on leave (half-day or short leave) isn't judged
+        // against the full-day bar; the leave covers its share and only the
+        // remaining hours are required.
+        const leaveInfo = leaveInfoForDate(
+          r.date,
+          dayFillCtx.leavesByUser.get(r.userId),
+        );
+        const leaveDayFraction = leaveDayFractionForStatus(
+          leaveInfo,
+          cfg.fullDayMinHours,
+        );
         const verdict = computeEffectiveStatus(
           {
             checkedIn: !!r.checkedIn,
@@ -322,6 +335,7 @@ export async function GET(request: NextRequest) {
             overtimeOptedIn: !!(r as any).overtimeOptedIn,
             workedMinutes,
             lateMinutes: (r as any).lateMinutes ?? 0,
+            leaveDayFraction,
           },
           {
             halfDayMinHours: cfg.halfDayMinHours,
@@ -355,7 +369,7 @@ export async function GET(request: NextRequest) {
           // employee also punched (e.g. worked one half, took the other as
           // half-day leave), so the leave isn't hidden behind an hours-based
           // Present/Half-Day badge.
-          leave: leaveInfoForDate(r.date, dayFillCtx.leavesByUser.get(r.userId)),
+          leave: leaveInfo,
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInLat: (r as any).checkInLat ?? null,

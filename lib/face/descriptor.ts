@@ -28,11 +28,18 @@ import { getFaceApi, loadFaceModels } from "./models";
 const TINY_DETECTOR_INPUT_SIZE = 224;
 const TINY_DETECTOR_SCORE_THRESHOLD = 0.3;
 
-async function tinyDetectorOptions() {
+/** Per-call detector overrides. Lets enrollment retry with a more sensitive
+ *  pass (larger input, lower threshold) when the default pass finds no face. */
+export interface DetectorTuning {
+  inputSize?: number;
+  scoreThreshold?: number;
+}
+
+async function tinyDetectorOptions(tuning?: DetectorTuning) {
   const faceapi = await getFaceApi();
   return new faceapi.TinyFaceDetectorOptions({
-    inputSize: TINY_DETECTOR_INPUT_SIZE,
-    scoreThreshold: TINY_DETECTOR_SCORE_THRESHOLD,
+    inputSize: tuning?.inputSize ?? TINY_DETECTOR_INPUT_SIZE,
+    scoreThreshold: tuning?.scoreThreshold ?? TINY_DETECTOR_SCORE_THRESHOLD,
   });
 }
 
@@ -65,12 +72,13 @@ export interface FaceDetectionResult {
 export async function computeDescriptorFromBlob(
   blob: Blob,
   includeDescriptor: boolean = true,
+  tuning?: DetectorTuning,
 ): Promise<FaceDetectionResult> {
   await loadFaceModels();
   const url = URL.createObjectURL(blob);
   try {
     const img = await blobUrlToImage(url);
-    return await computeDescriptorFromImage(img, includeDescriptor);
+    return await computeDescriptorFromImage(img, includeDescriptor, tuning);
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -91,9 +99,10 @@ export async function computeDescriptorFromBlobWithTimeout(
   blob: Blob,
   timeoutMs: number = 30_000,
   includeDescriptor: boolean = true,
+  tuning?: DetectorTuning,
 ): Promise<FaceDetectionResult> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const work = computeDescriptorFromBlob(blob, includeDescriptor);
+  const work = computeDescriptorFromBlob(blob, includeDescriptor, tuning);
   const timeout = new Promise<FaceDetectionResult>((resolve) => {
     timeoutId = setTimeout(() => {
       // Don't reject — { descriptor: null, faceCount: 0 } is the same
@@ -126,10 +135,11 @@ export async function computeDescriptorFromBlobWithTimeout(
 export async function computeDescriptorFromImage(
   img: HTMLImageElement,
   includeDescriptor: boolean = true,
+  tuning?: DetectorTuning,
 ): Promise<FaceDetectionResult> {
   await loadFaceModels();
   const faceapi = await getFaceApi();
-  const detectorOptions = await tinyDetectorOptions();
+  const detectorOptions = await tinyDetectorOptions(tuning);
 
   // Yield to the browser's event loop before starting heavy inference.
   // This allows React to paint the "Analyzing..." spinner to the screen
@@ -159,6 +169,32 @@ export async function computeDescriptorFromImage(
     descriptor: new Float32Array(detections[0].descriptor),
     faceCount: 1,
   };
+}
+
+/**
+ * Robust descriptor extraction for ENROLLMENT (profile photo / employee
+ * master). Tries the standard detector first; if it finds no face, retries
+ * once with a more sensitive pass (larger input, lower threshold) that
+ * catches faces the fast 224px pass misses — slightly turned heads, softer
+ * lighting, small or off-centre faces. This is the single biggest reason a
+ * user uploads a photo yet stays "not enrolled" for attendance.
+ *
+ * A group photo (faceCount > 1) is returned as-is on the first pass — we
+ * never retry into enrolling a multi-face baseline (anti-proxy guard).
+ *
+ * The sensitive retry is only paid when the first pass found nothing, so the
+ * common case (clear front-facing photo) stays as fast as before.
+ */
+export async function computeEnrollmentDescriptor(
+  blob: Blob,
+): Promise<FaceDetectionResult> {
+  const first = await computeDescriptorFromBlobWithTimeout(blob);
+  if (first.faceCount >= 1) return first;
+  // faceCount === 0 (or timed out → 0): retry with a more sensitive detector.
+  return computeDescriptorFromBlobWithTimeout(blob, 30_000, true, {
+    inputSize: 512,
+    scoreThreshold: 0.2,
+  });
 }
 
 /**

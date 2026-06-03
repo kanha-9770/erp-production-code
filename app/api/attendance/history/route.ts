@@ -8,6 +8,7 @@ import {
   buildSyntheticDays,
   fetchDayFillContext,
   leaveInfoForDate,
+  leaveDayFractionForStatus,
 } from '@/lib/hr/attendance-day-fill';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { getCallerRoleContext } from '@/lib/database/roles';
@@ -221,6 +222,18 @@ export async function GET(request: NextRequest) {
           checkInMs !== null && checkOutMs !== null && checkOutMs > checkInMs
             ? Math.round((checkOutMs - checkInMs) / 60_000)
             : 0;
+        // Approved leave covering this day — surfaced as a chip AND fed into
+        // the status verdict so a day the user was partly on leave (half-day
+        // or short leave) isn't judged against the full 8h bar; the leave
+        // covers its share and only the remaining hours are required.
+        const leaveInfo = leaveInfoForDate(
+          r.date,
+          dayFillCtx.leavesByUser.get(authUser.id),
+        );
+        const leaveDayFraction = leaveDayFractionForStatus(
+          leaveInfo,
+          cfg.fullDayMinHours,
+        );
         const verdict = computeEffectiveStatus(
           {
             checkedIn: !!r.checkedIn,
@@ -229,6 +242,7 @@ export async function GET(request: NextRequest) {
             overtimeOptedIn: !!(r as any).overtimeOptedIn,
             workedMinutes,
             lateMinutes: (r as any).lateMinutes ?? 0,
+            leaveDayFraction,
           },
           {
             halfDayMinHours: cfg.halfDayMinHours,
@@ -258,7 +272,7 @@ export async function GET(request: NextRequest) {
           effectiveStatusReason: verdict.reason ?? null,
           // Approved leave overlapping this day, surfaced even when the user
           // also punched (worked one half, took the other as half-day leave).
-          leave: leaveInfoForDate(r.date, dayFillCtx.leavesByUser.get(authUser.id)),
+          leave: leaveInfo,
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInFaceMatch: (r as any).checkInFaceMatch ?? null,

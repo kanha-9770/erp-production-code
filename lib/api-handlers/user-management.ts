@@ -15,6 +15,7 @@ import {
   getDescendantRoleIds,
 } from "@/lib/database/roles";
 import { moveToTrash } from "@/lib/trash";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 import { invalidatePayrollCache } from "@/lib/utils/payroll-live";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
 import {
@@ -302,6 +303,13 @@ export const UserManagementHandlers = {
       if (password) updatedData.password = await bcrypt.hash(password, 10);
 
       await prisma.user.update({ where: { id: userId }, data: updatedData });
+
+      // The user row changed (avatar/name/email/status/etc.) — drop the
+      // cached session so /api/auth/me and the header avatar reflect it
+      // immediately instead of serving the 5-min-stale session cache.
+      if (Object.keys(updatedData).length > 0) {
+        await invalidateAllSessionsForUser(userId);
+      }
 
       if (unitId && roleId) {
         await prisma.userUnitAssignment.upsert({
@@ -845,7 +853,13 @@ export const UserManagementHandlers = {
           if (lastName !== undefined) userSync.last_name = lastName;
           if (str(data.department) !== undefined) userSync.department = str(data.department);
           if (str(data.personalContact) !== undefined) userSync.phone = str(data.personalContact);
-          if (str(data.employeeImage) !== undefined) userSync.avatar = str(data.employeeImage);
+          // Photo: sync both a new image AND an explicit removal. sanitize-
+          // EmployeePayload normalises employeeImage to a trimmed string (set)
+          // or null (cleared), and only includes the key when the payload
+          // actually carried it — so mirroring the raw value keeps removal
+          // symmetric with the profile-side remove-avatar, while an absent key
+          // still leaves User.avatar untouched.
+          if ("employeeImage" in data) userSync.avatar = data.employeeImage ?? null;
 
           // Email maps to the login address — only sync a valid, changed
           // value that no *other* account already owns (don't 500 the edit
@@ -861,6 +875,10 @@ export const UserManagementHandlers = {
 
           if (Object.keys(userSync).length > 0) {
             await prisma.user.update({ where: { id: linkedUser.id }, data: userSync });
+            // Drop the linked user's cached session so the avatar/name/email
+            // edit made from Employee Master shows immediately (header avatar,
+            // /api/auth/me) instead of the 5-min-stale session cache.
+            await invalidateAllSessionsForUser(linkedUser.id);
           }
         }
       }

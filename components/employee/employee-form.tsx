@@ -35,7 +35,7 @@ import {
 import type { EmployeeDetail } from "@/lib/api/employees";
 import { useGetEmployeeListQuery } from "@/lib/api/employees";
 import { useToast } from "@/hooks/use-toast";
-import { computeDescriptorFromBlobWithTimeout } from "@/lib/face/descriptor";
+import { computeEnrollmentDescriptor } from "@/lib/face/descriptor";
 import { FaceCaptureDialog } from "@/components/attendance/face-capture-dialog";
 import {
   useCustomFormFields,
@@ -766,8 +766,10 @@ export function EmployeeForm({
     try {
       // Bounded so a slow/frozen tfjs init can't lock the form for minutes.
       // Falls back to "no_face" on timeout — HR can save the photo as a
-      // plain avatar and re-enroll later.
-      const result = await computeDescriptorFromBlobWithTimeout(file);
+      // plain avatar and re-enroll later. Uses the robust enrollment path
+      // (sensitive retry when the first pass finds no face) so a slightly
+      // off-angle photo still enrolls instead of silently failing.
+      const result = await computeEnrollmentDescriptor(file);
       setPhotoFaceCount(result.faceCount);
       if (result.faceCount === 0) {
         setPhotoStatus("no_face");

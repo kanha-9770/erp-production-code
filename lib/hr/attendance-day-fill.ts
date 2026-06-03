@@ -128,6 +128,49 @@ export function leaveInfoForDate(
   return hit ? buildLeaveInfo(hit) : null;
 }
 
+/** Hours spanned by a "HH:MM"–"HH:MM" window. 0 on a malformed/empty window.
+ *  Mirrors payroll-utils' slotHours so the badge and pay agree. */
+function windowHours(start: string | null, end: string | null): number {
+  if (!start || !end) return 0;
+  const m1 = /^(\d{1,2}):(\d{2})$/.exec(start.trim());
+  const m2 = /^(\d{1,2}):(\d{2})$/.exec(end.trim());
+  if (!m1 || !m2) return 0;
+  const a = Number(m1[1]) * 60 + Number(m1[2]);
+  const b = Number(m2[1]) * 60 + Number(m2[2]);
+  return b > a ? (b - a) / 60 : 0;
+}
+
+/**
+ * Fraction of a full day that an approved leave already covers, used to lower
+ * the worked-hours bar in `computeEffectiveStatus` so a day the employee was
+ * partly on leave isn't judged against the full-day requirement:
+ *
+ *   • HALF_DAY    → 0.5 (the leave covers one half).
+ *   • SHORT_LEAVE → window hours ÷ full-day hours (e.g. a 2.5h slot on an 8h
+ *                   day → 0.31), so only the remaining ~5.5h of work is
+ *                   needed for a full day.
+ *   • FULL_DAY / none → 0.
+ *
+ * This yields the SAME present/half boundary as payroll's short-leave credit
+ * (which instead ADDS the window to worked hours): both reduce to
+ * `workedHours + windowHours ≥ fullDay`. Returns a value in [0, 1).
+ */
+export function leaveDayFractionForStatus(
+  leave: LeaveInfo | null,
+  fullDayHours: number,
+): number {
+  if (!leave) return 0;
+  if (leave.kind === 'HALF_DAY') return 0.5;
+  if (leave.kind === 'SHORT_LEAVE') {
+    const full = fullDayHours > 0 ? fullDayHours : 8;
+    const win = windowHours(leave.startTime, leave.endTime);
+    // Cap below 1 so a (malformed) all-day window can never zero the bar and
+    // turn a no-show into a "full day".
+    return Math.max(0, Math.min(0.95, win / full));
+  }
+  return 0;
+}
+
 /**
  * A synthetic, display-only attendance record. Shape-compatible with the
  * `AttendanceRecord` the attendance tables render: every punch/photo/geo field
