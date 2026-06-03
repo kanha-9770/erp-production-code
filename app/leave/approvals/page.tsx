@@ -61,6 +61,27 @@ import PageBackLink from '@/components/shared/page-back-link';
 type Duration = 'FULL_DAY' | 'HALF_DAY_FIRST' | 'HALF_DAY_SECOND';
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
+// These APIs always return JSON. If we ever get HTML back (e.g. the dev server
+// is mid hot-reload, or an upstream error page), parse safely and surface a
+// clear message instead of crashing on "Unexpected token '<'".
+async function parseJsonSafe(res: Response): Promise<any | null> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    (res as any).__rawText = text;
+    return null;
+  }
+}
+function jsonError(j: any, res: Response): string {
+  if (j?.error) return j.error;
+  const raw: string = (res as any).__rawText ?? '';
+  if (raw.trimStart().startsWith('<')) {
+    return 'Server is busy (it may be reloading) — please try again in a moment.';
+  }
+  return 'Action failed';
+}
+
 interface UserLite {
   id: string;
   email: string;
@@ -195,8 +216,8 @@ export default function ApprovalsPage() {
         credentials: 'include',
         body: JSON.stringify({ decision, note: note ?? null }),
       });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || 'Failed');
+      const j = await parseJsonSafe(res);
+      if (!res.ok || !j?.success) throw new Error(jsonError(j, res));
       toast({ title: decision === 'APPROVED' ? 'Leave approved' : 'Leave rejected' });
       // Optimistically remove from the pending list and refetch calendar so
       // the calendar reflects the new APPROVED/REJECTED state.
@@ -227,8 +248,8 @@ export default function ApprovalsPage() {
         credentials: 'include',
         body: JSON.stringify({ decision, note: note ?? null }),
       });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || 'Failed');
+      const j = await parseJsonSafe(res);
+      if (!res.ok || !j?.success) throw new Error(jsonError(j, res));
       toast({
         title:
           decision === 'APPROVED'

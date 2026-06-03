@@ -27,7 +27,11 @@ import { acquireSlot, commitSlot } from './attendance-rate-limit';
 import { triggerWorkflowsForRecord } from '@/lib/workflow/trigger';
 import { logAudit } from '@/lib/api-helpers';
 import { sendPushToUsers } from '@/lib/push/server';
-import { endLeaveEarlyToday } from './leave-service';
+// NOTE: leave-service is imported DYNAMICALLY inside recordPunch (below), not at
+// the top, to keep this module's static import graph free of leave-service.
+// Several leave API routes pull attendance-service in transitively (via the
+// workflow trigger); a static edge here made the dev bundler serve HTML error
+// pages for those routes. The dynamic import keeps the graph clean.
 
 export type PunchType = 'IN' | 'OUT';
 export type PunchSource = 'WEB' | 'MOBILE' | 'BIOMETRIC' | 'ADMIN';
@@ -1369,6 +1373,7 @@ export async function recordPunch(
       // let the punch proceed. Bust the in-memory leaves cache so the freshly
       // shortened/cancelled leave doesn't re-trigger this guard on re-read.
       const leaveName = onLeaveToday.leaveType ?? null;
+      const { endLeaveEarlyToday } = await import('./leave-service');
       const result = await endLeaveEarlyToday({
         userId: input.userId,
         organizationId: input.organizationId,

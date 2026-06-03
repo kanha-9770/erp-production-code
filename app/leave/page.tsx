@@ -377,8 +377,24 @@ export default function LeavePage() {
         credentials: 'include',
         body: JSON.stringify({}),
       });
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || 'Cancel failed');
+      // The API always returns JSON; if we get HTML instead (e.g. the dev
+      // server is mid hot-reload, or an upstream error page), parse it safely
+      // and surface a clear message rather than "Unexpected token '<'".
+      const text = await res.text();
+      let j: any = null;
+      try {
+        j = JSON.parse(text);
+      } catch {
+        /* non-JSON response */
+      }
+      if (!res.ok || !j?.success) {
+        const msg =
+          j?.error ||
+          (text.trimStart().startsWith('<')
+            ? 'Server is busy (it may be reloading) — please try again in a moment.'
+            : 'Cancel failed');
+        throw new Error(msg);
+      }
       toast({ title: 'Leave cancelled' });
       refresh();
     } catch (e: any) {
