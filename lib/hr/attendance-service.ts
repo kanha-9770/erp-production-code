@@ -2028,7 +2028,8 @@ export async function setOvertimeOptIn(
   const data: Record<string, unknown> = {
     overtimeOptedIn: input.optIn,
   };
-  if (input.optIn && !(row as any).overtimeStartedAt) {
+  const startingFresh = input.optIn && !(row as any).overtimeStartedAt;
+  if (startingFresh) {
     data.overtimeStartedAt = now;
   }
 
@@ -2037,5 +2038,63 @@ export async function setOvertimeOptIn(
     data: data as any,
   });
 
+  // Fire a dedicated "overtime started" notification the first time the
+  // employee turns OT on for the day (bell + phone push). Fire-and-forget so
+  // a slow notification insert never blocks the toggle. Gated by the same
+  // notifyOnPunch switch as the punch notifications.
+  if (startingFresh && input.organizationId && cfg.notifyOnPunch) {
+    void createOvertimeStartedNotification({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      startedAt: now,
+      tz,
+      moduleName: cfg.workflowModuleName ?? 'Attendance',
+    }).catch((err) => {
+      console.error('[attendance] overtime notification failed:', err);
+    });
+  }
+
   return getStatus(input.userId, input.organizationId);
+}
+
+// Build + insert the "overtime started" notification (bell row + push).
+async function createOvertimeStartedNotification(args: {
+  organizationId: string;
+  userId: string;
+  startedAt: Date;
+  tz: string;
+  moduleName: string;
+}): Promise<void> {
+  const { organizationId, userId, startedAt, tz, moduleName } = args;
+  const at = formatHHmm12(startedAt, tz);
+  const title = `⏱️ Overtime started at ${at}`;
+  const body = `You're now on overtime — keep up the great work! 💪`;
+  try {
+    await (prisma as any).notification.create({
+      data: {
+        recipientId: userId,
+        organizationId,
+        title,
+        body,
+        moduleName,
+        link: '/attendance',
+      },
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    // Stale-client fallback: retry without any column the running Prisma
+    // client doesn't know yet (mirrors the punch-notification path).
+    if (!msg.includes('Unknown arg') && !msg.includes('Unknown argument')) {
+      throw err;
+    }
+    await (prisma as any).notification.create({
+      data: { recipientId: userId, organizationId, title, body },
+    });
+  }
+  void sendPushToUsers([userId], {
+    title,
+    body,
+    url: '/attendance',
+    tag: `overtime-started:${todayKey(startedAt, tz)}`,
+  }).catch(() => {});
 }
