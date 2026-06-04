@@ -505,8 +505,21 @@ export default function LeavePage() {
         header: "Reason",
         width: 250,
         cell: (r) => (
-          <div className="text-sm truncate" title={r.reason ?? ''}>
-            {r.reason || <span className="text-muted-foreground">—</span>}
+          <div className="space-y-1">
+            <div className="text-sm truncate" title={r.reason ?? ''}>
+              {r.reason || <span className="text-muted-foreground">—</span>}
+            </div>
+            {/* Approver's note (e.g. an org birthday wish) attached on the
+                decision — shown to the applicant under their own reason. */}
+            {r.decisionNote && (
+              <div
+                className="text-[11px] text-muted-foreground truncate"
+                title={r.decisionNote}
+              >
+                <span className="font-medium text-foreground/70">Note:</span>{' '}
+                {r.decisionNote}
+              </div>
+            )}
           </div>
         ),
       },

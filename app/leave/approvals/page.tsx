@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { formatWindowHours } from '@/lib/hr/short-leave-slots';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -100,6 +101,11 @@ interface Request {
   endDate: string;
   duration: Duration;
   totalDays: number;
+  // Short-leave rows carry a concrete slot window (e.g. 16:30–18:30). When
+  // both are set we render the window instead of the "½ — 2nd half" label,
+  // matching how the applicant sees it in My Leaves.
+  startTime: string | null;
+  endTime: string | null;
   reason: string | null;
   status: Status;
   appliedAt: string;
@@ -118,6 +124,16 @@ function monthBounds(d: Date) {
   const first = new Date(y, m, 1);
   const last = new Date(y, m + 1, 0);
   return { from: dateToYmd(first), to: dateToYmd(last) };
+}
+
+// Hours spanned by a short-leave slot window ("HH:MM"–"HH:MM"). Mirrors the
+// helper in app/leave/page.tsx so the approver's Days column shows the same
+// "2h" the applicant sees.
+function slotWindowHours(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => !Number.isFinite(n))) return 0;
+  return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
 }
 
 export default function ApprovalsPage() {
@@ -145,6 +161,10 @@ export default function ApprovalsPage() {
 
   const [rejectFor, setRejectFor] = useState<Request | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+  // Approve flow mirrors reject: an optional note the approver can attach
+  // (e.g. an org birthday wish) that the applicant sees on their leave.
+  const [approveFor, setApproveFor] = useState<Request | null>(null);
+  const [approveNote, setApproveNote] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -224,6 +244,8 @@ export default function ApprovalsPage() {
       setPending((prev) => (prev ?? []).filter((r) => r.id !== id));
       setRejectFor(null);
       setRejectNote('');
+      setApproveFor(null);
+      setApproveNote('');
       refresh();
     } catch (e: any) {
       toast({ title: 'Action failed', description: e?.message, variant: 'destructive' });
@@ -355,7 +377,10 @@ export default function ApprovalsPage() {
                   key={r.id}
                   request={r}
                   busy={busyId === r.id}
-                  onApprove={() => decide(r.id, 'APPROVED')}
+                  onApprove={() => {
+                    setApproveFor(r);
+                    setApproveNote('');
+                  }}
                   onRejectClick={() => {
                     setRejectFor(r);
                     setRejectNote('');
@@ -405,7 +430,17 @@ export default function ApprovalsPage() {
             onMonthChange={setCalendarMonth}
             data={calendarData}
             loading={loading}
-            onApprove={(id) => decide(id, 'APPROVED')}
+            onApprove={(id) => {
+              const target = (pending ?? []).find((r) => r.id === id);
+              if (target) {
+                setApproveFor(target);
+                setApproveNote('');
+              } else {
+                // Not in the pending list (e.g. another month) — approve
+                // directly without the note dialog.
+                decide(id, 'APPROVED');
+              }
+            }}
             onReject={(id) => {
               const target = (pending ?? []).find((r) => r.id === id);
               if (target) {
@@ -450,6 +485,42 @@ export default function ApprovalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!approveFor} onOpenChange={(v) => !v && setApproveFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve leave request</DialogTitle>
+            <DialogDescription>
+              Add an optional note for{' '}
+              {approveFor?.user?.firstName || approveFor?.user?.email || 'the applicant'}
+              {' '}— it shows up on their leave.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Note (optional)</Label>
+            <Textarea
+              value={approveNote}
+              onChange={(e) => setApproveNote(e.target.value)}
+              placeholder="e.g. Approved — happy birthday from the whole team! 🎉"
+              rows={3}
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setApproveFor(null)}>
+              Back
+            </Button>
+            <Button
+              disabled={busyId === approveFor?.id}
+              onClick={() =>
+                approveFor && decide(approveFor.id, 'APPROVED', approveNote || undefined)
+              }
+            >
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              Approve
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -474,12 +545,20 @@ function PendingCard({
     r.user?.firstName || r.user?.lastName
       ? `${r.user?.firstName ?? ''} ${r.user?.lastName ?? ''}`.trim()
       : r.user?.email ?? 'Unknown user';
-  const durationLabel =
-    r.duration === 'FULL_DAY'
+  // Short leaves carry a concrete slot window. Surface the actual times
+  // (e.g. "16:30–18:30") instead of the misleading "½ — 2nd half" half-day
+  // label, so the approver sees exactly what the applicant requested.
+  const isShortLeave = !!(r.startTime && r.endTime);
+  const durationLabel = isShortLeave
+    ? 'Short leave'
+    : r.duration === 'FULL_DAY'
       ? 'Full Day'
       : r.duration === 'HALF_DAY_FIRST'
         ? '½ — 1st half'
         : '½ — 2nd half';
+  const daysValue = isShortLeave
+    ? formatWindowHours(slotWindowHours(r.startTime!, r.endTime!))
+    : r.totalDays.toFixed(1);
   return (
     <Card>
       <CardContent className="p-3 sm:p-4 space-y-2.5">
@@ -514,8 +593,12 @@ function PendingCard({
         <div className="grid grid-cols-4 gap-2 text-xs">
           <Stat label="Start" value={r.startDate} mono />
           <Stat label="End" value={r.endDate} mono />
-          <Stat label="Days" value={r.totalDays.toFixed(1)} mono />
-          <Stat label="Duration" value={durationLabel} />
+          <Stat label="Days" value={daysValue} mono />
+          <Stat
+            label="Duration"
+            value={durationLabel}
+            sub={isShortLeave ? `${r.startTime}–${r.endTime}` : undefined}
+          />
         </div>
 
         {r.reason && (
@@ -550,7 +633,17 @@ function PendingCard({
   );
 }
 
-function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Stat({
+  label,
+  value,
+  mono,
+  sub,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  sub?: string;
+}) {
   return (
     <div className="min-w-0">
       <div className="text-muted-foreground text-[10px] uppercase tracking-wider leading-tight">
@@ -561,6 +654,11 @@ function Stat({ label, value, mono }: { label: string; value: string; mono?: boo
       >
         {value}
       </div>
+      {sub && (
+        <div className="text-[10px] text-muted-foreground tabular-nums truncate leading-tight">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
