@@ -11,6 +11,10 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
 import { moveToTrash } from "@/lib/trash";
+import {
+  onApplicationCreated,
+  onApplicationStatusChanged,
+} from "@/lib/hr/recruitment-automation";
 
 const EMPLOYMENT_TYPES = [
   "FULL_TIME",
@@ -307,6 +311,10 @@ export const JobApplicationHandlers = {
           recordId: application.id,
           recordData: application as any,
         });
+        // Notify recruiters + acknowledge to the candidate (non-blocking).
+        void onApplicationCreated(application, authUser.organizationId).catch(
+          () => {},
+        );
       }
       return NextResponse.json({ success: true, application }, { status: 201 });
     }, "create");
@@ -347,7 +355,7 @@ export const JobApplicationHandlers = {
 
       const existing = await (prisma as any).jobApplication.findFirst({
         where: { id, organizationId: authUser.organizationId },
-        select: { id: true },
+        select: { id: true, status: true },
       });
       if (!existing)
         return NextResponse.json(
@@ -401,6 +409,16 @@ export const JobApplicationHandlers = {
           recordId: application.id,
           recordData: application as any,
         });
+        // Drive the pipeline on status change (email candidate, auto-create
+        // offer on OFFERED, …) — non-blocking.
+        if (data.status && data.status !== existing.status) {
+          void onApplicationStatusChanged({
+            application,
+            prevStatus: existing.status,
+            organizationId: authUser.organizationId,
+            userId: authUser.id,
+          }).catch(() => {});
+        }
       }
       return NextResponse.json({ success: true, application });
     }, "update");

@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { fireWorkflow } from "@/lib/workflow/static-triggers";
 import { moveToTrash } from "@/lib/trash";
+import { onOfferStatusChanged } from "@/lib/hr/recruitment-automation";
 
 const STATUSES = [
   "DRAFT",
@@ -326,7 +327,7 @@ export const JobOfferHandlers = {
 
       const existing = await (prisma as any).jobOffer.findFirst({
         where: { id, organizationId: authUser.organizationId },
-        select: { id: true },
+        select: { id: true, status: true },
       });
       if (!existing)
         return NextResponse.json(
@@ -371,6 +372,16 @@ export const JobOfferHandlers = {
           recordId: offer.id,
           recordData: offer as any,
         });
+        // On ACCEPTED → auto-create a draft appointment letter; on SENT →
+        // email the candidate. Non-blocking.
+        if (data.status && data.status !== existing.status) {
+          void onOfferStatusChanged({
+            offer,
+            prevStatus: existing.status,
+            organizationId: authUser.organizationId,
+            userId: authUser.id,
+          }).catch(() => {});
+        }
       }
       return NextResponse.json({ success: true, offer });
     }, "update");

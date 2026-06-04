@@ -83,6 +83,7 @@ import {
 } from "@/lib/api/modules";
 import { usePermissionContext } from "@/context/PermissionContext";
 import { useRouteAccess } from "@/hooks/use-route-access";
+import { useSidebarBadges } from "@/hooks/use-sidebar-badges";
 import {
   STATIC_PAGES,
   staticPagesByGroup,
@@ -506,6 +507,9 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const { canAccess, isPermitted } = useRouteAccess();
 
+  // Pending/needs-action counts per route, shown as badges on sidebar rows.
+  const badges = useSidebarBadges();
+
   const canManageModules = canAccess("/admin/modules");
 
   const organizationId = userData?.user?.organization?.id ?? null;
@@ -548,6 +552,25 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
   const [view, setView] = useState<ViewType>("modules");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(260);
+
+  // Auto-collapse the sidebar whenever a Settings route is opened, giving the
+  // settings surfaces (Organization Setup, etc.) the full width. We only undo
+  // what we auto-collapsed: leaving Settings restores the sidebar, and a
+  // manual expand inside Settings is respected (we don't re-collapse it).
+  const autoCollapsedRef = useRef(false);
+  useEffect(() => {
+    const inSettings = !!pathname && pathname.startsWith("/settings");
+    if (inSettings) {
+      if (!isCollapsed && !autoCollapsedRef.current) {
+        setIsCollapsed(true);
+        autoCollapsedRef.current = true;
+      }
+    } else if (autoCollapsedRef.current) {
+      setIsCollapsed(false);
+      autoCollapsedRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
   const [isResizing, setIsResizing] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -638,6 +661,20 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
   const getSystemRoute = (module: FormModule): string | null =>
     (module as any).system_route ?? null;
+
+  // Pending-count for a row: a system-route leaf shows its own route's count;
+  // a folder shows the SUM of its descendant leaves' counts (so a collapsed
+  // folder still surfaces that something inside needs attention).
+  const subtreeBadgeCount = (module: FormModule): number => {
+    if (isSystemRouteNode(module)) {
+      const route = getSystemRoute(module);
+      return route ? badges[route] ?? 0 : 0;
+    }
+    return (module.children ?? []).reduce(
+      (sum, child) => sum + subtreeBadgeCount(child),
+      0,
+    );
+  };
 
   // The Payroll parent module is a pure container: clicking it should
   // only expand/collapse its children, never push to the records page.
@@ -739,6 +776,7 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     const hasChildren = !isSystemRoute && !!module.children?.length;
     const isExpanded = expandedModules.has(module.id);
     const isActive = isModuleActive(module);
+    const badgeCount = subtreeBadgeCount(module);
 
     const indent = computeIndent(depth);
     const isDeep = depth >= 4; // deep rows get smaller icon + tighter gap
@@ -800,6 +838,21 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
 
         {/* min-w-0 is crucial for `truncate` to clip inside a flex parent. */}
         <span className="truncate flex-1 min-w-0 text-left">{module.name}</span>
+
+        {/* Pending / needs-action count. Leaf → its own count; folder →
+            sum of descendants, so a collapsed folder still flags activity. */}
+        {badgeCount > 0 && (
+          <span
+            aria-label={`${badgeCount} pending`}
+            className={cn(
+              "flex-shrink-0 inline-flex items-center justify-center rounded-full px-1.5 text-[10px] font-medium leading-none tabular-nums",
+              "min-w-[18px] h-[18px]",
+              "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300",
+            )}
+          >
+            {badgeCount > 99 ? "99+" : badgeCount}
+          </span>
+        )}
 
         {hasChildren && (
           <ChevronRight

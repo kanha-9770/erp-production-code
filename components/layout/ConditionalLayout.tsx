@@ -7,6 +7,7 @@ import { MobileBottomNav } from "./MobileBottomNav"
 import { useEffect, useMemo, useState } from "react"
 import { PermissionProvider } from "@/context/PermissionContext"
 import { RoutePermissionGuard } from "@/components/guards/route-permission-guard"
+import { GlobalFlowInfo } from "@/components/insights/global-flow-info"
 import { Menu } from "lucide-react"
 
 /**
@@ -48,7 +49,8 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const isPublic =
     publicRoutes.includes(pathname) ||
     pathname.startsWith("/auth") ||
-    pathname.startsWith("/form/")
+    pathname.startsWith("/form/") ||
+    pathname.startsWith("/apply/")
 
   // Lock html/body scroll only while the app shell is mounted. Without this,
   // a child that accidentally exceeds 100vh (a stray `min-h-screen`, a tall
@@ -142,6 +144,11 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
               {children}
             </main>
           </div>
+
+          {/* Global "how it works" beacon — shows a floating help button on
+              any module route that has a defined workflow (see
+              lib/module-flows). No-op on routes without one. */}
+          <GlobalFlowInfo />
 
           {/* Mobile-only floating tab bar. The grid icon inside opens
               the same sidebar drawer the hamburger does — wiring the

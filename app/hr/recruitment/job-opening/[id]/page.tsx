@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import {
   useGetJobOpeningQuery,
   type JobOpeningStatus,
@@ -26,6 +28,9 @@ import {
   FileText,
   ExternalLink,
   User,
+  Copy,
+  Check,
+  Link2,
 } from "lucide-react";
 
 const BACK = "/hr/recruitment/job-opening";
@@ -119,6 +124,16 @@ export default function JobOpeningDetailPage() {
           <DetailFact label="Status" value={STATUS_LABEL[o.status]} />
         </DetailSection>
 
+        <DetailSection
+          title="Public Apply Link"
+          icon={<Link2 className="h-3.5 w-3.5" />}
+          className="lg:col-span-2"
+        >
+          <div className="sm:col-span-2">
+            <PublicApplyLink openingId={o.id} published={!!o.publishOnWebsite} />
+          </div>
+        </DetailSection>
+
         {o.staffingPlan ? (
           <DetailSection
             title="Linked Staffing Plan"
@@ -158,5 +173,91 @@ export default function JobOpeningDetailPage() {
         </DetailSection>
       </div>
     </DetailShell>
+  );
+}
+
+/**
+ * Shareable public apply link. Same behaviour as the list-page preview: shows
+ * the `${origin}/apply/${id}` URL with Copy + Open when the opening is
+ * published, or a hint to publish otherwise. `origin` is read in an effect
+ * because `window` is undefined during SSR.
+ */
+function PublicApplyLink({
+  openingId,
+  published,
+}: {
+  openingId: string;
+  published: boolean;
+}) {
+  const { toast } = useToast();
+  const [origin, setOrigin] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const url = origin ? `${origin}/apply/${openingId}` : `/apply/${openingId}`;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast({ title: "Link copied", description: "Paste it anywhere to share." });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({
+        title: "Couldn't copy",
+        description: "Select and copy the link manually.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (!published) {
+    return (
+      <div className="flex items-start gap-2 text-xs text-muted-foreground rounded-md border border-dashed bg-muted/30 p-3">
+        <Globe className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          Turn on <strong>Publish on website</strong> to generate a public apply
+          link you can share on job portals.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <code className="flex-1 min-w-[200px] truncate rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono">
+          {url}
+        </code>
+        <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={copy}>
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+            </>
+          )}
+        </Button>
+        <Button
+          asChild
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          title="Open the public form in a new tab"
+        >
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open
+          </a>
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Anyone with this link can view the role and apply — no login required.
+      </p>
+    </div>
   );
 }

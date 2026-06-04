@@ -23,7 +23,7 @@ const settingsData: SettingCategory[] = [
     items: [
       { name: "Personal Settings", href: "/settings/personal" },
       { name: "Users", href: "/settings/users" },
-      { name: "Company Settings", href: "/settings/company" },
+      { name: "Organization Setup", href: "/settings/organization" },
       { name: "Role Creation", href: "/settings/company" },
       { name: "Masters", href: "/settings/masters" },
       { name: "Motivator", href: "/settings/motivator" },

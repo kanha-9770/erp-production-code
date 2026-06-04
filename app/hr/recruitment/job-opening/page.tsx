@@ -9,7 +9,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useGetJobOpeningsQuery,
   useGetJobOpeningQuery,
@@ -50,6 +50,9 @@ import {
   Globe,
   ExternalLink,
   X as XIcon,
+  Copy,
+  Check,
+  Link2,
 } from "lucide-react";
 import {
   WorkspaceShell,
@@ -981,6 +984,8 @@ function OpeningPreview({ id }: { id: string }) {
         )}
       </div>
 
+      <PublicApplyLink openingId={o.id} published={!!o.publishOnWebsite} />
+
       <div className="grid grid-cols-2 gap-3 text-sm">
         <Fact icon={Layers} label="Department" value={o.department} />
         <Fact icon={UsersIcon} label="Vacancies" value={String(o.vacancies)} />
@@ -1015,6 +1020,109 @@ function OpeningPreview({ id }: { id: string }) {
         </p>
       </Card>
     </div>
+  );
+}
+
+/**
+ * The shareable public apply link for an opening. Renders the full
+ * `${origin}/apply/${id}` URL with Copy + Open actions so a recruiter can
+ * paste it on LinkedIn / a job portal / the company career page. The URL is
+ * computed from `window.location.origin` inside an effect because `window`
+ * isn't available during SSR. When the opening isn't published yet, we show a
+ * muted hint instead — the public endpoint only serves OPEN + published jobs,
+ * so a link would 404 for applicants until publishing is turned on.
+ */
+function PublicApplyLink({
+  openingId,
+  published,
+}: {
+  openingId: string;
+  published: boolean;
+}) {
+  const { toast } = useToast();
+  const [origin, setOrigin] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const url = origin ? `${origin}/apply/${openingId}` : `/apply/${openingId}`;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast({ title: "Link copied", description: "Paste it anywhere to share." });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({
+        title: "Couldn't copy",
+        description: "Select and copy the link manually.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (!published) {
+    return (
+      <Card className="p-3 border-dashed bg-muted/30">
+        <div className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Globe className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            Turn on <strong>Publish on website</strong> (Edit → publication
+            settings) to generate a public apply link you can share on job
+            portals.
+          </span>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-3 space-y-2 border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-500/5">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+        <Link2 className="h-3.5 w-3.5" />
+        Public apply link
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 min-w-0 truncate rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono">
+          {url}
+        </code>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          onClick={copy}
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+            </>
+          )}
+        </Button>
+        <Button
+          asChild
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          title="Open the public form in a new tab"
+        >
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="h-3.5 w-3.5 sm:mr-1" />
+            <span className="hidden sm:inline">Open</span>
+          </a>
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Anyone with this link can view the role and submit an application — no
+        login required. Share it on LinkedIn, job portals, or your career page.
+      </p>
+    </Card>
   );
 }
 

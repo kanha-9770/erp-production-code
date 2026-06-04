@@ -54,7 +54,19 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
     <div className="flex flex-col items-center relative flex-1">
       <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
 
-      <div className="relative group bg-white border-2 border-slate-900 rounded-lg p-3 w-56 text-center z-20 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] mx-4 hover:-translate-y-1 transition-all">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => dispatch({ type: "SELECT_ORG_UNIT", payload: { unit: { ...unit } } })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            dispatch({ type: "SELECT_ORG_UNIT", payload: { unit: { ...unit } } })
+          }
+        }}
+        title="Click to edit this unit"
+        className="relative group bg-white border-2 border-slate-900 rounded-lg p-3 w-56 text-center z-20 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] mx-4 hover:-translate-y-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+      >
         <h4 className="text-sm font-black text-slate-900 leading-tight">{unit.name}</h4>
         <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">
           {unit.description || "Position"}
@@ -71,7 +83,8 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
 
         <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100 z-30">
           <button
-            onClick={() =>
+            onClick={(e) => {
+              e.stopPropagation()
               dispatch({
                 type: "SELECT_ORG_UNIT",
                 payload: {
@@ -86,13 +99,18 @@ export function ChartNode({ unit, isFirst = false, isLast = false, isRoot = fals
                   } as any,
                 },
               })
-            }
+            }}
+            title="Add sub-unit"
             className="bg-slate-900 text-white p-1 rounded-full shadow-lg hover:bg-indigo-600"
           >
             <Plus className="h-3 w-3" />
           </button>
           <button
-            onClick={() => dispatch({ type: "SELECT_ORG_UNIT", payload: { unit: { ...unit } } })}
+            onClick={(e) => {
+              e.stopPropagation()
+              dispatch({ type: "SELECT_ORG_UNIT", payload: { unit: { ...unit } } })
+            }}
+            title="Edit unit"
             className="bg-white border border-slate-900 p-1 rounded-full shadow-lg"
           >
             <Settings2 className="h-3 w-3" />

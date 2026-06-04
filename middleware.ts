@@ -16,6 +16,18 @@ const CUID_REGEX = /^c[a-z0-9]{15,}$/;
  */
 const AUTH_META_MAX_AGE = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * One-shot URL marker appended to the refresh-meta callback. It rides in the
+ * URL — NOT a cookie — on purpose: if the root cause is a cookie that never
+ * makes it back to the server (e.g. a Secure cookie + an `http`
+ * X-Forwarded-Proto from the proxy), a cookie-based guard would itself be lost
+ * and the loop would continue. A query param always survives the round-trip,
+ * so the middleware can reliably detect "I already sent you to refresh-meta
+ * once and the cookie STILL isn't usable" and stop instead of looping into
+ * ERR_TOO_MANY_REDIRECTS.
+ */
+const REFRESH_MARKER = "__authRefreshed";
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -29,6 +41,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/form/") ||
+    pathname.startsWith("/apply/") ||
     pathname.startsWith("/models/") ||
     pathname.includes(".")
   ) {
@@ -83,24 +96,47 @@ export async function middleware(request: NextRequest) {
   const authMetaRaw = request.cookies.get("auth-meta")?.value;
   const authMeta = await verifyAuthMeta(authMetaRaw);
 
-  if (!authMeta) {
+  // The cookie needs to be (re)minted when it's missing/tampered (null),
+  // issued by an older code version (v < 2), or older than the staleness
+  // window. All three resolve the same way: bounce through refresh-meta once.
+  const needsRefresh =
+    !authMeta ||
+    !authMeta.v ||
+    authMeta.v < 2 ||
+    (!!authMeta.ts && Date.now() - authMeta.ts > AUTH_META_MAX_AGE);
+
+  if (needsRefresh) {
+    // ── Loop-breaker ────────────────────────────────────────────────────────
+    // If we ALREADY bounced this request through refresh-meta (marker present)
+    // and the cookie is STILL unusable, do NOT redirect again — that is exactly
+    // what produces ERR_TOO_MANY_REDIRECTS. Let the request through: the user
+    // still holds a valid `auth-token` (checked above), and the page-level
+    // RoutePermissionGuard + server-side API checks (userHasRouteAccess) remain
+    // in force, so this degrades gracefully instead of locking the app.
+    if (request.nextUrl.searchParams.has(REFRESH_MARKER)) {
+      console.warn(
+        `[middleware] auth-meta still unusable after refresh for "${pathname}" — ` +
+          `allowing through (auth-token + client guard still enforce access). ` +
+          `Likely cause: the Secure auth-meta cookie isn't returning to the server — ` +
+          `check that the proxy sends X-Forwarded-Proto: https.`
+      );
+      const response = NextResponse.next();
+      response.headers.set("x-next-pathname", pathname);
+      return response;
+    }
+
     const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
-    refreshUrl.searchParams.set("callbackUrl", pathname);
+    // Round-trip the marker via callbackUrl so a still-broken cookie can't loop.
+    refreshUrl.searchParams.set("callbackUrl", `${pathname}?${REFRESH_MARKER}=1`);
     return NextResponse.redirect(refreshUrl);
   }
 
-  // Force refresh if cookie is from an older version (missing v or ts field)
-  if (!authMeta.v || authMeta.v < 2) {
-    const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
-    refreshUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(refreshUrl);
-  }
-
-  // ── 4b. Staleness check — force refresh if cookie is too old ──────────────
-  if (authMeta.ts && Date.now() - authMeta.ts > AUTH_META_MAX_AGE) {
-    const refreshUrl = buildRedirectUrl(request, "/api/auth/refresh-meta");
-    refreshUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(refreshUrl);
+  // Cookie is valid & fresh. If the one-shot refresh marker is still on the URL
+  // (we just came back from a successful refresh), strip it with a single clean
+  // redirect. The cookie is good now, so the next pass sails straight through —
+  // one redirect, never a loop.
+  if (request.nextUrl.searchParams.has(REFRESH_MARKER)) {
+    return NextResponse.redirect(buildRedirectUrl(request, pathname));
   }
 
   // ── 4c. ERP module gate ───────────────────────────────────────────────────

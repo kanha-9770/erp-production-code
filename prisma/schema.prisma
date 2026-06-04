@@ -401,6 +401,16 @@ model Organization {
   // Empty array means no business modules are active (settings/profile
   // remain reachable so admins can configure).
   selectedModules    String[]            @default([]) @map("selected_modules")
+  // Free-form organization identity/profile shown on the
+  // Organization Setup → Organization Details screen (website, type,
+  // contact person/number/email, primary address, logo URL, …). Stored as
+  // JSON so new identity fields can be added without another migration.
+  profile            Json?               @map("profile")
+  // Organization Setup configuration sections (policy, locations,
+  // departments, designations, branding, fromAddresses, emailAuth). One JSON
+  // blob keyed by section so the whole Organization Setup surface persists
+  // without a table per section. Read-merge-write per section in the API.
+  setup              Json?               @map("setup")
   ownerId            String?             @unique @map("owner_id")
   owner              User?               @relation("Owner", fields: [ownerId], references: [id], onDelete: SetNull)
   users              User[]              @relation("UserOrganization")

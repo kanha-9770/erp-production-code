@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "prisma generate && next build",
+    "db:deploy": "prisma db push --skip-generate",
     "analyze": "cross-env ANALYZE=true next build",
     "dev": "next dev -p 5001",
     "start": "next start -p 5001",

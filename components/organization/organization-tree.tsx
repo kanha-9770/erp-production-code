@@ -489,32 +489,71 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   desktop: "Desktop",
 }
 
-export function OrganizationTree() {
+interface OrganizationTreeProps {
+  /** Extra content rendered at the start (left) of the control bar. */
+  toolbarStart?: React.ReactNode
+  /** Extra content rendered at the end (right) of the control bar. */
+  toolbarEnd?: React.ReactNode
+}
+
+export function OrganizationTree({ toolbarStart, toolbarEnd }: OrganizationTreeProps = {}) {
   const { state, dispatch } = useRoles()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>("desktop")
   const [showPanHint, setShowPanHint] = useState(true)
+
+  // The transformed "stage" (the scaled content). We measure its layout width
+  // to center the hierarchy precisely instead of guessing a fixed offset.
+  const stageRef = React.useRef<HTMLDivElement>(null)
 
   const {
     transform,
     setTransform,
     isPanning,
     containerRef,
-    centerView,
     handleMouseDown,
     attachWheelListener,
     zoomIn,
     zoomOut,
   } = useCanvasTransform({ initialScale: 0.8 })
 
-  // Auto-center on mount + resize + view mode change
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      centerView(160, 60) // slightly tighter centering for mobile
-    }, 150)
+  // Center the hierarchy in the canvas. For desktop we measure the stage's
+  // unscaled width (padding is symmetric, so its center is the tree's center)
+  // and translate so that center lands in the middle of the viewport. Device
+  // preview modes are already centered via CSS (left:50% + center origin), so
+  // we only need x=0 there.
+  const centerStage = React.useCallback(
+    (scaleOverride?: number) => {
+      const container = containerRef.current
+      if (!container) return
+      const cw = container.clientWidth
+      const scale = scaleOverride ?? (window.innerWidth < 640 ? 0.55 : 0.75)
+      if (viewMode !== "desktop") {
+        setTransform({ x: 0, y: 48, scale })
+        return
+      }
+      const stageW = stageRef.current?.scrollWidth ?? 0
+      setTransform({
+        x: Math.round(cw / 2 - (stageW / 2) * scale),
+        y: 48,
+        scale,
+      })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewMode],
+  )
 
-    return () => clearTimeout(timeout)
-  }, [centerView, viewMode, isFullscreen])
+  // Auto-center on mount + resize + view mode change. A short delay lets the
+  // stage finish laying out so the measured width is accurate.
+  useEffect(() => {
+    const timeout = setTimeout(() => centerStage(), 180)
+    const onResize = () => centerStage()
+    window.addEventListener("resize", onResize)
+    return () => {
+      clearTimeout(timeout)
+      window.removeEventListener("resize", onResize)
+    }
+  }, [centerStage, viewMode, isFullscreen, state.organizationUnits, state.expandedOrgNodes])
 
   useEffect(() => {
     return attachWheelListener()
@@ -541,6 +580,7 @@ export function OrganizationTree() {
       <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-4 px-3 sm:px-4 py-2.5 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-10 mb-3 sm:mb-4"> {/* z-50 → z-10 */}
         {/* Left side controls */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {toolbarStart}
           <Button
             variant="outline"
             size="sm"
@@ -573,7 +613,7 @@ export function OrganizationTree() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 sm:h-8 sm:w-8 hidden sm:flex"
-              onClick={() => centerView(160, 60)}
+              onClick={() => centerStage()}
               title="Center view"
             >
               <Target className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -603,6 +643,8 @@ export function OrganizationTree() {
               </Button>
             ))}
           </div>
+
+          {toolbarEnd}
 
           {/* Stats / help toggle */}
           <Button
@@ -644,6 +686,7 @@ export function OrganizationTree() {
         )}
 
         <div
+          ref={stageRef}
           className={cn(
             "absolute origin-top-left will-change-transform",
             viewMode !== "desktop" &&
