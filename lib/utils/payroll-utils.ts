@@ -769,6 +769,18 @@ function classifyDay(
         }
       }
 
+      // A HALF-DAY leave on a day the employee ALSO checked in: the leave
+      // covers one half, so the worked hours only have to make up the other
+      // half. Feed that into the classifier so the day grades as a full
+      // PRESENT once the worked half is met — instead of being docked to
+      // half (or even absent) for "only" working a half against the full-day
+      // bar. Mirrors the same leaveDayFraction the My Attendance / Team badge
+      // uses, keeping pay and badge in lockstep.
+      const halfDayLeaveHit =
+        !!slHit &&
+        (slHit.leave.isHalfDay || slHit.rule.category === 'HALF_DAY');
+      const leaveDayFraction = halfDayLeaveHit ? 0.5 : 0;
+
       // Delegate the verdict to the shared classifier so the UI badge
       // and the payroll math agree on every row. Thresholds come from
       // PayrollPolicy (mirrored from AttendanceConfiguration). The
@@ -784,6 +796,7 @@ function classifyDay(
           overtimeOptedIn: !!att.overtimeOptedIn,
           workedMinutes: Math.round(hours * 60),
           lateMinutes: att.lateMinutes ?? 0,
+          leaveDayFraction,
         },
         {
           halfDayMinHours: policy.halfDayMinHours,

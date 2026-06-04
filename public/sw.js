@@ -22,6 +22,10 @@
  *   { title: string, body?: string, url?: string, icon?: string, tag?: string }
  */
 
+// Bump this string whenever sw.js changes so the byte content differs and the
+// browser re-installs + activates the new worker on installed PWAs.
+const SW_VERSION = 'v3-2026-06-03-requireInteraction';
+
 self.addEventListener('install', (event) => {
   // Activate immediately on first install so the very first push doesn't get
   // dropped while an older worker is still claiming the scope.
@@ -65,8 +69,17 @@ self.addEventListener('push', (event) => {
     // push sharing a tag arrives but never re-pops on a locked phone.
     renotify: Boolean(payload.tag),
     // Slight vibration on phones so the user notices without being yelled at.
-    vibrate: [120, 60, 120],
-    requireInteraction: false,
+    vibrate: [200, 100, 200],
+    // Keep the popup on screen until the user acts (tap / dismiss) instead of
+    // auto-fading after a few seconds — ChatGPT-style "stays until you see it".
+    // The server can override per-message via payload.requireInteraction.
+    requireInteraction:
+      payload.requireInteraction === undefined ? true : !!payload.requireInteraction,
+    // Make sure the OS treats it as a high-priority alert (heads-up banner +
+    // sound) rather than a silent tray entry — important for closed/locked
+    // devices. `silent:false` is the default but we set it explicitly.
+    silent: false,
+    timestamp: Date.now(),
   };
 
   event.waitUntil(self.registration.showNotification(payload.title, options));

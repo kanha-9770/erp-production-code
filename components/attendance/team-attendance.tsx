@@ -27,6 +27,8 @@ import {
   Search,
   Inbox,
   FileText,
+  ChevronDown,
+  ChevronRight,
   X as XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -66,7 +68,10 @@ interface TeamResponse {
     lng: number | null;
     radiusM: number | null;
   };
-  faceVerify?: { mode: string; threshold: number };
+  faceVerify?: { mode: string; captureMode?: string; threshold: number };
+  // In-scope users with no FaceEnrollment row — blocked at check-in under
+  // ENFORCE. Surfaced so HR can enroll them before flipping/while in ENFORCE.
+  unenrolled?: TeamUser[];
   // Storage-policy snapshot used by the detail panel to label the photo
   // slot with the right reason when checkInPhoto / checkOutPhoto is null.
   facePhotoStorage?: { storeAfterVerify: string; retentionDays: number };
@@ -88,6 +93,7 @@ export function TeamAttendance() {
   const [data, setData] = useState<TeamResponse | null>(null);
   const [selected, setSelected] = useState<AttendanceRecord | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [showUnenrolled, setShowUnenrolled] = useState(false);
 
   const fetchTeam = useCallback(async () => {
     setLoading(true);
@@ -337,6 +343,18 @@ export function TeamAttendance() {
                     </div>
                   )}
 
+                  {data?.unenrolled && data.unenrolled.length > 0 && (
+                    <UnenrolledPanel
+                      users={data.unenrolled}
+                      enforcing={
+                        data.faceVerify?.mode === "ENFORCE" &&
+                        (data.faceVerify?.captureMode ?? "OFF") !== "OFF"
+                      }
+                      open={showUnenrolled}
+                      onToggle={() => setShowUnenrolled((v) => !v)}
+                    />
+                  )}
+
                   {error && (
                     <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                       <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -404,6 +422,82 @@ export function TeamAttendance() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Un-enrolled users panel — surfaces everyone in scope without a
+// FaceEnrollment row so HR can enroll them before (or while) face
+// verification runs in ENFORCE mode. Collapsed by default; the header line
+// alone tells admins the count and severity.
+// ─────────────────────────────────────────────────────────────────────────
+
+function UnenrolledPanel({
+  users,
+  enforcing,
+  open,
+  onToggle,
+}: {
+  users: TeamUser[];
+  enforcing: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const count = users.length;
+  // ENFORCE + capture on → these users are blocked RIGHT NOW (red). Otherwise
+  // it's a heads-up that they WOULD be blocked if ENFORCE is switched on (amber).
+  const tone = enforcing
+    ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+    : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200";
+  return (
+    <div className={`rounded-md border ${tone}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-start gap-2 p-3 text-left"
+        aria-expanded={open}
+      >
+        <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+        <span className="flex-1 text-sm leading-relaxed">
+          <span className="font-semibold">
+            {count} user{count === 1 ? "" : "s"} not face-enrolled
+          </span>
+          {enforcing
+            ? " — currently blocked from check-in (face verification is ENFORCE). Enroll them to unblock."
+            : " — they'll be blocked at check-in if you switch face verification to ENFORCE."}
+        </span>
+        {open ? (
+          <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" />
+        ) : (
+          <ChevronRight className="h-4 w-4 mt-0.5 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <ul className="rounded-md border bg-background/60 divide-y divide-border/60">
+            {users.map((u) => (
+              <li
+                key={u.id}
+                className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-1.5 text-xs"
+              >
+                <span className="font-medium text-foreground">{u.name}</span>
+                <span className="text-muted-foreground">{u.email}</span>
+                {u.department && (
+                  <span className="text-muted-foreground">· {u.department}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Fix: open{" "}
+            <Link href="/employee-master" className="text-blue-700 hover:underline">
+              Employee Master
+            </Link>{" "}
+            and upload a clear, front-facing solo photo for each user, or have
+            them enroll from Profile → Personal info.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Forbidden panel — shown when the API returns 403. Kept as a centered card
 // inside the list area so the WorkspaceShell chrome (header + back nav) stays
 // usable instead of leaving the user on an empty page with no way out.

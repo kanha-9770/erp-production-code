@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Archive,
+  CalendarDays,
 } from "lucide-react";
 import {
   formatDateLong,
@@ -27,6 +28,10 @@ import {
   workedMinutesFor,
 } from "./attendance-format";
 import { useUserTimezone } from "@/lib/user-timezone";
+import type { LeaveInfo } from "./leave-chip";
+
+// Re-export so existing importers of `LeaveInfo` from this module keep working.
+export type { LeaveInfo };
 
 export interface AttendanceRecord {
   id: string;
@@ -45,6 +50,14 @@ export interface AttendanceRecord {
   overtimeMinutes: number;
   isAutoCheckedOut: boolean;
   status: string | null;
+  // Approved leave covering this day, when any (full / half / short). Drives
+  // the leave chip on the row and the Leave section in this panel.
+  leave?: LeaveInfo | null;
+  // True for display-only rows synthesized by the day-fill (Absent / Weekly-off
+  // / Holiday / On-leave days that have no real Attendance row). These carry a
+  // fake id (`synthetic-<user>-<date>`) and no punch data, so the UI suppresses
+  // actions that need a real DB row (regularize / correction).
+  synthetic?: boolean;
   // Server-computed status that already accounts for org thresholds
   // (halfDayMinHours / fullDayMinHours), per-employee shift, and
   // auto-checkout. Prefer this over `status` when both are present —
@@ -140,6 +153,26 @@ export function AttendanceRecordDetail({ record, onClose }: Props) {
                   "Attendance details for the selected date."}
               </SheetDescription>
             </SheetHeader>
+
+            {/* Approved-leave banner — shown whenever a leave covers this day,
+                including days the employee also punched (e.g. worked the
+                morning, took the afternoon as half-day leave). */}
+            {record.leave && (
+              <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-200">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  Approved leave
+                </div>
+                <div className="mt-0.5">{record.leave.detailLabel}</div>
+                {record.leave.kind === "SHORT_LEAVE" &&
+                  record.leave.startTime &&
+                  record.leave.endTime && (
+                    <div className="mt-0.5 text-xs">
+                      Window: {record.leave.startTime}–{record.leave.endTime}
+                    </div>
+                  )}
+              </div>
+            )}
 
             {/* Stats row */}
             <div className="mt-4 grid grid-cols-3 gap-2 text-center">

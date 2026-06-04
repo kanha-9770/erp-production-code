@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +46,10 @@ export async function POST(request: NextRequest) {
     if (department !== undefined) changes.department = department;
     if (phone !== undefined) changes.phone = phone;
     await syncUserToEmployee(authUser.id, changes);
+
+    // Invalidate the cached session so the edited fields show immediately on
+    // the next /api/auth/me read instead of the stale cached copy (5-min TTL).
+    await invalidateAllSessionsForUser(authUser.id);
 
     return NextResponse.json({
       success: true,

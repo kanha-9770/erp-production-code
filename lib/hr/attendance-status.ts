@@ -19,10 +19,15 @@
  *      checkout fired, they signaled intent to stay — we treat the row
  *      as a normal punch and let the org's OT cap protect against the
  *      inflated 24h-cap hours.)
- *   3. Hours worked < halfDayMinHours        → ABSENT (no pay)
- *   4. Hours worked < fullDayMinHours        → HALF_DAY
- *   5. Late past grace AND lateHalfDay on    → HALF_DAY (opt-in tardiness rule)
- *   6. Otherwise                             → PRESENT
+ *   3. Approved leave covers part of the day  → worked hours only have to
+ *      (leaveDayFraction > 0)                   cover the REMAINING fraction;
+ *                                               full day if they do, else
+ *                                               HALF_DAY (never ABSENT — the
+ *                                               leave guarantees the half).
+ *   4. Hours worked < halfDayMinHours        → ABSENT (no pay)
+ *   5. Hours worked < fullDayMinHours        → HALF_DAY
+ *   6. Late past grace AND lateHalfDay on    → HALF_DAY (opt-in tardiness rule)
+ *   7. Otherwise                             → PRESENT
  *
  * Step 5 is OPT-IN: the lateness→half-day downgrade only fires when the org
  * enables `lateHalfDay` in Attendance Configuration. When off (default), a
@@ -68,6 +73,14 @@ export interface AttendanceStatusInput {
    *  the toggle is an explicit "I'm staying late" signal — payroll
    *  still applies the org's OT cap so 24h-cap rows don't blow up gross. */
   overtimeOptedIn?: boolean | null;
+  /** Fraction of this day already covered by an APPROVED leave (0, 0.5, or
+   *  1). A half-day leave (0.5) lowers the worked-hours bar: the leave covers
+   *  one half of the day, so the employee only has to work the OTHER half to
+   *  be credited a full day. Without this, a half-day-leave day on which the
+   *  employee worked a normal half still gets mislabeled HALF_DAY "under the
+   *  full-day requirement" — penalising them for the half they were on leave.
+   *  Defaults to 0 (no leave), so existing callers are unaffected. */
+  leaveDayFraction?: number | null;
 }
 
 export interface AttendanceStatusThresholds {
@@ -150,24 +163,47 @@ export function computeEffectiveStatus(
   const lateMinutes = Math.max(0, input.lateMinutes ?? 0);
   const autoWithOt = !!(input.isAutoCheckedOut && input.overtimeOptedIn);
   const h = workedHours.toFixed(2);
+  const leaveFraction = Math.min(1, Math.max(0, input.leaveDayFraction ?? 0));
+
+  // An approved leave (half-day or short leave) covers part of this day, so
+  // the worked-hours bar drops by that fraction — the employee only has to
+  // work the REMAINING share of a full day. This adjusts the THRESHOLD only:
+  // the tardiness (lateHalfDay) rule below still applies, so an unrelated late
+  // arrival isn't excused just because a leave covered another part of the
+  // day. leaveFraction = 0 leaves every threshold exactly as before.
+  const fullBar =
+    leaveFraction > 0
+      ? t.fullDayMinHours * (1 - leaveFraction)
+      : t.fullDayMinHours;
+  const coveredTxt =
+    leaveFraction <= 0
+      ? ''
+      : leaveFraction === 0.5
+        ? 'Half-day leave'
+        : `Leave covers ${Math.round(leaveFraction * 100)}% of the day`;
 
   // Below the half-day floor → absent regardless of lateness. Avoids
   // crediting employees who clock in for a few minutes just to mark
-  // attendance.
-  if (workedHours < t.halfDayMinHours) {
+  // attendance. Skipped when a leave covers part of the day — the leave
+  // itself guarantees at least a half-day, so the day is never "absent".
+  if (leaveFraction <= 0 && workedHours < t.halfDayMinHours) {
     return {
       status: 'ABSENT',
       reason: `Worked ${h}h — below the ${t.halfDayMinHours}h half-day minimum. Counts as absent.`,
     };
   }
 
-  // Between half- and full-day → half-day.
-  if (workedHours < t.fullDayMinHours) {
+  // Under the (leave-adjusted) full-day bar → half-day.
+  if (workedHours + 1e-9 < fullBar) {
     return {
       status: 'HALF_DAY',
-      reason: autoWithOt
-        ? `Auto-checkout, but OT was on. Paid for ${h}h (under ${t.fullDayMinHours}h full-day) → half-day.`
-        : `Worked ${h}h (under ${t.fullDayMinHours}h full-day requirement) → half-day.`,
+      reason: coveredTxt
+        ? `${coveredTxt}; worked ${h}h (under the ${fullBar.toFixed(
+            2,
+          )}h needed alongside the leave) → half-day.`
+        : autoWithOt
+          ? `Auto-checkout, but OT was on. Paid for ${h}h (under ${t.fullDayMinHours}h full-day) → half-day.`
+          : `Worked ${h}h (under ${t.fullDayMinHours}h full-day requirement) → half-day.`,
     };
   }
 
@@ -187,6 +223,15 @@ export function computeEffectiveStatus(
     return {
       status: 'PRESENT',
       reason: `Auto-checkout, but OT was on. Paid for ${h}h (OT capped per org policy).`,
+    };
+  }
+
+  // Full day reached with a leave covering part of it → present (the leave
+  // half + the worked remainder make a whole day).
+  if (coveredTxt) {
+    return {
+      status: 'PRESENT',
+      reason: `${coveredTxt} + worked ${h}h → full day.`,
     };
   }
 

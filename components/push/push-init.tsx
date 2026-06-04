@@ -24,6 +24,14 @@ async function ensureSubscription() {
   let registration: ServiceWorkerRegistration;
   try {
     registration = await navigator.serviceWorker.register("/sw.js");
+    // A freshly installed PWA often calls this before the worker is active.
+    // `ready` resolves once an active worker controls the page, so subscribe
+    // doesn't silently no-op on first launch. Guard with a timeout so a stuck
+    // SW never hangs the enrol forever.
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
   } catch (err) {
     console.warn("[push] service-worker registration failed:", err);
     return;
@@ -35,23 +43,64 @@ async function ensureSubscription() {
   // a user gesture.
   if (Notification.permission !== "granted") return;
 
+  // Fetch the current server VAPID key first so we can detect a stale
+  // subscription (one created against an old key pair won't deliver).
+  let key = "";
+  try {
+    const keyRes = await fetch("/api/push/vapid-public-key");
+    if (keyRes.ok) key = (await keyRes.json())?.key || "";
+  } catch {
+    /* offline — fall through; we can still re-send an existing sub below */
+  }
+
   try {
     const existing = await registration.pushManager.getSubscription();
     if (existing) {
-      await sendSubscriptionToServer(existing);
-      return;
+      // If the existing subscription was made against a different VAPID key
+      // (e.g. keys rotated, or it was created in the browser before install),
+      // it will never receive pushes. Detect the mismatch and re-subscribe.
+      const staleKey = key && !subscriptionMatchesKey(existing, key);
+      if (!staleKey) {
+        await sendSubscriptionToServer(existing);
+        return;
+      }
+      try {
+        await existing.unsubscribe();
+      } catch {
+        /* ignore — we'll just try to create a fresh one */
+      }
     }
-    const keyRes = await fetch("/api/push/vapid-public-key");
-    if (!keyRes.ok) return;
-    const { key } = await keyRes.json();
-    if (!key) return;
+
+    if (!key) return; // no key and no usable existing sub → nothing to do
     const sub = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key),
+      applicationServerKey: urlBase64ToUint8Array(key) as BufferSource,
     });
     await sendSubscriptionToServer(sub);
   } catch (err) {
     console.warn("[push] subscription enrol failed:", err);
+  }
+}
+
+// True when an existing PushSubscription's applicationServerKey matches the
+// current server VAPID public key. Compares the raw bytes so a key rotation
+// (or a sub made against a different key) is reliably detected.
+function subscriptionMatchesKey(
+  sub: PushSubscription,
+  serverKey: string,
+): boolean {
+  try {
+    const appKey = (sub.options && sub.options.applicationServerKey) || null;
+    if (!appKey) return true; // can't tell — assume OK, don't churn
+    const current = new Uint8Array(appKey as ArrayBuffer);
+    const expected = urlBase64ToUint8Array(serverKey);
+    if (current.length !== expected.length) return false;
+    for (let i = 0; i < current.length; i++) {
+      if (current[i] !== expected[i]) return false;
+    }
+    return true;
+  } catch {
+    return true; // on any error, don't force a re-subscribe loop
   }
 }
 

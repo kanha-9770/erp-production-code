@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,6 +22,12 @@ export async function POST(request: NextRequest) {
     });
 
     await syncUserToEmployee(authUser.id, { avatar: null });
+
+    // Drop the cached session so /api/auth/me reads the freshly-cleared
+    // avatar from the DB immediately. Without this the session cache (5-min
+    // TTL) keeps serving the old avatar, so the photo "comes back" on
+    // refresh until the cache expires.
+    await invalidateAllSessionsForUser(authUser.id);
 
     return NextResponse.json({
       success: true,

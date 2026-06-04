@@ -352,6 +352,9 @@ interface UseAttendanceState {
     livenessPassed?: boolean | null,
   ) => Promise<void>;
   refresh: () => Promise<void>;
+  // Shared with the component so handleClick can flag the next IN punch as a
+  // self-service early return (the ref lives in the hook with punch()).
+  endLeaveEarlyRef: { current: boolean };
 }
 
 interface UploadFacePhotoResult {
@@ -618,6 +621,7 @@ function useAttendance(enabled: boolean): UseAttendanceState {
     status,
     punch,
     refresh: fetchStatus,
+    endLeaveEarlyRef,
   };
 }
 
@@ -641,7 +645,8 @@ export function AttendanceWidget({
   useOrgTimezone();
   // Kept for any user-zone-aware labels rendered elsewhere in the widget.
   useUserTimezone();
-  const { loading, busy, error, status, punch, refresh } = useAttendance(enabled);
+  const { loading, busy, error, status, punch, refresh, endLeaveEarlyRef } =
+    useAttendance(enabled);
   const [now, setNow] = useState<number>(() => Date.now());
   const [open, setOpen] = useState(false);
   // Camera capture flow. `captureType` records which punch is pending so

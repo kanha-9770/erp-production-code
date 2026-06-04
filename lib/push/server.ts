@@ -46,6 +46,10 @@ export interface PushPayload {
   icon?: string;
   badge?: string;
   tag?: string;
+  /** When true (default in the service worker), the popup stays on screen
+   *  until the user taps or dismisses it — ChatGPT-style. Set false for
+   *  low-priority messages that may auto-fade. */
+  requireInteraction?: boolean;
 }
 
 /**

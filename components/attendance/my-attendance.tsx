@@ -27,6 +27,7 @@ import Link from "next/link";
 // is dynamic-imported below so the modal's code doesn't ship with the
 // initial my-attendance bundle.
 import type { AttendanceRecord } from "./attendance-record-detail";
+import { LeaveChip } from "./leave-chip";
 // Both panels only render after a user action (clicking a row → detail,
 // clicking "Regularize" → dialog). Dynamic-importing them removes ~600
 // lines + their Radix dependencies from the initial bundle. `ssr: false`
@@ -306,7 +307,23 @@ export function MyAttendance() {
               {statusLabel(code).toUpperCase()}
             </Badge>
           );
-          if (!reason) return badge;
+          // Approved-leave chip rides alongside the status so a worked
+          // half-day / short-leave day reveals the leave (type + window) at a
+          // glance, not just an hours-based Present / Half-Day badge.
+          // Full-day leave is already conveyed by the "On Leave" status badge,
+          // so only the half-day / short-leave chips ride alongside (those have
+          // an hours-based badge that would otherwise hide the leave).
+          const leaveChip =
+            r.leave && r.leave.kind !== "FULL_DAY" ? (
+              <LeaveChip leave={r.leave} />
+            ) : null;
+          if (!reason)
+            return (
+              <div className="flex items-center gap-1 flex-wrap">
+                {badge}
+                {leaveChip}
+              </div>
+            );
           // Pair the badge with a small info icon so the tooltip is
           // discoverable. HoverCard only fires on pointer hover, which
           // never happens on touch devices — so we share one trigger
@@ -315,6 +332,7 @@ export function MyAttendance() {
           // whichever opens, the user sees it. stopPropagation keeps the tap
           // from also opening the row detail panel underneath.
           return (
+            <div className="flex items-center gap-1 flex-wrap">
             <HoverCard openDelay={100} closeDelay={100}>
               <Popover>
                 <HoverCardTrigger asChild>
@@ -346,6 +364,8 @@ export function MyAttendance() {
                 </PopoverContent>
               </Popover>
             </HoverCard>
+            {leaveChip}
+            </div>
           );
         },
       },
@@ -471,20 +491,26 @@ export function MyAttendance() {
         id: "actions",
         header: "",
         width: 56,
-        cell: (r) => (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            title="Request correction"
-            onClick={(e) => {
-              e.stopPropagation();
-              setRegularizing(r);
-            }}
-          >
-            <Edit3 className="h-3.5 w-3.5" />
-          </Button>
-        ),
+        // Synthetic gap-fill rows (Absent / Weekly-off / Holiday / On-leave with
+        // no real punch) carry a fake id, so there's nothing to regularize —
+        // hide the correction button for them.
+        cell: (r) =>
+          r.synthetic ? (
+            <span className="text-xs text-muted-foreground">—</span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              title="Request correction"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRegularizing(r);
+              }}
+            >
+              <Edit3 className="h-3.5 w-3.5" />
+            </Button>
+          ),
       },
     ],
     [],

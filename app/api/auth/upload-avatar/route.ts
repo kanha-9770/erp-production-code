@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { syncUserToEmployee } from "@/lib/utils/user-employee-sync";
+import { invalidateAllSessionsForUser } from "@/lib/auth";
 import { uploadToHostinger } from "@/lib/hostinger-upload";
 import path from "path";
 
@@ -78,6 +79,10 @@ export async function POST(request: NextRequest) {
     // Mirror the photo onto the linked Employee record (employeeImage) so
     // Employee Master shows the same image the user just picked.
     await syncUserToEmployee(authUser.id, { avatar: avatarUrl });
+
+    // Invalidate the cached session so /api/auth/me returns the new avatar
+    // right away instead of the stale cached value (5-min TTL).
+    await invalidateAllSessionsForUser(authUser.id);
 
     return NextResponse.json({ success: true, url: avatarUrl });
   } catch (error) {

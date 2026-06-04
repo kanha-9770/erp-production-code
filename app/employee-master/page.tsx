@@ -1270,6 +1270,34 @@ function EditEmployeeSheet({ id, onClose }: { id: string; onClose: () => void })
                 }
               }
               await updateEmployee({ id, body: payload }).unwrap();
+
+              // Enroll/re-enroll the face descriptor for biometric attendance,
+              // mirroring the create path. Without this, editing an existing
+              // employee's photo updated the avatar everywhere but never wrote
+              // the FaceEnrollment row — so the user stayed "not enrolled" and
+              // was blocked at check-in under ENFORCE mode. Only runs when the
+              // form actually extracted a single-face descriptor and the
+              // employee is linked to a user account.
+              if (e.userId && extras?.facePhoto && extras?.faceDescriptor) {
+                const fd = new FormData();
+                fd.append("photo", extras.facePhoto);
+                fd.append("descriptor", descriptorToBase64(extras.faceDescriptor));
+                fd.append("targetUserId", e.userId);
+                fd.append("consent", "true");
+                const enrollRes = await fetch("/api/face/enroll", {
+                  method: "POST",
+                  body: fd,
+                });
+                if (!enrollRes.ok) {
+                  toast({
+                    title: "Saved, but face not enrolled",
+                    description:
+                      "The photo was saved, but couldn't be registered for attendance. Try a clear, front-facing solo photo.",
+                    variant: "destructive",
+                  });
+                }
+              }
+
               toast({ title: "Employee updated" });
               onClose();
             } catch (err: any) {

@@ -10,6 +10,12 @@ import {
 } from '@/lib/hr/attendance-service';
 import { getAttendanceConfig } from '@/lib/hr/attendance-config';
 import { computeEffectiveStatus } from '@/lib/hr/attendance-status';
+import {
+  buildSyntheticDays,
+  fetchDayFillContext,
+  leaveInfoForDate,
+  leaveDayFractionForStatus,
+} from '@/lib/hr/attendance-day-fill';
 import { lateHalfDayAppliesTo, lateHalfDayScopeOf } from '@/lib/hr/late-half-day';
 import { userHasRouteAccess } from '@/lib/auth/route-meta';
 import { getVisibleUserIdsForHierarchy } from '@/lib/database/roles';
@@ -173,6 +179,19 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'desc' }, { userId: 'asc' }],
   });
 
+  // Face-enrollment coverage: which of these in-scope users have NO
+  // FaceEnrollment row. Surfaced so HR can see exactly who will be blocked at
+  // check-in once face verification runs in ENFORCE mode — a row is required,
+  // and without one ENFORCE returns FACE_NOT_ENROLLED. Cheap indexed lookup
+  // over the same user set we already paged for the dashboard.
+  const enrolledRows = await (prisma as any).faceEnrollment.findMany({
+    where: { userId: { in: userIds } },
+    select: { userId: true },
+  });
+  const enrolledSet = new Set<string>(
+    enrolledRows.map((r: { userId: string }) => r.userId),
+  );
+
   // Per-org geofence centre. Used to flag punches that landed outside the
   // configured radius so admins can spot off-site check-ins at a glance.
   // We deliberately ignore `geofenceMode` here: as soon as the admin has
@@ -217,6 +236,48 @@ export async function GET(request: NextRequest) {
     };
   }
 
+  // ── Gap-fill: synthesize Absent / Weekly-off / Holiday / On-leave rows for
+  // every (user, date) in the window that has NO real Attendance row, so the
+  // team view shows a complete per-day calendar instead of only the days people
+  // actually punched. Display only — nothing is written and pay is unaffected
+  // (payroll already books these days via its own calendar walk).
+  const realDatesByUser = new Map<string, Set<string>>();
+  for (const r of records) {
+    const set = realDatesByUser.get(r.userId) ?? new Set<string>();
+    set.add(r.date);
+    realDatesByUser.set(r.userId, set);
+  }
+  const dayFillCtx = await fetchDayFillContext({
+    organizationId: authUser.organizationId,
+    userIds,
+    from,
+    to,
+  });
+  const syntheticRecords = buildSyntheticDays({
+    userIds,
+    from,
+    to,
+    today,
+    weeklyOffDays: cfg.weeklyOffDays ?? [],
+    realDatesByUser,
+    ctx: dayFillCtx,
+  });
+
+  // Display shape for users — reused for both the full roster and the
+  // un-enrolled subset so the two never drift in how names are composed.
+  const mappedUsers = users.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name:
+      [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
+      u.employee?.employeeName ||
+      u.username ||
+      u.email,
+    department: u.employee?.department ?? null,
+    designation: u.employee?.designation ?? null,
+    employeeId: u.employee?.id ?? null,
+  }));
+
   return NextResponse.json(
     {
       success: true,
@@ -235,24 +296,20 @@ export async function GET(request: NextRequest) {
       // label missing photos correctly (expired vs never-stored).
       faceVerify: {
         mode: cfg.faceVerifyMode,
+        // Capture mode too: ENFORCE only actually blocks when capture is on
+        // (OPTIONAL/REQUIRED). The UI uses both to decide how loud the
+        // un-enrolled warning should be.
+        captureMode: cfg.faceCaptureMode,
         threshold: cfg.faceMatchThreshold,
       },
       facePhotoStorage: {
         storeAfterVerify: cfg.facePhotoStoreAfterVerify,
         retentionDays: cfg.facePhotoRetentionDays,
       },
-      users: users.map((u) => ({
-        id: u.id,
-        email: u.email,
-        name:
-          [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
-          u.employee?.employeeName ||
-          u.username ||
-          u.email,
-        department: u.employee?.department ?? null,
-        designation: u.employee?.designation ?? null,
-        employeeId: u.employee?.id ?? null,
-      })),
+      users: mappedUsers,
+      // In-scope users with no FaceEnrollment row — these are blocked at
+      // check-in under ENFORCE. HR uses this to enroll them proactively.
+      unenrolled: mappedUsers.filter((u) => !enrolledSet.has(u.id)),
       // Per-org thresholds so the admin's team view applies the same
       // cutoffs as the user's My Attendance view, even if the admin's
       // own user is in a different org someday.
@@ -260,7 +317,8 @@ export async function GET(request: NextRequest) {
         halfDayMinHours: cfg.halfDayMinHours,
         fullDayMinHours: cfg.fullDayMinHours,
       },
-      records: records.map((r) => {
+      records: [
+        ...records.map((r) => {
         const inGeo = annotateGeo(
           (r as any).checkInLat ?? null,
           (r as any).checkInLng ?? null,
@@ -281,6 +339,18 @@ export async function GET(request: NextRequest) {
           checkInMs !== null && checkOutMs !== null && checkOutMs > checkInMs
             ? Math.round((checkOutMs - checkInMs) / 60_000)
             : 0;
+        // Approved leave covering this day — fed into the verdict so a day the
+        // employee was partly on leave (half-day or short leave) isn't judged
+        // against the full-day bar; the leave covers its share and only the
+        // remaining hours are required.
+        const leaveInfo = leaveInfoForDate(
+          r.date,
+          dayFillCtx.leavesByUser.get(r.userId),
+        );
+        const leaveDayFraction = leaveDayFractionForStatus(
+          leaveInfo,
+          cfg.fullDayMinHours,
+        );
         const verdict = computeEffectiveStatus(
           {
             checkedIn: !!r.checkedIn,
@@ -289,6 +359,7 @@ export async function GET(request: NextRequest) {
             overtimeOptedIn: !!(r as any).overtimeOptedIn,
             workedMinutes,
             lateMinutes: (r as any).lateMinutes ?? 0,
+            leaveDayFraction,
           },
           {
             halfDayMinHours: cfg.halfDayMinHours,
@@ -318,6 +389,11 @@ export async function GET(request: NextRequest) {
           status: (r as any).status ?? null,
           effectiveStatus: verdict.status,
           effectiveStatusReason: verdict.reason ?? null,
+          // Approved leave overlapping this day — surfaced even when the
+          // employee also punched (e.g. worked one half, took the other as
+          // half-day leave), so the leave isn't hidden behind an hours-based
+          // Present/Half-Day badge.
+          leave: leaveInfo,
           checkInPhoto: (r as any).checkInPhoto ?? null,
           checkOutPhoto: (r as any).checkOutPhoto ?? null,
           checkInLat: (r as any).checkInLat ?? null,
@@ -333,7 +409,21 @@ export async function GET(request: NextRequest) {
           checkOutOutsideRadius: outGeo.outsideRadius,
           checkOutLocationMissing: outGeo.locationMissing,
         };
-      }),
+        }),
+        ...syntheticRecords,
+      ].sort((a, b) =>
+        // date desc, then userId asc — mirrors the original DB orderBy so the
+        // merged real + synthetic list keeps a stable, predictable order.
+        a.date < b.date
+          ? 1
+          : a.date > b.date
+            ? -1
+            : a.userId < b.userId
+              ? -1
+              : a.userId > b.userId
+                ? 1
+                : 0,
+      ),
     },
     {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
