@@ -52,7 +52,10 @@ export const usersApi = baseApi.injectEndpoints({
         url: `/users/${userId}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["AdminUsers"],
+      // A user account, its linked employee record, and the logged-in user's
+      // own profile are one identity. Refresh them together so a change made
+      // from User Management reflects in Employee Master + the header/profile.
+      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
     }),
 
     getUserPermissionsList: builder.query<{ success: boolean; data: any[] }, { userId: string }>({
@@ -79,7 +82,9 @@ export const usersApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["AdminUsers"],
+      // Links a user to an employee → the employee row's "has account" state
+      // changes, so refresh Employee Master too.
+      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
     }),
 
     // Create user
@@ -89,7 +94,7 @@ export const usersApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["AdminUsers"],
+      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }],
     }),
 
     // Update user
@@ -99,7 +104,9 @@ export const usersApi = baseApi.injectEndpoints({
         method: "PUT",
         body,
       }),
-      invalidatesTags: ["AdminUsers"],
+      // Edits sync to the linked employee (reverse of updateEmployee) and may
+      // be the logged-in user themselves — refresh all three faces.
+      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
     }),
   }),
 })
