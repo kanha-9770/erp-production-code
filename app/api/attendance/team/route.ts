@@ -179,6 +179,19 @@ export async function GET(request: NextRequest) {
     orderBy: [{ date: 'desc' }, { userId: 'asc' }],
   });
 
+  // Face-enrollment coverage: which of these in-scope users have NO
+  // FaceEnrollment row. Surfaced so HR can see exactly who will be blocked at
+  // check-in once face verification runs in ENFORCE mode — a row is required,
+  // and without one ENFORCE returns FACE_NOT_ENROLLED. Cheap indexed lookup
+  // over the same user set we already paged for the dashboard.
+  const enrolledRows = await (prisma as any).faceEnrollment.findMany({
+    where: { userId: { in: userIds } },
+    select: { userId: true },
+  });
+  const enrolledSet = new Set<string>(
+    enrolledRows.map((r: { userId: string }) => r.userId),
+  );
+
   // Per-org geofence centre. Used to flag punches that landed outside the
   // configured radius so admins can spot off-site check-ins at a glance.
   // We deliberately ignore `geofenceMode` here: as soon as the admin has
@@ -250,6 +263,21 @@ export async function GET(request: NextRequest) {
     ctx: dayFillCtx,
   });
 
+  // Display shape for users — reused for both the full roster and the
+  // un-enrolled subset so the two never drift in how names are composed.
+  const mappedUsers = users.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name:
+      [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
+      u.employee?.employeeName ||
+      u.username ||
+      u.email,
+    department: u.employee?.department ?? null,
+    designation: u.employee?.designation ?? null,
+    employeeId: u.employee?.id ?? null,
+  }));
+
   return NextResponse.json(
     {
       success: true,
@@ -268,24 +296,20 @@ export async function GET(request: NextRequest) {
       // label missing photos correctly (expired vs never-stored).
       faceVerify: {
         mode: cfg.faceVerifyMode,
+        // Capture mode too: ENFORCE only actually blocks when capture is on
+        // (OPTIONAL/REQUIRED). The UI uses both to decide how loud the
+        // un-enrolled warning should be.
+        captureMode: cfg.faceCaptureMode,
         threshold: cfg.faceMatchThreshold,
       },
       facePhotoStorage: {
         storeAfterVerify: cfg.facePhotoStoreAfterVerify,
         retentionDays: cfg.facePhotoRetentionDays,
       },
-      users: users.map((u) => ({
-        id: u.id,
-        email: u.email,
-        name:
-          [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
-          u.employee?.employeeName ||
-          u.username ||
-          u.email,
-        department: u.employee?.department ?? null,
-        designation: u.employee?.designation ?? null,
-        employeeId: u.employee?.id ?? null,
-      })),
+      users: mappedUsers,
+      // In-scope users with no FaceEnrollment row — these are blocked at
+      // check-in under ENFORCE. HR uses this to enroll them proactively.
+      unenrolled: mappedUsers.filter((u) => !enrolledSet.has(u.id)),
       // Per-org thresholds so the admin's team view applies the same
       // cutoffs as the user's My Attendance view, even if the admin's
       // own user is in a different org someday.
