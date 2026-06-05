@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useGetEmployeeListQuery,
   useGetEmployeeQuery,
@@ -39,6 +39,7 @@ import {
   type FilterField, type FilterCondition,
   ManageColumnsButton,
   SelectFilter,
+  useTablePrefs,
 } from "@/components/real-estate/workspace";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
@@ -101,14 +102,28 @@ const EMPTY_FILTERS: Filters = {
 
 const PAGE_SIZE = 10;
 
+// localStorage key for the "working" filter session (search + quick filters +
+// advanced conditions). Sorting is persisted separately by the DataTable under
+// `rebm:table:employee-master`, so we read it from useTablePrefs rather than
+// duplicating it here. Bump the version suffix if the Filters shape changes.
+const FILTER_SESSION_KEY = "employee-master:filter-session-v1";
+
 export default function EmployeeMasterListPage() {
   const { toast } = useToast();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
   const [page, setPage] = useState(0);
-  const [sort, setSort] = useState<{ by: string; dir: "asc" | "desc" } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
+
+  // Sorting is the persisted source of truth: the DataTable writes the user's
+  // sort choice to localStorage (rebm:table:employee-master) and our own
+  // useTablePrefs instance for the same tableId stays in sync via the
+  // same-window storage event. Driving the server query straight off
+  // `tablePrefs.sort` is what makes the sort SURVIVE A RELOAD — previously the
+  // page held sort in transient state that reset to null on refresh, so the
+  // saved arrow showed but the query never actually sorted.
+  const { prefs: tablePrefs } = useTablePrefs("employee-master");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -135,6 +150,47 @@ export default function EmployeeMasterListPage() {
     setPage(0);
   };
 
+  // ── Persist the working filter session ──────────────────────────────────
+  // Restore the last-used search/filters/conditions once on mount, then write
+  // them back whenever they change. This makes the user's filtering "stick"
+  // across reloads and navigation — independent of the named Saved Views,
+  // which remain an explicit save/recall mechanism. `restoredRef` guards the
+  // persist effect so the first render (still holding EMPTY_FILTERS) can't
+  // clobber the saved session before we've restored it.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const raw = localStorage.getItem(FILTER_SESSION_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        filters?: Partial<Filters>;
+        conditions?: FilterCondition[];
+      };
+      if (saved.filters) {
+        const merged = { ...EMPTY_FILTERS, ...saved.filters };
+        setFilters(merged);
+        setSearchInput(merged.search ?? "");
+      }
+      if (Array.isArray(saved.conditions)) setConditions(saved.conditions);
+    } catch {
+      /* corrupt session — ignore and start clean */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    try {
+      localStorage.setItem(
+        FILTER_SESSION_KEY,
+        JSON.stringify({ filters, conditions }),
+      );
+    } catch {
+      /* quota / unavailable — non-fatal */
+    }
+  }, [filters, conditions]);
+
   // Server-side filtering + pagination — every filter / search / sort / page
   // is sent to the API which returns only the current page plus the total
   // count. Conditions are mapped to the {fieldId, operator, value, value2}
@@ -149,8 +205,8 @@ export default function EmployeeMasterListPage() {
       department: filters.department || undefined,
       minSalary: filters.minSalary || undefined,
       maxSalary: filters.maxSalary || undefined,
-      sortBy: sort?.by,
-      sortDir: sort?.dir,
+      sortBy: tablePrefs.sort?.column,
+      sortDir: tablePrefs.sort?.direction,
       conditions: conditions.map((c) => ({
         fieldId: c.fieldId,
         operator: c.operator,
@@ -158,7 +214,7 @@ export default function EmployeeMasterListPage() {
         value2: c.value2,
       })),
     }),
-    [page, filters, sort, conditions],
+    [page, filters, tablePrefs.sort, conditions],
   );
 
   const { data, isLoading, isFetching } = useGetEmployeeListQuery(queryArgs);
@@ -1031,8 +1087,10 @@ export default function EmployeeMasterListPage() {
                   total,
                   onPageChange: setPage,
                 }}
-                onSortChange={(column, direction) => {
-                  setSort(column && direction ? { by: column, dir: direction } : null);
+                onSortChange={() => {
+                  // The DataTable persists the new sort to localStorage; our
+                  // useTablePrefs instance picks it up and re-runs the query.
+                  // We only need to jump back to the first page here.
                   setPage(0);
                 }}
                 selectedId={selectedId}

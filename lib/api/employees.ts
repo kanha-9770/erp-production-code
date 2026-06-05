@@ -195,7 +195,16 @@ export const employeesApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: [{ type: "Employees", id: "LIST" }],
+      // An employee, the linked User account, the logged-in user's own
+      // profile, and the user-management list are all the SAME identity. The
+      // backend keeps them in sync (see updateEmployee handler), so the client
+      // caches must refresh together — otherwise an edit shows in one screen
+      // and stays stale in another. Invalidate the whole identity set.
+      invalidatesTags: [
+        { type: "Employees", id: "LIST" },
+        "User",
+        "AdminUsers",
+      ],
     }),
 
     updateEmployee: builder.mutation<
@@ -207,9 +216,14 @@ export const employeesApi = baseApi.injectEndpoints({
         method: "PUT",
         body,
       }),
+      // See createEmployee: refresh the linked User account, the logged-in
+      // user's own profile (/auth/me powers the header avatar + /profile), and
+      // the user-management list, in addition to this employee + the list.
       invalidatesTags: (_r, _e, { id }) => [
         { type: "Employee", id },
         { type: "Employees", id: "LIST" },
+        "User",
+        "AdminUsers",
       ],
     }),
 
@@ -221,6 +235,8 @@ export const employeesApi = baseApi.injectEndpoints({
       invalidatesTags: (_r, _e, id) => [
         { type: "Employee", id },
         { type: "Employees", id: "LIST" },
+        "User",
+        "AdminUsers",
       ],
     }),
   }),

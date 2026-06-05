@@ -279,7 +279,9 @@ export const authApi = baseApi.injectEndpoints({
         method: "POST",
         body: formData,
       }),
-      invalidatesTags: ["User"],
+      // Avatar/name/contact are shared with the linked employee + user-mgmt
+      // list, so a self-edit must refresh those screens too, not just "User".
+      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Remove avatar
@@ -288,7 +290,7 @@ export const authApi = baseApi.injectEndpoints({
         url: "/auth/remove-avatar",
         method: "POST",
       }),
-      invalidatesTags: ["User"],
+      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Update profile
@@ -298,7 +300,7 @@ export const authApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["User"],
+      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Get user by ID (for OTP verification flow)
