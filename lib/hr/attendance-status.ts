@@ -14,11 +14,15 @@
  *
  * Order of precedence (first match wins):
  *   1. Live punch (checkedIn && !checkedOut) → WORKING
- *   2. Auto-checkout + NO OT opt-in          → AUTO_CHECKOUT (₹0 day)
+ *   2. Auto-checkout + NO OT opt-in          → AUTO_CHECKOUT (₹0 day, but a
+ *      paid short-leave window on the same day still pays — see below)
  *      (When the employee toggled OT on for the row before the auto-
  *      checkout fired, they signaled intent to stay — we treat the row
  *      as a normal punch and let the org's OT cap protect against the
- *      inflated 24h-cap hours.)
+ *      inflated 24h-cap hours. An auto-checkout voids the WORKED hours,
+ *      but an approved paid short leave on the day keeps paying its
+ *      granted window — the payroll classifier credits it, so the badge
+ *      tooltip must say so too rather than claiming a flat ₹0.)
  *   3. Approved leave covers part of the day  → worked hours only have to
  *      (leaveDayFraction > 0)                   cover the REMAINING fraction;
  *                                               full day if they do, else
@@ -81,6 +85,15 @@ export interface AttendanceStatusInput {
    *  full-day requirement" — penalising them for the half they were on leave.
    *  Defaults to 0 (no leave), so existing callers are unaffected. */
   leaveDayFraction?: number | null;
+  /** Hours from an approved PAID short leave that still pay even when an
+   *  auto-checkout voids the day's worked hours. Mirrors the payroll
+   *  classifier's short-leave rescue (`shortLeaveCreditH`): on an
+   *  AUTO_CHECKOUT row this is what keeps the day from being a flat ₹0, so
+   *  the badge tooltip can name the surviving paid hours instead of wrongly
+   *  saying "Salary = ₹0". Pass ONLY short-leave hours here — half-day
+   *  leaves are NOT rescued by payroll on auto-checkout, so feeding their
+   *  hours would over-promise pay. Defaults to 0. */
+  autoCheckoutPaidLeaveHours?: number | null;
 }
 
 export interface AttendanceStatusThresholds {
@@ -152,10 +165,15 @@ export function computeEffectiveStatus(
   // payroll's overtimeMaxHoursPerDay cap protects against the 24h-cap
   // hours inflating gross.
   if (input.isAutoCheckedOut && !input.overtimeOptedIn) {
+    const paidLeaveHours = Math.max(0, input.autoCheckoutPaidLeaveHours ?? 0);
     return {
       status: 'AUTO_CHECKOUT',
       reason:
-        "Forgot to check out — system auto-closed this day. Salary = ₹0. Toggle Overtime before leaving if you plan to stay late.",
+        paidLeaveHours > 0
+          ? `Forgot to check out — system auto-closed this day, so the hours you worked aren't paid. Only your approved ${
+              +paidLeaveHours.toFixed(2)
+            }h of short leave is paid for this day. Toggle Overtime before leaving if you plan to stay late.`
+          : "Forgot to check out — system auto-closed this day. Salary = ₹0. Toggle Overtime before leaving if you plan to stay late.",
     };
   }
 
