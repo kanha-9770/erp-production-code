@@ -95,6 +95,16 @@ interface DataTableProps<T> {
     total: number; // total rows across all pages
     onPageChange: (page: number) => void;
   };
+  /**
+   * Opt-in row selection (checkboxes in the gutter + select-all on the current
+   * page + shift-click range). Omit entirely and the table behaves exactly as
+   * before — no checkbox column, identical layout. The parent owns the set and
+   * decides what the bulk actions are.
+   */
+  selection?: {
+    selectedIds: Set<string>;
+    onChange: (next: Set<string>) => void;
+  };
 }
 
 interface CellRef { r: number; c: number }
@@ -161,6 +171,7 @@ export function DataTable<T>({
   onSortChange,
   pageSize,
   serverPagination,
+  selection,
 }: DataTableProps<T>) {
   const { prefs, isHidden, toggleHidden, setWidth, setSort, setDensity } =
     useTablePrefs(tableId);
@@ -334,6 +345,48 @@ export function DataTable<T>({
     };
   }, [sel]);
 
+  // ── Row selection (opt-in via `selection`) ────────────────────────────────
+  // Operates on the CURRENT PAGE's rows; the parent set persists across pages.
+  const pageIds = useMemo(() => rows.map(rowId), [rows, rowId]);
+  const lastIndexRef = useRef<number | null>(null);
+  const selectedSet = selection?.selectedIds;
+  const pageAllSelected =
+    !!selection && pageIds.length > 0 && pageIds.every((id) => selectedSet!.has(id));
+  const pageSomeSelected =
+    !!selection && !pageAllSelected && pageIds.some((id) => selectedSet!.has(id));
+
+  const toggleAllOnPage = useCallback(() => {
+    if (!selection) return;
+    const next = new Set(selection.selectedIds);
+    if (pageAllSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    selection.onChange(next);
+  }, [selection, pageAllSelected, pageIds]);
+
+  const toggleRowAt = useCallback(
+    (index: number, shift: boolean) => {
+      if (!selection) return;
+      const next = new Set(selection.selectedIds);
+      const id = pageIds[index];
+      const willSelect = !next.has(id);
+      if (shift && lastIndexRef.current != null) {
+        const lo = Math.min(lastIndexRef.current, index);
+        const hi = Math.max(lastIndexRef.current, index);
+        for (let i = lo; i <= hi; i++) {
+          if (willSelect) next.add(pageIds[i]);
+          else next.delete(pageIds[i]);
+        }
+      } else if (willSelect) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      lastIndexRef.current = index;
+      selection.onChange(next);
+    },
+    [selection, pageIds],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -376,11 +429,30 @@ export function DataTable<T>({
               Same reason for the gutter corner cell below. */}
           <thead className="sticky top-0 z-30 bg-muted">
             <tr>
-              {/* Row gutter corner */}
+              {/* Row gutter corner — holds the select-all checkbox when row
+                  selection is enabled, otherwise an empty sticky corner. */}
               <th
-                className="bg-muted border-b border-r border-border h-9 md:sticky md:left-0 z-40"
-                aria-hidden
-              />
+                className="bg-muted border-b border-r border-border h-9 md:sticky md:left-0 z-40 p-0"
+                aria-hidden={!selection}
+              >
+                {selection && rows.length > 0 && (
+                  <div className="flex items-center justify-center">
+                    <Checkbox
+                      aria-label="Select all on this page"
+                      checked={
+                        pageAllSelected
+                          ? true
+                          : pageSomeSelected
+                            ? "indeterminate"
+                            : false
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      onCheckedChange={() => toggleAllOnPage()}
+                      className="h-3.5 w-3.5"
+                    />
+                  </div>
+                )}
+              </th>
               {visible.map((col, idx) => {
                 const isPinned = !isMobile && pinnedSet.has(col.id);
                 const sortDir =
@@ -495,6 +567,7 @@ export function DataTable<T>({
               rows.map((row, rIdx) => {
                 const id = rowId(row);
                 const isRowSelected = id === selectedId;
+                const isRowChecked = !!selection && selectedSet!.has(id);
                 const isInRange = range && rIdx >= range.r0 && rIdx <= range.r1;
                 return (
                   <tr
@@ -503,10 +576,13 @@ export function DataTable<T>({
                     aria-selected={isRowSelected}
                     className={cn(
                       "transition-colors",
+                      selection && "group",
                       onRowClick && "cursor-pointer",
-                      isRowSelected
-                        ? "bg-primary/[0.08] hover:bg-primary/[0.12]"
-                        : "hover:bg-muted/40",
+                      isRowChecked
+                        ? "bg-primary/[0.06] hover:bg-primary/[0.10]"
+                        : isRowSelected
+                          ? "bg-primary/[0.08] hover:bg-primary/[0.12]"
+                          : "hover:bg-muted/40",
                     )}
                   >
                     {/* Row number gutter — Excel-style 1, 2, 3 ...
@@ -528,7 +604,38 @@ export function DataTable<T>({
                         isolation: "isolate",
                       }}
                     >
-                      {pageStart + rIdx + 1}
+                      {selection ? (
+                        <div className="relative flex items-center justify-center">
+                          {/* Row number by default; checkbox on hover or when
+                              the row is checked (keeps the Excel look at rest). */}
+                          <span
+                            className={cn(
+                              isRowChecked ? "invisible" : "group-hover:invisible",
+                            )}
+                          >
+                            {pageStart + rIdx + 1}
+                          </span>
+                          <span
+                            className={cn(
+                              "absolute inset-0 flex items-center justify-center",
+                              isRowChecked ? "flex" : "hidden group-hover:flex",
+                            )}
+                          >
+                            <Checkbox
+                              aria-label="Select row"
+                              checked={isRowChecked}
+                              onClick={(e) => {
+                                // Don't open the preview or fight cell selection.
+                                e.stopPropagation();
+                                toggleRowAt(rIdx, (e as React.MouseEvent).shiftKey);
+                              }}
+                              className="h-3.5 w-3.5"
+                            />
+                          </span>
+                        </div>
+                      ) : (
+                        pageStart + rIdx + 1
+                      )}
                     </td>
                     {visible.map((col, cIdx) => {
                       const isPinned = !isMobile && pinnedSet.has(col.id);

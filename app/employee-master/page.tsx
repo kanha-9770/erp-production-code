@@ -13,13 +13,16 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useGetEmployeeListQuery,
+  useLazyGetEmployeeListQuery,
   useGetEmployeeQuery,
   useUpdateEmployeeMutation,
   useCreateEmployeeMutation,
   useDeleteEmployeeMutation,
+  useBulkUpdateEmployeesMutation,
   type EmployeeListItem,
   type EmployeeStatus,
 } from "@/lib/api/employees";
+import { exportTableRows, type ExportColumn } from "@/lib/export/table-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +32,7 @@ import {
   Users, Plus, Search, Mail, Phone, Calendar, MapPin, Building2, User2,
   Briefcase, CreditCard, Pencil, ExternalLink, Trash2, ChevronLeft, ChevronRight,
   ImageOff, UserCircle, X as XIcon, Loader2,
+  Download, ChevronDown, Layers, IndianRupee, CircleDollarSign,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -42,6 +46,7 @@ import {
   useTablePrefs,
 } from "@/components/real-estate/workspace";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
@@ -115,6 +120,12 @@ export default function EmployeeMasterListPage() {
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
+  // Bulk row selection (ids can span pages). The DataTable drives this set.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Group By dimension for the ERPNext-style count chips. "none" hides them.
+  const [groupBy, setGroupBy] = useState<"none" | "department" | "status">("none");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
 
   // Sorting is the persisted source of truth: the DataTable writes the user's
   // sort choice to localStorage (rebm:table:employee-master) and our own
@@ -199,6 +210,8 @@ export default function EmployeeMasterListPage() {
     () => ({
       page,
       pageSize: PAGE_SIZE,
+      // Roll-up totals + group-by counts for the summary strip / Group By chips.
+      withAggregates: true,
       search: filters.search || undefined,
       status: filters.status || undefined,
       gender: filters.gender || undefined,
@@ -221,6 +234,7 @@ export default function EmployeeMasterListPage() {
   // The server already filtered + paginated, so the rows we got ARE the page.
   const items = data?.employees ?? [];
   const total = data?.total ?? 0;
+  const aggregates = data?.aggregates;
 
   // If the current page falls past the end of the result set (e.g. the last
   // row on the last page was deleted, or a filter shrank the total), snap
@@ -234,6 +248,16 @@ export default function EmployeeMasterListPage() {
   const [createEmployee, { isLoading: creating }] = useCreateEmployeeMutation();
   const [updateEmployee] = useUpdateEmployeeMutation();
   const [deleteEmployee] = useDeleteEmployeeMutation();
+  const [bulkUpdate, { isLoading: bulkBusy }] = useBulkUpdateEmployeesMutation();
+  const [fetchAllMatching, { isFetching: exportingAll }] = useLazyGetEmployeeListQuery();
+
+  // Clear the bulk selection whenever the RESULT SET changes (filters / search /
+  // conditions / sort) — the selected ids may no longer be in scope. Paging is
+  // intentionally excluded so a user can accumulate a selection across pages.
+  const clearSelection = () => setSelectedIds(new Set());
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [filters, conditions, tablePrefs.sort]);
 
   const isDirty = useMemo(() => {
     if (views.activeId == null) {
@@ -307,9 +331,21 @@ export default function EmployeeMasterListPage() {
       header: "",
       width: 56,
       pinned: true,
-      cell: () => (
-        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-          <UserCircle className="h-6 w-6 text-primary/60" />
+      cell: (e) => (
+        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+          {e.employeeImage ? (
+            // Same photo the person set on their profile — kept in sync via
+            // syncUserToEmployee (employeeImage). eslint-disable: this is a
+            // remote CDN URL, next/image isn't configured for it here.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={e.employeeImage}
+              alt={e.employeeName}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <UserCircle className="h-6 w-6 text-primary/60" />
+          )}
         </div>
       ),
     },
@@ -354,6 +390,7 @@ export default function EmployeeMasterListPage() {
       align: "right",
       sortKey: "totalSalary",
       group: "Overview",
+      copyValue: (e) => String(Number(e.totalSalary || 0)),
       cell: (e) => <span className="font-semibold">₹{Number(e.totalSalary || 0).toLocaleString()}</span>,
     },
     {
@@ -361,6 +398,7 @@ export default function EmployeeMasterListPage() {
       header: "Contact",
       width: 220,
       group: "Overview",
+      copyValue: (e) => [e.emailAddress1, e.personalContact].filter(Boolean).join(" / "),
       cell: (e) => (
         <div className="flex flex-col text-xs gap-0.5">
           <div className="flex items-center gap-1.5 text-primary hover:underline truncate">
@@ -380,6 +418,10 @@ export default function EmployeeMasterListPage() {
       width: 130,
       sortKey: "dateOfJoining",
       group: "Overview",
+      copyValue: (e) =>
+        e.dateOfJoining
+          ? new Date(e.dateOfJoining).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+          : "",
       cell: (e) => (
         <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
           <Calendar className="h-3 w-3" />
@@ -927,6 +969,126 @@ export default function EmployeeMasterListPage() {
     }
   };
 
+  // ── Export ────────────────────────────────────────────────────────────────
+  // Export the CURRENTLY VISIBLE columns (same tri-state visibility the
+  // DataTable uses). Each value comes from the column's copyValue, falling back
+  // to the row field whose name matches the column id (most optional columns'
+  // ids equal their EmployeeListItem field), so the file mirrors the table.
+  const exportColumns: ExportColumn<EmployeeListItem>[] = useMemo(() => {
+    const hidden = tablePrefs.hidden;
+    const isVisible = (c: ColumnDef<EmployeeListItem>) => {
+      if (c.pinned) return true;
+      const explicit = hidden[c.id];
+      if (explicit === true) return false;
+      if (explicit === false) return true;
+      return !c.defaultHidden;
+    };
+    const stringify = (v: unknown) =>
+      v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    return columns
+      .filter(isVisible)
+      .map((c) => {
+        const header = typeof c.header === "string" ? c.header.trim() : "";
+        // Skip decorative columns with no header AND no copyValue (e.g. avatar).
+        if (!header && !c.copyValue) return null;
+        return {
+          header: header || c.id,
+          value: (row: EmployeeListItem) =>
+            c.copyValue ? c.copyValue(row) : stringify((row as any)[c.id]),
+        } as ExportColumn<EmployeeListItem>;
+      })
+      .filter(Boolean) as ExportColumn<EmployeeListItem>[];
+  }, [columns, tablePrefs.hidden]);
+
+  const runExport = async (rows: EmployeeListItem[], format: "xlsx" | "csv") => {
+    if (rows.length === 0) {
+      toast({ title: "Nothing to export", description: "No matching employees." });
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    await exportTableRows({ rows, columns: exportColumns, filename: `employees-${stamp}`, format });
+  };
+
+  // Pull EVERY matching row (same filters/sort, no pagination) — the endpoint
+  // returns all rows when pageSize is omitted. Used by "all" and "selected".
+  const fetchAllRows = async (): Promise<EmployeeListItem[]> => {
+    const res = await fetchAllMatching({
+      ...queryArgs,
+      page: 0,
+      pageSize: undefined,
+      withAggregates: false,
+    }).unwrap();
+    return res.employees ?? [];
+  };
+
+  const exportCurrentPage = (format: "xlsx" | "csv") => runExport(items, format);
+  const exportAllMatching = async (format: "xlsx" | "csv") => {
+    try {
+      await runExport(await fetchAllRows(), format);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Export failed", description: err?.data?.error || err?.message });
+    }
+  };
+  const exportSelected = async (format: "xlsx" | "csv") => {
+    if (selectedIds.size === 0) return;
+    try {
+      // Selected ids may span pages — pull all matching, then filter to them.
+      const rows = (await fetchAllRows()).filter((e) => selectedIds.has(e.id));
+      await runExport(rows, format);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Export failed", description: err?.data?.error || err?.message });
+    }
+  };
+
+  // ── Bulk actions ────────────────────────────────────────────────────────────
+  const selectedArr = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const handleBulkStatus = async (status: EmployeeStatus) => {
+    try {
+      const res = await bulkUpdate({ action: "status", ids: selectedArr, status }).unwrap();
+      toast({ title: `Updated ${res.affected} employee${res.affected === 1 ? "" : "s"}` });
+      clearSelection();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Bulk update failed", description: err?.data?.error || err?.message });
+    }
+  };
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedArr.length} selected employee${selectedArr.length === 1 ? "" : "s"}? They will be moved to Trash.`)) return;
+    try {
+      const res = await bulkUpdate({ action: "delete", ids: selectedArr }).unwrap();
+      if (selectedId && selectedIds.has(selectedId)) setSelectedId(null);
+      toast({ title: `Deleted ${res.affected} employee${res.affected === 1 ? "" : "s"}` });
+      clearSelection();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Bulk delete failed", description: err?.data?.error || err?.message });
+    }
+  };
+
+  // ── Group By chips (ERPNext-style live counts that filter on click) ──────────
+  const groupChips = useMemo(() => {
+    if (groupBy === "none" || !aggregates) return [];
+    if (groupBy === "status") {
+      return STATUS_OPTIONS.map((s) => ({
+        value: s.value,
+        label: s.label,
+        count: aggregates.statusCounts[s.value] ?? 0,
+        active: filters.status === s.value,
+      })).filter((c) => c.count > 0 || c.active);
+    }
+    return aggregates.departmentCounts.map((d) => ({
+      value: d.department,
+      label: d.department,
+      count: d.count,
+      active: filters.department === d.department,
+    }));
+  }, [groupBy, aggregates, filters.status, filters.department]);
+
+  const onGroupChipClick = (value: string) => {
+    const key: keyof Filters = groupBy === "status" ? "status" : "department";
+    updateFilter(key, (filters[key] === value ? "" : value) as Filters[typeof key]);
+  };
+
+  const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
   return (
     <>
       <WorkspaceShell
@@ -1004,6 +1166,47 @@ export default function EmployeeMasterListPage() {
                 columns={columns}
                 variant="dialog"
               />
+              {/* Export — current page or the full filtered set, as Excel or
+                  CSV. "All matching" re-fetches every row (no pagination). */}
+              <Popover open={exportOpen} onOpenChange={setExportOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2 sm:px-3 shrink-0"
+                    disabled={exportingAll}
+                    aria-label="Export"
+                  >
+                    {exportingAll ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin sm:mr-1" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5 sm:mr-1" />
+                    )}
+                    <span className="hidden sm:inline">Export</span>
+                    <ChevronDown className="h-3 w-3 ml-0.5 hidden sm:inline opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} className="w-56 p-1.5">
+                  <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Current page
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs"
+                      onClick={() => { exportCurrentPage("xlsx"); setExportOpen(false); }}>Excel</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs"
+                      onClick={() => { exportCurrentPage("csv"); setExportOpen(false); }}>CSV</Button>
+                  </div>
+                  <div className="px-2 py-1 mt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    All matching ({total.toLocaleString()})
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs"
+                      onClick={() => { exportAllMatching("xlsx"); setExportOpen(false); }}>Excel</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs"
+                      onClick={() => { exportAllMatching("csv"); setExportOpen(false); }}>CSV</Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
               {/* + New collapses to icon + "New" on mobile so the four
                   action buttons (Search, Filter, Columns, + New) all fit
                   on one row. */}
@@ -1070,10 +1273,131 @@ export default function EmployeeMasterListPage() {
                 onClearAll={() => { setFilters(EMPTY_FILTERS); setSearchInput(""); }}
               />
             </div>
+
+            {/* Summary roll-ups (over the FULL filtered set) + Group By switch. */}
+            <div className="px-4 sm:px-6 pb-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-2 text-xs">
+              <div className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">Headcount</span>
+                <span className="font-semibold tabular-nums">{total.toLocaleString()}</span>
+              </div>
+              {aggregates && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <CircleDollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Total salary</span>
+                    <span className="font-semibold tabular-nums">{inr(aggregates.totalSalarySum)}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-muted-foreground">Avg salary</span>
+                    <span className="font-semibold tabular-nums">{inr(aggregates.avgSalary)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex items-center gap-1 ml-auto">
+                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground mr-0.5">Group by</span>
+                {(["none", "department", "status"] as const).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGroupBy(g)}
+                    className={cn(
+                      "px-2 py-0.5 rounded-md text-[11px] capitalize transition-colors",
+                      groupBy === g
+                        ? "bg-primary text-primary-foreground"
+                        : "hover:bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Group By chips — live counts that filter the list on click. */}
+            {groupBy !== "none" && groupChips.length > 0 && (
+              <div className="px-4 sm:px-6 pb-2 flex items-center gap-1.5 overflow-x-auto">
+                {groupChips.map((chip) => (
+                  <button
+                    key={chip.value}
+                    type="button"
+                    onClick={() => onGroupChipClick(chip.value)}
+                    className={cn(
+                      "shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition-colors",
+                      chip.active
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background hover:bg-muted border-border",
+                    )}
+                  >
+                    <span className="font-medium">{chip.label}</span>
+                    <span
+                      className={cn(
+                        "tabular-nums rounded-full px-1.5",
+                        chip.active ? "bg-primary-foreground/20" : "bg-muted",
+                      )}
+                    >
+                      {chip.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         }
         list={
           <div className="flex flex-col h-full">
+            {/* Bulk action bar — appears only when rows are selected. Actions
+                hit real endpoints (status change / soft-delete) + export. */}
+            {selectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b bg-primary/[0.04] text-xs shrink-0">
+                <span className="font-medium tabular-nums">
+                  {selectedIds.size} selected
+                </span>
+                <div className="h-4 w-px bg-border mx-0.5" />
+                {/* Change status */}
+                <Popover open={bulkStatusOpen} onOpenChange={setBulkStatusOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-7 px-2 gap-1" disabled={bulkBusy}>
+                      Set status <ChevronDown className="h-3 w-3 opacity-60" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" sideOffset={6} className="w-44 p-1.5">
+                    {STATUS_OPTIONS.map((s) => (
+                      <Button
+                        key={s.value}
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start h-7 text-xs"
+                        onClick={() => { handleBulkStatus(s.value as EmployeeStatus); setBulkStatusOpen(false); }}
+                      >
+                        {s.label}
+                      </Button>
+                    ))}
+                  </PopoverContent>
+                </Popover>
+                {/* Export selected */}
+                <Button variant="outline" size="sm" className="h-7 px-2 gap-1"
+                  disabled={exportingAll}
+                  onClick={() => exportSelected("xlsx")}>
+                  {exportingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                  Export
+                </Button>
+                {/* Delete */}
+                <Button variant="outline" size="sm"
+                  className="h-7 px-2 gap-1 text-destructive hover:text-destructive"
+                  disabled={bulkBusy}
+                  onClick={handleBulkDelete}>
+                  {bulkBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  Delete
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 ml-auto"
+                  onClick={clearSelection}>
+                  Clear
+                </Button>
+              </div>
+            )}
             <div className="flex-1 min-h-0">
               <DataTable<EmployeeListItem>
                 tableId="employee-master"
@@ -1081,6 +1405,7 @@ export default function EmployeeMasterListPage() {
                 rows={items}
                 rowId={(e) => e.id}
                 isLoading={isLoading}
+                selection={{ selectedIds, onChange: setSelectedIds }}
                 serverPagination={{
                   page,
                   pageSize: PAGE_SIZE,

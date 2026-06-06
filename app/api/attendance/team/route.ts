@@ -351,6 +351,15 @@ export async function GET(request: NextRequest) {
           leaveInfo,
           cfg.fullDayMinHours,
         );
+        // Hours of an approved short leave that still pay through an
+        // auto-checkout (mirrors payroll's short-leave rescue). For a short
+        // leave, leaveDayFraction is window÷full-day, so ×full-day recovers
+        // the window hours. Gated on SHORT_LEAVE: half-day leaves are NOT
+        // rescued on auto-checkout, so they must not soften the ₹0 tooltip.
+        const autoCheckoutPaidLeaveHours =
+          leaveInfo?.kind === 'SHORT_LEAVE'
+            ? leaveDayFraction * cfg.fullDayMinHours
+            : 0;
         const verdict = computeEffectiveStatus(
           {
             checkedIn: !!r.checkedIn,
@@ -360,6 +369,7 @@ export async function GET(request: NextRequest) {
             workedMinutes,
             lateMinutes: (r as any).lateMinutes ?? 0,
             leaveDayFraction,
+            autoCheckoutPaidLeaveHours,
           },
           {
             halfDayMinHours: cfg.halfDayMinHours,
