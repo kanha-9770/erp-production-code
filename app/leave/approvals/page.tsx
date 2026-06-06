@@ -501,7 +501,7 @@ export default function ApprovalsPage() {
             <Textarea
               value={approveNote}
               onChange={(e) => setApproveNote(e.target.value)}
-              placeholder="e.g. Approved — happy birthday from the whole team! 🎉"
+              placeholder="e.g. Approved 🎉"
               rows={3}
             />
           </div>
