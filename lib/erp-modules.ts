@@ -111,6 +111,15 @@ export const ERP_MODULES: ErpModuleDef[] = [
     groups: ["Purchase"],
     routePrefixes: ["/purchase-management"],
   },
+  {
+    id: "accounts",
+    label: "Accounts & Finance",
+    sidebarLabel: "Accounts",
+    description: "Payables & finance: supplier payment requests",
+    icon: "banknote",
+    groups: ["Accounts"],
+    routePrefixes: ["/accounts"],
+  },
 ];
 
 /** Default modules picked for brand-new orgs if the user submits none. */

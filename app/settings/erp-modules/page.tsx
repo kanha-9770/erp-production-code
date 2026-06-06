@@ -17,6 +17,8 @@ import {
   Building2,
   Boxes,
   Package,
+  Banknote,
+  ShoppingCart,
   ShieldAlert,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -32,6 +34,10 @@ function moduleIcon(name: string) {
       return Boxes
     case "package":
       return Package
+    case "banknote":
+      return Banknote
+    case "shopping-cart":
+      return ShoppingCart
     default:
       return Building2
   }

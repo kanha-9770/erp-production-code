@@ -70,14 +70,21 @@ export function LineItemsField({
   value: unknown;
   onChange: (rows: Row[]) => void;
 }) {
-  const { getPoTrace, getOpenPoOptions, getOpenPrOptions } = usePurchase();
+  const { getPoTrace, getOpenPoOptions, getOpenPrOptions, getMasterOptions } = usePurchase();
   const rows = asRows(value);
   const columns = field.columns ?? [];
   const noun = field.rowNoun ?? "Row";
+  // Receipt badges (Pending/Partial/Full) only make sense for GRN-style lines
+  // that carry invoice/received quantities. Plain item lists hide them.
+  const tracksReceipt = columns.some(
+    (c) => c.key === "invoiceQty" || c.key === "receivedQty" || c.type === "lineItems",
+  );
 
   const optionsFor = (col: FieldDef, current: string): OpenDocOption[] | undefined => {
     if (col.optionsSource === "openPo") return getOpenPoOptions(current);
     if (col.optionsSource === "openPr") return getOpenPrOptions(current);
+    if (col.type === "master" && col.master)
+      return getMasterOptions(col.master).map((o) => ({ value: o.value, label: o.value, balance: 0 }));
     return undefined;
   };
 
@@ -135,10 +142,12 @@ export function LineItemsField({
                 <span className="text-xs font-semibold text-muted-foreground">
                   {noun} {idx + 1}
                 </span>
-                <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
-                  {RECEIPT_LABEL[receiptType]}
-                </Badge>
-                {balance > 0 && (
+                {tracksReceipt && (
+                  <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
+                    {RECEIPT_LABEL[receiptType]}
+                  </Badge>
+                )}
+                {tracksReceipt && balance > 0 && (
                   <span className="text-xs text-muted-foreground">Balance {formatNumber(balance)}</span>
                 )}
               </div>
@@ -220,12 +229,11 @@ function SubField({
     </Label>
   );
 
-  // Dynamic dropdown (open POs / PRs) or a static select.
-  if (field.type === "select") {
+  // Dropdown: a master (options injected), a dynamic open-PO/PR list, or a
+  // static select.
+  if (field.type === "select" || field.type === "master") {
     const list =
-      field.optionsSource && options
-        ? options
-        : (field.options ?? []).map((o) => ({ value: o.value, label: o.label, balance: 0 }));
+      options ?? (field.options ?? []).map((o) => ({ value: o.value, label: o.label, balance: 0 }));
     return (
       <div className="space-y-1">
         {label}
@@ -240,7 +248,9 @@ function SubField({
               </SelectItem>
             ))}
             {list.length === 0 && (
-              <div className="px-2 py-2 text-xs text-muted-foreground">No open documents</div>
+              <div className="px-2 py-2 text-xs text-muted-foreground">
+                {field.optionsSource ? "No open documents" : "No options"}
+              </div>
             )}
           </SelectContent>
         </Select>

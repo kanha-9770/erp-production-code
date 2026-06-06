@@ -106,7 +106,7 @@ export const SEED_MASTERS: MasterType[] = [
     icon: "wallet",
     usedBy: ["sourcing", "po", "payment"],
     system: true,
-    options: opts(["Advance", "50% Advance", "Net 15", "Net 30", "Net 45", "Net 60", "On Delivery"]),
+    options: opts(["100% Advance", "Credit", "Advance + Credit", "Advance + Before Delivery", "Cash on Delivery"]),
   },
   {
     key: "category",
@@ -238,6 +238,11 @@ const APPROVAL_OPTS = [
   { value: "APPROVED", label: "Approved" },
   { value: "REJECTED", label: "Rejected" },
 ];
+const PAY_METHOD_OPTS = [
+  { value: "Cash", label: "Cash" },
+  { value: "UPI", label: "UPI" },
+  { value: "By Bank", label: "By Bank" },
+];
 const INSPECTION_OPTS = [
   { value: "PENDING", label: "Pending" },
   { value: "PASSED", label: "Passed" },
@@ -286,22 +291,34 @@ export const PR_SCHEMA: SubmoduleSchema = {
     { key: "department", label: "Department", type: "master", master: "department", section: "Requisition", required: true, inTable: true, width: 140 },
     { key: "requestedBy", label: "Requested By", type: "text", section: "Requisition", inTable: true, width: 150 },
     { key: "priority", label: "Priority", type: "master", master: "priority", section: "Requisition", inTable: true, width: 110 },
-
-    { key: "itemName", label: "Item", type: "text", section: "Item Details", required: true, inTable: true, width: 180 },
-    { key: "itemDescription", label: "Item Description", type: "text", section: "Item Details", inTable: true, width: 240, placeholder: "Specification / description" },
-    { key: "category", label: "Category", type: "master", master: "category", section: "Item Details", inTable: true, width: 140 },
-    { key: "quantity", label: "Quantity", type: "number", section: "Item Details", defaultValue: 0, inTable: true, width: 110, align: "right" },
-    { key: "uom", label: "UOM", type: "master", master: "uom", section: "Item Details", inTable: true, width: 90 },
-    { key: "requiredBy", label: "Required By", type: "date", section: "Item Details", inTable: true, width: 130 },
-    { key: "purpose", label: "Purpose", type: "text", section: "Item Details", inTable: true, width: 180, placeholder: "Reason for requisition" },
-    { key: "estRate", label: "Est. Rate", type: "currency", section: "Item Details", defaultValue: 0, inTable: true, defaultHidden: true, width: 120, align: "right" },
-
     // Procurement route — NEW items go through sourcing & supplier selection;
-    // REPEAT items reuse the preferred supplier + last rate and skip sourcing.
+    // REPEAT items are picked from Store Inventory and reuse supplier + last rate.
     { key: "purchaseType", label: "Purchase Type", type: "select", options: [
       { value: "NEW", label: "New Item" },
       { value: "REPEAT", label: "Repeat Purchase" },
-    ], defaultValue: "NEW", section: "Procurement Route", inTable: true, width: 140 },
+    ], defaultValue: "NEW", section: "Requisition", inTable: true, width: 140 },
+
+    // Every requisition (New or Repeat) captures its line items in the Items
+    // subform below, so several items can be raised at once. These flat fields
+    // are NOT shown on the form — they mirror the first line so the list view,
+    // preview and item-history lookups keep working unchanged.
+    { key: "itemName", label: "Item", type: "text", section: "Item Details", formHidden: true, inTable: true, width: 180 },
+    { key: "itemDescription", label: "Item Description", type: "text", section: "Item Details", formHidden: true, inTable: true, width: 240 },
+    { key: "category", label: "Category", type: "master", master: "category", section: "Item Details", formHidden: true, inTable: true, width: 140 },
+    { key: "quantity", label: "Quantity", type: "number", section: "Item Details", formHidden: true, defaultValue: 0, inTable: true, width: 110, align: "right" },
+    { key: "uom", label: "UOM", type: "master", master: "uom", section: "Item Details", formHidden: true, inTable: true, width: 90 },
+    // The items grid — one row per item, added manually (New) or picked from
+    // Store Inventory (Repeat).
+    { key: "items", label: "Items", type: "lineItems", section: "Item Details", rowNoun: "Item", addLabel: "Add item", columns: [
+      { key: "itemName", label: "Item", type: "text", section: "line", required: true },
+      { key: "itemDescription", label: "Description", type: "text", section: "line" },
+      { key: "category", label: "Category", type: "master", master: "category", section: "line" },
+      { key: "uom", label: "UOM", type: "master", master: "uom", section: "line" },
+      { key: "quantity", label: "Qty", type: "number", section: "line", defaultValue: 0 },
+    ] },
+    { key: "requiredBy", label: "Required By", type: "date", section: "Item Details", inTable: true, width: 130 },
+    { key: "purpose", label: "Purpose", type: "text", section: "Item Details", inTable: true, width: 180, placeholder: "Reason for requisition" },
+
     { key: "preferredSupplier", label: "Preferred Supplier", type: "master", master: "supplier", section: "Procurement Route", inTable: true, defaultHidden: true, width: 170 },
     { key: "lastRate", label: "Last Rate", type: "currency", section: "Procurement Route", defaultValue: 0, inTable: true, defaultHidden: true, width: 120, align: "right" },
     { key: "lastPoRef", label: "Last PO Ref.", type: "text", section: "Procurement Route", inTable: true, defaultHidden: true, width: 130 },
@@ -366,6 +383,7 @@ export const PO_SCHEMA: SubmoduleSchema = {
     { key: "rate", label: "Rate", type: "currency", section: "Line", defaultValue: 0, inTable: true, width: 120, align: "right" },
     { key: "amount", label: "Amount", type: "currency", section: "Line", defaultValue: 0, inTable: true, width: 140, align: "right" },
     { key: "paymentTerms", label: "Payment Terms", type: "master", master: "payment_terms", section: "Line", inTable: true, defaultHidden: true, width: 140 },
+    { key: "payMethod", label: "Pay Method", type: "select", options: PAY_METHOD_OPTS, defaultValue: "By Bank", section: "Line", inTable: true, width: 120 },
     { key: "deliveryDate", label: "Delivery Date", type: "date", section: "Line", inTable: true, width: 130 },
 
     { key: "approvalStatus", label: "Approval", type: "select", options: APPROVAL_OPTS, defaultValue: "PENDING", section: "Approval", inTable: true, width: 120 },
@@ -458,13 +476,22 @@ export const PAYMENT_SCHEMA: SubmoduleSchema = {
   fields: [
     { key: "docNo", label: "Payment Req. No.", type: "text", section: "Request", required: true, inTable: true, pinned: true, width: 150 },
     { key: "docDate", label: "Request Date", type: "date", section: "Request", inTable: true, width: 130 },
-    { key: "supplier", label: "Supplier", type: "master", master: "supplier", section: "Request", required: true, inTable: true, width: 180 },
-    { key: "poRef", label: "PO / GRN Ref.", type: "text", section: "Request", inTable: true, width: 130 },
-    { key: "invoiceNo", label: "Invoice No.", type: "text", section: "Request", inTable: true, width: 130 },
+    { key: "poRef", label: "PO No.", type: "select", optionsSource: "paymentPo", required: true, section: "Request", inTable: true, width: 130 },
+    // Auto-filled from the selected PO — never entered manually.
+    { key: "supplier", label: "Supplier", type: "master", master: "supplier", computed: true, section: "Request", inTable: true, width: 180 },
+    // Only appears once the chosen PO has been received via GRN — lists that
+    // GRN's invoice number(s).
+    { key: "invoiceNo", label: "Invoice No.", type: "select", optionsSource: "grnInvoice", dependsOn: "poRef", section: "Request", inTable: true, width: 130 },
 
-    { key: "invoiceAmount", label: "Invoice Amount", type: "currency", section: "Amount", defaultValue: 0, inTable: true, width: 150, align: "right" },
-    { key: "paymentTerms", label: "Payment Terms", type: "master", master: "payment_terms", section: "Amount", inTable: true, width: 140 },
-    { key: "dueDate", label: "Due Date", type: "date", section: "Amount", inTable: true, width: 130 },
+    // Auto-filled from the GRN invoice booked against the chosen PO — read-only,
+    // and only shown once goods have been received (a GRN exists). When no GRN
+    // has been done yet this stays hidden and the user keys the amount straight
+    // into Request Amount below.
+    { key: "invoiceAmount", label: "Invoice Amount", type: "currency", computed: true, requiresGrnInvoice: true, section: "Amount", defaultValue: 0, inTable: true, width: 150, align: "right" },
+    // The amount actually being requested for payment. Defaults to the invoice
+    // amount when a GRN invoice is resolved, but the user can override it (and
+    // enters it directly when no GRN has been done).
+    { key: "requestAmount", label: "Request Amount", type: "currency", required: true, section: "Amount", defaultValue: 0, inTable: true, width: 150, align: "right" },
 
     { key: "status", label: "Status", type: "status", statusOptions: PAYMENT_STATUS, defaultValue: "REQUESTED", section: "Status", inTable: true, width: 170 },
     { key: "remarks", label: "Remarks", type: "textarea", section: "Status" },

@@ -301,12 +301,28 @@ const PURCHASE_BLUEPRINT: ModuleBlueprint = {
   ],
 };
 
+// ── Accounts & Finance ──────────────────────────────────────────────────────
+const ACCOUNTS_BLUEPRINT: ModuleBlueprint = {
+  erpModuleId: "accounts",
+  topLabel: "Accounts",
+  topIcon: "banknote",
+  topDescription: "Payables & finance: supplier payment requests",
+  tree: [
+    {
+      name: "Payables",
+      icon: "banknote",
+      pages: ["/accounts/payment-request"],
+    },
+  ],
+};
+
 /** All module blueprints, keyed implicitly by `erpModuleId`. */
 export const SIDEBAR_BLUEPRINTS: ModuleBlueprint[] = [
   HR_BLUEPRINT,
   MLM_BLUEPRINT,
   INVENTORY_BLUEPRINT,
   PURCHASE_BLUEPRINT,
+  ACCOUNTS_BLUEPRINT,
 ];
 
 /** ERP module ids that have a nested-folder blueprint. */

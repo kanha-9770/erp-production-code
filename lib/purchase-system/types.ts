@@ -65,9 +65,19 @@ export interface FieldDef {
   /** For type === "select": inline options. */
   options?: Array<{ value: string; label: string }>;
   /** For type === "select": pull options dynamically from live records instead
-   *  of static `options` — "openPo"/"openPr" list documents not yet fully
-   *  received (partial included, fully-GRN'd excluded). */
-  optionsSource?: "openPo" | "openPr";
+   *  of static `options`.
+   *   - "openPo"/"openPr": documents not yet fully received (partial included).
+   *   - "paymentPo": every PO (payment request's compulsory PO dropdown).
+   *   - "grnInvoice": invoice numbers booked against the chosen PO via GRN;
+   *     depends on the `dependsOn` field's value and is hidden when empty. */
+  optionsSource?: "openPo" | "openPr" | "paymentPo" | "grnInvoice";
+  /** For optionsSource === "grnInvoice": the field key whose value (a PO No.)
+   *  scopes the invoice list. */
+  dependsOn?: string;
+  /** Payment request only: show this field (form + preview) only once the chosen
+   *  PO (`poRef`) has been received via a GRN — i.e. has booked invoices. Used by
+   *  the auto-filled Invoice Amount, which is irrelevant until goods arrive. */
+  requiresGrnInvoice?: boolean;
   /** For type === "status": the workflow pipeline for this document. */
   statusOptions?: StatusOption[];
   required?: boolean;
@@ -85,6 +95,10 @@ export interface FieldDef {
   addLabel?: string;
   /** For type === "lineItems": singular noun for a row, e.g. "Invoice", "Line". */
   rowNoun?: string;
+
+  /** Kept in the record (and table/preview) but NOT rendered as a form input —
+   *  e.g. a flat field that mirrors the first row of a line-items subform. */
+  formHidden?: boolean;
 
   // Table presentation
   inTable?: boolean;

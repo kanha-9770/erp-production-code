@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { validateSession } from "@/lib/auth"
+import { validateSession, invalidateAllSessionsForOrganization } from "@/lib/auth"
 import { sanitizeSelectedModules, ERP_MODULES } from "@/lib/erp-modules"
 import { ensureErpModuleSidebar } from "@/lib/erp-modules-seed"
 
@@ -83,19 +83,33 @@ export async function PUT(request: NextRequest) {
 
   const selectedModules = sanitizeSelectedModules(body?.selectedModules)
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const org = await tx.organization.update({
-      where: { id: orgId },
-      data: { selectedModules },
-      select: { id: true, name: true, selectedModules: true },
-    })
-    // Reconcile the org's FormModules + group anchors so the sidebar
-    // matches the new selection. Newly-enabled modules get a FormModule
-    // and group anchors; disabled modules have their group anchors
-    // cleared (FormModule rows are kept so any custom forms aren't lost).
-    await ensureErpModuleSidebar(tx, orgId, selectedModules)
-    return org
-  }, { timeout: 30000 })
+  // Persist the selection first (a single atomic statement).
+  const updated = await prisma.organization.update({
+    where: { id: orgId },
+    data: { selectedModules },
+    select: { id: true, name: true, selectedModules: true },
+  })
+
+  // Reconcile the org's FormModules + group anchors so the sidebar matches the
+  // new selection. Newly-enabled modules get a FormModule and anchors; disabled
+  // modules have their group anchors cleared (FormModule rows are kept so any
+  // custom forms aren't lost).
+  //
+  // This runs OUTSIDE an interactive transaction on purpose: the seeder issues
+  // many sequential folder lookups/creates (one round-trip each, across every
+  // selected module's blueprint tree), which on a higher-latency database can
+  // exceed Prisma's interactive-transaction time limit and fail with P2028
+  // ("Transaction not found"). The seeder is fully idempotent — safe to re-run
+  // on the next toggle or login backfill — so statement-by-statement execution
+  // is correct here and converges even if a single statement transiently fails.
+  await ensureErpModuleSidebar(prisma, orgId, selectedModules)
+
+  // The validated session is cached (with the org's selectedModules embedded)
+  // for several minutes; without busting it here, /api/auth/me — and therefore
+  // the sidebar's enabled-group set — would keep serving the OLD selection
+  // until the cache TTL lapsed. Invalidate every org member's session so the
+  // change is reflected on the very next request (after the client reloads).
+  await invalidateAllSessionsForOrganization(orgId)
 
   return NextResponse.json({
     success: true,

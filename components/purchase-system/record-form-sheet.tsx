@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, History, Sparkles, CheckCircle2 } from "lucide-react";
+import { Plus, History, Sparkles, CheckCircle2, Boxes } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePurchase, type ItemPurchaseHistory } from "@/lib/purchase-system/store";
 import { formatMoney, formatDate, resolveStatus } from "@/lib/purchase-system/format";
@@ -37,6 +37,7 @@ import { deriveReceiptStatus } from "@/lib/purchase-system/receipt";
 import { Badge } from "@/components/ui/badge";
 import { MediaField } from "./media-field";
 import { LineItemsField } from "./line-items-field";
+import { StoreItemPicker, type SelectedStoreItem } from "./store-item-picker";
 import type { MediaRef } from "@/lib/purchase-system/media";
 import type { FieldDef, PurchaseRecord, SubmoduleSchema } from "@/lib/purchase-system/types";
 
@@ -46,6 +47,10 @@ interface RecordFormSheetProps {
   record: PurchaseRecord | null;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: Record<string, unknown>) => void;
+}
+
+function rowUid(): string {
+  return `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): Record<string, unknown> {
@@ -58,13 +63,31 @@ function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): R
     else if (f.type === "status" && f.statusOptions?.length) out[f.key] = f.statusOptions[0].value;
     else out[f.key] = f.type === "number" || f.type === "currency" ? 0 : "";
   }
+  // Back-compat: an existing single-item requisition (flat itemName, no Items
+  // rows) is migrated into the subform so it can be edited there.
+  if (schema.key === "pr") {
+    const items = Array.isArray(out.items) ? (out.items as Record<string, unknown>[]) : [];
+    if (items.length === 0 && record && record.itemName) {
+      out.items = [
+        {
+          _id: rowUid(),
+          itemName: record.itemName,
+          itemDescription: record.itemDescription ?? "",
+          category: record.category ?? "",
+          uom: record.uom ?? "",
+          quantity: Number(record.quantity ?? 0) || 0,
+        },
+      ];
+    }
+  }
   return out;
 }
 
 export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }: RecordFormSheetProps) {
-  const { getMasterOptions, addMasterOption, getItemHistory } = usePurchase();
+  const { getMasterOptions, addMasterOption, getItemHistory, getPaymentPoOptions, getGrnInvoiceOptions, getPoTrace } = usePurchase();
   const [form, setForm] = useState<Record<string, unknown>>(() => buildInitial(schema, record));
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [storePickerOpen, setStorePickerOpen] = useState(false);
 
   // Repeat-purchase detection (Purchase Requisition only): as the item name is
   // typed, look it up against prior POs. A known item can reuse its supplier +
@@ -84,6 +107,39 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
       lastRate: history.lastRate ?? prev.lastRate,
       lastPoRef: history.lastPoRef ?? prev.lastPoRef,
     }));
+  };
+
+  // Build one Items-subform row from a chosen store item (item details + qty).
+  const toItemRow = (item: SelectedStoreItem): Record<string, unknown> => ({
+    _id: `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    itemName: item.itemName,
+    itemDescription: item.itemDescription,
+    category: item.category,
+    uom: item.uom,
+    quantity: item.quantity,
+  });
+
+  // Repeat purchase: append the chosen Store Inventory items (with quantities)
+  // to the requisition's Items subform, and mirror the first line onto the flat
+  // header fields so the list view and preview stay populated.
+  const applyStoreItems = (chosen: SelectedStoreItem[]) => {
+    if (chosen.length === 0) return;
+    const newRows = chosen.map(toItemRow);
+    setForm((prev) => {
+      const existing = Array.isArray(prev.items) ? (prev.items as Record<string, unknown>[]) : [];
+      const rows = [...existing, ...newRows];
+      const head = rows[0] ?? {};
+      return {
+        ...prev,
+        purchaseType: "REPEAT",
+        items: rows,
+        itemName: (head.itemName as string) || prev.itemName,
+        itemDescription: (head.itemDescription as string) || prev.itemDescription,
+        category: (head.category as string) || prev.category,
+        uom: (head.uom as string) || prev.uom,
+        quantity: (head.quantity as number) || prev.quantity,
+      };
+    });
   };
 
   useEffect(() => {
@@ -119,28 +175,98 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
   const set = (key: string, value: unknown) => {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
+      // Payment request: selecting a PO auto-fills the supplier (and clears the
+      // stale invoice when the PO changes), so supplier is never keyed in.
+      if (schema.key === "payment" && key === "poRef") {
+        const poNo = String(value ?? "");
+        const trace = getPoTrace(poNo);
+        next.supplier = trace.supplier ?? "";
+        next.invoiceNo = "";
+        // If goods have been received (GRN done), pull the invoice amount in
+        // automatically; a single invoice is auto-selected, otherwise the user
+        // picks one below. With no GRN yet, both amounts reset to 0 and the user
+        // keys the figure straight into Request Amount.
+        const invoices = getGrnInvoiceOptions(poNo);
+        if (invoices.length === 1) {
+          next.invoiceNo = invoices[0].value;
+          next.invoiceAmount = invoices[0].balance;
+          next.requestAmount = invoices[0].balance;
+        } else {
+          next.invoiceAmount = 0;
+          next.requestAmount = 0;
+        }
+      }
+      // Picking a specific GRN invoice fills its amount and pre-fills the
+      // requested amount (still editable).
+      if (schema.key === "payment" && key === "invoiceNo") {
+        const match = getGrnInvoiceOptions(String(next.poRef ?? "")).find(
+          (o) => o.value === String(value ?? ""),
+        );
+        next.invoiceAmount = match ? match.balance : 0;
+        if (match) next.requestAmount = match.balance;
+      }
       // Clear any dependent fields that this change hides, so stale values
       // aren't saved (e.g. unchecking Recommend Vendor clears name + phone).
       for (const f of schema.fields) {
         if (f.showIf?.field === key && next[f.showIf.field] !== f.showIf.equals) {
-          next[f.key] = f.type === "number" || f.type === "currency" ? 0 : f.type === "checkbox" ? false : "";
+          next[f.key] =
+            f.type === "number" || f.type === "currency"
+              ? 0
+              : f.type === "checkbox"
+                ? false
+                : f.type === "lineItems"
+                  ? []
+                  : "";
         }
       }
       return next;
     });
     setErrors((prev) => (prev[key] ? { ...prev, [key]: "" } : prev));
+    // Repeat requisition → open the Store Inventory picker to choose the item.
+    if (schema.key === "pr" && key === "purchaseType" && value === "REPEAT") {
+      setStorePickerOpen(true);
+    }
   };
 
   // A field is visible unless its showIf condition is unmet by the current form.
   const isVisible = (f: FieldDef) =>
     !f.showIf || form[f.showIf.field] === f.showIf.equals;
 
+  // Options for a select that sources from live records (payment PO list / the
+  // GRN invoices booked against the chosen PO).
+  const dynamicOptionsFor = (f: FieldDef): Array<{ value: string; label: string }> | undefined => {
+    if (f.optionsSource === "paymentPo")
+      return getPaymentPoOptions(String(form[f.key] ?? "") || undefined).map((o) => ({ value: o.value, label: o.label }));
+    if (f.optionsSource === "grnInvoice") {
+      const poNo = f.dependsOn ? String(form[f.dependsOn] ?? "") : "";
+      return getGrnInvoiceOptions(poNo).map((o) => ({ value: o.value, label: o.label }));
+    }
+    return undefined;
+  };
+
+  // A GRN-invoice select — and the auto-filled Invoice Amount — are shown only
+  // once the chosen PO has invoices (i.e. goods received via GRN).
+  const isShown = (f: FieldDef) => {
+    if (f.formHidden || !isVisible(f)) return false;
+    if (f.optionsSource === "grnInvoice") return (dynamicOptionsFor(f)?.length ?? 0) > 0;
+    if (f.requiresGrnInvoice) {
+      const poNo = String(form.poRef ?? "");
+      return poNo !== "" && getGrnInvoiceOptions(poNo).length > 0;
+    }
+    return true;
+  };
+
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     for (const f of schema.fields) {
-      if (!f.required || !isVisible(f)) continue;
+      if (!f.required || f.formHidden || !isVisible(f)) continue;
       const v = form[f.key];
       if (v == null || String(v).trim() === "") next[f.key] = `${f.label} is required`;
+    }
+    // A requisition must list at least one item in the subform.
+    if (schema.key === "pr") {
+      const rows = Array.isArray(form.items) ? (form.items as unknown[]) : [];
+      if (rows.length === 0) next.items = "Add at least one item.";
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -151,6 +277,19 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
     const data: Record<string, unknown> = { ...form };
     for (const f of schema.fields) {
       if (f.type === "number" || f.type === "currency") data[f.key] = Number(data[f.key] ?? 0) || 0;
+    }
+    // Mirror the first Items row onto the flat fields so the list view, preview
+    // and item-history lookups keep working off a single "primary" item.
+    if (schema.key === "pr") {
+      const rows = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
+      if (rows.length > 0) {
+        const head = rows[0];
+        data.itemName = head.itemName ?? "";
+        data.itemDescription = head.itemDescription ?? "";
+        data.category = head.category ?? "";
+        data.uom = head.uom ?? "";
+        data.quantity = Number(head.quantity ?? 0) || 0;
+      }
     }
     onSubmit(data);
     onOpenChange(false);
@@ -171,6 +310,31 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-7">
+          {schema.key === "pr" && String(form.purchaseType ?? "NEW") === "REPEAT" && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <Boxes className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                <div className="text-sm min-w-0">
+                  <span className="font-medium">Repeat purchase.</span>{" "}
+                  <span className="text-muted-foreground">
+                    {form.itemName
+                      ? `Selected “${String(form.itemName)}” from Store Inventory.`
+                      : "Pick the item from Store Inventory."}
+                  </span>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setStorePickerOpen(true)}
+              >
+                <Boxes className="h-3.5 w-3.5 mr-1.5" />
+                {form.itemName ? "Change item" : "Select item"}
+              </Button>
+            </div>
+          )}
           {schema.key === "pr" && itemName.trim() !== "" && history && (
             <RepeatPurchaseBanner
               history={history}
@@ -179,7 +343,7 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
             />
           )}
           {sections.map((section) => {
-            const visible = section.fields.filter(isVisible);
+            const visible = section.fields.filter(isShown);
             if (visible.length === 0) return null;
             return (
               <div key={section.name} className="space-y-4">
@@ -196,6 +360,7 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
                       onChange={(v) => set(f.key, v)}
                       getMasterOptions={getMasterOptions}
                       onAddMasterOption={addMasterOption}
+                      dynamicOptions={dynamicOptionsFor(f)}
                     />
                   ))}
                 </div>
@@ -211,6 +376,14 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
           <Button onClick={handleSubmit}>{record ? "Save changes" : `Create ${schema.recordNoun}`}</Button>
         </SheetFooter>
       </SheetContent>
+
+      {schema.key === "pr" && (
+        <StoreItemPicker
+          open={storePickerOpen}
+          onOpenChange={setStorePickerOpen}
+          onConfirm={applyStoreItems}
+        />
+      )}
     </Sheet>
   );
 }
@@ -282,6 +455,7 @@ function FieldControl({
   onChange,
   getMasterOptions,
   onAddMasterOption,
+  dynamicOptions,
 }: {
   field: FieldDef;
   value: unknown;
@@ -289,6 +463,7 @@ function FieldControl({
   onChange: (value: unknown) => void;
   getMasterOptions: (key: string) => Array<{ id: string; value: string }>;
   onAddMasterOption: (key: string, value: string, code?: string) => Promise<void>;
+  dynamicOptions?: Array<{ value: string; label: string }>;
 }) {
   const fullWidth =
     field.type === "textarea" || field.type === "media" || field.type === "lineItems";
@@ -343,11 +518,14 @@ function FieldControl({
             <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
           </SelectTrigger>
           <SelectContent>
-            {(field.options ?? []).map((o) => (
+            {(field.optionsSource ? dynamicOptions ?? [] : field.options ?? []).map((o) => (
               <SelectItem key={o.value} value={o.value}>
                 {o.label}
               </SelectItem>
             ))}
+            {field.optionsSource && (dynamicOptions?.length ?? 0) === 0 && (
+              <div className="px-2 py-2 text-xs text-muted-foreground">No matching documents</div>
+            )}
           </SelectContent>
         </Select>
       ) : field.type === "status" ? (

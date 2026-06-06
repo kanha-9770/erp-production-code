@@ -52,6 +52,7 @@ export type StaticPageGroup =
   | 'Real Estate'
   | 'Inventory'
   | 'Purchase'
+  | 'Accounts'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -413,6 +414,17 @@ export const STATIC_PAGES: StaticPage[] = [
     group: 'Purchase',
     description: 'Supplier, department & payment-term dropdowns',
     icon: 'settings',
+  },
+
+  // ── Accounts & Finance (Module #5) ─────────────────────────────────────
+  // Shares the purchase data store: Payment Request reads POs & GRN invoices.
+  // The same page is also surfaced under Purchase (procure-to-pay flow).
+  {
+    path: '/accounts/payment-request',
+    label: 'Payment Request',
+    group: 'Accounts',
+    description: 'Supplier payment requests',
+    icon: 'banknote',
   },
 
   // ── Real Estate Brokerage (Module #2) ──────────────────────────────────
@@ -944,6 +956,7 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Real Estate',
   'Inventory',
   'Purchase',
+  'Accounts',
   'Settings',
   'Profile',
   'AI & Tools',
