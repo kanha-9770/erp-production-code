@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
  * | last_name             | → | lastName         |
  * | department            | → | department       |
  * | phone                 | → | personalContact  |
+ * | mobile                | → | alternateNo1     |
  * | avatar                | → | employeeImage    |
  * | email                 | → | emailAddress1    |
  * | first_name+last_name  | → | employeeName     |
@@ -31,6 +32,7 @@ export async function syncUserToEmployee(
     last_name?: string | null;
     department?: string | null;
     phone?: string | null;
+    mobile?: string | null;
     avatar?: string | null;
     email?: string | null;
   }
@@ -41,6 +43,7 @@ export async function syncUserToEmployee(
   if (changes.last_name !== undefined) employeeSync.lastName = changes.last_name;
   if (changes.department !== undefined) employeeSync.department = changes.department;
   if (changes.phone !== undefined) employeeSync.personalContact = changes.phone;
+  if (changes.mobile !== undefined) employeeSync.alternateNo1 = changes.mobile;
   if (changes.avatar !== undefined) employeeSync.employeeImage = changes.avatar;
 
   // Recompose the employee display name when either name part changed. Read the

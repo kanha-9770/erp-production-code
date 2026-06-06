@@ -17,7 +17,15 @@ export const sendOTPEmail = async (
 ) => {
   // If email configuration is missing, return success for development
   if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER) {
-    console.log(`[DEV] OTP Email would be sent to ${email}: ${otp} (type: ${type})`)
+    if (process.env.NODE_ENV === "production") {
+      // In production this means the OTP never reaches the user — surface it
+      // loudly rather than printing the code to the server log as "[DEV]".
+      console.error(
+        `[email] OTP NOT SENT to ${email} (type: ${type}) — EMAIL_HOST/EMAIL_USER are not set in this environment.`
+      )
+    } else {
+      console.log(`[DEV] OTP Email would be sent to ${email}: ${otp} (type: ${type})`)
+    }
     return { success: true }
   }
 
@@ -161,6 +169,21 @@ export const sendWorkflowEmail = async (
   options: WorkflowEmailOptions
 ): Promise<{ success: boolean; error?: string }> => {
   if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER) {
+    // In production a missing SMTP config means real emails (recruitment status
+    // updates, workflow notifications) are silently dropped — the #1 cause of
+    // "emails aren't sending". Make it LOUD and report failure so callers and
+    // logs reflect reality instead of a misleading success. In dev we keep the
+    // quiet no-op so the app runs without SMTP configured.
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        `[email] NOT SENT to ${options.to} ("${options.subject}") — EMAIL_HOST/EMAIL_USER are not set in this environment. ` +
+          `Recruitment/workflow emails are disabled. Set EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_APP_PASSWORD and EMAIL_FROM in the server environment, then restart (e.g. pm2 restart <app> --update-env).`
+      )
+      return {
+        success: false,
+        error: "Email transport not configured (EMAIL_HOST/EMAIL_USER missing)",
+      }
+    }
     console.log(
       `[DEV] Workflow email would be sent to ${options.to}: ${options.subject}`
     )

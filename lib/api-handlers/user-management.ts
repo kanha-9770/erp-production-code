@@ -476,6 +476,9 @@ export const UserManagementHandlers = {
       const employeeSelect = {
         // Identifiers + Section 1 (Personal)
         id: true, userId: true, employeeName: true,
+        // Avatar so the master table can show the same photo the user set on
+        // their profile (synced via syncUserToEmployee → employeeImage).
+        employeeImage: true,
         salutation: true, firstName: true, lastName: true,
         dob: true, placeOfBirth: true, bloodGroup: true,
         maritalStatus: true, nationality: true, gender: true,
@@ -511,8 +514,12 @@ export const UserManagementHandlers = {
         resignationLetterDate: true, reasonOfLeaving: true, noticeServed: true,
       };
 
-      let employees;
-      let total = 0;
+      // The final Prisma `where` differs for admin vs non-admin (different
+      // visibility rules). We capture it in one variable so the page slice,
+      // the count, AND the optional aggregates all run against the exact same
+      // constraint set — keeping the summary/group-by numbers consistent with
+      // what the table shows.
+      let where: any;
 
       if (adminUser) {
         const adminUserIds = await prisma.$queryRaw<{ id: string }[]>`
@@ -525,7 +532,7 @@ export const UserManagementHandlers = {
         `.then((rows) => rows.map((r) => r.id));
 
         // Visibility constraints + the page's filter clauses, AND-ed together.
-        const where: any = {
+        where = {
           AND: [
             {
               status: "ACTIVE",
@@ -535,14 +542,6 @@ export const UserManagementHandlers = {
             ...filterClauses,
           ],
         };
-
-        total = await prisma.employee.count({ where });
-        employees = await prisma.employee.findMany({
-          where,
-          select: employeeSelect,
-          orderBy,
-          ...(paginate ? { skip: page * pageSize, take: pageSize } : {}),
-        });
       } else {
         // Hierarchy-based visibility: a parent role (e.g. HR) sees the
         // employee records of every role *below* it in the org's role tree,
@@ -603,7 +602,7 @@ export const UserManagementHandlers = {
           new Set<string>([authUser.id, ...peerCreators.map((a) => a.userId)]),
         );
 
-        const where: any = {
+        where = {
           AND: [
             {
               status: "ACTIVE",
@@ -622,14 +621,65 @@ export const UserManagementHandlers = {
             ...filterClauses,
           ],
         };
+      }
 
-        total = await prisma.employee.count({ where });
-        employees = await prisma.employee.findMany({
-          where,
-          select: employeeSelect,
-          orderBy,
-          ...(paginate ? { skip: page * pageSize, take: pageSize } : {}),
-        });
+      // Shared across both visibility branches — same `where` for count, the
+      // page slice, and the aggregates below.
+      const total = await prisma.employee.count({ where });
+      const employees = await prisma.employee.findMany({
+        where,
+        select: employeeSelect,
+        orderBy,
+        ...(paginate ? { skip: page * pageSize, take: pageSize } : {}),
+      });
+
+      // Optional roll-up totals + group-by counts for the summary strip and the
+      // Group By chips. Computed over the FULL filtered set (not just the page)
+      // so the numbers reflect every matching employee. Opt-in via
+      // `withAggregates=1` so callers that only need the list don't pay for it.
+      let aggregates:
+        | {
+            totalSalarySum: number;
+            avgSalary: number;
+            statusCounts: Record<string, number>;
+            departmentCounts: Array<{ department: string; count: number }>;
+          }
+        | undefined;
+      if (sp.get("withAggregates") === "1") {
+        const [salary, byStatus, byDept] = await Promise.all([
+          prisma.employee.aggregate({
+            where,
+            _sum: { totalSalary: true },
+            _avg: { totalSalary: true },
+          }),
+          prisma.employee.groupBy({
+            by: ["status"],
+            where,
+            _count: { _all: true },
+          }),
+          prisma.employee.groupBy({
+            by: ["department"],
+            where,
+            _count: { _all: true },
+            orderBy: { _count: { department: "desc" } },
+            take: 50,
+          }),
+        ]);
+
+        const statusCounts: Record<string, number> = {};
+        for (const row of byStatus as any[]) {
+          if (row.status) statusCounts[row.status] = row._count._all;
+        }
+        const departmentCounts = (byDept as any[])
+          .filter((r) => r.department)
+          .map((r) => ({ department: r.department as string, count: r._count._all }));
+
+        aggregates = {
+          totalSalarySum: Number(salary._sum.totalSalary ?? 0),
+          avgSalary: Number(salary._avg.totalSalary ?? 0),
+          statusCounts,
+          departmentCounts,
+        };
       }
 
       return NextResponse.json({
@@ -639,6 +689,7 @@ export const UserManagementHandlers = {
         total,
         page,
         pageSize,
+        ...(aggregates ? { aggregates } : {}),
       });
     }, "getEmployees");
   },
@@ -948,6 +999,102 @@ export const UserManagementHandlers = {
       }
       return NextResponse.json({ success: true });
     }, "deleteEmployee");
+  },
+
+  // POST /api/employees/bulk — apply one action to many employees at once.
+  // Body: { action: "delete" | "status", ids: string[], status?: EmployeeStatus }
+  // Mirrors the single-row handlers' org scoping: only employees the caller's
+  // organization owns (or unassigned orphan records) are touched, so a crafted
+  // id list can never reach another org's data.
+  async bulkUpdateEmployees(request: NextRequest): Promise<NextResponse> {
+    return handle(async () => {
+      const authUser = await requireAuth(request);
+
+      let body: { action?: string; ids?: unknown; status?: string };
+      try {
+        body = await request.json();
+      } catch {
+        return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+      }
+
+      const action = body.action;
+      const ids = Array.isArray(body.ids)
+        ? Array.from(new Set(body.ids.filter((x): x is string => typeof x === "string")))
+        : [];
+
+      if (action !== "delete" && action !== "status") {
+        return NextResponse.json(
+          { error: "action must be 'delete' or 'status'" },
+          { status: 400 },
+        );
+      }
+      if (ids.length === 0) {
+        return NextResponse.json({ error: "No employee ids provided" }, { status: 400 });
+      }
+      // Cap the batch so one request can't enqueue an unbounded amount of work.
+      if (ids.length > 200) {
+        return NextResponse.json(
+          { error: "Too many records selected (max 200 per action)" },
+          { status: 400 },
+        );
+      }
+
+      const VALID_STATUSES = ["ACTIVE", "INACTIVE", "ON_LEAVE", "TERMINATED"];
+      if (action === "status" && !VALID_STATUSES.includes(body.status ?? "")) {
+        return NextResponse.json(
+          { error: "Invalid status value" },
+          { status: 400 },
+        );
+      }
+
+      // Keep only ids this caller's org may touch (same scope as single delete).
+      const scoped = await prisma.employee.findMany({
+        where: {
+          id: { in: ids },
+          OR: [
+            { user: { organizationId: authUser.organizationId } },
+            { userId: null },
+          ],
+        },
+        select: { id: true },
+      });
+      const validIds = scoped.map((e) => e.id);
+      if (validIds.length === 0) {
+        return NextResponse.json(
+          { error: "None of the selected employees were found" },
+          { status: 404 },
+        );
+      }
+
+      let affected = 0;
+      if (action === "delete") {
+        // Reuse the same soft-delete primitive as single delete so trash /
+        // restore behaves identically. Sequential to keep snapshot writes safe.
+        for (const id of validIds) {
+          try {
+            await moveToTrash("Employee", id, {
+              userId: authUser.id,
+              userName: authUser.email,
+              organizationId: authUser.organizationId,
+            });
+            affected++;
+          } catch (err) {
+            console.error(`[bulkUpdateEmployees] delete ${id} failed:`, err);
+          }
+        }
+      } else {
+        const res = await prisma.employee.updateMany({
+          where: { id: { in: validIds } },
+          data: { status: body.status as any },
+        });
+        affected = res.count;
+      }
+
+      // Refresh the live payroll cache (status/headcount changes feed it).
+      if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);
+
+      return NextResponse.json({ success: true, action, affected });
+    }, "bulkUpdateEmployees");
   },
 };
 

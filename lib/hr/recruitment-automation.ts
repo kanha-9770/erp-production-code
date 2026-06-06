@@ -72,11 +72,28 @@ async function emailCandidate(
   subject: string,
   body: string,
 ): Promise<void> {
-  if (!to) return;
+  if (!to) {
+    console.warn(
+      `[recruitment-automation] skipped email "${subject}" — candidate has no email address on file.`,
+    );
+    return;
+  }
   try {
-    await sendWorkflowEmail({ to, subject, body });
+    const res = await sendWorkflowEmail({ to, subject, body });
+    if (res?.success) {
+      console.log(`[recruitment-automation] sent "${subject}" to ${to}`);
+    } else {
+      // The transport returned without sending (e.g. SMTP not configured in
+      // this environment). Surface it — this is the silent failure operators hit.
+      console.warn(
+        `[recruitment-automation] email "${subject}" to ${to} was NOT sent: ${res?.error ?? "unknown reason"}`,
+      );
+    }
   } catch (err) {
-    console.error("[recruitment-automation] emailCandidate:", err);
+    console.error(
+      `[recruitment-automation] email "${subject}" to ${to} threw:`,
+      err,
+    );
   }
 }
 

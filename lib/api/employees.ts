@@ -11,6 +11,8 @@ export interface EmployeeListItem {
   id: string;
   userId: string | null;
   employeeName: string;
+  /** Avatar URL — kept in sync with the linked User's profile photo. */
+  employeeImage: string | null;
   salutation: string | null;
   firstName: string | null;
   lastName: string | null;
@@ -93,8 +95,8 @@ export interface EmployeeListItem {
 // the master table. Extends EmployeeListItem so detail consumers get
 // everything in one shape.
 export interface EmployeeDetail extends EmployeeListItem {
-  // Section 1 extras (legacy / detail-only)
-  employeeImage: string | null;
+  // Section 1 extras (legacy / detail-only). employeeImage is inherited from
+  // EmployeeListItem now that the list also returns it.
   nativePlace: string | null;
   country: string | null;
   permanentAddress: string | null;
@@ -121,6 +123,15 @@ export interface EmployeeDetail extends EmployeeListItem {
   customFields?: Record<string, unknown> | null;
 }
 
+/** Roll-up totals + group-by counts over the FULL filtered set (not just the
+ *  current page). Present only when the query asks for `withAggregates`. */
+export interface EmployeeAggregates {
+  totalSalarySum: number;
+  avgSalary: number;
+  statusCounts: Record<string, number>;
+  departmentCounts: Array<{ department: string; count: number }>;
+}
+
 interface ListResponse {
   success: boolean;
   employees: EmployeeListItem[];
@@ -129,6 +140,7 @@ interface ListResponse {
   total: number;
   page: number;
   pageSize: number;
+  aggregates?: EmployeeAggregates;
 }
 
 /** Query args for the server-paginated employee list. All optional so the
@@ -146,6 +158,15 @@ export interface EmployeeListArgs {
   sortDir?: "asc" | "desc";
   /** Advanced-filter conditions, serialised to JSON in the query string. */
   conditions?: Array<{ fieldId: string; operator: string; value?: string; value2?: string }>;
+  /** Ask the server to also return roll-up totals + group-by counts. */
+  withAggregates?: boolean;
+}
+
+/** Body for POST /api/employees/bulk. */
+export interface BulkEmployeeArgs {
+  action: "delete" | "status";
+  ids: string[];
+  status?: EmployeeStatus;
 }
 
 interface SingleResponse<T> {
@@ -169,6 +190,7 @@ export const employeesApi = baseApi.injectEndpoints({
         if (a.maxSalary) qs.set("maxSalary", a.maxSalary);
         if (a.sortBy) qs.set("sortBy", a.sortBy);
         if (a.sortDir) qs.set("sortDir", a.sortDir);
+        if (a.withAggregates) qs.set("withAggregates", "1");
         if (a.conditions && a.conditions.length) {
           qs.set("conditions", JSON.stringify(a.conditions));
         }
@@ -239,13 +261,34 @@ export const employeesApi = baseApi.injectEndpoints({
         "AdminUsers",
       ],
     }),
+
+    // Bulk delete / bulk status-change for the Employee Master list. Refreshes
+    // the whole identity set (same as single mutations) so every screen stays
+    // in sync after the batch.
+    bulkUpdateEmployees: builder.mutation<
+      { success: boolean; action: string; affected: number },
+      BulkEmployeeArgs
+    >({
+      query: (body) => ({
+        url: "/employees/bulk",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: [
+        { type: "Employees", id: "LIST" },
+        "User",
+        "AdminUsers",
+      ],
+    }),
   }),
 });
 
 export const {
   useGetEmployeeListQuery,
+  useLazyGetEmployeeListQuery,
   useGetEmployeeQuery,
   useCreateEmployeeMutation,
   useUpdateEmployeeMutation,
   useDeleteEmployeeMutation,
+  useBulkUpdateEmployeesMutation,
 } = employeesApi;

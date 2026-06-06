@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
     if (last_name !== undefined) changes.last_name = last_name;
     if (department !== undefined) changes.department = department;
     if (phone !== undefined) changes.phone = phone;
+    if (mobile !== undefined) changes.mobile = mobile;
     await syncUserToEmployee(authUser.id, changes);
 
     // Invalidate the cached session so the edited fields show immediately on

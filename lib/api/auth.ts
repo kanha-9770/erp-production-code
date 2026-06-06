@@ -281,7 +281,10 @@ export const authApi = baseApi.injectEndpoints({
       }),
       // Avatar/name/contact are shared with the linked employee + user-mgmt
       // list, so a self-edit must refresh those screens too, not just "User".
-      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
+      // "Employee" (the per-id tag, no id) invalidates every cached employee
+      // DETAIL/preview query too — so an open Employee Master preview pane
+      // refreshes on a profile edit, not just the list.
+      invalidatesTags: ["User", "Employee", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Remove avatar
@@ -290,7 +293,10 @@ export const authApi = baseApi.injectEndpoints({
         url: "/auth/remove-avatar",
         method: "POST",
       }),
-      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
+      // "Employee" (the per-id tag, no id) invalidates every cached employee
+      // DETAIL/preview query too — so an open Employee Master preview pane
+      // refreshes on a profile edit, not just the list.
+      invalidatesTags: ["User", "Employee", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Update profile
@@ -300,7 +306,10 @@ export const authApi = baseApi.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ["User", { type: "Employees", id: "LIST" }, "AdminUsers"],
+      // "Employee" (the per-id tag, no id) invalidates every cached employee
+      // DETAIL/preview query too — so an open Employee Master preview pane
+      // refreshes on a profile edit, not just the list.
+      invalidatesTags: ["User", "Employee", { type: "Employees", id: "LIST" }, "AdminUsers"],
     }),
 
     // Get user by ID (for OTP verification flow)
