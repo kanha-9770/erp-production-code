@@ -211,6 +211,8 @@ function groupIconName(group: string): string {
       return "building2";
     case "Inventory":
       return "package";
+    case "Purchase":
+      return "receipt";
     case "Asset & Admin":
       return "boxes";
     case "Settings":

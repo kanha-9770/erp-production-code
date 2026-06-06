@@ -101,7 +101,15 @@ export const ERP_MODULES: ErpModuleDef[] = [
     description: "Product catalog, stock, and public storefront pages",
     icon: "boxes",
     groups: ["Inventory"],
-    routePrefixes: ["/inventory", "/storefront"],
+    routePrefixes: ["/inventory", "/inventory-management", "/storefront"],
+  },
+  {
+    id: "purchase",
+    label: "Purchase & Procurement",
+    description: "Procure-to-pay: requisition, sourcing, PO, GRN, payments",
+    icon: "shopping-cart",
+    groups: ["Purchase"],
+    routePrefixes: ["/purchase-management"],
   },
 ];
 

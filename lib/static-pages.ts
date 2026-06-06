@@ -51,6 +51,7 @@ export type StaticPageGroup =
   | 'Asset & Admin'
   | 'Real Estate'
   | 'Inventory'
+  | 'Purchase'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -321,6 +322,97 @@ export const STATIC_PAGES: StaticPage[] = [
     group: 'Inventory',
     description: 'Quick-create a product',
     icon: 'plus',
+  },
+  // Inventory Management — store / machine / metal submodules + masters.
+  // Frontend-only module (optimistic UI, localStorage-backed) under
+  // /inventory-management; see app/inventory-management.
+  {
+    path: '/inventory-management/store-inventory',
+    label: 'Store Inventory',
+    group: 'Inventory',
+    description: 'Spares, consumables & general store items',
+    icon: 'boxes',
+  },
+  {
+    path: '/inventory-management/machine-inventory',
+    label: 'Machine Inventory',
+    group: 'Inventory',
+    description: 'Plant & machinery register',
+    icon: 'package',
+  },
+  {
+    path: '/inventory-management/metal-inventory',
+    label: 'Metal Inventory',
+    group: 'Inventory',
+    description: 'Raw metal stock by grade & form',
+    icon: 'list',
+  },
+  {
+    path: '/inventory-management/master',
+    label: 'Inventory Master',
+    group: 'Inventory',
+    description: 'Manage category, unit & warehouse dropdowns',
+    icon: 'settings',
+  },
+
+  // ── Purchase & Procurement (Module #4) ─────────────────────────────────
+  // Procure-to-pay documents under /purchase-management. Frontend-only
+  // (optimistic UI, localStorage-backed); see app/purchase-management.
+  {
+    path: '/purchase-management/suppliers',
+    label: 'Supplier Master',
+    group: 'Purchase',
+    description: 'Vendor master — tax, terms, banking',
+    icon: 'users',
+  },
+  {
+    path: '/purchase-management/requisition',
+    label: 'Purchase Requisition',
+    group: 'Purchase',
+    description: 'Raise PR & production approval',
+    icon: 'file-text',
+  },
+  {
+    path: '/purchase-management/sourcing',
+    label: 'Supplier Sourcing / RFQ',
+    group: 'Purchase',
+    description: 'Supplier selection, pricing & payment terms',
+    icon: 'users',
+  },
+  {
+    path: '/purchase-management/purchase-order',
+    label: 'Purchase Order',
+    group: 'Purchase',
+    description: 'Approval & PO generation',
+    icon: 'file-signature',
+  },
+  {
+    path: '/purchase-management/grn',
+    label: 'Goods Receipt (GRN)',
+    group: 'Purchase',
+    description: 'Inspection, GRN & stock update',
+    icon: 'package',
+  },
+  {
+    path: '/purchase-management/open-po',
+    label: 'Open POs · Pending Balances',
+    group: 'Purchase',
+    description: 'POs with outstanding receipt balance',
+    icon: 'list',
+  },
+  {
+    path: '/purchase-management/payment-request',
+    label: 'Payment Request',
+    group: 'Purchase',
+    description: 'Supplier payment requests',
+    icon: 'banknote',
+  },
+  {
+    path: '/purchase-management/master',
+    label: 'Purchase Master',
+    group: 'Purchase',
+    description: 'Supplier, department & payment-term dropdowns',
+    icon: 'settings',
   },
 
   // ── Real Estate Brokerage (Module #2) ──────────────────────────────────
@@ -851,6 +943,7 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   // Other modules + always-on groups.
   'Real Estate',
   'Inventory',
+  'Purchase',
   'Settings',
   'Profile',
   'AI & Tools',

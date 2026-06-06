@@ -240,8 +240,74 @@ const MLM_BLUEPRINT: ModuleBlueprint = {
   ],
 };
 
+// ── Inventory ────────────────────────────────────────────────────────────
+const INVENTORY_BLUEPRINT: ModuleBlueprint = {
+  erpModuleId: "inventory",
+  topLabel: "Inventory",
+  topIcon: "boxes",
+  topDescription: "Stores, machinery, metal stock & item masters",
+  legacyLabels: ["Inventory & Storefront"],
+  // Existing product-catalog / storefront pages stay as direct leaves under
+  // the top folder (rendered after the sub-folders below).
+  topPages: ["/inventory", "/inventory/new"],
+  tree: [
+    {
+      // The new optimistic, master-driven inventory module. Leaf order within
+      // this folder follows the order these paths appear in static-pages.ts
+      // (store → machine → metal).
+      name: "Inventory Management",
+      icon: "boxes",
+      pages: [
+        "/inventory-management/store-inventory",
+        "/inventory-management/machine-inventory",
+        "/inventory-management/metal-inventory",
+      ],
+    },
+    {
+      name: "Masters",
+      icon: "settings",
+      pages: ["/inventory-management/master"],
+    },
+  ],
+};
+
+// ── Purchase & Procurement ──────────────────────────────────────────────────
+const PURCHASE_BLUEPRINT: ModuleBlueprint = {
+  erpModuleId: "purchase",
+  topLabel: "Purchase",
+  topIcon: "briefcase",
+  topDescription: "Procure-to-pay: requisition → sourcing → PO → GRN → payment",
+  tree: [
+    {
+      // Procurement documents, in workflow order. Leaf order within the folder
+      // follows the order these paths appear in static-pages.ts.
+      name: "Procurement",
+      icon: "file-text",
+      pages: [
+        "/purchase-management/suppliers",
+        "/purchase-management/requisition",
+        "/purchase-management/sourcing",
+        "/purchase-management/purchase-order",
+        "/purchase-management/grn",
+        "/purchase-management/open-po",
+        "/purchase-management/payment-request",
+      ],
+    },
+    {
+      name: "Masters",
+      icon: "settings",
+      pages: ["/purchase-management/master"],
+    },
+  ],
+};
+
 /** All module blueprints, keyed implicitly by `erpModuleId`. */
-export const SIDEBAR_BLUEPRINTS: ModuleBlueprint[] = [HR_BLUEPRINT, MLM_BLUEPRINT];
+export const SIDEBAR_BLUEPRINTS: ModuleBlueprint[] = [
+  HR_BLUEPRINT,
+  MLM_BLUEPRINT,
+  INVENTORY_BLUEPRINT,
+  PURCHASE_BLUEPRINT,
+];
 
 /** ERP module ids that have a nested-folder blueprint. */
 export const BLUEPRINT_MODULE_IDS = new Set(
