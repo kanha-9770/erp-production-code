@@ -19,6 +19,7 @@ import { seedItems } from "@/lib/inventory-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
 import type {
   InventoryItem,
+  InventoryMovement,
   InventorySnapshot,
   MasterType,
   SubmoduleKey,
@@ -273,6 +274,61 @@ async function resolveMasters(ctx: InvCtx): Promise<MasterType[]> {
   return masters;
 }
 
+// ── Goods movements (Inward / Outward) ──────────────────────────────────────
+// Stored in inventory_records under the "movement" submodule, so they never
+// surface in store/machine/metal item lists. Posting / editing / deleting a
+// movement atomically adjusts the linked store item's currentStock in the SAME
+// transaction, so the ledger and stock can never drift apart.
+const MOVEMENT_SUBMODULE = "movement";
+
+// Keys the server controls — stripped from movement payloads (docNo is
+// system-generated; the rest are row metadata). Note: unlike items, `itemCode`
+// is a legitimate movement field (a snapshot of the linked item's code).
+const MOVEMENT_RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "docNo"];
+
+function stripMovement(obj: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...obj };
+  for (const k of MOVEMENT_RESERVED) delete out[k];
+  return out;
+}
+
+/** Signed stock effect of a movement: +qty for IN, −qty for OUT. */
+function movementDelta(direction: unknown, quantity: unknown): number {
+  const qty = Number(quantity ?? 0) || 0;
+  return direction === "OUT" ? -qty : qty;
+}
+
+/** Adjust a linked store item's currentStock by `delta` within `tx`. No-op when
+ *  the movement isn't linked to an item or the item no longer exists. */
+async function applyStockDelta(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  itemId: string,
+  delta: number,
+): Promise<void> {
+  if (!itemId || delta === 0) return;
+  const row = await tx.inventoryRecord.findFirst({
+    where: { id: itemId, organizationId, submodule: "store" },
+  });
+  if (!row) return;
+  const data = (row.data as Record<string, unknown>) ?? {};
+  const cur = Number(data.currentStock ?? 0) || 0;
+  await tx.inventoryRecord.update({
+    where: { id: row.id },
+    data: { data: { ...data, currentStock: cur + delta } as any },
+  });
+}
+
+/** DB row → flat InventoryMovement (data spread + reserved keys). */
+function toMovement(row: { id: string; data: unknown; createdAt: Date; updatedAt: Date }): InventoryMovement {
+  return {
+    ...(row.data as Record<string, unknown>),
+    id: row.id,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  } as InventoryMovement;
+}
+
 export const InventoryHandlers = {
   /**
    * Legacy full snapshot (masters + ALL items for all submodules). Retained for
@@ -283,7 +339,7 @@ export const InventoryHandlers = {
     const masters = await resolveMasters(ctx);
 
     const rows = await prisma.inventoryRecord.findMany({
-      where: { organizationId: ctx.organizationId },
+      where: { organizationId: ctx.organizationId, submodule: { not: MOVEMENT_SUBMODULE } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     const items = { store: [], machine: [], metal: [] } as Record<SubmoduleKey, InventoryItem[]>;
@@ -292,7 +348,9 @@ export const InventoryHandlers = {
     }
     for (const k of SUBMODULE_ORDER) items[k] ??= [];
 
-    return { version: SNAPSHOT_VERSION, masters, items };
+    // Movements are a client-side local ledger (no API backend yet) — the
+    // snapshot carries an empty list to satisfy the type.
+    return { version: SNAPSHOT_VERSION, masters, items, movements: [] };
   },
 
   /** Just the master registry — the provider's cheap mount-time load. */
@@ -433,6 +491,91 @@ export const InventoryHandlers = {
       where: { id: { in: ids }, organizationId: ctx.organizationId },
     });
     return { count: res.count };
+  },
+
+  // ── Goods movements (Inward / Outward) ──
+  /** Every movement for the org, newest first. */
+  async listMovements(ctx: InvCtx): Promise<InventoryMovement[]> {
+    const rows = await prisma.inventoryRecord.findMany({
+      where: { organizationId: ctx.organizationId, submodule: MOVEMENT_SUBMODULE },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    return rows.map(toMovement);
+  },
+
+  /** Post a movement (server-generated IN-/OUT- code) and adjust the linked
+   *  store item's stock — atomically. */
+  async createMovement(ctx: InvCtx, data: Record<string, unknown>): Promise<{ movement: InventoryMovement }> {
+    const clean = stripMovement(data || {});
+    const direction = clean.direction === "OUT" ? "OUT" : "IN";
+    const itemId = String(clean.itemId ?? "");
+    const row = await prisma.$transaction(async (tx) => {
+      const docNo = await nextCode(tx, {
+        scopeKey: `inv:${ctx.organizationId}:movement:${direction}`,
+        prefix: direction,
+        computeSeed: () =>
+          maxCodeSuffix(tx, "inventory_records", ctx.organizationId, MOVEMENT_SUBMODULE, "docNo", direction),
+      });
+      const created = await tx.inventoryRecord.create({
+        data: {
+          organizationId: ctx.organizationId,
+          submodule: MOVEMENT_SUBMODULE,
+          status: direction,
+          data: { ...clean, direction, docNo } as any,
+          createdById: ctx.userId,
+        },
+      });
+      await applyStockDelta(tx, ctx.organizationId, itemId, movementDelta(direction, clean.quantity));
+      return created;
+    });
+    return { movement: toMovement(row) };
+  },
+
+  /** Edit a movement: reverse the old stock effect, apply the new one, persist. */
+  async updateMovement(ctx: InvCtx, id: string, patch: Record<string, unknown>): Promise<{ movement: InventoryMovement }> {
+    const row = await prisma.$transaction(async (tx) => {
+      const existing = await tx.inventoryRecord.findFirst({
+        where: { id, organizationId: ctx.organizationId, submodule: MOVEMENT_SUBMODULE },
+      });
+      if (!existing) throw new Error("Movement not found");
+      const oldData = (existing.data as Record<string, unknown>) ?? {};
+      // Reverse the old effect first (handles a changed item / qty / direction).
+      await applyStockDelta(
+        tx,
+        ctx.organizationId,
+        String(oldData.itemId ?? ""),
+        -movementDelta(oldData.direction, oldData.quantity),
+      );
+      const merged = { ...oldData, ...stripMovement(patch || {}) };
+      const direction = merged.direction === "OUT" ? "OUT" : "IN";
+      merged.direction = direction;
+      const updated = await tx.inventoryRecord.update({
+        where: { id },
+        data: { data: merged as any, status: direction },
+      });
+      await applyStockDelta(tx, ctx.organizationId, String(merged.itemId ?? ""), movementDelta(direction, merged.quantity));
+      return updated;
+    });
+    return { movement: toMovement(row) };
+  },
+
+  /** Delete a movement and reverse its stock effect — atomically. */
+  async deleteMovement(ctx: InvCtx, id: string): Promise<{ id: string }> {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.inventoryRecord.findFirst({
+        where: { id, organizationId: ctx.organizationId, submodule: MOVEMENT_SUBMODULE },
+      });
+      if (!existing) return;
+      const data = (existing.data as Record<string, unknown>) ?? {};
+      await applyStockDelta(
+        tx,
+        ctx.organizationId,
+        String(data.itemId ?? ""),
+        -movementDelta(data.direction, data.quantity),
+      );
+      await tx.inventoryRecord.delete({ where: { id } });
+    });
+    return { id };
   },
 
   async saveMasters(ctx: InvCtx, masters: MasterType[]): Promise<MasterType[]> {

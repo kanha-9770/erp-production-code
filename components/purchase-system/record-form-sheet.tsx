@@ -52,20 +52,16 @@ interface RecordFormSheetProps {
   onSubmit: (data: Record<string, unknown>) => void;
 }
 
-<<<<<<< HEAD
+function rowUid(): string {
+  return `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
 function buildInitial(
   schema: SubmoduleSchema,
   record: PurchaseRecord | null,
   initial?: Record<string, unknown> | null,
   currentUser?: { name: string; department: string } | null,
 ): Record<string, unknown> {
-=======
-function rowUid(): string {
-  return `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): Record<string, unknown> {
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
   const out: Record<string, unknown> = {};
   for (const f of schema.fields) {
     if (record && record[f.key] != null) out[f.key] = record[f.key];
@@ -99,17 +95,19 @@ function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): R
   return out;
 }
 
-<<<<<<< HEAD
 export function RecordFormSheet({ schema, open, record, initial, onOpenChange, onSubmit }: RecordFormSheetProps) {
-  const { getMasterOptions, addMasterOption, getItemHistory, currentUser } = usePurchase();
+  const {
+    getMasterOptions,
+    addMasterOption,
+    getItemHistory,
+    currentUser,
+    getPaymentPoOptions,
+    getGrnInvoiceOptions,
+    getPoTrace,
+  } = usePurchase();
   const [form, setForm] = useState<Record<string, unknown>>(() =>
     buildInitial(schema, record, initial, currentUser),
   );
-=======
-export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }: RecordFormSheetProps) {
-  const { getMasterOptions, addMasterOption, getItemHistory, getPaymentPoOptions, getGrnInvoiceOptions, getPoTrace } = usePurchase();
-  const [form, setForm] = useState<Record<string, unknown>>(() => buildInitial(schema, record));
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [storePickerOpen, setStorePickerOpen] = useState(false);
 
@@ -233,11 +231,7 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
       // aren't saved (e.g. unchecking Recommend Vendor clears name + phone;
       // switching away from a partial-advance term clears the advance amount).
       for (const f of schema.fields) {
-<<<<<<< HEAD
         if (f.showIf?.field === key && !showIfSatisfied(f.showIf, next[f.showIf.field])) {
-          next[f.key] = f.type === "number" || f.type === "currency" ? 0 : f.type === "checkbox" ? false : "";
-=======
-        if (f.showIf?.field === key && next[f.showIf.field] !== f.showIf.equals) {
           next[f.key] =
             f.type === "number" || f.type === "currency"
               ? 0
@@ -246,7 +240,6 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
                 : f.type === "lineItems"
                   ? []
                   : "";
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
         }
       }
       return next;

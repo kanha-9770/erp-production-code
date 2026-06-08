@@ -39,7 +39,12 @@ import type {
 interface InventoryContextValue {
   ready: boolean;
   masters: MasterType[];
-  movements: InventoryMovement[];
+  /**
+   * Capped in-memory item lists kept for pickers (e.g. the goods-movement form
+   * links a movement to a store item). The main list view still pages via
+   * `useInventoryList` — this is only for small dropdowns.
+   */
+  items: Record<SubmoduleKey, InventoryItem[]>;
 
   /**
    * Bumped after every successful item mutation (and reset). `useInventoryList`
@@ -59,8 +64,8 @@ interface InventoryContextValue {
   deleteItem: (submodule: SubmoduleKey, id: string) => Promise<void>;
   bulkDelete: (submodule: SubmoduleKey, ids: string[]) => Promise<void>;
 
-  // Goods movements (Inward / Outward) — posting adjusts the linked store
-  // item's current stock.
+  // Goods movements (Inward / Outward) — a self-contained ledger.
+  movements: InventoryMovement[];
   createMovement: (data: Record<string, unknown>) => Promise<void>;
   updateMovement: (id: string, patch: Record<string, unknown>) => Promise<void>;
   deleteMovement: (id: string) => Promise<void>;
@@ -89,13 +94,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [ready, setReady] = useState(false);
   const [masters, setMasters] = useState<MasterType[]>([]);
-<<<<<<< HEAD
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [items, setItems] = useState<Record<SubmoduleKey, InventoryItem[]>>({
+    store: [],
+    machine: [],
+    metal: [],
+  });
   const [revalidateToken, setRevalidateToken] = useState(0);
 
   const bumpRevalidate = useCallback(() => setRevalidateToken((n) => n + 1), []);
-=======
-  const [movements, setMovements] = useState<InventoryMovement[]>([]);
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 
   // Keep a ref to the latest masters so async reconcilers persist the right
   // snapshot without stale closures.
@@ -106,7 +113,6 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   // not every inventory record. Items are paged in by useInventoryList.
   useEffect(() => {
     let alive = true;
-<<<<<<< HEAD
     inventoryService
       .loadMasters()
       .then((m) => {
@@ -117,19 +123,33 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         if (alive) setReady(true); // unblock the UI even if masters fail
       });
-=======
-    inventoryService.load().then((snap) => {
-      if (!alive) return;
-      setItems(snap.items);
-      setMasters(snap.masters);
-      setMovements(snap.movements);
-      setReady(true);
-    });
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
+    // Movements are a separate, self-contained ledger (see service.ts).
+    inventoryService
+      .loadMovements()
+      .then((mv) => {
+        if (alive) setMovements(mv);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, []);
+
+  // Keep a capped in-memory list of store items for pickers (the movement form
+  // links a movement to a store item). Refreshes whenever a mutation bumps the
+  // revalidate token; the main list view still pages via useInventoryList.
+  useEffect(() => {
+    let alive = true;
+    inventoryService
+      .listItems({ submodule: "store", page: 0, pageSize: 2000 })
+      .then((r) => {
+        if (alive) setItems((prev) => ({ ...prev, store: r.rows }));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [revalidateToken]);
 
   // ── Item CRUD (mutate → revalidate) ────────────────────────────────────────
   // No in-memory list to reconcile: each method persists via the service and,
@@ -206,40 +226,23 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   );
 
   // ── Goods movements (Inward / Outward) ──────────────────────────────────────
-
-  const movementQty = (m: { direction?: unknown; quantity?: unknown }) => {
-    const qty = Number(m.quantity ?? 0) || 0;
-    return m.direction === "IN" ? qty : -qty;
-  };
-
-  const adjustLocalStock = useCallback((itemId: string | undefined, delta: number) => {
-    if (!itemId || delta === 0) return;
-    setItems((prev) => ({
-      ...prev,
-      store: prev.store.map((i) =>
-        i.id === itemId ? { ...i, currentStock: (Number(i.currentStock ?? 0) || 0) + delta } : i,
-      ),
-    }));
-  }, []);
+  // A self-contained ledger persisted by the service. Each mutation manages the
+  // movements list optimistically, then bumps the revalidate token so any
+  // visible item page re-fetches. (Syncing a posted movement into the linked
+  // item's DB stock is a follow-up — see service.ts.)
 
   const createMovement = useCallback(
     async (data: Record<string, unknown>) => {
       const tempId = uid("tmp");
       const now = new Date().toISOString();
       const optimistic = { ...data, id: tempId, createdAt: now, updatedAt: now, _optimistic: true } as InventoryMovement;
-      const delta = movementQty(optimistic);
       setMovements((prev) => [optimistic, ...prev]);
-      adjustLocalStock(optimistic.itemId, delta);
       try {
-        // Stock was applied optimistically (identical to the service's own
-        // delta) and the service persisted it. Just swap the temp movement for
-        // the canonical one — we deliberately do NOT pull the whole store back,
-        // as replacing it would clobber other in-flight optimistic deltas.
         const { movement } = await inventoryService.createMovement(data);
         setMovements((prev) => prev.map((m) => (m.id === tempId ? movement : m)));
+        bumpRevalidate();
       } catch (err) {
         setMovements((prev) => prev.filter((m) => m.id !== tempId));
-        adjustLocalStock(optimistic.itemId, -delta);
         toast({
           variant: "destructive",
           title: "Could not post movement",
@@ -248,7 +251,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast, adjustLocalStock],
+    [toast, bumpRevalidate],
   );
 
   const updateMovement = useCallback(
@@ -261,22 +264,14 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
           return { ...m, ...patch, _optimistic: true, updatedAt: new Date().toISOString() };
         }),
       );
-      // Optimistically re-balance stock: reverse the old effect, apply the new
-      // one (handles a changed item / quantity / direction). Matches the
-      // service's reverse-then-apply, so local & persisted stock agree.
-      const merged = snapshot ? ({ ...snapshot, ...patch } as InventoryMovement) : undefined;
-      if (snapshot) adjustLocalStock(snapshot.itemId, -movementQty(snapshot));
-      if (merged) adjustLocalStock(merged.itemId, movementQty(merged));
       try {
         const { movement } = await inventoryService.updateMovement(id, patch);
         setMovements((prev) => prev.map((m) => (m.id === id ? movement : m)));
+        bumpRevalidate();
       } catch (err) {
         if (snapshot) {
           const restore = snapshot;
           setMovements((prev) => prev.map((m) => (m.id === id ? restore : m)));
-          // Undo the optimistic stock re-balance.
-          if (merged) adjustLocalStock(merged.itemId, -movementQty(merged));
-          adjustLocalStock(snapshot.itemId, movementQty(snapshot));
         }
         toast({
           variant: "destructive",
@@ -286,7 +281,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast, adjustLocalStock],
+    [toast, bumpRevalidate],
   );
 
   const deleteMovement = useCallback(
@@ -298,24 +293,19 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         removed = prev[removedIndex];
         return prev.map((m) => (m.id === id ? { ...m, _deleting: true } : m));
       });
-      // Optimistically reverse this movement's stock effect.
-      if (removed) adjustLocalStock(removed.itemId, -movementQty(removed));
       try {
         await inventoryService.deleteMovement(id);
         setMovements((prev) => prev.filter((m) => m.id !== id));
+        bumpRevalidate();
       } catch (err) {
         if (removed) {
           const restore = removed;
           const at = removedIndex;
           setMovements((prev) => {
             const list = prev.map((m) => (m.id === id ? { ...restore, _deleting: false } : m));
-            if (!list.some((m) => m.id === id) && at >= 0) {
-              list.splice(at, 0, { ...restore, _deleting: false });
-            }
+            if (!list.some((m) => m.id === id) && at >= 0) list.splice(at, 0, { ...restore, _deleting: false });
             return list;
           });
-          // Re-apply the stock effect we optimistically reversed.
-          adjustLocalStock(removed.itemId, movementQty(removed));
         }
         toast({
           variant: "destructive",
@@ -325,7 +315,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast, adjustLocalStock],
+    [toast, bumpRevalidate],
   );
 
   // ── Masters ───────────────────────────────────────────────────────────────
@@ -455,11 +445,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
   const resetAll = useCallback(async () => {
     const snap = await inventoryService.reset();
     setMasters(snap.masters);
-<<<<<<< HEAD
     bumpRevalidate();
-=======
-    setMovements(snap.movements);
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
     toast({ title: "Inventory data reset", description: "Sample data has been restored." });
   }, [toast, bumpRevalidate]);
 
@@ -467,22 +453,17 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       masters,
-<<<<<<< HEAD
+      items,
       revalidateToken,
       bumpRevalidate,
       createItem,
       updateItem,
       deleteItem,
       bulkDelete,
-=======
       movements,
-      createItem,
-      updateItem,
-      deleteItem,
       createMovement,
       updateMovement,
       deleteMovement,
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
       getMaster,
       getMasterOptions,
       addMasterOption,
@@ -495,22 +476,17 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     [
       ready,
       masters,
-<<<<<<< HEAD
+      items,
       revalidateToken,
       bumpRevalidate,
       createItem,
       updateItem,
       deleteItem,
       bulkDelete,
-=======
       movements,
-      createItem,
-      updateItem,
-      deleteItem,
       createMovement,
       updateMovement,
       deleteMovement,
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
       getMaster,
       getMasterOptions,
       addMasterOption,

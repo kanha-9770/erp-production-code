@@ -101,18 +101,6 @@ export const SEED_MASTERS: MasterType[] = [
     options: opts(["Low", "Medium", "High", "Urgent"]),
   },
   {
-<<<<<<< HEAD
-=======
-    key: "payment_terms",
-    label: "Payment Terms",
-    description: "Agreed payment terms with the supplier.",
-    icon: "wallet",
-    usedBy: ["sourcing", "po", "payment"],
-    system: true,
-    options: opts(["100% Advance", "Credit", "Advance + Credit", "Advance + Before Delivery", "Cash on Delivery"]),
-  },
-  {
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
     key: "category",
     label: "Category",
     description: "Item category for requisitions.",
@@ -326,10 +314,6 @@ export const PR_SCHEMA: SubmoduleSchema = {
     { key: "purchaseType", label: "Purchase Type", type: "select", options: [
       { value: "NEW", label: "New Item" },
       { value: "REPEAT", label: "Repeat Purchase" },
-<<<<<<< HEAD
-    ], defaultValue: "NEW", section: "Procurement Route", inTable: true, width: 140 },
-    { key: "preferredSupplier", label: "Preferred Vendor", type: "master", master: "supplier", section: "Procurement Route", inTable: true, defaultHidden: true, width: 170 },
-=======
     ], defaultValue: "NEW", section: "Requisition", inTable: true, width: 140 },
 
     // Every requisition (New or Repeat) captures its line items in the Items
@@ -353,8 +337,7 @@ export const PR_SCHEMA: SubmoduleSchema = {
     { key: "requiredBy", label: "Required By", type: "date", section: "Item Details", inTable: true, width: 130 },
     { key: "purpose", label: "Purpose", type: "text", section: "Item Details", inTable: true, width: 180, placeholder: "Reason for requisition" },
 
-    { key: "preferredSupplier", label: "Preferred Supplier", type: "master", master: "supplier", section: "Procurement Route", inTable: true, defaultHidden: true, width: 170 },
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
+    { key: "preferredSupplier", label: "Preferred Vendor", type: "master", master: "supplier", section: "Procurement Route", inTable: true, defaultHidden: true, width: 170 },
     { key: "lastRate", label: "Last Rate", type: "currency", section: "Procurement Route", defaultValue: 0, inTable: true, defaultHidden: true, width: 120, align: "right" },
     { key: "lastPoRef", label: "Last PO Ref.", type: "text", section: "Procurement Route", inTable: true, defaultHidden: true, width: 130 },
 
@@ -418,12 +401,8 @@ export const PO_SCHEMA: SubmoduleSchema = {
     { key: "uom", label: "UOM", type: "master", master: "uom", section: "Line", inTable: true, width: 90 },
     { key: "rate", label: "Rate", type: "currency", section: "Line", defaultValue: 0, inTable: true, width: 120, align: "right" },
     { key: "amount", label: "Amount", type: "currency", section: "Line", defaultValue: 0, inTable: true, width: 140, align: "right" },
-<<<<<<< HEAD
     { key: "paymentTerms", label: "Payment Terms", type: "select", options: PAYMENT_TERM_OPTS, section: "Line", inTable: true, defaultHidden: true, width: 140 },
-=======
-    { key: "paymentTerms", label: "Payment Terms", type: "master", master: "payment_terms", section: "Line", inTable: true, defaultHidden: true, width: 140 },
     { key: "payMethod", label: "Pay Method", type: "select", options: PAY_METHOD_OPTS, defaultValue: "By Bank", section: "Line", inTable: true, width: 120 },
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
     { key: "deliveryDate", label: "Delivery Date", type: "date", section: "Line", inTable: true, width: 130 },
 
     { key: "approvalStatus", label: "Approval", type: "select", options: APPROVAL_OPTS, defaultValue: "PENDING", section: "Approval", inTable: true, width: 120 },
@@ -516,18 +495,9 @@ export const PAYMENT_SCHEMA: SubmoduleSchema = {
   fields: [
     { key: "docNo", label: "Payment Req. No.", type: "text", section: "Request", auto: true, inTable: true, pinned: true, width: 150 },
     { key: "docDate", label: "Request Date", type: "date", section: "Request", inTable: true, width: 130 },
-<<<<<<< HEAD
-    { key: "supplier", label: "Vendor", type: "master", master: "supplier", section: "Request", required: true, inTable: true, width: 180 },
-    { key: "poRef", label: "PO / GRN Ref.", type: "text", section: "Request", inTable: true, width: 130 },
-    { key: "invoiceNo", label: "Invoice No.", type: "text", section: "Request", inTable: true, width: 130 },
-
-    { key: "invoiceAmount", label: "Invoice Amount", type: "currency", section: "Amount", defaultValue: 0, inTable: true, width: 150, align: "right" },
-    { key: "paymentTerms", label: "Payment Terms", type: "select", options: PAYMENT_TERM_OPTS, section: "Amount", inTable: true, width: 140 },
-    { key: "dueDate", label: "Due Date", type: "date", section: "Amount", inTable: true, width: 130 },
-=======
     { key: "poRef", label: "PO No.", type: "select", optionsSource: "paymentPo", required: true, section: "Request", inTable: true, width: 130 },
     // Auto-filled from the selected PO — never entered manually.
-    { key: "supplier", label: "Supplier", type: "master", master: "supplier", computed: true, section: "Request", inTable: true, width: 180 },
+    { key: "supplier", label: "Vendor", type: "master", master: "supplier", computed: true, section: "Request", inTable: true, width: 180 },
     // Only appears once the chosen PO has been received via GRN — lists that
     // GRN's invoice number(s).
     { key: "invoiceNo", label: "Invoice No.", type: "select", optionsSource: "grnInvoice", dependsOn: "poRef", section: "Request", inTable: true, width: 130 },
@@ -541,7 +511,6 @@ export const PAYMENT_SCHEMA: SubmoduleSchema = {
     // amount when a GRN invoice is resolved, but the user can override it (and
     // enters it directly when no GRN has been done).
     { key: "requestAmount", label: "Request Amount", type: "currency", required: true, section: "Amount", defaultValue: 0, inTable: true, width: 150, align: "right" },
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 
     { key: "status", label: "Status", type: "status", statusOptions: PAYMENT_STATUS, defaultValue: "REQUESTED", section: "Status", inTable: true, width: 170 },
     { key: "remarks", label: "Remarks", type: "textarea", section: "Status" },
@@ -567,16 +536,9 @@ export const SUPPLIER_SCHEMA: SubmoduleSchema = {
     { key: "supplierGroup", label: "Group / Category", type: "master", master: "supplier_group", section: "General", inTable: true, width: 150 },
     { key: "status", label: "Status", type: "status", statusOptions: SUPPLIER_STATUS, defaultValue: "ACTIVE", section: "General", inTable: true, width: 120 },
 
-<<<<<<< HEAD
     // Multiple contacts — "Add contact" appends a row (name / designation /
     // phone / email). Not a table column (it's a repeatable list).
     { key: "contacts", label: "Contacts", type: "lineItems", columns: CONTACT_COLUMNS, rowNoun: "Contact", addLabel: "Add contact", section: "Contact" },
-=======
-    { key: "contactPerson", label: "Contact Person", type: "text", section: "Contact", inTable: true, width: 150 },
-    { key: "phoneCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: DEFAULT_DIAL_CODE, section: "Contact", inTable: true, defaultHidden: true, width: 120 },
-    { key: "phone", label: "Phone", type: "text", section: "Contact", inTable: true, width: 130, placeholder: "Number without code" },
-    { key: "email", label: "Email", type: "text", section: "Contact", inTable: true, width: 180 },
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
     { key: "website", label: "Website", type: "text", section: "Contact", defaultHidden: true, inTable: true, width: 160 },
 
     { key: "addressLine", label: "Address", type: "textarea", section: "Address", placeholder: "Street, area…" },

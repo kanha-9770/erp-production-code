@@ -58,10 +58,7 @@ export function RecordPreview({
   const statusField = schema.fields.find((f) => f.key === schema.statusKey);
   const status = statusField ? resolveStatus(statusField, record[schema.statusKey]) : null;
 
-<<<<<<< HEAD
   const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, record[f.showIf.field]);
-=======
-  const isVisible = (f: FieldDef) => !f.showIf || record[f.showIf.field] === f.showIf.equals;
   // When a line-items subform holds the detail, hide the flat mirror fields so
   // they aren't shown twice; legacy records without rows still show them.
   const hasLineItems = schema.fields.some(
@@ -71,7 +68,6 @@ export function RecordPreview({
   // — in that case the figure lives in Request Amount instead.
   const isShown = (f: FieldDef) =>
     isVisible(f) && !(f.formHidden && hasLineItems) && !(f.requiresGrnInvoice && !record[f.key]);
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 
   return (
     <div className="p-5 sm:p-6 space-y-6">

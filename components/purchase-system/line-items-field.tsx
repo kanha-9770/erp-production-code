@@ -130,6 +130,8 @@ export function LineItemsField({
 
       {rows.map((row, idx) => {
         const receipt = rowReceipt ? rowReceipt(row, columns) : null;
+        const receiptType = receipt?.receiptType;
+        const balance = receipt?.balance ?? 0;
         return (
           <div key={(row._id as string) ?? idx} className="rounded-lg border p-3 space-y-3 bg-muted/20">
             <div className="flex items-center justify-between gap-2">
@@ -137,9 +139,11 @@ export function LineItemsField({
                 <span className="text-xs font-semibold text-muted-foreground">
                   {noun} {idx + 1}
                 </span>
-                <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
-                  {RECEIPT_LABEL[receiptType]}
-                </Badge>
+                {receiptType && (
+                  <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
+                    {RECEIPT_LABEL[receiptType]}
+                  </Badge>
+                )}
                 {balance > 0 && (
                   <span className="text-xs text-muted-foreground">Balance {formatNumber(balance)}</span>
                 )}

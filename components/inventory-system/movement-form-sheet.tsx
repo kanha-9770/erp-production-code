@@ -179,9 +179,7 @@ export function MovementFormSheet({
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
-    if (!form.docNo.trim()) e.docNo = "Document no. is required";
-    else if (takenDocNos.includes(form.docNo.trim().toLowerCase()))
-      e.docNo = `${form.docNo.trim()} already exists`;
+    // docNo is system-generated server-side (locked) — no client validation.
     if (!form.itemId) e.itemId = "Pick an item";
     if (num(form.quantity) <= 0) e.quantity = "Quantity must be greater than 0";
     if (num(form.rate) < 0) e.rate = "Rate cannot be negative";
@@ -228,11 +226,12 @@ export function MovementFormSheet({
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label={isIn ? "Inward No." : "Outward No."} required error={errors.docNo}>
+            <Field label={isIn ? "Inward No." : "Outward No."}>
               <Input
-                value={form.docNo}
-                onChange={(e) => set({ docNo: e.target.value })}
-                className={cn(errors.docNo && "border-destructive")}
+                value={record ? form.docNo : ""}
+                readOnly
+                placeholder="Auto-generated on save"
+                className="bg-muted/50 text-muted-foreground font-mono cursor-not-allowed"
               />
             </Field>
             <Field label="Date">

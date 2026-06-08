@@ -106,13 +106,12 @@ interface DataTableProps<T> {
     onChange: (next: Set<string>) => void;
   };
   /**
-<<<<<<< HEAD
    * Suppress the built-in bottom Previous/Next footer. Use when the parent
    * renders its own pagination controls elsewhere (e.g. a top toolbar with a
    * page-size selector). Row-number gutter offsets still honour the page.
    */
   hidePaginationFooter?: boolean;
-=======
+  /**
    * Opt-in: render an extra header row above the column headers that spans each
    * run of consecutive visible columns sharing the same `group`, labelled with
    * that group. Off by default so existing tables are unchanged. Used by dense,
@@ -125,7 +124,6 @@ interface DataTableProps<T> {
    * bold text; groups without one fall back to the muted style.
    */
   groupColors?: Record<string, string>;
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 }
 
 interface CellRef { r: number; c: number }
@@ -193,12 +191,9 @@ export function DataTable<T>({
   pageSize,
   serverPagination,
   selection,
-<<<<<<< HEAD
   hidePaginationFooter,
-=======
   groupHeaders,
   groupColors,
->>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 }: DataTableProps<T>) {
   const { prefs, isHidden, toggleHidden, setWidth, setSort, setDensity } =
     useTablePrefs(tableId);
