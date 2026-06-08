@@ -96,7 +96,24 @@ export const SEED_MASTERS: MasterType[] = [
     description: "Material grade for metal stock.",
     icon: "layers",
     usedBy: ["metal"],
-    options: opts(["MS", "SS 304", "SS 316", "Aluminium", "Brass", "Copper", "Cast Iron"]),
+    options: opts([
+      "MS",
+      "SS 304",
+      "SS 316",
+      "Aluminium",
+      "Brass",
+      "Copper",
+      "Cast Iron",
+      "EN8",
+      "EN31",
+      "D2",
+      "H13",
+      "CHROME ROD",
+      "EN18",
+      "EN19",
+      "EN24",
+      "ALUMINIUM 6061",
+    ]),
   },
   {
     key: "metal_form",
@@ -180,14 +197,21 @@ export const METAL_SCHEMA: SubmoduleSchema = {
   codePrefix: "MTL",
   fields: [
     { key: "image", label: "Image", type: "image", section: "Identity", inTable: true, pinned: true, width: 60 },
+<<<<<<< HEAD
     { key: "itemCode", label: "Stock Code", type: "text", section: "Identity", auto: true, inTable: true, width: 140 },
     { key: "itemName", label: "Description", type: "text", section: "Identity", required: true, inTable: true, width: 240, placeholder: "e.g. SS 304 Sheet 2mm" },
+=======
+    { key: "itemCode", label: "Item Code", type: "text", section: "Identity", required: true, inTable: true, width: 140 },
+    { key: "itemName", label: "Item Name", type: "text", section: "Identity", required: true, inTable: true, pinned: true, width: 220, placeholder: "e.g. SS 304 Sheet" },
+    { key: "itemDescription", label: "Item Description", type: "text", section: "Identity", inTable: true, width: 260, placeholder: "e.g. SS 304 cold-rolled sheet 2mm" },
+>>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
     { key: "grade", label: "Grade", type: "master", master: "metal_grade", section: "Identity", required: true, inTable: true, width: 130 },
     { key: "form", label: "Form", type: "master", master: "metal_form", section: "Identity", required: true, inTable: true, width: 120 },
     { key: "dimension", label: "Dimension / Size", type: "text", section: "Identity", inTable: true, defaultHidden: true, width: 150, placeholder: "2mm x 1250 x 2500" },
 
     { key: "uom", label: "Unit (UOM)", type: "master", master: "uom", section: "Stock", required: true, inTable: true, width: 110 },
     { key: "warehouse", label: "Warehouse", type: "master", master: "warehouse", section: "Stock", required: true, inTable: true, width: 180 },
+    { key: "location", label: "Location", type: "text", section: "Stock", inTable: true, width: 150, placeholder: "Yard / Rack / Bin" },
     { key: "heatNo", label: "Heat / Batch No.", type: "text", section: "Stock", defaultHidden: true, inTable: true, width: 140 },
     { key: "currentStock", label: "Quantity", type: "number", section: "Stock", defaultValue: 0, inTable: true, width: 110, align: "right" },
     { key: "minStock", label: "Reorder Level", type: "number", section: "Stock", defaultValue: 0, inTable: true, width: 120, align: "right" },

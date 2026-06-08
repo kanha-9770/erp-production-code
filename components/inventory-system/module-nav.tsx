@@ -4,11 +4,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Cog, Layers, SlidersHorizontal, Warehouse } from "lucide-react";
+import {
+  Boxes,
+  Cog,
+  Layers,
+  SlidersHorizontal,
+  Warehouse,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/inventory-management/store-inventory", label: "Store", icon: Boxes },
+  { href: "/inventory-management/inward", label: "Inward", icon: ArrowDownToLine },
+  { href: "/inventory-management/outward", label: "Outward", icon: ArrowUpFromLine },
   { href: "/inventory-management/machine-inventory", label: "Machine", icon: Cog },
   { href: "/inventory-management/metal-inventory", label: "Metal", icon: Layers },
   { href: "/inventory-management/master", label: "Inventory Master", icon: SlidersHorizontal },

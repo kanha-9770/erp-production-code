@@ -70,20 +70,16 @@ export function LineItemsField({
   value: unknown;
   onChange: (rows: Row[]) => void;
 }) {
-  const { getPoTrace, getOpenPoOptions, getOpenPrOptions } = usePurchase();
+  const { getPoTrace, getOpenPoOptions, getOpenPrOptions, getMasterOptions } = usePurchase();
   const rows = asRows(value);
   const columns = field.columns ?? [];
   const noun = field.rowNoun ?? "Row";
-  // Receipt status applies to GRN rows — leaf rows (invoiceQty/receivedQty) and
-  // invoice rows (which aggregate a nested lineItems column). Plain repeatable
-  // rows like vendor contacts have neither, so no receipt badge.
-  const showReceipt = columns.some(
-    (c) => c.key === "invoiceQty" || c.key === "receivedQty" || c.type === "lineItems",
-  );
 
   const optionsFor = (col: FieldDef, current: string): OpenDocOption[] | undefined => {
     if (col.optionsSource === "openPo") return getOpenPoOptions(current);
     if (col.optionsSource === "openPr") return getOpenPrOptions(current);
+    if (col.type === "master" && col.master)
+      return getMasterOptions(col.master).map((o) => ({ value: o.value, label: o.value, balance: 0 }));
     return undefined;
   };
 
@@ -133,7 +129,7 @@ export function LineItemsField({
       )}
 
       {rows.map((row, idx) => {
-        const receipt = showReceipt ? rowReceipt(row, columns) : null;
+        const receipt = rowReceipt ? rowReceipt(row, columns) : null;
         return (
           <div key={(row._id as string) ?? idx} className="rounded-lg border p-3 space-y-3 bg-muted/20">
             <div className="flex items-center justify-between gap-2">
@@ -141,17 +137,11 @@ export function LineItemsField({
                 <span className="text-xs font-semibold text-muted-foreground">
                   {noun} {idx + 1}
                 </span>
-                {receipt && (
-                  <>
-                    <Badge variant={RECEIPT_VARIANT[receipt.receiptType]} className="h-5">
-                      {RECEIPT_LABEL[receipt.receiptType]}
-                    </Badge>
-                    {receipt.balance > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        Balance {formatNumber(receipt.balance)}
-                      </span>
-                    )}
-                  </>
+                <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
+                  {RECEIPT_LABEL[receiptType]}
+                </Badge>
+                {balance > 0 && (
+                  <span className="text-xs text-muted-foreground">Balance {formatNumber(balance)}</span>
                 )}
               </div>
               <Button
@@ -232,12 +222,11 @@ function SubField({
     </Label>
   );
 
-  // Dynamic dropdown (open POs / PRs) or a static select.
-  if (field.type === "select") {
+  // Dropdown: a master (options injected), a dynamic open-PO/PR list, or a
+  // static select.
+  if (field.type === "select" || field.type === "master") {
     const list =
-      field.optionsSource && options
-        ? options
-        : (field.options ?? []).map((o) => ({ value: o.value, label: o.label, balance: 0 }));
+      options ?? (field.options ?? []).map((o) => ({ value: o.value, label: o.label, balance: 0 }));
     return (
       <div className="space-y-1">
         {label}
@@ -252,7 +241,9 @@ function SubField({
               </SelectItem>
             ))}
             {list.length === 0 && (
-              <div className="px-2 py-2 text-xs text-muted-foreground">No open documents</div>
+              <div className="px-2 py-2 text-xs text-muted-foreground">
+                {field.optionsSource ? "No open documents" : "No options"}
+              </div>
             )}
           </SelectContent>
         </Select>

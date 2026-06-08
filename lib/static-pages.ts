@@ -52,6 +52,8 @@ export type StaticPageGroup =
   | 'Real Estate'
   | 'Inventory'
   | 'Purchase'
+  | 'Accounts'
+  | 'Products'
   | 'Settings'
   | 'Profile'
   | 'AI & Tools';
@@ -334,6 +336,20 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'boxes',
   },
   {
+    path: '/inventory-management/inward',
+    label: 'Inward (Goods In)',
+    group: 'Inventory',
+    description: 'Goods received into the store — increases stock',
+    icon: 'package',
+  },
+  {
+    path: '/inventory-management/outward',
+    label: 'Outward (Goods Out)',
+    group: 'Inventory',
+    description: 'Goods issued from the store — decreases stock',
+    icon: 'package',
+  },
+  {
     path: '/inventory-management/machine-inventory',
     label: 'Machine Inventory',
     group: 'Inventory',
@@ -412,6 +428,99 @@ export const STATIC_PAGES: StaticPage[] = [
     label: 'Purchase Master',
     group: 'Purchase',
     description: 'Supplier, department & payment-term dropdowns',
+    icon: 'settings',
+  },
+
+  // ── Accounts & Finance (Module #5) ─────────────────────────────────────
+  // Self-contained finance documents (lib/accounts-system, localStorage-backed)
+  // plus the procurement Payment Request, which is surfaced here AND under
+  // Purchase (it reads POs & GRN invoices from the purchase store).
+  {
+    path: '/accounts/reports',
+    label: 'Accounts Dashboard',
+    group: 'Accounts',
+    description: 'Receivables, collections & money-out roll-up',
+    icon: 'bar-chart',
+  },
+  {
+    path: '/accounts/chart-of-accounts',
+    label: 'Chart of Accounts',
+    group: 'Accounts',
+    description: 'Ledger accounts master',
+    icon: 'book',
+  },
+  {
+    path: '/accounts/customers',
+    label: 'Customers',
+    group: 'Accounts',
+    description: 'Customer master (AR)',
+    icon: 'users',
+  },
+  {
+    path: '/accounts/sales-invoice',
+    label: 'Sales Invoice',
+    group: 'Accounts',
+    description: 'Customer invoices with tax & totals',
+    icon: 'file-text',
+  },
+  {
+    path: '/accounts/receipts',
+    label: 'Receipts',
+    group: 'Accounts',
+    description: 'Money received against invoices',
+    icon: 'banknote',
+  },
+  {
+    path: '/accounts/payment-voucher',
+    label: 'Payment Voucher',
+    group: 'Accounts',
+    description: 'Disbursements to suppliers / parties',
+    icon: 'banknote',
+  },
+  {
+    path: '/accounts/expenses',
+    label: 'Expense Voucher',
+    group: 'Accounts',
+    description: 'Operating expenses & claims',
+    icon: 'receipt',
+  },
+  {
+    path: '/accounts/journal-voucher',
+    label: 'Journal Voucher',
+    group: 'Accounts',
+    description: 'Manual Dr / Cr ledger entries',
+    icon: 'book',
+  },
+  {
+    path: '/accounts/payment-request',
+    label: 'Payment Request',
+    group: 'Accounts',
+    description: 'Supplier payment requests (procurement)',
+    icon: 'banknote',
+  },
+  {
+    path: '/accounts/master',
+    label: 'Accounts Master',
+    group: 'Accounts',
+    description: 'Account group, tax, payment-mode dropdowns',
+    icon: 'settings',
+  },
+
+  // ── Product Master (Module #6) ─────────────────────────────────────────
+  // Self-contained machine-product catalog (lib/product-system,
+  // localStorage-backed): identification, technical, financial, sales & service.
+  {
+    path: '/product-master/products',
+    label: 'Product Master',
+    group: 'Products',
+    description: 'Machine products — specs, pricing, technical & sales data',
+    icon: 'package',
+  },
+  {
+    path: '/product-master/master',
+    label: 'Product Dropdowns',
+    group: 'Products',
+    description: 'Category, variant & UoM dropdowns',
     icon: 'settings',
   },
 
@@ -944,6 +1053,8 @@ export const STATIC_PAGE_GROUP_ORDER: StaticPageGroup[] = [
   'Real Estate',
   'Inventory',
   'Purchase',
+  'Accounts',
+  'Products',
   'Settings',
   'Profile',
   'AI & Tools',

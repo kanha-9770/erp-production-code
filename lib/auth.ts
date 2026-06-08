@@ -153,6 +153,26 @@ export async function invalidateAllSessionsForUser(userId: string) {
   );
 }
 
+/**
+ * Invalidates ALL cached sessions for every member of an organization. Call
+ * after changing org-wide session-embedded state (e.g. selectedModules) so the
+ * next validateSession() reloads from the DB instead of serving the stale
+ * cached graph for up to SESSION_CACHE_TTL_S. Without this, a freshly enabled
+ * ERP module stays hidden from the sidebar (which reads selectedModules off the
+ * cached session via /api/auth/me) until the TTL lapses.
+ */
+export async function invalidateAllSessionsForOrganization(organizationId: string) {
+  const sessions = await prisma.userSession.findMany({
+    where: { user: { organizationId } },
+    select: { token: true },
+  });
+  if (sessions.length === 0) return;
+  await cacheInvalidate(
+    "auth",
+    ...sessions.map((s) => sessionCacheKey(s.token))
+  );
+}
+
 export async function cleanupExpiredSessions() {
   await prisma.userSession.deleteMany({
     where: {

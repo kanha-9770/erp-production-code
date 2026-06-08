@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PhoneField } from "@/components/form-fields/phone-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -580,10 +581,10 @@ export function JobApplicationForm({
             </Select>
           </Field>
           <Field label="Applicant Mobile Number *">
-            <Input
+            <PhoneField
               value={values.applicantMobile}
-              onChange={(e) => set("applicantMobile", e.target.value)}
-              placeholder="+91 98xxxxxxxx"
+              onChange={(v) => set("applicantMobile", v)}
+              placeholder="98xxxxxxxx"
             />
           </Field>
 

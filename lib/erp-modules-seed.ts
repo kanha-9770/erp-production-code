@@ -76,21 +76,41 @@ async function ensureFolder(
   const existing = await (db as PrismaClient).formModule.findFirst({
     // parentId null vs a value both work — Prisma treats `null` as IS NULL.
     where: { organizationId, name, parentId: parentId ?? null },
-    select: { id: true },
+    select: {
+      id: true,
+      moduleType: true,
+      isActive: true,
+      sortOrder: true,
+      level: true,
+      icon: true,
+      description: true,
+    },
   });
 
   if (existing) {
-    await (db as PrismaClient).formModule.update({
-      where: { id: existing.id },
-      data: {
-        moduleType: SEEDED_MODULE_TYPE,
-        isActive: true,
-        sortOrder,
-        level,
-        ...(icon !== undefined ? { icon } : {}),
-        ...(description !== undefined ? { description } : {}),
-      },
-    });
+    // Skip the write when the row already matches the blueprint — on a re-seed
+    // (e.g. a settings toggle) most folders are unchanged, so this avoids a
+    // round-trip per existing folder and keeps the reconcile fast.
+    const unchanged =
+      existing.moduleType === SEEDED_MODULE_TYPE &&
+      existing.isActive === true &&
+      existing.sortOrder === sortOrder &&
+      existing.level === level &&
+      (icon === undefined || existing.icon === icon) &&
+      (description === undefined || existing.description === description);
+    if (!unchanged) {
+      await (db as PrismaClient).formModule.update({
+        where: { id: existing.id },
+        data: {
+          moduleType: SEEDED_MODULE_TYPE,
+          isActive: true,
+          sortOrder,
+          level,
+          ...(icon !== undefined ? { icon } : {}),
+          ...(description !== undefined ? { description } : {}),
+        },
+      });
+    }
     return existing.id;
   }
 
@@ -131,21 +151,38 @@ async function ensureTopFolder(
       parentId: null,
       name: { in: candidateNames },
     },
-    select: { id: true, name: true },
+    select: {
+      id: true,
+      name: true,
+      icon: true,
+      description: true,
+      isActive: true,
+      sortOrder: true,
+      level: true,
+    },
   });
 
   if (existing) {
-    await (db as PrismaClient).formModule.update({
-      where: { id: existing.id },
-      data: {
-        name: bp.topLabel,
-        icon: bp.topIcon,
-        description: bp.topDescription,
-        isActive: true,
-        sortOrder,
-        level: 0,
-      },
-    });
+    const unchanged =
+      existing.name === bp.topLabel &&
+      existing.icon === bp.topIcon &&
+      existing.description === (bp.topDescription ?? null) &&
+      existing.isActive === true &&
+      existing.sortOrder === sortOrder &&
+      existing.level === 0;
+    if (!unchanged) {
+      await (db as PrismaClient).formModule.update({
+        where: { id: existing.id },
+        data: {
+          name: bp.topLabel,
+          icon: bp.topIcon,
+          description: bp.topDescription,
+          isActive: true,
+          sortOrder,
+          level: 0,
+        },
+      });
+    }
     return existing.id;
   }
 

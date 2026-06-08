@@ -11,6 +11,7 @@ import { computeImagePhash } from "@/lib/real-estate/perceptual-hash";
 import { LeadPhotoCapture } from "@/components/real-estate/lead-photo-capture";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PhoneField } from "@/components/form-fields/phone-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -303,10 +304,10 @@ export default function NewLeadPage() {
               <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
             </Field>
             <Field label="Phone">
-              <Input type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+              <PhoneField value={form.phone} onChange={(v) => set("phone", v)} />
             </Field>
             <Field label="Alternate phone">
-              <Input type="tel" value={form.altPhone} onChange={(e) => set("altPhone", e.target.value)} />
+              <PhoneField value={form.altPhone} onChange={(v) => set("altPhone", v)} />
             </Field>
             <Field
               label="Customer photo"

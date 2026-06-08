@@ -31,6 +31,8 @@ import {
   Users,
   Boxes,
   Package,
+  Banknote,
+  ShoppingCart,
 } from "lucide-react"
 import { useCreateOrganizationMutation } from "@/lib/api/organization"
 import { ERP_MODULES, DEFAULT_NEW_ORG_MODULES, type ErpModuleDef } from "@/lib/erp-modules"
@@ -61,6 +63,10 @@ function moduleIcon(name: string) {
       return Boxes
     case "package":
       return Package
+    case "banknote":
+      return Banknote
+    case "shopping-cart":
+      return ShoppingCart
     default:
       return Building2
   }

@@ -264,6 +264,11 @@ const INVENTORY_BLUEPRINT: ModuleBlueprint = {
       ],
     },
     {
+      name: "Goods Movement",
+      icon: "arrow-down-up",
+      pages: ["/inventory-management/inward", "/inventory-management/outward"],
+    },
+    {
       name: "Masters",
       icon: "settings",
       pages: ["/inventory-management/master"],
@@ -301,12 +306,67 @@ const PURCHASE_BLUEPRINT: ModuleBlueprint = {
   ],
 };
 
+// ── Accounts & Finance ──────────────────────────────────────────────────────
+const ACCOUNTS_BLUEPRINT: ModuleBlueprint = {
+  erpModuleId: "accounts",
+  topLabel: "Accounts",
+  topIcon: "banknote",
+  topDescription: "Accounts & finance: invoices, receipts, payments, ledgers",
+  // Direct dashboard leaf under the top folder, then grouped documents.
+  topPages: ["/accounts/reports"],
+  tree: [
+    {
+      name: "Masters",
+      icon: "book",
+      pages: ["/accounts/chart-of-accounts", "/accounts/customers"],
+    },
+    {
+      name: "Receivables",
+      icon: "arrow-down-circle",
+      pages: ["/accounts/sales-invoice", "/accounts/receipts"],
+    },
+    {
+      name: "Payables",
+      icon: "arrow-up-circle",
+      pages: ["/accounts/payment-voucher", "/accounts/expenses", "/accounts/payment-request"],
+    },
+    {
+      name: "General Ledger",
+      icon: "book-open",
+      pages: ["/accounts/journal-voucher"],
+    },
+    {
+      name: "Setup",
+      icon: "settings",
+      pages: ["/accounts/master"],
+    },
+  ],
+};
+
+// ── Product Master ───────────────────────────────────────────────────────────
+const PRODUCT_BLUEPRINT: ModuleBlueprint = {
+  erpModuleId: "product",
+  topLabel: "Products",
+  topIcon: "package",
+  topDescription: "Machine product master — specs, pricing, technical & sales data",
+  topPages: ["/product-master/products"],
+  tree: [
+    {
+      name: "Setup",
+      icon: "settings",
+      pages: ["/product-master/master"],
+    },
+  ],
+};
+
 /** All module blueprints, keyed implicitly by `erpModuleId`. */
 export const SIDEBAR_BLUEPRINTS: ModuleBlueprint[] = [
   HR_BLUEPRINT,
   MLM_BLUEPRINT,
   INVENTORY_BLUEPRINT,
   PURCHASE_BLUEPRINT,
+  ACCOUNTS_BLUEPRINT,
+  PRODUCT_BLUEPRINT,
 ];
 
 /** ERP module ids that have a nested-folder blueprint. */

@@ -56,6 +56,10 @@ interface PurchaseContextValue {
   getOpenPoOptions: (includeValue?: string) => OpenDocOption[];
   /** PR numbers not yet fully received (partial included). */
   getOpenPrOptions: (includeValue?: string) => OpenDocOption[];
+  /** Every PO (for the payment request's compulsory PO dropdown). */
+  getPaymentPoOptions: (includeValue?: string) => OpenDocOption[];
+  /** Invoice numbers booked against a PO via GRN — empty until a GRN exists. */
+  getGrnInvoiceOptions: (poNo: string) => OpenDocOption[];
   /** Every PO with an outstanding balance, for the pending-balances report. */
   getPendingPoBalances: () => PoBalance[];
 
@@ -452,6 +456,44 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     return out;
   }, []);
 
+  // Every (non-cancelled) PO, for the payment request's compulsory PO dropdown.
+  const getPaymentPoOptions = useCallback((includeValue?: string): OpenDocOption[] => {
+    const out: OpenDocOption[] = [];
+    for (const po of recordsRef.current.po) {
+      if (po.status === "CANCELLED") continue;
+      const docNo = String(po.docNo ?? "").trim();
+      if (!docNo) continue;
+      const supplier = po.supplier ? ` · ${String(po.supplier)}` : "";
+      out.push({ value: docNo, label: `${docNo}${supplier}`, balance: 0 });
+    }
+    if (includeValue && !out.some((o) => o.value === includeValue)) {
+      out.unshift({ value: includeValue, label: includeValue, balance: 0 });
+    }
+    return out;
+  }, []);
+
+  // Invoice numbers received against a PO through any GRN. Empty when no GRN has
+  // booked that PO yet (so the payment's Invoice No. field stays hidden).
+  const getGrnInvoiceOptions = useCallback((poNo: string): OpenDocOption[] => {
+    const target = String(poNo ?? "").trim();
+    if (!target) return [];
+    const seen = new Set<string>();
+    const out: OpenDocOption[] = [];
+    for (const grn of recordsRef.current.grn) {
+      const invoices = Array.isArray(grn.lines) ? (grn.lines as Record<string, unknown>[]) : [];
+      for (const inv of invoices) {
+        const items = Array.isArray(inv.items) ? (inv.items as Record<string, unknown>[]) : [];
+        const matched = items.filter((it) => String(it.poRef ?? "").trim() === target);
+        const invNo = String(inv.invoiceNo ?? "").trim();
+        if (matched.length === 0 || !invNo || seen.has(invNo)) continue;
+        seen.add(invNo);
+        const amt = matched.reduce((s, it) => s + (Number(it.amount ?? 0) || 0), 0);
+        out.push({ value: invNo, label: amt > 0 ? `${invNo} · ${amt}` : invNo, balance: amt });
+      }
+    }
+    return out;
+  }, []);
+
   const getPendingPoBalances = useCallback((): PoBalance[] => {
     // received qty + last receipt date per PO, across every GRN's nested lines.
     const recv = new Map<string, { qty: number; lastDate?: string }>();
@@ -645,6 +687,8 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       getPoTrace,
       getOpenPoOptions,
       getOpenPrOptions,
+      getPaymentPoOptions,
+      getGrnInvoiceOptions,
       getPendingPoBalances,
       getMaster,
       getMasterOptions,
@@ -668,6 +712,8 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       getPoTrace,
       getOpenPoOptions,
       getOpenPrOptions,
+      getPaymentPoOptions,
+      getGrnInvoiceOptions,
       getPendingPoBalances,
       getMaster,
       getMasterOptions,

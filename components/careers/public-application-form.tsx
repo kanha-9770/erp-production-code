@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { PhoneField } from "@/components/form-fields/phone-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -309,12 +310,11 @@ export function PublicApplicationForm({ jobId }: { jobId: string }) {
                   />
                 </Field>
                 <Field label="Phone" required error={errors.mobile}>
-                  <Input
+                  <PhoneField
                     value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    placeholder="+91 90000 00000"
-                    inputMode="tel"
-                    aria-invalid={!!errors.mobile || undefined}
+                    onChange={setMobile}
+                    placeholder="90000 00000"
+                    hasError={!!errors.mobile}
                   />
                 </Field>
                 <Field label="How did you hear about us?">

@@ -58,7 +58,20 @@ export function RecordPreview({
   const statusField = schema.fields.find((f) => f.key === schema.statusKey);
   const status = statusField ? resolveStatus(statusField, record[schema.statusKey]) : null;
 
+<<<<<<< HEAD
   const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, record[f.showIf.field]);
+=======
+  const isVisible = (f: FieldDef) => !f.showIf || record[f.showIf.field] === f.showIf.equals;
+  // When a line-items subform holds the detail, hide the flat mirror fields so
+  // they aren't shown twice; legacy records without rows still show them.
+  const hasLineItems = schema.fields.some(
+    (f) => f.type === "lineItems" && Array.isArray(record[f.key]) && (record[f.key] as unknown[]).length > 0,
+  );
+  // Hide the auto-filled Invoice Amount when no GRN was booked (value is 0/empty)
+  // — in that case the figure lives in Request Amount instead.
+  const isShown = (f: FieldDef) =>
+    isVisible(f) && !(f.formHidden && hasLineItems) && !(f.requiresGrnInvoice && !record[f.key]);
+>>>>>>> 3f62dcd6f3ee142bcf58a686984ba27a27ffaab8
 
   return (
     <div className="p-5 sm:p-6 space-y-6">
@@ -129,7 +142,7 @@ export function RecordPreview({
           </h3>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
             {section.fields
-              .filter((f) => f.type !== "textarea" && f.type !== "media" && f.type !== "lineItems" && isVisible(f))
+              .filter((f) => f.type !== "textarea" && f.type !== "media" && f.type !== "lineItems" && isShown(f))
               .map((f) => (
                 <div key={f.key} className="min-w-0">
                   <dt className="text-xs text-muted-foreground">{f.label}</dt>
