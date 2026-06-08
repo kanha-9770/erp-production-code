@@ -83,6 +83,15 @@ export const modulesApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 300,
     }),
 
+    // Full module hierarchy + ALL forms (incl. drafts) for the data-import
+    // picker. Distinct from getPermittedModules, which only attaches published
+    // forms and is consumed by the sidebar/other surfaces.
+    getImportTargets: builder.query<PermittedModulesResponse, void>({
+      query: () => "/import/targets",
+      providesTags: ["Module"],
+      keepUnusedDataFor: 120,
+    }),
+
     getModuleById: builder.query<ModuleResponse, string>({
       query: (moduleId) => `/modules/${moduleId}`,
       providesTags: (result, error, moduleId) => [{ type: "Module", id: moduleId }],
@@ -321,6 +330,7 @@ export const modulesApi = baseApi.injectEndpoints({
 
 export const {
   useGetPermittedModulesQuery,
+  useGetImportTargetsQuery,
   useGetModuleByIdQuery,
   useLazyGetModuleByIdQuery,
   useGetOrgModulesQuery,

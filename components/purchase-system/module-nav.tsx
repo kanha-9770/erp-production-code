@@ -18,7 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { href: "/purchase-management/suppliers", label: "Suppliers", icon: Truck },
+  { href: "/purchase-management/suppliers", label: "Vendors", icon: Truck },
   { href: "/purchase-management/requisition", label: "Requisition", icon: FileText },
   { href: "/purchase-management/sourcing", label: "Sourcing", icon: Search },
   { href: "/purchase-management/purchase-order", label: "Purchase Order", icon: FileSignature },

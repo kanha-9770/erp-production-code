@@ -1,137 +1,74 @@
 /**
- * Purchase System — service boundary (mock; localStorage-backed).
- * Mirrors lib/inventory-system/service.ts. The only file that knows where data
- * lives; swap it to wire a real backend without touching provider or UI.
+ * Purchase System — service boundary (LIVE: org-scoped Prisma-backed API).
+ * Mirrors lib/inventory-system/service.ts. Calls /api/purchase-system/*
+ * (backed by PurchaseRecord + PurchaseMasterSnapshot). Method names, argument
+ * order and return types are unchanged from the localStorage mock, so the
+ * provider/UI keep working without edits.
  */
 
 import type {
   PurchaseRecord,
   PurchaseSnapshot,
+  PostStockResult,
   MasterType,
   PurchaseSubmoduleKey,
 } from "./types";
-import { SEED_MASTERS, SUBMODULE_ORDER } from "./schema";
-import { seedRecords } from "./seed";
 
-const STORAGE_KEY = "erp:purchase-system:v1";
-const SNAPSHOT_VERSION = 1;
-const LATENCY_MS = 350;
+const BASE = "/api/purchase-system";
 
-function delay(): Promise<void> {
-  return new Promise((res) => setTimeout(res, LATENCY_MS));
-}
-
-function emptyRecords(): Record<PurchaseSubmoduleKey, PurchaseRecord[]> {
-  return { supplier: [], pr: [], sourcing: [], po: [], grn: [], payment: [] };
-}
-
-function freshSnapshot(): PurchaseSnapshot {
-  const records = emptyRecords();
-  for (const key of SUBMODULE_ORDER) records[key] = seedRecords(key);
-  return {
-    version: SNAPSHOT_VERSION,
-    masters: structuredClone(SEED_MASTERS),
-    records,
-  };
-}
-
-function read(): PurchaseSnapshot {
-  if (typeof window === "undefined") return freshSnapshot();
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const seeded = freshSnapshot();
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    const parsed = JSON.parse(raw) as PurchaseSnapshot;
-    const known = new Set(parsed.masters.map((m) => m.key));
-    for (const m of SEED_MASTERS) {
-      if (!known.has(m.key)) parsed.masters.push(structuredClone(m));
-    }
-    if (!parsed.records) parsed.records = emptyRecords();
-    for (const key of SUBMODULE_ORDER) parsed.records[key] ??= [];
-    return parsed;
-  } catch {
-    return freshSnapshot();
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) {
+    throw new Error(json?.error || `Request failed (${res.status})`);
   }
-}
-
-function write(snap: PurchaseSnapshot): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
-}
-
-function uid(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
+  return json.data as T;
 }
 
 export const purchaseService = {
-  async load(): Promise<PurchaseSnapshot> {
-    await delay();
-    return read();
+  load(): Promise<PurchaseSnapshot> {
+    return api<PurchaseSnapshot>(`${BASE}/load`);
   },
 
-  async createRecord(
-    submodule: PurchaseSubmoduleKey,
-    data: Record<string, unknown>,
-  ): Promise<PurchaseRecord> {
-    await delay();
-    const snap = read();
-    const record: PurchaseRecord = {
-      ...data,
-      id: uid("rec"),
-      submodule,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    snap.records[submodule] = [record, ...snap.records[submodule]];
-    write(snap);
-    return record;
+  createRecord(submodule: PurchaseSubmoduleKey, data: Record<string, unknown>): Promise<PurchaseRecord> {
+    return api<PurchaseRecord>(`${BASE}/records`, {
+      method: "POST",
+      body: JSON.stringify({ submodule, data }),
+    });
   },
 
-  async updateRecord(
-    submodule: PurchaseSubmoduleKey,
-    id: string,
-    patch: Record<string, unknown>,
-  ): Promise<PurchaseRecord> {
-    await delay();
-    const snap = read();
-    const list = snap.records[submodule];
-    const idx = list.findIndex((r) => r.id === id);
-    if (idx === -1) throw new Error("Record not found");
-    const updated: PurchaseRecord = { ...list[idx], ...patch, updatedAt: nowIso() };
-    list[idx] = updated;
-    write(snap);
-    return updated;
+  updateRecord(submodule: PurchaseSubmoduleKey, id: string, patch: Record<string, unknown>): Promise<PurchaseRecord> {
+    return api<PurchaseRecord>(`${BASE}/records/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ submodule, patch }),
+    });
   },
 
-  async deleteRecord(submodule: PurchaseSubmoduleKey, id: string): Promise<{ id: string }> {
-    await delay();
-    const snap = read();
-    snap.records[submodule] = snap.records[submodule].filter((r) => r.id !== id);
-    write(snap);
-    return { id };
+  deleteRecord(_submodule: PurchaseSubmoduleKey, id: string): Promise<{ id: string }> {
+    return api<{ id: string }>(`${BASE}/records/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 
-  async saveMasters(masters: MasterType[]): Promise<MasterType[]> {
-    await delay();
-    const snap = read();
-    snap.masters = masters;
-    write(snap);
-    return masters;
+  /** Post a received GRN's quantities into Store Inventory (increment-or-create). */
+  postStock(grnId: string): Promise<PostStockResult> {
+    return api<PostStockResult>(`${BASE}/grn/${encodeURIComponent(grnId)}/post-stock`, {
+      method: "POST",
+    });
   },
 
-  async reset(): Promise<PurchaseSnapshot> {
-    const seeded = freshSnapshot();
-    write(seeded);
-    await delay();
-    return seeded;
+  saveMasters(masters: MasterType[]): Promise<MasterType[]> {
+    return api<MasterType[]>(`${BASE}/masters`, {
+      method: "PUT",
+      body: JSON.stringify({ masters }),
+    });
+  },
+
+  reset(): Promise<PurchaseSnapshot> {
+    return api<PurchaseSnapshot>(`${BASE}/reset`, { method: "POST" });
   },
 };
-
-export { STORAGE_KEY as PURCHASE_STORAGE_KEY };

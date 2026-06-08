@@ -23,6 +23,9 @@
  * rename modules; matching is case-insensitive).
  */
 
+import { SUBMODULE_SCHEMAS as INV_SCHEMAS } from "@/lib/inventory-system/schema";
+import { SUBMODULE_SCHEMAS as PUR_SCHEMAS } from "@/lib/purchase-system/schema";
+
 export interface StaticField {
   /** Stable identifier — used for both `id` (prefixed) and `apiName` (raw). */
   coreKey: string;
@@ -42,6 +45,14 @@ export interface StaticFormDef {
   formName: string;
   /** Canonical fields the static page renders. */
   fields: StaticField[];
+  /**
+   * True when a bulk-import handler is registered for this form in
+   * lib/static-imports/handlers.ts. Only importable forms are shown in the
+   * data-import picker — otherwise the user could pick a page that has no
+   * writer and every row would fail with "No import handler registered".
+   * KEEP IN SYNC with the HANDLERS registry.
+   */
+  importable?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,17 +330,49 @@ const PAYROLL_RECORD_FIELDS: StaticField[] = [
   { coreKey: "paymentDate", label: "Payment Date", type: "date" },
 ];
 
+// Inventory product catalog (/inventory) — backed by the InventoryProduct
+// Prisma model (the only inventory page with a real DB table).
+const INVENTORY_PRODUCT_FIELDS: StaticField[] = [
+  { coreKey: "name", label: "Product Name", type: "text" },
+  { coreKey: "sku", label: "SKU", type: "text" },
+  { coreKey: "shortDescription", label: "Short Description", type: "text" },
+  { coreKey: "description", label: "Description", type: "textarea" },
+  { coreKey: "status", label: "Status", type: "select" },
+  { coreKey: "price", label: "Price", type: "number" },
+  { coreKey: "compareAtPrice", label: "Compare-at Price", type: "number" },
+  { coreKey: "currency", label: "Currency", type: "text" },
+  { coreKey: "taxRate", label: "Tax Rate %", type: "number" },
+  { coreKey: "stockQty", label: "Stock Qty", type: "number" },
+  { coreKey: "lowStockThreshold", label: "Low-stock Threshold", type: "number" },
+  { coreKey: "brand", label: "Brand", type: "text" },
+  { coreKey: "category", label: "Category", type: "text" },
+  { coreKey: "weight", label: "Weight", type: "number" },
+  { coreKey: "weightUnit", label: "Weight Unit", type: "text" },
+  { coreKey: "metaTitle", label: "Meta Title", type: "text" },
+  { coreKey: "metaDescription", label: "Meta Description", type: "textarea" },
+  { coreKey: "metaKeywords", label: "Meta Keywords", type: "text" },
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const STATIC_FORMS: StaticFormDef[] = [
   {
+    moduleName: "Products",
+    aliases: ["Inventory Products", "Product Catalog", "Product"],
+    formId: "static:inventory-product",
+    formName: "Product (static)",
+    fields: INVENTORY_PRODUCT_FIELDS,
+    importable: true, // handler: handleInventoryProduct
+  },
+  {
     moduleName: "Employee Master",
     aliases: ["Employees", "Employee"],
     formId: "static:employee-master",
     formName: "Employee Master (static)",
     fields: EMPLOYEE_MASTER_FIELDS,
+    importable: true, // handler: handleEmployeeMaster
   },
   {
     moduleName: "Staffing Plan",
@@ -337,6 +380,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:staffing-plan",
     formName: "Staffing Plan (static)",
     fields: STAFFING_PLAN_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Job Opening",
@@ -344,6 +388,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:job-opening",
     formName: "Job Opening (static)",
     fields: JOB_OPENING_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Job Application",
@@ -351,6 +396,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:job-application",
     formName: "Job Application (static)",
     fields: JOB_APPLICATION_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Job Offer",
@@ -358,6 +404,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:job-offer",
     formName: "Job Offer (static)",
     fields: JOB_OFFER_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Appointment Letter",
@@ -365,6 +412,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:appointment-letter",
     formName: "Appointment Letter (static)",
     fields: APPOINTMENT_LETTER_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Employee Referral",
@@ -372,6 +420,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:employee-referral",
     formName: "Employee Referral (static)",
     fields: EMPLOYEE_REFERRAL_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Properties",
@@ -379,6 +428,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:property",
     formName: "Property (static)",
     fields: PROPERTY_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Leads",
@@ -386,6 +436,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:lead",
     formName: "Lead (static)",
     fields: LEAD_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Payroll",
@@ -393,6 +444,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:payroll",
     formName: "Payroll Record (static)",
     fields: PAYROLL_RECORD_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Leave",
@@ -415,6 +467,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:leave-request",
     formName: "Leave Request (static)",
     fields: LEAVE_REQUEST_FIELDS,
+    importable: true,
   },
   {
     moduleName: "Attendance",
@@ -428,6 +481,7 @@ export const STATIC_FORMS: StaticFormDef[] = [
     formId: "static:attendance",
     formName: "Attendance (static)",
     fields: ATTENDANCE_FIELDS,
+    importable: true,
   },
 ];
 
@@ -523,4 +577,71 @@ export function getStaticModules(): InjectedModule[] {
     id: `static-mod:${f.formId.replace(/^static:/, "")}`,
     name: f.moduleName,
   }));
+}
+
+/**
+ * Same as getStaticModules() but only the pages that can actually be imported
+ * into (have a registered handler, flagged via `importable`). This is what the
+ * data-import picker should use so users never select a dead-end page.
+ */
+export function getImportableStaticModules(): InjectedModule[] {
+  return STATIC_FORMS.filter((f) => f.importable).map((f) => ({
+    id: `static-mod:${f.formId.replace(/^static:/, "")}`,
+    name: f.moduleName,
+  }));
+}
+
+/**
+ * Form entries for a module, restricted to importable static forms. Returns []
+ * for modules with no importable form so the picker shows nothing selectable.
+ */
+export function getImportableStaticFormEntries(
+  moduleName: string | null | undefined,
+): InjectedForm[] {
+  return getStaticFormsForModule(moduleName)
+    .filter((f) => f.importable)
+    .map((f) => ({ id: f.formId, name: f.formName, isPublished: true }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-registered importable targets for the Inventory & Purchase systems.
+// Their fields are derived from the live SUBMODULE_SCHEMAS so the import columns
+// always match the field definitions AND the handlers' buildDataBag (which
+// reads the same schemas). lineItems / computed fields are skipped — they can't
+// be expressed as flat CSV columns (see lib/static-imports/handlers.ts).
+// ─────────────────────────────────────────────────────────────────────────────
+function fieldDefsToStaticFields(fields: any[]): StaticField[] {
+  const out: StaticField[] = [];
+  for (const f of fields) {
+    if (f.type === "lineItems" || f.computed) continue;
+    let type: string = f.type;
+    if (type === "currency") type = "number";
+    else if (type === "master" || type === "select" || type === "status") type = "select";
+    else if (type === "image" || type === "media") type = "text";
+    out.push({ coreKey: f.key, label: f.label, type });
+  }
+  return out;
+}
+
+const SYSTEM_IMPORT_FORMS: Array<{ schema: any; moduleName: string; aliases: string[]; formId: string }> = [
+  { schema: INV_SCHEMAS.store,    moduleName: "Store Inventory",      aliases: ["Store", "Store Items"],   formId: "static:inv-store" },
+  { schema: INV_SCHEMAS.machine,  moduleName: "Machine Inventory",    aliases: ["Machines"],               formId: "static:inv-machine" },
+  { schema: INV_SCHEMAS.metal,    moduleName: "Metal Inventory",      aliases: ["Metal Stock"],            formId: "static:inv-metal" },
+  { schema: PUR_SCHEMAS.supplier, moduleName: "Supplier Master",      aliases: ["Suppliers"],              formId: "static:pur-supplier" },
+  { schema: PUR_SCHEMAS.pr,       moduleName: "Purchase Requisition", aliases: ["Requisition", "PR"],      formId: "static:pur-pr" },
+  { schema: PUR_SCHEMAS.sourcing, moduleName: "Supplier Sourcing",    aliases: ["Sourcing", "RFQ"],        formId: "static:pur-sourcing" },
+  { schema: PUR_SCHEMAS.po,       moduleName: "Purchase Order",       aliases: ["PO", "Purchase Orders"],  formId: "static:pur-po" },
+  { schema: PUR_SCHEMAS.grn,      moduleName: "Goods Receipt",        aliases: ["GRN"],                    formId: "static:pur-grn" },
+  { schema: PUR_SCHEMAS.payment,  moduleName: "Payment Request",      aliases: ["Payment", "Payments"],    formId: "static:pur-payment" },
+];
+
+for (const s of SYSTEM_IMPORT_FORMS) {
+  STATIC_FORMS.push({
+    moduleName: s.moduleName,
+    aliases: s.aliases,
+    formId: s.formId,
+    formName: `${s.moduleName} (static)`,
+    fields: fieldDefsToStaticFields(s.schema.fields),
+    importable: true,
+  });
 }

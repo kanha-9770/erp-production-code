@@ -50,6 +50,11 @@ if (!process.env.DATABASE_URL) {
 const prisma = new PrismaClient();
 
 // One statement per call — Prisma's $executeRawUnsafe runs a single statement.
+//
+// SCOPE: form_records_15 ONLY (the user table — backs login/role lookups).
+// Inventory & Purchase indexes deliberately live in a SEPARATE script
+// (scripts/apply-inventory-indexes.ts / `npm run db:inventory-indexes`) so the
+// business features can be indexed WITHOUT touching the form_records_* tables.
 const STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_form_records_15_email
      ON form_records_15 (((record_data::jsonb) ->> 'email'))`,
@@ -61,16 +66,25 @@ const STATEMENTS: string[] = [
 ];
 
 async function main(): Promise<void> {
+  let applied = 0;
+  let skipped = 0;
   for (const sql of STATEMENTS) {
     const label = sql.trim().split(/\s+/).slice(0, 6).join(" ");
     process.stdout.write(`→ ${label} … `);
-    await prisma.$executeRawUnsafe(sql);
-    console.log("ok");
+    try {
+      await prisma.$executeRawUnsafe(sql);
+      console.log("ok");
+      applied++;
+    } catch (e: any) {
+      // Don't abort the whole run on one failing statement — keep going.
+      console.log(`skipped (${e?.message ?? e})`);
+      skipped++;
+    }
   }
+  console.log(`\n✅ form_records_15 JSONB indexes — ${applied} applied, ${skipped} skipped.`);
 }
 
 main()
-  .then(() => console.log("✅ JSONB indexes applied to form_records_15."))
   .catch((e) => {
     console.error("❌ Failed:", e?.message ?? e);
     process.exitCode = 1;

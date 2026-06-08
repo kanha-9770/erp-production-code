@@ -1,13 +1,12 @@
 /**
- * Inventory System — service boundary (the seam between UI and "backend").
+ * Inventory System — service boundary (LIVE: org-scoped Prisma-backed API).
  *
- * Today this is a mock that persists to localStorage and simulates network
- * latency, so the whole module works with zero backend. It is the ONLY file
- * that knows where data lives. To go live, reimplement these functions against
- * the real API (RTK Query / fetch) — the provider and UI never change.
- *
- * All write methods return the canonical record as the "server" would, so the
- * optimistic provider can reconcile (e.g. swap a temp id for a real one).
+ * This is the ONLY file that knows where data lives. It used to persist to
+ * localStorage; it now calls /api/inventory-system/* (backed by the
+ * InventoryRecord + InventoryMasterSnapshot tables). The provider, schemas and
+ * UI are unchanged — the method names, argument order and return types are
+ * identical to the previous mock, so optimistic reconciliation still works
+ * (every write returns the canonical server record).
  */
 
 import type {
@@ -16,134 +15,139 @@ import type {
   MasterType,
   SubmoduleKey,
 } from "./types";
-import { SEED_MASTERS, SUBMODULE_ORDER } from "./schema";
-import { seedItems } from "./seed";
 
-const STORAGE_KEY = "erp:inventory-system:v1";
-const SNAPSHOT_VERSION = 1;
-const LATENCY_MS = 350; // visible enough to make optimistic UI obvious
+const BASE = "/api/inventory-system";
 
-function delay(): Promise<void> {
-  return new Promise((res) => setTimeout(res, LATENCY_MS));
+/** Query for one paginated page of a submodule. */
+export interface InventoryListQuery {
+  submodule: SubmoduleKey;
+  page: number;
+  pageSize: number;
+  search?: string;
+  status?: string;
+  masters?: Record<string, string>;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
 }
 
-function emptyItems(): Record<SubmoduleKey, InventoryItem[]> {
-  return { store: [], machine: [], metal: [] };
+export interface InventoryListResult {
+  rows: InventoryItem[];
+  total: number;
+  lowCount: number;
+  outCount: number;
+  page: number;
+  pageSize: number;
 }
 
-function freshSnapshot(): InventorySnapshot {
-  const items = emptyItems();
-  for (const key of SUBMODULE_ORDER) items[key] = seedItems(key);
-  return {
-    version: SNAPSHOT_VERSION,
-    masters: structuredClone(SEED_MASTERS),
-    items,
-  };
-}
-
-function read(): InventorySnapshot {
-  if (typeof window === "undefined") return freshSnapshot();
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const seeded = freshSnapshot();
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    const parsed = JSON.parse(raw) as InventorySnapshot;
-    // Backfill any masters that were added to the seed after first run, so new
-    // dropdowns (e.g. metal_form) appear without a manual reset.
-    const known = new Set(parsed.masters.map((m) => m.key));
-    for (const m of SEED_MASTERS) {
-      if (!known.has(m.key)) parsed.masters.push(structuredClone(m));
-    }
-    if (!parsed.items) parsed.items = emptyItems();
-    for (const key of SUBMODULE_ORDER) parsed.items[key] ??= [];
-    return parsed;
-  } catch {
-    return freshSnapshot();
+/** Fetch + unwrap the {success,data} envelope; throw on any non-ok response. */
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) {
+    throw new Error(json?.error || `Request failed (${res.status})`);
   }
+  return json.data as T;
 }
 
-function write(snap: InventorySnapshot): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
-}
-
-function uid(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
+/** Build the /items query string from a list query (omitting empty params). */
+function listParams(q: InventoryListQuery): string {
+  const p = new URLSearchParams();
+  p.set("submodule", q.submodule);
+  p.set("page", String(q.page));
+  p.set("pageSize", String(q.pageSize));
+  if (q.search?.trim()) p.set("search", q.search.trim());
+  if (q.status) p.set("status", q.status);
+  if (q.sortKey) {
+    p.set("sortKey", q.sortKey);
+    p.set("sortDir", q.sortDir ?? "desc");
+  }
+  if (q.masters) {
+    const active = Object.fromEntries(Object.entries(q.masters).filter(([, v]) => v));
+    if (Object.keys(active).length) p.set("masters", JSON.stringify(active));
+  }
+  return p.toString();
 }
 
 export const inventoryService = {
-  /** Load the full snapshot (masters + items for all submodules). */
-  async load(): Promise<InventorySnapshot> {
-    await delay();
-    return read();
+  /** Load the full snapshot (masters + items for all submodules). Legacy. */
+  load(): Promise<InventorySnapshot> {
+    return api<InventorySnapshot>(`${BASE}/load`);
+  },
+
+  /** Just the master registry — the provider's cheap mount-time load. */
+  loadMasters(): Promise<MasterType[]> {
+    return api<MasterType[]>(`${BASE}/masters`);
+  },
+
+  /** One paginated, server-filtered/sorted page of a submodule. */
+  listItems(q: InventoryListQuery, signal?: AbortSignal): Promise<InventoryListResult> {
+    return api<InventoryListResult>(`${BASE}/items?${listParams(q)}`, { signal });
+  },
+
+  /** Full single record (incl. image) — lazy-loaded on row select. */
+  getItem(id: string, signal?: AbortSignal): Promise<InventoryItem> {
+    return api<InventoryItem>(`${BASE}/items/${encodeURIComponent(id)}`, { signal });
+  },
+
+  /** All matching ids across every page — backs "Select all N matching". */
+  listItemIds(q: InventoryListQuery): Promise<string[]> {
+    return api<string[]>(`${BASE}/items/query`, {
+      method: "POST",
+      body: JSON.stringify({ op: "ids", query: q }),
+    });
+  },
+
+  /** Lean records for a set of ids — cross-page export of the selection. */
+  getItemsByIds(ids: string[]): Promise<InventoryItem[]> {
+    return api<InventoryItem[]>(`${BASE}/items/query`, {
+      method: "POST",
+      body: JSON.stringify({ op: "byIds", ids }),
+    });
   },
 
   // ── Items ──
-  async createItem(
-    submodule: SubmoduleKey,
-    data: Record<string, unknown>,
-  ): Promise<InventoryItem> {
-    await delay();
-    const snap = read();
-    const record: InventoryItem = {
-      ...data,
-      id: uid("itm"),
-      submodule,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    snap.items[submodule] = [record, ...snap.items[submodule]];
-    write(snap);
-    return record;
+  createItem(submodule: SubmoduleKey, data: Record<string, unknown>): Promise<InventoryItem> {
+    return api<InventoryItem>(`${BASE}/items`, {
+      method: "POST",
+      body: JSON.stringify({ submodule, data }),
+    });
   },
 
-  async updateItem(
-    submodule: SubmoduleKey,
-    id: string,
-    patch: Record<string, unknown>,
-  ): Promise<InventoryItem> {
-    await delay();
-    const snap = read();
-    const list = snap.items[submodule];
-    const idx = list.findIndex((i) => i.id === id);
-    if (idx === -1) throw new Error("Item not found");
-    const updated: InventoryItem = { ...list[idx], ...patch, updatedAt: nowIso() };
-    list[idx] = updated;
-    write(snap);
-    return updated;
+  updateItem(submodule: SubmoduleKey, id: string, patch: Record<string, unknown>): Promise<InventoryItem> {
+    return api<InventoryItem>(`${BASE}/items/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ submodule, patch }),
+    });
   },
 
-  async deleteItem(submodule: SubmoduleKey, id: string): Promise<{ id: string }> {
-    await delay();
-    const snap = read();
-    snap.items[submodule] = snap.items[submodule].filter((i) => i.id !== id);
-    write(snap);
-    return { id };
+  deleteItem(_submodule: SubmoduleKey, id: string): Promise<{ id: string }> {
+    return api<{ id: string }>(`${BASE}/items/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  /** Delete many items at once (one request). */
+  bulkDelete(ids: string[]): Promise<{ count: number }> {
+    return api<{ count: number }>(`${BASE}/items/bulk-delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
   },
 
   // ── Masters ──
-  async saveMasters(masters: MasterType[]): Promise<MasterType[]> {
-    await delay();
-    const snap = read();
-    snap.masters = masters;
-    write(snap);
-    return masters;
+  saveMasters(masters: MasterType[]): Promise<MasterType[]> {
+    return api<MasterType[]>(`${BASE}/masters`, {
+      method: "PUT",
+      body: JSON.stringify({ masters }),
+    });
   },
 
-  /** Wipe local data and reseed — handy for demos. */
-  async reset(): Promise<InventorySnapshot> {
-    const seeded = freshSnapshot();
-    write(seeded);
-    await delay();
-    return seeded;
+  /** Wipe this org's inventory data and reseed. */
+  reset(): Promise<InventorySnapshot> {
+    return api<InventorySnapshot>(`${BASE}/reset`, { method: "POST" });
   },
 };
-
-export { STORAGE_KEY as INVENTORY_STORAGE_KEY };

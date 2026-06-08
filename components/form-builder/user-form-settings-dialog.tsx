@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useCheckEmployeeFormQuery, usePatchFormSettingsMutation } from "@/lib/api/forms"
 import { useToast } from "@/hooks/use-toast"
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags"
 
 interface UserFormSettingsDialogProps {
   form: Form | null
@@ -177,26 +178,28 @@ export default function UserFormSettingsDialog({
                 />
               </div>
 
-              {/* Employee Form Toggle */}
-              <div className={`flex items-center justify-between p-2 border rounded-lg ${employeeFormTaken ? "bg-muted/50 border-dashed" : ""}`}>
-                <div className="space-y-1">
-                  <div className={`font-medium text-sm ${employeeFormTaken ? "text-muted-foreground" : ""}`}>
-                    Employee Form
+              {/* Employee Form Toggle — only when hybrid Employee-form mode is on. */}
+              {HYBRID_FORMS_ENABLED && (
+                <div className={`flex items-center justify-between p-2 border rounded-lg ${employeeFormTaken ? "bg-muted/50 border-dashed" : ""}`}>
+                  <div className="space-y-1">
+                    <div className={`font-medium text-sm ${employeeFormTaken ? "text-muted-foreground" : ""}`}>
+                      Employee Form
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {employeeFormTaken
+                        ? `"${employeeCheck?.formName}" is already designated as the employee form in your organization. Only one employee form is allowed per organization.`
+                        : "Designate this form for employee-specific data collection"
+                      }
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {employeeFormTaken
-                      ? `"${employeeCheck?.formName}" is already designated as the employee form in your organization. Only one employee form is allowed per organization.`
-                      : "Designate this form for employee-specific data collection"
-                    }
-                  </div>
+                  <Switch
+                    id="employee-form-toggle"
+                    checked={employeeFormTaken ? false : isEmployeeForm}
+                    onCheckedChange={handleEmployeeFormChange}
+                    disabled={employeeFormTaken || isUpdating || isCheckingEmployee}
+                  />
                 </div>
-                <Switch
-                  id="employee-form-toggle"
-                  checked={employeeFormTaken ? false : isEmployeeForm}
-                  onCheckedChange={handleEmployeeFormChange}
-                  disabled={employeeFormTaken || isUpdating || isCheckingEmployee}
-                />
-              </div>
+              )}
             </div>
           </div>
 

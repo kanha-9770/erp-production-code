@@ -57,6 +57,10 @@ export async function POST(request: Request) {
 
         const sourceColumn = normalizeKey(sourceColumnRaw);
         const targetFieldId = typeof fieldIdRaw === "string" ? fieldIdRaw.trim() : "";
+        // When a column is flagged as (part of) the upsert business key, we
+        // record it on the existing lookupResolutionKey column with a sentinel
+        // ("KEY"). The import engine reads this to decide insert-vs-update.
+        const isKey = m.isKey === true || m.isKey === "true";
 
         const isValid =
           sourceColumn !== "" &&
@@ -70,6 +74,7 @@ export async function POST(request: Request) {
           importJobId,
           sourceColumn,
           targetFieldId,
+          lookupResolutionKey: isKey ? "KEY" : null,
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);

@@ -119,7 +119,7 @@ export const STORE_SCHEMA: SubmoduleSchema = {
   codePrefix: "STK",
   fields: [
     { key: "image", label: "Image", type: "image", section: "Identity", inTable: true, pinned: true, width: 60 },
-    { key: "itemCode", label: "Item Code", type: "text", section: "Identity", required: true, inTable: true, width: 130, placeholder: "Auto / manual" },
+    { key: "itemCode", label: "Item Code", type: "text", section: "Identity", auto: true, inTable: true, width: 130 },
     { key: "itemName", label: "Item Name", type: "text", section: "Identity", required: true, inTable: true, pinned: true, width: 240, placeholder: "e.g. M8 Hex Bolt" },
     { key: "itemDescription", label: "Item Description", type: "text", section: "Identity", inTable: true, width: 260, placeholder: "Short description of the item" },
     { key: "category", label: "Category", type: "master", master: "category", section: "Identity", required: true, inTable: true, width: 150 },
@@ -149,7 +149,7 @@ export const MACHINE_SCHEMA: SubmoduleSchema = {
   codePrefix: "MCH",
   fields: [
     { key: "image", label: "Image", type: "image", section: "Identity", inTable: true, pinned: true, width: 60 },
-    { key: "itemCode", label: "Machine Code", type: "text", section: "Identity", required: true, inTable: true, width: 140 },
+    { key: "itemCode", label: "Machine Code", type: "text", section: "Identity", auto: true, inTable: true, width: 140 },
     { key: "itemName", label: "Machine Name", type: "text", section: "Identity", required: true, inTable: true, pinned: true, width: 240 },
     { key: "machineType", label: "Machine Type", type: "master", master: "machine_type", section: "Identity", required: true, inTable: true, width: 150 },
     { key: "manufacturer", label: "Manufacturer", type: "text", section: "Identity", inTable: true, width: 160 },
@@ -180,7 +180,7 @@ export const METAL_SCHEMA: SubmoduleSchema = {
   codePrefix: "MTL",
   fields: [
     { key: "image", label: "Image", type: "image", section: "Identity", inTable: true, pinned: true, width: 60 },
-    { key: "itemCode", label: "Stock Code", type: "text", section: "Identity", required: true, inTable: true, width: 140 },
+    { key: "itemCode", label: "Stock Code", type: "text", section: "Identity", auto: true, inTable: true, width: 140 },
     { key: "itemName", label: "Description", type: "text", section: "Identity", required: true, inTable: true, width: 240, placeholder: "e.g. SS 304 Sheet 2mm" },
     { key: "grade", label: "Grade", type: "master", master: "metal_grade", section: "Identity", required: true, inTable: true, width: 130 },
     { key: "form", label: "Form", type: "master", master: "metal_form", section: "Identity", required: true, inTable: true, width: 120 },

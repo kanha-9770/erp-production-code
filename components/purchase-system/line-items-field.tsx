@@ -74,6 +74,12 @@ export function LineItemsField({
   const rows = asRows(value);
   const columns = field.columns ?? [];
   const noun = field.rowNoun ?? "Row";
+  // Receipt status applies to GRN rows — leaf rows (invoiceQty/receivedQty) and
+  // invoice rows (which aggregate a nested lineItems column). Plain repeatable
+  // rows like vendor contacts have neither, so no receipt badge.
+  const showReceipt = columns.some(
+    (c) => c.key === "invoiceQty" || c.key === "receivedQty" || c.type === "lineItems",
+  );
 
   const optionsFor = (col: FieldDef, current: string): OpenDocOption[] | undefined => {
     if (col.optionsSource === "openPo") return getOpenPoOptions(current);
@@ -127,7 +133,7 @@ export function LineItemsField({
       )}
 
       {rows.map((row, idx) => {
-        const { receiptType, balance } = rowReceipt(row, columns);
+        const receipt = showReceipt ? rowReceipt(row, columns) : null;
         return (
           <div key={(row._id as string) ?? idx} className="rounded-lg border p-3 space-y-3 bg-muted/20">
             <div className="flex items-center justify-between gap-2">
@@ -135,11 +141,17 @@ export function LineItemsField({
                 <span className="text-xs font-semibold text-muted-foreground">
                   {noun} {idx + 1}
                 </span>
-                <Badge variant={RECEIPT_VARIANT[receiptType]} className="h-5">
-                  {RECEIPT_LABEL[receiptType]}
-                </Badge>
-                {balance > 0 && (
-                  <span className="text-xs text-muted-foreground">Balance {formatNumber(balance)}</span>
+                {receipt && (
+                  <>
+                    <Badge variant={RECEIPT_VARIANT[receipt.receiptType]} className="h-5">
+                      {RECEIPT_LABEL[receipt.receiptType]}
+                    </Badge>
+                    {receipt.balance > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        Balance {formatNumber(receipt.balance)}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
               <Button
@@ -276,21 +288,30 @@ export function LineItemsView({ field, value }: { field: FieldDef; value: unknow
   const scalarCols = columns.filter((c) => c.type !== "media" && c.type !== "lineItems");
   const mediaCols = columns.filter((c) => c.type === "media");
   const nestedCols = columns.filter((c) => c.type === "lineItems");
+  // Receipt status applies to GRN rows — leaf rows (invoiceQty/receivedQty) and
+  // invoice rows (which aggregate a nested lineItems column). Plain repeatable
+  // rows like vendor contacts have neither, so no receipt badge.
+  const showReceipt = columns.some(
+    (c) => c.key === "invoiceQty" || c.key === "receivedQty" || c.type === "lineItems",
+  );
 
   return (
     <div className="space-y-2">
       {rows.map((row, idx) => {
-        const { receiptType } = rowReceipt(row, columns);
+        const receipt = showReceipt ? rowReceipt(row, columns) : null;
         const title =
           (row.invoiceNo as string) ||
           (row.poRef as string) ||
+          (row.contactPerson as string) ||
           (row.itemName as string) ||
           `${noun} ${idx + 1}`;
         return (
           <div key={(row._id as string) ?? idx} className="rounded-lg border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-sm font-medium truncate">{title}</span>
-              <Badge variant={RECEIPT_VARIANT[receiptType]}>{RECEIPT_LABEL[receiptType]}</Badge>
+              <span className={cn("text-sm font-medium truncate", showReceipt && "font-mono")}>{title}</span>
+              {receipt && (
+                <Badge variant={RECEIPT_VARIANT[receipt.receiptType]}>{RECEIPT_LABEL[receipt.receiptType]}</Badge>
+              )}
             </div>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
               {scalarCols.map((c) => (

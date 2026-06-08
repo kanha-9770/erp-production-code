@@ -35,6 +35,7 @@ import type {
 // Utilities
 import { formatFieldValue, getFieldIcon } from "@/lib/utils/fieldUtils";
 import { processRecordData } from "@/lib/utils/recordUtils";
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags";
 
 export default function ModulePage(
   props: {
@@ -159,6 +160,7 @@ export default function ModulePage(
   const [coreFieldsEnsured, setCoreFieldsEnsured] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!HYBRID_FORMS_ENABLED) return; // hybrid Employee-form mode is off
     if (!employeeForm || !isAdmin) return;
     if (coreFieldsEnsured === employeeForm.id) return;
     setCoreFieldsEnsured(employeeForm.id);
@@ -707,7 +709,7 @@ export default function ModulePage(
   return (
     <div className="flex flex-col h-full p-2 gap-2 max-w-full overflow-hidden">
       <div className="shrink-0 space-y-2">
-        {employeeForm && isAdmin && (
+        {HYBRID_FORMS_ENABLED && employeeForm && isAdmin && (
           <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
             <div className="text-xs text-amber-900 flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5 text-amber-600" />

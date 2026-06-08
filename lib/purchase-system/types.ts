@@ -74,10 +74,24 @@ export interface FieldDef {
   placeholder?: string;
   section: string;
   defaultValue?: string | number;
+  /** System-generated on save (e.g. the document number). Rendered read-only,
+   *  skipped by required-validation, and never sent as an editable value — the
+   *  server mints it. */
+  auto?: boolean;
+  /** Auto-filled from the logged-in user and rendered read-only. The server is
+   *  authoritative — it overwrites the field from the authenticated user on
+   *  create, so it can't be edited or spoofed (e.g. "Requested By", department). */
+  prefillUser?: "name" | "department";
   /** Value is auto-derived by the system, not entered — rendered read-only. */
   computed?: boolean;
-  /** Show this field only when another field equals a value (form + preview). */
-  showIf?: { field: string; equals: string | number | boolean };
+  /** Show this field only when another field's value matches (form + preview).
+   *  Use `equals` for a single value, or `in` for a set (e.g. show "Advance
+   *  Amount" for any of the partial-advance payment terms). */
+  showIf?: {
+    field: string;
+    equals?: string | number | boolean;
+    in?: Array<string | number | boolean>;
+  };
   /** For type === "lineItems": the per-row sub-fields (columns). May itself
    *  contain a nested `lineItems` column (e.g. Invoice → PO/PR item lines). */
   columns?: FieldDef[];
@@ -123,8 +137,24 @@ export interface PurchaseRecord {
   [key: string]: unknown;
 }
 
+/** Identity of the logged-in user, used to prefill user-derived fields. */
+export interface CurrentUserIdentity {
+  name: string;
+  department: string;
+}
+
 export interface PurchaseSnapshot {
   version: number;
   masters: MasterType[];
   records: Record<PurchaseSubmoduleKey, PurchaseRecord[]>;
+  /** The requesting user — drives read-only prefill of "Requested By" etc. */
+  currentUser: CurrentUserIdentity;
+}
+
+/** Result of posting a GRN's received quantities into Store Inventory. */
+export interface PostStockResult {
+  grn: PurchaseRecord;
+  increased: Array<{ itemCode: string; itemName: string; added: number; newStock: number }>;
+  created: Array<{ itemCode: string; itemName: string; qty: number }>;
+  alreadyPosted: boolean;
 }

@@ -20,7 +20,8 @@
     "setup:hr": "npx tsx scripts/setup-hr-production.ts",
     "setup:production": "prisma migrate deploy && prisma generate && npm run seed:routes && npm run setup:hr && npm run seed:payroll",
     "warm:cache": "npx tsx scripts/warm-cache.ts",
-    "db:jsonb-indexes": "npx tsx scripts/apply-jsonb-indexes.ts"
+    "db:jsonb-indexes": "npx tsx scripts/apply-jsonb-indexes.ts",
+    "db:inventory-indexes": "npx tsx scripts/apply-inventory-indexes.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",

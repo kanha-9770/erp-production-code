@@ -3,6 +3,7 @@ import { DatabaseService } from "@/lib/database/database-service";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
 import { moveToTrash } from "@/lib/trash";
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags";
 
 /**
  * Collect every fieldId in the form (sections + nested subforms). Used to
@@ -279,6 +280,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ for
       if (allowedFields.includes(key)) {
         updates[key] = body[key];
       }
+    }
+
+    // Hybrid Employee-form mode is off → never let a form be flagged as the
+    // Employee form (turning one OFF is still allowed).
+    if (!HYBRID_FORMS_ENABLED && updates.isEmployeeForm === true) {
+      delete updates.isEmployeeForm;
     }
 
     // Hierarchical inheritance toggle. We don't expose Form.settings as a

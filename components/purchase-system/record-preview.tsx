@@ -5,8 +5,9 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Pencil, Trash2, Loader2 } from "lucide-react";
-import { formatDate, formatMoney, formatNumber, resolveStatus } from "@/lib/purchase-system/format";
+import { Pencil, Trash2, Loader2, ArrowRight, PackageCheck, CheckCircle2 } from "lucide-react";
+import { formatDate, formatMoney, formatNumber, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
+import { promotionsFor, type PromotionDef } from "@/lib/purchase-system/promote";
 import { MediaGallery } from "./media-field";
 import { LineItemsView } from "./line-items-field";
 import type { FieldDef, PurchaseRecord, SubmoduleSchema } from "@/lib/purchase-system/types";
@@ -30,12 +31,20 @@ export function RecordPreview({
   record,
   onEdit,
   onDelete,
+  onPromote,
+  onPostStock,
 }: {
   schema: SubmoduleSchema;
   record: PurchaseRecord;
   onEdit: () => void;
   onDelete: () => void;
+  /** Promote this document to the next step in the procure-to-pay chain. */
+  onPromote?: (def: PromotionDef) => void;
+  /** GRN only: post received quantities into Store Inventory. */
+  onPostStock?: () => void;
 }) {
+  const promotions = onPromote ? promotionsFor(schema.key) : [];
+  const stockPosted = String(record.stockUpdated ?? "NO") === "YES";
   const sections: Array<{ name: string; fields: FieldDef[] }> = [];
   for (const f of schema.fields) {
     let s = sections.find((x) => x.name === f.section);
@@ -49,7 +58,7 @@ export function RecordPreview({
   const statusField = schema.fields.find((f) => f.key === schema.statusKey);
   const status = statusField ? resolveStatus(statusField, record[schema.statusKey]) : null;
 
-  const isVisible = (f: FieldDef) => !f.showIf || record[f.showIf.field] === f.showIf.equals;
+  const isVisible = (f: FieldDef) => !f.showIf || showIfSatisfied(f.showIf, record[f.showIf.field]);
 
   return (
     <div className="p-5 sm:p-6 space-y-6">
@@ -85,6 +94,32 @@ export function RecordPreview({
           <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
         </Button>
       </div>
+
+      {(promotions.length > 0 || onPostStock) && record.docNo ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Next step
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {promotions.map((p) => (
+              <Button key={`${p.to}-${p.label}`} size="sm" onClick={() => onPromote?.(p)}>
+                {p.label} <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+              </Button>
+            ))}
+            {onPostStock ? (
+              stockPosted ? (
+                <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-4 w-4" /> Stock posted to inventory
+                </span>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={onPostStock}>
+                  <PackageCheck className="h-3.5 w-3.5 mr-1.5" /> Post to inventory
+                </Button>
+              )
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {sections.map((section) => (
         <div key={section.name} className="space-y-3">

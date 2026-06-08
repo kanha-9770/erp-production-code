@@ -21,6 +21,29 @@ import { getAuthenticatedUser } from '@/lib/api-helpers';
 import { getStaticImportHandler, type RowOutcome } from '@/lib/static-imports/handlers';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // long-lived VPS; allow big chunks to finish
+
+/** Run `fn` over `items` with at most `limit` in flight at once. Results are
+ *  returned in input order. Used as the fallback for handlers without a
+ *  set-based batch path. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
 
 interface Body {
   formId?: string;
@@ -90,34 +113,46 @@ export async function POST(request: NextRequest) {
     return out;
   };
 
+  const ctx = { organizationId: user.organizationId, actingUserId: user.id };
+  const remappedRows = body.rows.map(remap);
+
+  let outcomes: RowOutcome[];
+  if (handler.handleBatch) {
+    // Set-based fast path: one chunk → a handful of SQL statements. The
+    // handler guarantees one outcome per row in order and never throws, but we
+    // still guard so a thrown batch degrades to "whole chunk failed" rather
+    // than a 500.
+    try {
+      outcomes = await handler.handleBatch(remappedRows, ctx);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      outcomes = remappedRows.map(() => ({ status: 'failed', error: msg }) as RowOutcome);
+    }
+  } else {
+    // No batch path — process rows with bounded concurrency (much faster than
+    // strictly sequential, without overwhelming the connection pool).
+    outcomes = await mapWithConcurrency(remappedRows, 12, (row) =>
+      handler
+        .handle(row, ctx)
+        .catch((err: any): RowOutcome => ({ status: 'failed', error: err?.message || String(err) })),
+    );
+  }
+
   let successCount = 0;
   let failedCount = 0;
   let skippedCount = 0;
   const errors: Array<{ rowIndex: number; error: string }> = [];
 
-  for (let i = 0; i < body.rows.length; i++) {
-    const raw = body.rows[i];
-    const remapped = remap(raw);
-    let outcome: RowOutcome;
-    try {
-      outcome = await handler.handle(remapped, {
-        organizationId: user.organizationId,
-        actingUserId: user.id,
-      });
-    } catch (err: any) {
-      // Defensive: handlers are expected to catch their own errors and
-      // return `{ status: 'failed' }`, but if one throws anyway we still
-      // count it instead of crashing the whole chunk.
-      outcome = { status: 'failed', error: err?.message || String(err) };
-    }
+  for (let i = 0; i < outcomes.length; i++) {
+    const outcome = outcomes[i] ?? { status: 'failed' as const, error: 'No outcome returned' };
     if (outcome.status === 'success') successCount += 1;
     else if (outcome.status === 'skipped') skippedCount += 1;
     else {
       failedCount += 1;
       // Keep at most 50 detailed errors so the response doesn't grow
-      // unbounded on a bad 5000-row file.
+      // unbounded on a bad file.
       if (errors.length < 50) {
-        errors.push({ rowIndex: i, error: outcome.error });
+        errors.push({ rowIndex: i, error: (outcome as any).error || 'Unknown error' });
       }
     }
   }

@@ -42,6 +42,7 @@ import {
   type CustomFieldValues,
 } from "@/lib/forms/use-custom-form-fields";
 import { CustomFieldsRenderer } from "@/components/forms/custom-fields-renderer";
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags";
 
 /**
  * Resolve the org's Employee form id, seeding one if it doesn't exist yet.
@@ -1953,22 +1954,28 @@ export function EmployeeForm({
       )}
 
       <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 pt-2">
-        <Button
-          type="button"
-          variant="link"
-          className="px-0 self-start gap-1.5"
-          disabled={openingBuilder}
-          onClick={openCustomizeBuilder}
-        >
-          {openingBuilder ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Settings2 className="h-3.5 w-3.5" />
-          )}
-          {openingBuilder
-            ? "Opening builder…"
-            : "Customize form — add custom fields in builder"}
-        </Button>
+        {/* "Customize in form builder" bridges into hybrid Employee-form mode —
+            hidden when that mode is off (the dedicated Employee table is used). */}
+        {HYBRID_FORMS_ENABLED ? (
+          <Button
+            type="button"
+            variant="link"
+            className="px-0 self-start gap-1.5"
+            disabled={openingBuilder}
+            onClick={openCustomizeBuilder}
+          >
+            {openingBuilder ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Settings2 className="h-3.5 w-3.5" />
+            )}
+            {openingBuilder
+              ? "Opening builder…"
+              : "Customize form — add custom fields in builder"}
+          </Button>
+        ) : (
+          <span />
+        )}
         <div className="flex flex-col-reverse sm:flex-row gap-2">
           {onCancel && (
             <Button

@@ -22,6 +22,7 @@ export const dynamic = 'force-dynamic';
 import { type NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedUser, isUserAdmin } from '@/lib/api-helpers';
+import { HYBRID_FORMS_ENABLED } from '@/lib/feature-flags';
 
 const CORE_SECTION_TITLE = 'Employee Identity';
 
@@ -62,6 +63,11 @@ const CORE_FIELDS: CoreFieldSpec[] = [
 ];
 
 export async function POST(request: NextRequest, props0: { params: Promise<{ formId: string }> }) {
+  // Hybrid Employee-form mode is off → no core-field injection. No-op (not an
+  // error) so the caller's optional "ensure" step quietly does nothing.
+  if (!HYBRID_FORMS_ENABLED) {
+    return NextResponse.json({ success: true, created: 0, alreadyExisted: 0, disabled: true });
+  }
   const params = await props0.params;
   const authUser = await getAuthenticatedUser(request);
   if (!authUser) {

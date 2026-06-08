@@ -25,6 +25,7 @@ export const dynamic = "force-dynamic";
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags";
 
 const DEFAULT_FORM_NAME = "Employee Master";
 const DEFAULT_MODULE_NAME = "HR";
@@ -165,6 +166,13 @@ const FORM_SECTIONS: SectionSpec[] = [
 
 export async function POST(request: NextRequest) {
   try {
+    // Hybrid Employee-form mode is off → don't seed/return a builder form.
+    if (!HYBRID_FORMS_ENABLED) {
+      return NextResponse.json(
+        { success: false, disabled: true, error: "Hybrid Employee forms are disabled." },
+        { status: 403 },
+      );
+    }
     const user = await getAuthenticatedUser(request);
     if (!user) {
       return NextResponse.json(

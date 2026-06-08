@@ -35,6 +35,7 @@ import {
   useSaveFormMutation,
 } from "@/lib/api/forms"
 import type { HistoryEntry } from "@/hooks/use-form-history"
+import { HYBRID_FORMS_ENABLED } from "@/lib/feature-flags"
 
 interface FormCanvasProps {
   form: Form & {
@@ -578,7 +579,8 @@ export default function FormCanvas({
             )}
           </div>
 
-          {/* Toggle Button Logic */}
+          {/* Toggle Button Logic — only when hybrid Employee-form mode is on. */}
+          {HYBRID_FORMS_ENABLED && (
           <div className="flex items-center gap-3 flex-wrap">
             {/* Show toggle ONLY if:
                 - This form is the Employee Form, OR
@@ -617,6 +619,7 @@ export default function FormCanvas({
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             )}
           </div>
+          )}
         </div>
 
         {/* Rest of your Form Content - unchanged */}

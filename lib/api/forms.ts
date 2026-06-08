@@ -161,7 +161,7 @@ export const formsApi = baseApi.injectEndpoints({
 
     // ─── Import/Export ──────────────────────────────────────────
 
-    createImportJob: builder.mutation<ApiResponse, { moduleId: string; formId: string; fileName: string; fileSize: number; duplicateHandling?: string }>({
+    createImportJob: builder.mutation<ApiResponse & { importJobId?: string }, { moduleId: string; formId: string; fileName: string; fileSize: number; totalRows?: number; duplicateHandling?: string }>({
       query: (body) => ({
         url: "/import/create-job",
         method: "POST",
@@ -169,7 +169,7 @@ export const formsApi = baseApi.injectEndpoints({
       }),
     }),
 
-    addImportMapping: builder.mutation<ApiResponse, { importJobId: string; mappings: { sourceColumn: string; targetFieldId: string }[] }>({
+    addImportMapping: builder.mutation<ApiResponse, { importJobId: string; mappings: { sourceColumn: string; targetFieldId: string; isKey?: boolean }[] }>({
       query: (body) => ({
         url: "/import/add-mapping",
         method: "POST",

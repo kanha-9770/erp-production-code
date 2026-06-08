@@ -81,6 +81,9 @@ export interface FieldDef {
   section: string;
   /** Default value applied when creating a fresh item. */
   defaultValue?: string | number;
+  /** System-generated on save (e.g. the item code). Rendered read-only, skipped
+   *  by required-validation; the server mints it. */
+  auto?: boolean;
 
   // ── Table presentation ──
   /** Render this field as a column in the list. */

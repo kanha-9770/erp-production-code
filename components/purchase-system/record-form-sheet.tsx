@@ -32,7 +32,7 @@ import {
 import { Plus, History, Sparkles, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePurchase, type ItemPurchaseHistory } from "@/lib/purchase-system/store";
-import { formatMoney, formatDate, resolveStatus } from "@/lib/purchase-system/format";
+import { formatMoney, formatDate, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
 import { deriveReceiptStatus } from "@/lib/purchase-system/receipt";
 import { Badge } from "@/components/ui/badge";
 import { MediaField } from "./media-field";
@@ -44,14 +44,26 @@ interface RecordFormSheetProps {
   schema: SubmoduleSchema;
   open: boolean;
   record: PurchaseRecord | null;
+  /** Pre-fill values for a NEW document (used by document promotion). Ignored
+   *  when editing an existing `record`. */
+  initial?: Record<string, unknown> | null;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: Record<string, unknown>) => void;
 }
 
-function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): Record<string, unknown> {
+function buildInitial(
+  schema: SubmoduleSchema,
+  record: PurchaseRecord | null,
+  initial?: Record<string, unknown> | null,
+  currentUser?: { name: string; department: string } | null,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of schema.fields) {
     if (record && record[f.key] != null) out[f.key] = record[f.key];
+    // New documents prefill user-derived fields ("Requested By", Department)
+    // read-only from the logged-in user (the server re-asserts these on save).
+    else if (!record && f.prefillUser) out[f.key] = currentUser?.[f.prefillUser] ?? "";
+    else if (!record && initial && initial[f.key] != null) out[f.key] = initial[f.key];
     else if (f.type === "lineItems") out[f.key] = [];
     else if (f.type === "checkbox") out[f.key] = false;
     else if (f.defaultValue != null) out[f.key] = f.defaultValue;
@@ -61,9 +73,11 @@ function buildInitial(schema: SubmoduleSchema, record: PurchaseRecord | null): R
   return out;
 }
 
-export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }: RecordFormSheetProps) {
-  const { getMasterOptions, addMasterOption, getItemHistory } = usePurchase();
-  const [form, setForm] = useState<Record<string, unknown>>(() => buildInitial(schema, record));
+export function RecordFormSheet({ schema, open, record, initial, onOpenChange, onSubmit }: RecordFormSheetProps) {
+  const { getMasterOptions, addMasterOption, getItemHistory, currentUser } = usePurchase();
+  const [form, setForm] = useState<Record<string, unknown>>(() =>
+    buildInitial(schema, record, initial, currentUser),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Repeat-purchase detection (Purchase Requisition only): as the item name is
@@ -88,10 +102,10 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
 
   useEffect(() => {
     if (open) {
-      setForm(buildInitial(schema, record));
+      setForm(buildInitial(schema, record, initial, currentUser));
       setErrors({});
     }
-  }, [open, record, schema]);
+  }, [open, record, schema, initial, currentUser]);
 
   // Live-derive the GRN receipt status from the invoice/received quantities so
   // the read-only badge updates as the user edits the lines.
@@ -120,9 +134,10 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
     setForm((prev) => {
       const next = { ...prev, [key]: value };
       // Clear any dependent fields that this change hides, so stale values
-      // aren't saved (e.g. unchecking Recommend Vendor clears name + phone).
+      // aren't saved (e.g. unchecking Recommend Vendor clears name + phone;
+      // switching away from a partial-advance term clears the advance amount).
       for (const f of schema.fields) {
-        if (f.showIf?.field === key && next[f.showIf.field] !== f.showIf.equals) {
+        if (f.showIf?.field === key && !showIfSatisfied(f.showIf, next[f.showIf.field])) {
           next[f.key] = f.type === "number" || f.type === "currency" ? 0 : f.type === "checkbox" ? false : "";
         }
       }
@@ -133,7 +148,7 @@ export function RecordFormSheet({ schema, open, record, onOpenChange, onSubmit }
 
   // A field is visible unless its showIf condition is unmet by the current form.
   const isVisible = (f: FieldDef) =>
-    !f.showIf || form[f.showIf.field] === f.showIf.equals;
+    !f.showIf || showIfSatisfied(f.showIf, form[f.showIf.field]);
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
@@ -318,6 +333,18 @@ function FieldControl({
         ) : (
           <div className="text-sm h-9 flex items-center">{value ? String(value) : "—"}</div>
         )
+      ) : field.auto || field.prefillUser ? (
+        // Locked, system-set. `auto` = server-minted document number; `prefillUser`
+        // = pulled from the logged-in user (Requested By / Department). Read-only.
+        <Input
+          value={(value as string) ?? ""}
+          readOnly
+          placeholder={field.auto ? "Auto-generated on save" : "From your profile"}
+          className={cn(
+            "bg-muted/50 text-muted-foreground cursor-not-allowed",
+            field.auto && "font-mono",
+          )}
+        />
       ) : field.type === "lineItems" ? (
         <LineItemsField field={field} value={value} onChange={(rows) => onChange(rows)} />
       ) : field.type === "media" ? (

@@ -31,6 +31,16 @@ export function formatDate(value: unknown): string {
   return d.toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "2-digit" });
 }
 
+/** Evaluate a field's `showIf` against the current value of its controlling
+ *  field. `in` matches a set of values, `equals` matches one. No condition →
+ *  always visible. Shared by the form and the preview. */
+export function showIfSatisfied(showIf: FieldDef["showIf"], value: unknown): boolean {
+  if (!showIf) return true;
+  if (showIf.in) return showIf.in.includes(value as string | number | boolean);
+  if (showIf.equals !== undefined) return value === showIf.equals;
+  return true;
+}
+
 /** Resolve a status value to its label + colour using the field's pipeline. */
 export function resolveStatus(
   field: FieldDef,

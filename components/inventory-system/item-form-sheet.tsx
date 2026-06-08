@@ -226,6 +226,14 @@ function FieldControl({
             ))}
           </SelectContent>
         </Select>
+      ) : field.auto ? (
+        // System-generated, locked (e.g. the item code). Read-only.
+        <Input
+          value={(value as string) ?? ""}
+          readOnly
+          placeholder="Auto-generated on save"
+          className="font-mono bg-muted/50 text-muted-foreground cursor-not-allowed"
+        />
       ) : (
         <Input
           type={field.type === "number" || field.type === "currency" ? "number" : field.type === "date" ? "date" : "text"}

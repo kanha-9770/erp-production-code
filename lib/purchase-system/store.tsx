@@ -22,6 +22,8 @@ import { purchaseService } from "./service";
 import { deriveReceiptStatus } from "./receipt";
 import type {
   PurchaseRecord,
+  PostStockResult,
+  CurrentUserIdentity,
   MasterOption,
   MasterType,
   PurchaseSubmoduleKey,
@@ -31,6 +33,8 @@ interface PurchaseContextValue {
   ready: boolean;
   records: Record<PurchaseSubmoduleKey, PurchaseRecord[]>;
   masters: MasterType[];
+  /** Logged-in user identity — drives read-only prefill of "Requested By" etc. */
+  currentUser: CurrentUserIdentity;
 
   createRecord: (submodule: PurchaseSubmoduleKey, data: Record<string, unknown>) => Promise<void>;
   updateRecord: (
@@ -39,6 +43,9 @@ interface PurchaseContextValue {
     patch: Record<string, unknown>,
   ) => Promise<void>;
   deleteRecord: (submodule: PurchaseSubmoduleKey, id: string) => Promise<void>;
+
+  /** Post a received GRN's quantities into Store Inventory (increment-or-create). */
+  postStock: (grnId: string) => Promise<PostStockResult>;
 
   /** Look up prior purchase history for an item (from PO records). */
   getItemHistory: (itemName: string) => ItemPurchaseHistory;
@@ -148,6 +155,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     payment: [],
   });
   const [masters, setMasters] = useState<MasterType[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUserIdentity>({ name: "", department: "" });
 
   const mastersRef = useRef(masters);
   mastersRef.current = masters;
@@ -163,6 +171,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       if (!alive) return;
       setRecords(snap.records);
       setMasters(snap.masters);
+      if (snap.currentUser) setCurrentUser(snap.currentUser);
       setReady(true);
     });
     return () => {
@@ -315,6 +324,18 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     },
     [toast],
   );
+
+  // ── GRN → Inventory stock posting ───────────────────────────────────────────
+
+  const postStock = useCallback(async (grnId: string): Promise<PostStockResult> => {
+    const result = await purchaseService.postStock(grnId);
+    // Reflect the server's STOCK_UPDATED / stockUpdated=YES on the local GRN row.
+    setRecords((prev) => ({
+      ...prev,
+      grn: prev.grn.map((r) => (r.id === grnId ? result.grn : r)),
+    }));
+    return result;
+  }, []);
 
   // ── Purchase history (repeat-purchase detection) ────────────────────────────
 
@@ -606,6 +627,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     const snap = await purchaseService.reset();
     setRecords(snap.records);
     setMasters(snap.masters);
+    if (snap.currentUser) setCurrentUser(snap.currentUser);
     toast({ title: "Purchase data reset", description: "Sample data has been restored." });
   }, [toast]);
 
@@ -614,9 +636,11 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       ready,
       records,
       masters,
+      currentUser,
       createRecord,
       updateRecord,
       deleteRecord,
+      postStock,
       getItemHistory,
       getPoTrace,
       getOpenPoOptions,
@@ -635,9 +659,11 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       ready,
       records,
       masters,
+      currentUser,
       createRecord,
       updateRecord,
       deleteRecord,
+      postStock,
       getItemHistory,
       getPoTrace,
       getOpenPoOptions,

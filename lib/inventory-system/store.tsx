@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * InventoryProvider — the optimistic state layer for the Inventory System.
+ * InventoryProvider — the master-registry + mutation layer for the Inventory
+ * System.
  *
- * Pattern (mirrors the codebase's manual-optimistic approach, e.g. the AI
- * config client): every mutation updates the in-memory state IMMEDIATELY so the
- * UI feels instant, fires the async service in the background, then reconciles
- * the result (swapping a temp id for the canonical record) or rolls the change
- * back and surfaces a toast on failure.
+ * Items are NO LONGER held here. With 6K+ records per submodule, loading every
+ * row up-front was the cause of the slow open, so the item list is now fetched
+ * one server-paginated page at a time by `useInventoryList` (see
+ * ./use-inventory-list). This provider keeps only the small master registry
+ * (loaded once on mount) and exposes thin CRUD methods that mutate via the
+ * service then bump a `revalidateToken` — every mounted list re-fetches its
+ * current page in response, so the UI stays consistent without a global cache.
  *
- * The provider is the single source of truth for the mounted module. It is
- * deliberately decoupled from the rest of the ERP — it only talks to
- * `inventoryService`, so swapping the mock for a real API is a one-file change.
+ * It remains deliberately decoupled from the rest of the ERP — it only talks to
+ * `inventoryService`.
  */
 
 import {
@@ -35,17 +37,25 @@ import type {
 
 interface InventoryContextValue {
   ready: boolean;
-  items: Record<SubmoduleKey, InventoryItem[]>;
   masters: MasterType[];
 
-  // Item CRUD (optimistic)
-  createItem: (submodule: SubmoduleKey, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * Bumped after every successful item mutation (and reset). `useInventoryList`
+   * depends on it, so a bump triggers a re-fetch of every mounted page.
+   */
+  revalidateToken: number;
+  /** Force a list re-fetch without a mutation (rarely needed). */
+  bumpRevalidate: () => void;
+
+  // Item CRUD — mutate via the service, then revalidate the visible page(s).
+  createItem: (submodule: SubmoduleKey, data: Record<string, unknown>) => Promise<InventoryItem | undefined>;
   updateItem: (
     submodule: SubmoduleKey,
     id: string,
     patch: Record<string, unknown>,
   ) => Promise<void>;
   deleteItem: (submodule: SubmoduleKey, id: string) => Promise<void>;
+  bulkDelete: (submodule: SubmoduleKey, ids: string[]) => Promise<void>;
 
   // Master helpers
   getMaster: (key: string) => MasterType | undefined;
@@ -70,61 +80,46 @@ function uid(prefix: string): string {
 export function InventoryProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [ready, setReady] = useState(false);
-  const [items, setItems] = useState<Record<SubmoduleKey, InventoryItem[]>>({
-    store: [],
-    machine: [],
-    metal: [],
-  });
   const [masters, setMasters] = useState<MasterType[]>([]);
+  const [revalidateToken, setRevalidateToken] = useState(0);
+
+  const bumpRevalidate = useCallback(() => setRevalidateToken((n) => n + 1), []);
 
   // Keep a ref to the latest masters so async reconcilers persist the right
   // snapshot without stale closures.
   const mastersRef = useRef(masters);
   mastersRef.current = masters;
 
+  // Mount-time load is now CHEAP: just the master registry (one small row),
+  // not every inventory record. Items are paged in by useInventoryList.
   useEffect(() => {
     let alive = true;
-    inventoryService.load().then((snap) => {
-      if (!alive) return;
-      setItems(snap.items);
-      setMasters(snap.masters);
-      setReady(true);
-    });
+    inventoryService
+      .loadMasters()
+      .then((m) => {
+        if (!alive) return;
+        setMasters(m);
+        setReady(true);
+      })
+      .catch(() => {
+        if (alive) setReady(true); // unblock the UI even if masters fail
+      });
     return () => {
       alive = false;
     };
   }, []);
 
-  // ── Item CRUD ─────────────────────────────────────────────────────────────
+  // ── Item CRUD (mutate → revalidate) ────────────────────────────────────────
+  // No in-memory list to reconcile: each method persists via the service and,
+  // on success, bumps the revalidate token so the visible page re-fetches.
 
   const createItem = useCallback(
     async (submodule: SubmoduleKey, data: Record<string, unknown>) => {
-      const tempId = uid("tmp");
-      const now = new Date().toISOString();
-      const optimistic: InventoryItem = {
-        ...data,
-        id: tempId,
-        submodule,
-        createdAt: now,
-        updatedAt: now,
-        _optimistic: true,
-      };
-      // 1) show it immediately
-      setItems((prev) => ({ ...prev, [submodule]: [optimistic, ...prev[submodule]] }));
       try {
-        // 2) persist
         const saved = await inventoryService.createItem(submodule, data);
-        // 3) reconcile temp → canonical
-        setItems((prev) => ({
-          ...prev,
-          [submodule]: prev[submodule].map((i) => (i.id === tempId ? saved : i)),
-        }));
+        bumpRevalidate();
+        return saved;
       } catch (err) {
-        // 4) rollback
-        setItems((prev) => ({
-          ...prev,
-          [submodule]: prev[submodule].filter((i) => i.id !== tempId),
-        }));
         toast({
           variant: "destructive",
           title: "Could not create",
@@ -133,35 +128,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast],
+    [toast, bumpRevalidate],
   );
 
   const updateItem = useCallback(
     async (submodule: SubmoduleKey, id: string, patch: Record<string, unknown>) => {
-      let snapshot: InventoryItem | undefined;
-      setItems((prev) => ({
-        ...prev,
-        [submodule]: prev[submodule].map((i) => {
-          if (i.id !== id) return i;
-          snapshot = i;
-          return { ...i, ...patch, _optimistic: true, updatedAt: new Date().toISOString() };
-        }),
-      }));
       try {
-        const saved = await inventoryService.updateItem(submodule, id, patch);
-        setItems((prev) => ({
-          ...prev,
-          [submodule]: prev[submodule].map((i) => (i.id === id ? saved : i)),
-        }));
+        await inventoryService.updateItem(submodule, id, patch);
+        bumpRevalidate();
       } catch (err) {
-        // rollback to the captured snapshot
-        if (snapshot) {
-          const restore = snapshot;
-          setItems((prev) => ({
-            ...prev,
-            [submodule]: prev[submodule].map((i) => (i.id === id ? restore : i)),
-          }));
-        }
         toast({
           variant: "destructive",
           title: "Could not save changes",
@@ -170,45 +145,15 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast],
+    [toast, bumpRevalidate],
   );
 
   const deleteItem = useCallback(
     async (submodule: SubmoduleKey, id: string) => {
-      let removed: InventoryItem | undefined;
-      let removedIndex = -1;
-      // mark deleting (dim) then remove on success
-      setItems((prev) => {
-        const list = prev[submodule];
-        removedIndex = list.findIndex((i) => i.id === id);
-        removed = list[removedIndex];
-        return {
-          ...prev,
-          [submodule]: list.map((i) => (i.id === id ? { ...i, _deleting: true } : i)),
-        };
-      });
       try {
         await inventoryService.deleteItem(submodule, id);
-        setItems((prev) => ({
-          ...prev,
-          [submodule]: prev[submodule].filter((i) => i.id !== id),
-        }));
+        bumpRevalidate();
       } catch (err) {
-        // restore at original position
-        if (removed) {
-          const restore = removed;
-          const at = removedIndex;
-          setItems((prev) => {
-            const list = prev[submodule].map((i) =>
-              i.id === id ? { ...restore, _deleting: false } : i,
-            );
-            // if it had already been filtered out somehow, reinsert
-            if (!list.some((i) => i.id === id) && at >= 0) {
-              list.splice(at, 0, { ...restore, _deleting: false });
-            }
-            return { ...prev, [submodule]: list };
-          });
-        }
         toast({
           variant: "destructive",
           title: "Could not delete",
@@ -217,7 +162,25 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [toast],
+    [toast, bumpRevalidate],
+  );
+
+  const bulkDelete = useCallback(
+    async (_submodule: SubmoduleKey, ids: string[]) => {
+      if (!ids.length) return;
+      try {
+        await inventoryService.bulkDelete(ids);
+        bumpRevalidate();
+      } catch (err) {
+        toast({
+          variant: "destructive",
+          title: "Could not delete selected items",
+          description: (err as Error)?.message ?? "Please try again.",
+        });
+        throw err;
+      }
+    },
+    [toast, bumpRevalidate],
   );
 
   // ── Masters ───────────────────────────────────────────────────────────────
@@ -346,19 +309,21 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
 
   const resetAll = useCallback(async () => {
     const snap = await inventoryService.reset();
-    setItems(snap.items);
     setMasters(snap.masters);
+    bumpRevalidate();
     toast({ title: "Inventory data reset", description: "Sample data has been restored." });
-  }, [toast]);
+  }, [toast, bumpRevalidate]);
 
   const value = useMemo<InventoryContextValue>(
     () => ({
       ready,
-      items,
       masters,
+      revalidateToken,
+      bumpRevalidate,
       createItem,
       updateItem,
       deleteItem,
+      bulkDelete,
       getMaster,
       getMasterOptions,
       addMasterOption,
@@ -370,11 +335,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready,
-      items,
       masters,
+      revalidateToken,
+      bumpRevalidate,
       createItem,
       updateItem,
       deleteItem,
+      bulkDelete,
       getMaster,
       getMasterOptions,
       addMasterOption,

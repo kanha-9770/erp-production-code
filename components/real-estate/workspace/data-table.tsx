@@ -105,6 +105,12 @@ interface DataTableProps<T> {
     selectedIds: Set<string>;
     onChange: (next: Set<string>) => void;
   };
+  /**
+   * Suppress the built-in bottom Previous/Next footer. Use when the parent
+   * renders its own pagination controls elsewhere (e.g. a top toolbar with a
+   * page-size selector). Row-number gutter offsets still honour the page.
+   */
+  hidePaginationFooter?: boolean;
 }
 
 interface CellRef { r: number; c: number }
@@ -172,6 +178,7 @@ export function DataTable<T>({
   pageSize,
   serverPagination,
   selection,
+  hidePaginationFooter,
 }: DataTableProps<T>) {
   const { prefs, isHidden, toggleHidden, setWidth, setSort, setDensity } =
     useTablePrefs(tableId);
@@ -714,7 +721,7 @@ export function DataTable<T>({
       {/* Pagination footer — when client- or server-side pagination is on.
           Stacks vertically + centres on mobile so the controls never spill
           past the viewport; switches to the spaced-out row on sm+. */}
-      {paginate && !isLoading && totalRows > 0 && (
+      {paginate && !isLoading && totalRows > 0 && !hidePaginationFooter && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 border-t bg-background text-xs shrink-0">
           <span className="text-muted-foreground tabular-nums order-2 sm:order-1 text-center">
             Showing {pageStart + 1}–{Math.min(pageStart + effectivePageSize, totalRows)} of{" "}

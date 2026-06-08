@@ -4625,6 +4625,84 @@ model InventoryProduct {
   @@map("inventory_products")
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Inventory Management system (lib/inventory-system) — schema-driven open
+// records that replace the previous localStorage-only store. Fields are defined
+// in code (lib/inventory-system/schema.ts) and stored in the `data` JSON bag,
+// mirroring the form-builder's recordData pattern. Tenancy is enforced in the
+// service/handler layer (no FK), matching house style (Property/InventoryProduct).
+// ───────────────────────────────────────────────────────────────────────────
+model InventoryRecord {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  // SubmoduleKey: "store" | "machine" | "metal"
+  submodule String
+
+  // Denormalised mirror of data.status for cheap status filtering/indexing.
+  status String?
+
+  // The full schema-driven field bag (itemCode, itemName, …). Always an object.
+  data Json @default("{}")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById String?  @map("created_by_id")
+
+  @@index([organizationId, submodule, createdAt(sort: Desc)])
+  @@index([organizationId, submodule, status])
+  @@map("inventory_records")
+}
+
+// One JSON snapshot row per org holding the entire MasterType[] for the
+// inventory system. saveMasters() is a whole-array replace (upsert), so a
+// single Json column round-trips the dropdown registry verbatim.
+model InventoryMasterSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String   @unique @map("organization_id")
+  masters        Json     @default("[]")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("inventory_master_snapshots")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Purchase & Procurement system (lib/purchase-system) — schema-driven open
+// records (supplier/pr/sourcing/po/grn/payment). Nested lineItems (GRN invoices)
+// and computed fields are persisted verbatim inside `data`.
+// ───────────────────────────────────────────────────────────────────────────
+model PurchaseRecord {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  // PurchaseSubmoduleKey: "supplier" | "pr" | "sourcing" | "po" | "grn" | "payment"
+  submodule String
+
+  // Denormalised mirror of data.status (the workflow stage, not receiptStatus).
+  status String?
+
+  data Json @default("{}")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById String?  @map("created_by_id")
+
+  @@index([organizationId, submodule, createdAt(sort: Desc)])
+  @@index([organizationId, submodule, status])
+  @@map("purchase_records")
+}
+
+model PurchaseMasterSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String   @unique @map("organization_id")
+  masters        Json     @default("[]")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("purchase_master_snapshots")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // REBM PHASE 4 — Plan Designer, RERA, Team Self-Service
 // ─────────────────────────────────────────────────────────────────────────────

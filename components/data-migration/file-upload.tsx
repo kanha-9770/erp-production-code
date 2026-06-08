@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useRef } from "react";
+import React, { useCallback, useState, useRef, useEffect } from "react";
 import { Upload, FileSpreadsheet, X, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,34 +13,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-// xlsx is dynamically imported inside parseFile (~300 KB gzipped) so it
-// doesn't ship in the initial page bundle. Only the WorkBook type — erased
-// at compile time — is needed up here for the closure-scoped declaration.
-import type { WorkBook } from "xlsx";
 import { cn } from "@/lib/utils";
+// Parsing runs in a Web Worker (./parse-worker.ts) so the heavy XLSX decode
+// never freezes the UI thread on large files. The pure logic + the
+// ParsedFilePreview type live in the shared module; we import ONLY the types
+// (erased at compile time, so `xlsx` stays out of the main bundle) and re-export
+// ParsedFilePreview so existing importers (the import page) are unchanged.
+import type { ParsedFilePreview, ParseProgress } from "@/lib/import/parse-spreadsheet";
+
+export type { ParsedFilePreview };
+
+/** Thrown when the worker can't be created/run, so we fall back to the main
+ *  thread instead of surfacing it as a parse failure. */
+class WorkerUnavailable extends Error {}
 
 /* ============================================================
    CONSTANTS
 ============================================================ */
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — supports large XLSX with 5000+ rows and wide columns
-const PREVIEW_ROWS_LIMIT = 50;
-
-/* ============================================================
-   TYPES
-============================================================ */
-interface ColumnGroup {
-  sectionTitle: string;
-  columns: string[];
-  startIndex: number;
-}
-
-export interface ParsedFilePreview {
-  headers: string[];
-  rows: string[][];       // preview rows (limited for display)
-  allRows: string[][];    // ALL rows for actual import
-  totalRows: number;
-  columnGroups?: ColumnGroup[];
-}
 
 interface FileUploadProps {
   onFileUpload: (
@@ -63,167 +53,81 @@ export function FileUpload({
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
+  const [progress, setProgress] = useState<ParseProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const workerRef = useRef<Worker | null>(null);
+
+  // Tear down a still-running parse worker if the component unmounts mid-parse.
+  useEffect(() => () => workerRef.current?.terminate(), []);
 
   /* ============================================================
      FILE PARSER
+     Runs in a Web Worker so a big XLSX decode never freezes the page; falls
+     back to a (lazy-loaded) main-thread parse only if a worker can't be made.
   ============================================================ */
-  const parseFile = async (
-    file: File
-  ): Promise<ParsedFilePreview> => {
+  const parseViaWorker = (file: File): Promise<ParsedFilePreview> =>
+    new Promise((resolve, reject) => {
+      let worker: Worker;
+      try {
+        worker = new Worker(new URL("./parse-worker.ts", import.meta.url), { type: "module" });
+      } catch (err) {
+        reject(new WorkerUnavailable(err instanceof Error ? err.message : "Worker unavailable"));
+        return;
+      }
+      workerRef.current = worker;
+      const cleanup = () => {
+        worker.terminate();
+        if (workerRef.current === worker) workerRef.current = null;
+      };
+      worker.onmessage = (e: MessageEvent) => {
+        const msg = e.data as
+          | ({ type: "progress" } & ParseProgress)
+          | { type: "result"; preview: ParsedFilePreview }
+          | { type: "error"; error: string };
+        if (msg.type === "progress") setProgress({ phase: msg.phase, percent: msg.percent });
+        else if (msg.type === "result") { cleanup(); resolve(msg.preview); }
+        else if (msg.type === "error") { cleanup(); reject(new Error(msg.error || "Parse failed")); }
+      };
+      worker.onerror = (ev) => {
+        cleanup();
+        // A worker script-load/runtime failure → fall back to the main thread.
+        reject(new WorkerUnavailable(ev instanceof ErrorEvent ? ev.message : "Worker error"));
+      };
+      worker.postMessage({ file });
+    });
+
+  const parseOnMainThread = async (file: File): Promise<ParsedFilePreview> => {
+    // Lazy-load the parser (and xlsx, ~300 KB gzipped) only now — keeps it out
+    // of the initial page bundle, same as before.
+    const { parseSpreadsheet } = await import("@/lib/import/parse-spreadsheet");
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+    const content: string | ArrayBuffer = isCsv ? await file.text() : await file.arrayBuffer();
+    return parseSpreadsheet(content, isCsv, (p) => setProgress(p));
+  };
+
+  const parseFile = async (file: File): Promise<ParsedFilePreview> => {
     setIsParsing(true);
     setError(null);
-
-    // Lazy-load xlsx (~300 KB gzipped) only when the user actually uploads
-    // a file. Keeping it out of the initial page bundle is the main reason
-    // /data-migration/import shrinks dramatically on first load.
-    const XLSX = await import("xlsx");
-
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = (e) => {
+    setProgress({ phase: "parsing", percent: 5 });
+    try {
+      if (typeof Worker !== "undefined") {
         try {
-          const result = e.target?.result;
-          if (!result) throw new Error("File read failed");
-
-          let workbook: WorkBook;
-
-          if (file.name.toLowerCase().endsWith(".csv")) {
-            workbook = XLSX.read(result as string, { type: "string" });
-          } else {
-            workbook = XLSX.read(result as ArrayBuffer, { type: "array" });
-          }
-
-          const sheetName = workbook.SheetNames[0];
-          if (!sheetName) throw new Error("No sheet found");
-
-          const worksheet = workbook.Sheets[sheetName];
-
-          const jsonData = XLSX.utils.sheet_to_json<string[]>(worksheet, {
-            header: 1,
-            defval: "",
-            blankrows: false,
-          }) as string[][];
-
-          if (jsonData.length < 2) {
-            throw new Error("File must contain a header row and at least one data row");
-          }
-
-          /* ====================================================
-             DETECT FORMAT: standard CSV vs 2-row section format
-             Standard CSV: row 0 = headers, row 1+ = data
-             Section format: row 0 = sections, row 1 = headers, row 2+ = data
-          ==================================================== */
-          const row0 = jsonData[0];
-          const row1 = jsonData[1];
-
-          // Count empty cells in row 0 vs row 1
-          const row0Empty = row0.filter((c) => !String(c || "").trim()).length;
-          const row1Empty = row1.filter((c) => !String(c || "").trim()).length;
-          const totalCols = Math.max(row0.length, row1.length);
-
-          // If row 0 has many empty cells and row 1 has fewer, it's a section format
-          const hasSectionRow = totalCols > 1 && row0Empty > row1Empty && row0Empty > totalCols * 0.3;
-
-          let columnGroups: ColumnGroup[] = [];
-          let finalHeaders: string[] = [];
-          let dataStartIndex: number;
-
-          if (hasSectionRow) {
-            // 2-row format: row 0 = sections, row 1 = headers
-            const sectionRow = row0;
-            const headerRow = row1;
-            dataStartIndex = 2;
-
-            let currentSection = "General";
-            let currentColumns: string[] = [];
-            let currentStartIndex = 0;
-
-            for (let col = 0; col < headerRow.length; col++) {
-              const sectionCell = String(sectionRow[col] || "").trim();
-              const headerCell = String(headerRow[col] || "").trim();
-
-              if (sectionCell) {
-                if (currentColumns.length > 0) {
-                  columnGroups.push({
-                    sectionTitle: currentSection,
-                    columns: [...currentColumns],
-                    startIndex: currentStartIndex,
-                  });
-                }
-                currentSection = sectionCell;
-                currentColumns = [];
-                currentStartIndex = col;
-              }
-
-              const safeHeader = headerCell || `Column ${col + 1}`;
-              finalHeaders.push(safeHeader);
-              currentColumns.push(safeHeader);
-            }
-
-            if (currentColumns.length > 0) {
-              columnGroups.push({
-                sectionTitle: currentSection,
-                columns: currentColumns,
-                startIndex: currentStartIndex,
-              });
-            }
-          } else {
-            // Standard CSV: row 0 = headers, row 1+ = data
-            dataStartIndex = 1;
-            finalHeaders = row0.map((cell, idx) => {
-              const val = String(cell || "").trim();
-              return val || `Column ${idx + 1}`;
-            });
-          }
-
-          /* ====================================================
-             ROW NORMALIZATION (CRITICAL)
-          ==================================================== */
-          const normalizeRow = (row: string[]) =>
-            finalHeaders.map((_, idx) => String(row[idx] ?? ""));
-
-          const filterEmpty = (row: string[]) =>
-            row.some((cell) => cell.trim() !== "");
-
-          const allDataRows = jsonData
-            .slice(dataStartIndex)
-            .map(normalizeRow)
-            .filter(filterEmpty);
-
-          const previewRows = allDataRows.slice(0, PREVIEW_ROWS_LIMIT);
-
-          resolve({
-            headers: finalHeaders,
-            rows: previewRows,
-            allRows: allDataRows,
-            totalRows: allDataRows.length,
-            columnGroups: hasSectionRow ? columnGroups : undefined,
-          });
+          return await parseViaWorker(file);
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Parse failed";
-          setError(message);
-          reject(new Error(message));
-        } finally {
-          setIsParsing(false);
+          if (!(err instanceof WorkerUnavailable)) throw err; // real parse error
+          console.warn("Parse worker unavailable, parsing on the main thread:", err);
         }
-      };
-
-      reader.onerror = () => {
-        setError("File read error");
-        setIsParsing(false);
-        reject(new Error("FileReader error"));
-      };
-
-      if (file.name.toLowerCase().endsWith(".csv")) {
-        reader.readAsText(file);
-      } else {
-        reader.readAsArrayBuffer(file);
       }
-    });
+      return await parseOnMainThread(file);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Parse failed";
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setIsParsing(false);
+      setProgress(null);
+    }
   };
 
   /* ============================================================
@@ -234,7 +138,7 @@ export function FileUpload({
       if (!file) return;
 
       if (file.size > MAX_FILE_SIZE) {
-        setError("File exceeds 10MB limit");
+        setError("File exceeds 50MB limit");
         return;
       }
 
@@ -304,8 +208,27 @@ export function FileUpload({
               )}
 
               <p className="text-lg font-semibold">
-                {isParsing ? "Processing..." : "Drop your file here"}
+                {isParsing
+                  ? progress?.phase === "normalizing"
+                    ? "Preparing rows…"
+                    : "Reading spreadsheet…"
+                  : "Drop your file here"}
               </p>
+
+              {isParsing && progress && (
+                <div className="w-full max-w-xs mt-4 space-y-1">
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>Parsing in the background — the page stays responsive</span>
+                    <span className="tabular-nums">{progress.percent}%</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 rounded-full transition-all duration-200"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {!isParsing && (
                 <>
