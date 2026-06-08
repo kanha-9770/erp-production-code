@@ -12,12 +12,13 @@
 
 import type {
   InventoryItem,
+  InventoryMovement,
   InventorySnapshot,
   MasterType,
   SubmoduleKey,
 } from "./types";
 import { SEED_MASTERS, SUBMODULE_ORDER } from "./schema";
-import { seedItems } from "./seed";
+import { seedItems, seedMovements } from "./seed";
 
 const STORAGE_KEY = "erp:inventory-system:v1";
 const SNAPSHOT_VERSION = 1;
@@ -38,6 +39,7 @@ function freshSnapshot(): InventorySnapshot {
     version: SNAPSHOT_VERSION,
     masters: structuredClone(SEED_MASTERS),
     items,
+    movements: seedMovements(),
   };
 }
 
@@ -59,6 +61,7 @@ function read(): InventorySnapshot {
     }
     if (!parsed.items) parsed.items = emptyItems();
     for (const key of SUBMODULE_ORDER) parsed.items[key] ??= [];
+    if (!parsed.movements) parsed.movements = [];
     return parsed;
   } catch {
     return freshSnapshot();
@@ -76,6 +79,22 @@ function uid(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** Signed effect of a movement on stock: +qty for IN, −qty for OUT. */
+function movementDelta(m: InventoryMovement): number {
+  const qty = Number(m.quantity ?? 0) || 0;
+  return m.direction === "IN" ? qty : -qty;
+}
+
+/** Adjust a store item's currentStock by `delta` (no-op if unlinked/missing). */
+function applyStockDelta(snap: InventorySnapshot, itemId: string | undefined, delta: number): void {
+  if (!itemId || delta === 0) return;
+  const list = snap.items.store;
+  const idx = list.findIndex((i) => i.id === itemId);
+  if (idx === -1) return;
+  const cur = Number(list[idx].currentStock ?? 0) || 0;
+  list[idx] = { ...list[idx], currentStock: cur + delta, updatedAt: nowIso() };
 }
 
 export const inventoryService = {
@@ -126,6 +145,55 @@ export const inventoryService = {
     snap.items[submodule] = snap.items[submodule].filter((i) => i.id !== id);
     write(snap);
     return { id };
+  },
+
+  // ── Goods movements (Inward / Outward) ──
+  // Posting a movement also adjusts the linked store item's currentStock in the
+  // SAME snapshot write, so the ledger and stock never drift apart. Each method
+  // returns the canonical store-item list so the provider can reconcile stock.
+  async createMovement(
+    data: Record<string, unknown>,
+  ): Promise<{ movement: InventoryMovement; storeItems: InventoryItem[] }> {
+    await delay();
+    const snap = read();
+    const movement = {
+      ...data,
+      id: uid("mov"),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    } as InventoryMovement;
+    snap.movements = [movement, ...snap.movements];
+    applyStockDelta(snap, movement.itemId, movementDelta(movement));
+    write(snap);
+    return { movement, storeItems: snap.items.store };
+  },
+
+  async updateMovement(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<{ movement: InventoryMovement; storeItems: InventoryItem[] }> {
+    await delay();
+    const snap = read();
+    const idx = snap.movements.findIndex((m) => m.id === id);
+    if (idx === -1) throw new Error("Movement not found");
+    const old = snap.movements[idx];
+    // Reverse the old effect, apply the new — handles changed item/qty/direction.
+    applyStockDelta(snap, old.itemId, -movementDelta(old));
+    const updated = { ...old, ...patch, updatedAt: nowIso() } as InventoryMovement;
+    snap.movements[idx] = updated;
+    applyStockDelta(snap, updated.itemId, movementDelta(updated));
+    write(snap);
+    return { movement: updated, storeItems: snap.items.store };
+  },
+
+  async deleteMovement(id: string): Promise<{ id: string; storeItems: InventoryItem[] }> {
+    await delay();
+    const snap = read();
+    const old = snap.movements.find((m) => m.id === id);
+    if (old) applyStockDelta(snap, old.itemId, -movementDelta(old));
+    snap.movements = snap.movements.filter((m) => m.id !== id);
+    write(snap);
+    return { id, storeItems: snap.items.store };
   },
 
   // ── Masters ──

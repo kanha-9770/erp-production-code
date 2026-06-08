@@ -28,6 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { inventoryService } from "./service";
 import type {
   InventoryItem,
+  InventoryMovement,
   MasterOption,
   MasterType,
   SubmoduleKey,
@@ -37,6 +38,7 @@ interface InventoryContextValue {
   ready: boolean;
   items: Record<SubmoduleKey, InventoryItem[]>;
   masters: MasterType[];
+  movements: InventoryMovement[];
 
   // Item CRUD (optimistic)
   createItem: (submodule: SubmoduleKey, data: Record<string, unknown>) => Promise<void>;
@@ -46,6 +48,12 @@ interface InventoryContextValue {
     patch: Record<string, unknown>,
   ) => Promise<void>;
   deleteItem: (submodule: SubmoduleKey, id: string) => Promise<void>;
+
+  // Goods movements (Inward / Outward) — posting adjusts the linked store
+  // item's current stock.
+  createMovement: (data: Record<string, unknown>) => Promise<void>;
+  updateMovement: (id: string, patch: Record<string, unknown>) => Promise<void>;
+  deleteMovement: (id: string) => Promise<void>;
 
   // Master helpers
   getMaster: (key: string) => MasterType | undefined;
@@ -76,6 +84,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     metal: [],
   });
   const [masters, setMasters] = useState<MasterType[]>([]);
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
 
   // Keep a ref to the latest masters so async reconcilers persist the right
   // snapshot without stale closures.
@@ -88,6 +97,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       if (!alive) return;
       setItems(snap.items);
       setMasters(snap.masters);
+      setMovements(snap.movements);
       setReady(true);
     });
     return () => {
@@ -220,6 +230,129 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     [toast],
   );
 
+  // ── Goods movements (Inward / Outward) ──────────────────────────────────────
+
+  const movementQty = (m: { direction?: unknown; quantity?: unknown }) => {
+    const qty = Number(m.quantity ?? 0) || 0;
+    return m.direction === "IN" ? qty : -qty;
+  };
+
+  const adjustLocalStock = useCallback((itemId: string | undefined, delta: number) => {
+    if (!itemId || delta === 0) return;
+    setItems((prev) => ({
+      ...prev,
+      store: prev.store.map((i) =>
+        i.id === itemId ? { ...i, currentStock: (Number(i.currentStock ?? 0) || 0) + delta } : i,
+      ),
+    }));
+  }, []);
+
+  const createMovement = useCallback(
+    async (data: Record<string, unknown>) => {
+      const tempId = uid("tmp");
+      const now = new Date().toISOString();
+      const optimistic = { ...data, id: tempId, createdAt: now, updatedAt: now, _optimistic: true } as InventoryMovement;
+      const delta = movementQty(optimistic);
+      setMovements((prev) => [optimistic, ...prev]);
+      adjustLocalStock(optimistic.itemId, delta);
+      try {
+        // Stock was applied optimistically (identical to the service's own
+        // delta) and the service persisted it. Just swap the temp movement for
+        // the canonical one — we deliberately do NOT pull the whole store back,
+        // as replacing it would clobber other in-flight optimistic deltas.
+        const { movement } = await inventoryService.createMovement(data);
+        setMovements((prev) => prev.map((m) => (m.id === tempId ? movement : m)));
+      } catch (err) {
+        setMovements((prev) => prev.filter((m) => m.id !== tempId));
+        adjustLocalStock(optimistic.itemId, -delta);
+        toast({
+          variant: "destructive",
+          title: "Could not post movement",
+          description: (err as Error)?.message ?? "Please try again.",
+        });
+        throw err;
+      }
+    },
+    [toast, adjustLocalStock],
+  );
+
+  const updateMovement = useCallback(
+    async (id: string, patch: Record<string, unknown>) => {
+      let snapshot: InventoryMovement | undefined;
+      setMovements((prev) =>
+        prev.map((m) => {
+          if (m.id !== id) return m;
+          snapshot = m;
+          return { ...m, ...patch, _optimistic: true, updatedAt: new Date().toISOString() };
+        }),
+      );
+      // Optimistically re-balance stock: reverse the old effect, apply the new
+      // one (handles a changed item / quantity / direction). Matches the
+      // service's reverse-then-apply, so local & persisted stock agree.
+      const merged = snapshot ? ({ ...snapshot, ...patch } as InventoryMovement) : undefined;
+      if (snapshot) adjustLocalStock(snapshot.itemId, -movementQty(snapshot));
+      if (merged) adjustLocalStock(merged.itemId, movementQty(merged));
+      try {
+        const { movement } = await inventoryService.updateMovement(id, patch);
+        setMovements((prev) => prev.map((m) => (m.id === id ? movement : m)));
+      } catch (err) {
+        if (snapshot) {
+          const restore = snapshot;
+          setMovements((prev) => prev.map((m) => (m.id === id ? restore : m)));
+          // Undo the optimistic stock re-balance.
+          if (merged) adjustLocalStock(merged.itemId, -movementQty(merged));
+          adjustLocalStock(snapshot.itemId, movementQty(snapshot));
+        }
+        toast({
+          variant: "destructive",
+          title: "Could not save movement",
+          description: (err as Error)?.message ?? "Please try again.",
+        });
+        throw err;
+      }
+    },
+    [toast, adjustLocalStock],
+  );
+
+  const deleteMovement = useCallback(
+    async (id: string) => {
+      let removed: InventoryMovement | undefined;
+      let removedIndex = -1;
+      setMovements((prev) => {
+        removedIndex = prev.findIndex((m) => m.id === id);
+        removed = prev[removedIndex];
+        return prev.map((m) => (m.id === id ? { ...m, _deleting: true } : m));
+      });
+      // Optimistically reverse this movement's stock effect.
+      if (removed) adjustLocalStock(removed.itemId, -movementQty(removed));
+      try {
+        await inventoryService.deleteMovement(id);
+        setMovements((prev) => prev.filter((m) => m.id !== id));
+      } catch (err) {
+        if (removed) {
+          const restore = removed;
+          const at = removedIndex;
+          setMovements((prev) => {
+            const list = prev.map((m) => (m.id === id ? { ...restore, _deleting: false } : m));
+            if (!list.some((m) => m.id === id) && at >= 0) {
+              list.splice(at, 0, { ...restore, _deleting: false });
+            }
+            return list;
+          });
+          // Re-apply the stock effect we optimistically reversed.
+          adjustLocalStock(removed.itemId, movementQty(removed));
+        }
+        toast({
+          variant: "destructive",
+          title: "Could not delete movement",
+          description: (err as Error)?.message ?? "Please try again.",
+        });
+        throw err;
+      }
+    },
+    [toast, adjustLocalStock],
+  );
+
   // ── Masters ───────────────────────────────────────────────────────────────
 
   const getMaster = useCallback(
@@ -348,6 +481,7 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     const snap = await inventoryService.reset();
     setItems(snap.items);
     setMasters(snap.masters);
+    setMovements(snap.movements);
     toast({ title: "Inventory data reset", description: "Sample data has been restored." });
   }, [toast]);
 
@@ -356,9 +490,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       ready,
       items,
       masters,
+      movements,
       createItem,
       updateItem,
       deleteItem,
+      createMovement,
+      updateMovement,
+      deleteMovement,
       getMaster,
       getMasterOptions,
       addMasterOption,
@@ -372,9 +510,13 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
       ready,
       items,
       masters,
+      movements,
       createItem,
       updateItem,
       deleteItem,
+      createMovement,
+      updateMovement,
+      deleteMovement,
       getMaster,
       getMasterOptions,
       addMasterOption,

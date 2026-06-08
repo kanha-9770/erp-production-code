@@ -127,9 +127,49 @@ export interface InventoryItem {
   [key: string]: unknown;
 }
 
+// ── Goods movements (Inward / Outward) ──────────────────────────────────────
+
+/** Direction of a stock movement: IN = goods received, OUT = goods issued. */
+export type MovementDirection = "IN" | "OUT";
+
+/**
+ * A single goods movement against the Store inventory. Each movement optionally
+ * links to a store item (`itemId`); posting one adjusts that item's
+ * `currentStock` (+qty for IN, −qty for OUT). The item code/name/uom/warehouse
+ * are snapshotted onto the movement so the log stays readable even if the item
+ * is later edited or removed.
+ */
+export interface InventoryMovement {
+  id: string;
+  direction: MovementDirection;
+  /** Document no., e.g. "IN-0001" / "OUT-0001". */
+  docNo: string;
+  date: string;
+  /** Linked store item id (when picked from the dropdown). */
+  itemId?: string;
+  itemCode: string;
+  itemName: string;
+  category?: string;
+  uom: string;
+  warehouse: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  /** Supplier (IN) or department / person it was issued to (OUT). */
+  party: string;
+  /** GRN / PO / issue-slip reference. */
+  reference: string;
+  remarks: string;
+  createdAt: string;
+  updatedAt: string;
+  _optimistic?: boolean;
+  _deleting?: boolean;
+}
+
 /** The full persisted snapshot the service round-trips. */
 export interface InventorySnapshot {
   version: number;
   masters: MasterType[];
   items: Record<SubmoduleKey, InventoryItem[]>;
+  movements: InventoryMovement[];
 }

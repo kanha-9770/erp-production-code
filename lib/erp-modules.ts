@@ -120,6 +120,15 @@ export const ERP_MODULES: ErpModuleDef[] = [
     groups: ["Accounts"],
     routePrefixes: ["/accounts"],
   },
+  {
+    id: "product",
+    label: "Product Master",
+    sidebarLabel: "Products",
+    description: "Machine product catalog: specs, pricing, technical & sales data",
+    icon: "package",
+    groups: ["Products"],
+    routePrefixes: ["/product-master"],
+  },
 ];
 
 /** Default modules picked for brand-new orgs if the user submits none. */

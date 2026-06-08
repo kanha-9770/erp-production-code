@@ -105,6 +105,19 @@ interface DataTableProps<T> {
     selectedIds: Set<string>;
     onChange: (next: Set<string>) => void;
   };
+  /**
+   * Opt-in: render an extra header row above the column headers that spans each
+   * run of consecutive visible columns sharing the same `group`, labelled with
+   * that group. Off by default so existing tables are unchanged. Used by dense,
+   * sectioned masters (e.g. Product Master) to show section names above fields.
+   */
+  groupHeaders?: boolean;
+  /**
+   * Optional per-group background colour (any CSS colour) for the group-header
+   * row. Keyed by the column `group` label. Cells with a colour render white,
+   * bold text; groups without one fall back to the muted style.
+   */
+  groupColors?: Record<string, string>;
 }
 
 interface CellRef { r: number; c: number }
@@ -172,6 +185,8 @@ export function DataTable<T>({
   pageSize,
   serverPagination,
   selection,
+  groupHeaders,
+  groupColors,
 }: DataTableProps<T>) {
   const { prefs, isHidden, toggleHidden, setWidth, setSort, setDensity } =
     useTablePrefs(tableId);
@@ -428,6 +443,41 @@ export function DataTable<T>({
               scroll doesn't bleed row content through the sticky header.
               Same reason for the gutter corner cell below. */}
           <thead className="sticky top-0 z-30 bg-muted">
+            {groupHeaders &&
+              (() => {
+                // Group the visible columns into runs of consecutive columns
+                // sharing the same `group`, each spanned by one labelled cell.
+                const runs: Array<{ group?: string; span: number }> = [];
+                for (const col of visible) {
+                  const last = runs[runs.length - 1];
+                  if (last && last.group === col.group) last.span += 1;
+                  else runs.push({ group: col.group, span: 1 });
+                }
+                return (
+                  <tr>
+                    <th
+                      className="bg-muted border-b border-r border-border md:sticky md:left-0 z-40 p-0"
+                      aria-hidden
+                    />
+                    {runs.map((run, i) => {
+                      const color = run.group ? groupColors?.[run.group] : undefined;
+                      return (
+                        <th
+                          key={i}
+                          colSpan={run.span}
+                          className={cn(
+                            "h-8 border-b border-r border-border px-2 text-center text-[11px] font-bold uppercase tracking-wider whitespace-nowrap",
+                            !color && "bg-muted text-foreground/75",
+                          )}
+                          style={color ? { backgroundColor: color, color: "#fff" } : undefined}
+                        >
+                          {run.group ?? ""}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                );
+              })()}
             <tr>
               {/* Row gutter corner — holds the select-all checkbox when row
                   selection is enabled, otherwise an empty sticky corner. */}

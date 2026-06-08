@@ -4,11 +4,32 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Banknote, Landmark } from "lucide-react";
+import {
+  LayoutDashboard,
+  Book,
+  Users,
+  FileText,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Receipt,
+  BookOpen,
+  Banknote,
+  SlidersHorizontal,
+  Landmark,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
+  { href: "/accounts/reports", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/accounts/chart-of-accounts", label: "Chart of Accounts", icon: Book },
+  { href: "/accounts/customers", label: "Customers", icon: Users },
+  { href: "/accounts/sales-invoice", label: "Sales Invoice", icon: FileText },
+  { href: "/accounts/receipts", label: "Receipts", icon: ArrowDownCircle },
+  { href: "/accounts/payment-voucher", label: "Payment Voucher", icon: ArrowUpCircle },
+  { href: "/accounts/expenses", label: "Expenses", icon: Receipt },
+  { href: "/accounts/journal-voucher", label: "Journal", icon: BookOpen },
   { href: "/accounts/payment-request", label: "Payment Request", icon: Banknote },
+  { href: "/accounts/master", label: "Accounts Master", icon: SlidersHorizontal },
 ];
 
 export function AccountsNav() {

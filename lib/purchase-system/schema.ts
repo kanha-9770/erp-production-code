@@ -14,6 +14,7 @@ import type {
   SubmoduleSchema,
   PurchaseSubmoduleKey,
 } from "./types";
+import { DIAL_CODE_OPTIONS, DEFAULT_DIAL_CODE } from "@/lib/dial-codes";
 
 // ── Seed master dropdowns ───────────────────────────────────────────────────
 
@@ -329,7 +330,8 @@ export const PR_SCHEMA: SubmoduleSchema = {
     // Requester's vendor recommendation (optional).
     { key: "recommendVendor", label: "Recommend Vendor", type: "checkbox", section: "Recommended Vendor", inTable: true, width: 140 },
     { key: "recommendedVendorName", label: "Recommended Vendor Name", type: "text", section: "Recommended Vendor", inTable: true, width: 200, showIf: { field: "recommendVendor", equals: true } },
-    { key: "recommendedVendorPhone", label: "Recommended Vendor Phone No.", type: "text", section: "Recommended Vendor", inTable: true, width: 190, showIf: { field: "recommendVendor", equals: true } },
+    { key: "recommendedVendorPhoneCode", label: "Vendor Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: DEFAULT_DIAL_CODE, section: "Recommended Vendor", inTable: true, defaultHidden: true, width: 130, showIf: { field: "recommendVendor", equals: true } },
+    { key: "recommendedVendorPhone", label: "Recommended Vendor Phone No.", type: "text", section: "Recommended Vendor", inTable: true, width: 190, placeholder: "Number without code", showIf: { field: "recommendVendor", equals: true } },
 
     { key: "status", label: "Status", type: "status", statusOptions: PR_STATUS, defaultValue: "DRAFT", section: "Status", inTable: true, width: 170 },
   ],
@@ -518,7 +520,8 @@ export const SUPPLIER_SCHEMA: SubmoduleSchema = {
     { key: "status", label: "Status", type: "status", statusOptions: SUPPLIER_STATUS, defaultValue: "ACTIVE", section: "General", inTable: true, width: 120 },
 
     { key: "contactPerson", label: "Contact Person", type: "text", section: "Contact", inTable: true, width: 150 },
-    { key: "phone", label: "Phone", type: "text", section: "Contact", inTable: true, width: 130 },
+    { key: "phoneCode", label: "Country Code", type: "select", options: DIAL_CODE_OPTIONS, defaultValue: DEFAULT_DIAL_CODE, section: "Contact", inTable: true, defaultHidden: true, width: 120 },
+    { key: "phone", label: "Phone", type: "text", section: "Contact", inTable: true, width: 130, placeholder: "Number without code" },
     { key: "email", label: "Email", type: "text", section: "Contact", inTable: true, width: 180 },
     { key: "website", label: "Website", type: "text", section: "Contact", defaultHidden: true, inTable: true, width: 160 },
 
