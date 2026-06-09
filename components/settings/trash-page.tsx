@@ -41,6 +41,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, RotateCcw, Trash2, Loader2, Clock } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { useDispatch } from "react-redux";
+import { baseApi } from "@/lib/api/baseApi";
 
 type TrashItem = {
   id: string;
@@ -82,6 +84,25 @@ function friendlyType(t: string) {
   return FRIENDLY_TYPE[t] ?? t;
 }
 
+/**
+ * RTK Query cache tags to invalidate after restoring each resource type, so the
+ * relevant screens refetch and the restored record shows up without a full page
+ * reload. The trash page restores via plain fetch (it's type-agnostic), so it
+ * can't rely on a mutation's invalidatesTags — we dispatch invalidation here
+ * based on what came back. Types not listed simply don't force a refetch (their
+ * screens may not be RTK-backed); add an entry when one needs it.
+ */
+const RESTORE_INVALIDATION: Record<string, string[]> = {
+  Role: ["OrgRoles", "Roles"],
+  OrganizationUnit: ["OrgUnits"],
+  UserUnitAssignment: ["OrgUnits", "AdminUsers"],
+  User: ["AdminUsers", "Employees"],
+  Form: ["Form", "FormDetail", "OrgModules"],
+  FormModule: ["OrgModules", "Module", "PermissionModules"],
+  FormRecord: ["Records", "Record"],
+  RoutePermission: ["RoutePermissions", "RouteAccess"],
+};
+
 /** Preset retention options. "custom" reveals a numeric input. */
 const PRESETS: Array<{ value: string; label: string; days: number | null }> = [
   { value: "7", label: "7 days", days: 7 },
@@ -101,6 +122,7 @@ function presetForDays(days: number): string {
 
 export function TrashPage() {
   const { toast } = useToast();
+  const dispatch = useDispatch();
   const [items, setItems] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -215,6 +237,11 @@ export function TrashPage() {
         throw new Error(json?.error || json?._raw || `Restore failed (${res.status})`);
       }
       toast({ title: "Restored", description: `${friendlyType(item.resourceType)} "${item.resourceName ?? item.resourceId}" is back.` });
+      // Invalidate the RTK cache for the restored resource so screens like the
+      // Role Hierarchy refetch immediately instead of showing stale data until
+      // a manual page reload.
+      const tags = RESTORE_INVALIDATION[item.resourceType];
+      if (tags?.length) dispatch(baseApi.util.invalidateTags(tags));
       // Re-fetch from the server rather than just filtering locally — if the
       // restore created cascading side-effects (e.g. expired items got purged
       // alongside), the list should reflect the authoritative state.

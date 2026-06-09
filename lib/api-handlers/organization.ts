@@ -107,7 +107,7 @@ export const OrganizationHandlers = {
         new URL(request.url).searchParams.get("promoteChildren") === "true";
       if (promoteChildren) {
         const orgId = role.organizationId;
-        const movedCount = await prisma.$transaction(async (tx) => {
+        const promotedChildIds: string[] = await prisma.$transaction(async (tx) => {
           // Snapshot the role's CURRENT direct children before re-parenting.
           const children = await tx.role.findMany({
             where: { parentId: roleId, organizationId: orgId },
@@ -154,23 +154,38 @@ export const OrganizationHandlers = {
           await tx.unitRoleAssignment.deleteMany({ where: { roleId } });
           await tx.userUnitAssignment.deleteMany({ where: { roleId } });
 
-          return childIds.length;
+          return childIds;
         });
 
         // Snapshot + delete just this one role (children are already detached).
-        await moveToTrash("Role", roleId, {
+        const { trashId } = await moveToTrash("Role", roleId, {
           userId: user.id,
           userName: user.email,
           organizationId: user.organizationId,
         });
 
+        // Record which children were promoted onto the trash snapshot, so a
+        // later restore can re-adopt and demote them — fully reversing this
+        // operation ("Restore puts them back exactly as they were").
+        if (promotedChildIds.length > 0) {
+          const trashRow = await prisma.trashBin.findUnique({
+            where: { id: trashId },
+            select: { snapshot: true },
+          });
+          const snap = (trashRow?.snapshot ?? {}) as any;
+          await prisma.trashBin.update({
+            where: { id: trashId },
+            data: { snapshot: { ...snap, _promotedChildIds: promotedChildIds } },
+          });
+        }
+
         return NextResponse.json({
           success: true,
           message:
-            movedCount > 0
+            promotedChildIds.length > 0
               ? "Role moved to recycle bin; its sub-roles were promoted one level up"
               : "Role moved to recycle bin",
-          promotedCount: movedCount,
+          promotedCount: promotedChildIds.length,
         });
       }
 

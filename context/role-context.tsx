@@ -313,6 +313,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     refetch: refetchRoles,
   } = useGetOrgRolesQuery(state.organizationId!, {
     skip: !state.organizationId,
+    // Refetch whenever this view (re)mounts so returning to the hierarchy after
+    // a change elsewhere — e.g. restoring a role from the recycle bin on
+    // another screen — always shows current data instead of a 120s-stale cache.
+    refetchOnMountOrArgChange: true,
   });
 
   const {
@@ -321,6 +325,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     refetch: refetchUnits,
   } = useGetOrgUnitsQuery(state.organizationId!, {
     skip: !state.organizationId,
+    refetchOnMountOrArgChange: true,
   });
 
   // Sync RTK Query data into reducer state

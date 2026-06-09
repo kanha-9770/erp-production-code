@@ -96,6 +96,91 @@ async function defaultRestore(cfg: TrashConfig, data: any, db: Tx) {
   await (db as any)[cfg.model].create({ data: clean(data) });
 }
 
+/**
+ * Roles carry a denormalized `level` (their depth in the org tree). While a
+ * role sits in the recycle bin the surrounding tree can change — a layer is
+ * inserted or removed, a parent is promoted or deleted — so the snapshot's
+ * `level` can no longer match where the role actually lands. Recompute `level`
+ * from the CURRENT parent on restore so the role always comes back at the
+ * correct depth instead of the stale snapshot value. If the original parent no
+ * longer exists, restore the role at the top level rather than dangling off a
+ * missing FK (which the verbatim path would reject outright).
+ */
+async function restoreRole(data: any, db: Tx) {
+  const cleaned = clean(data) as any;
+  // `_promotedChildIds` is restore-only metadata stamped onto the snapshot when
+  // this role was deleted via "promote children". It is NOT a column, so strip
+  // it before re-creating the row.
+  const { _promotedChildIds, ...role } = cleaned;
+  const roleId: string = role.id;
+  const orgId: string | null = role.organizationId ?? null;
+
+  let parentId: string | null = role.parentId ?? null;
+  let level = 0;
+  if (parentId) {
+    const parent = await (db as any).role.findUnique({
+      where: { id: parentId },
+      select: { level: true, organizationId: true },
+    });
+    if (parent && parent.organizationId === orgId) {
+      level = parent.level + 1;
+    } else {
+      // Parent is gone — restore as a top-level role instead of failing.
+      parentId = null;
+      level = 0;
+    }
+  }
+
+  await (db as any).role.create({ data: { ...role, parentId, level } });
+
+  // Reverse a "promote children" deletion: re-adopt the sub-roles that were
+  // lifted up when this role was removed, then recompute the whole restored
+  // subtree's levels from this role downward — demoting them back into place.
+  // Only children that still exist AND are still sitting where the promotion
+  // left them (under this role's parent) are re-adopted, so we never yank back
+  // a role the user has since moved elsewhere.
+  if (Array.isArray(_promotedChildIds) && _promotedChildIds.length > 0 && orgId) {
+    const candidates = await (db as any).role.findMany({
+      where: { id: { in: _promotedChildIds }, organizationId: orgId },
+      select: { id: true, parentId: true },
+    });
+    const reAdopt = candidates
+      .filter((c: any) => (c.parentId ?? null) === parentId)
+      .map((c: any) => c.id);
+
+    if (reAdopt.length > 0) {
+      await (db as any).role.updateMany({
+        where: { id: { in: reAdopt }, organizationId: orgId },
+        data: { parentId: roleId },
+      });
+      // Recompute levels for the restored role's entire subtree: its direct
+      // children become level+1, their children level+2, and so on. Robust to
+      // any tree shift that happened while the role sat in the bin. Depth is
+      // capped at 50 as a cycle safety net.
+      await (db as any).$executeRaw`
+        WITH RECURSIVE tree AS (
+          SELECT id, ${level + 1}::int AS new_level, 0 AS depth
+          FROM roles
+          WHERE parent_id = ${roleId}
+            AND organization_id = ${orgId}
+            AND is_active = true
+          UNION ALL
+          SELECT r.id, t.new_level + 1, t.depth + 1
+          FROM roles r
+          JOIN tree t ON r.parent_id = t.id
+          WHERE r.organization_id = ${orgId}
+            AND r.is_active = true
+            AND t.depth < 50
+        )
+        UPDATE roles
+        SET level = t.new_level, updated_at = NOW()
+        FROM tree t
+        WHERE roles.id = t.id
+      `;
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom serialize/restore for cascade trees
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,7 +438,7 @@ const CONFIGS: Record<string, TrashConfig> = {
   PayrollRecord: { model: "payrollRecord", nameOf: (r) => `${r.employeeId} ${r.month}/${r.year}` },
 
   // Org / users / roles
-  Role: { model: "role", orgField: "organizationId", nameOf: (r) => r.name },
+  Role: { model: "role", orgField: "organizationId", nameOf: (r) => r.name, customRestore: restoreRole },
   OrganizationUnit: { model: "organizationUnit", orgField: "organizationId", nameOf: (r) => r.name },
   User: { model: "user", orgField: "organizationId", nameOf: (r) => r.email },
   UserUnitAssignment: { model: "userUnitAssignment", nameOf: (r) => r.id },
