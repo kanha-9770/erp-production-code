@@ -640,11 +640,41 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     return `/${slug || "module"}`;
   };
 
+  // Accordion expand/collapse. Opening a row first collapses its same-level
+  // siblings — and any open descendants of those siblings — so the tree never
+  // shows more than one open branch per level; a deep menu can't sprawl into a
+  // wall of links. Closing a row also collapses everything beneath it, so a
+  // branch always re-opens clean. (`moduleIndex`, built alongside the module
+  // tree below, supplies the parent/sibling lookup. It's referenced here via
+  // closure and only read inside this click handler, by which point the memo
+  // has been initialised for the render.)
   const toggleModule = (moduleId: string) => {
     setExpandedModules((prev) => {
       const next = new Set(prev);
-      if (next.has(moduleId)) next.delete(moduleId);
-      else next.add(moduleId);
+
+      const collapseSubtree = (id: string) => {
+        for (const childId of moduleIndex.childrenOf.get(id) ?? []) {
+          next.delete(childId);
+          collapseSubtree(childId);
+        }
+      };
+
+      // Closing: drop this row and everything under it.
+      if (next.has(moduleId)) {
+        next.delete(moduleId);
+        collapseSubtree(moduleId);
+        return next;
+      }
+
+      // Opening: collapse siblings (and their open subtrees) first, then open.
+      const parentKey =
+        moduleIndex.parentOf.get(moduleId) ?? moduleIndex.ROOT_KEY;
+      for (const siblingId of moduleIndex.childrenOf.get(parentKey) ?? []) {
+        if (siblingId === moduleId) continue;
+        next.delete(siblingId);
+        collapseSubtree(siblingId);
+      }
+      next.add(moduleId);
       return next;
     });
   };
@@ -1010,6 +1040,29 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     return filterForRebmAgent(combined);
   }, [modules, isAdmin, checkPermission, canAccess, isPermitted, isRebmOnlyAgent, userData]);
 
+  // Flat parent/sibling index over the *rendered* tree (post-permission,
+  // post-filter), keyed by module id; root-level rows hang off the ROOT_KEY
+  // sentinel. `toggleModule`'s accordion logic uses `childrenOf(parentOf(id))`
+  // to find a row's siblings (to collapse them) and `childrenOf(id)` to walk
+  // its descendants (to tidy them on close). Rebuilt only when the tree itself
+  // changes, so toggling a row is cheap.
+  const moduleIndex = useMemo(() => {
+    const ROOT_KEY = "__root__";
+    const parentOf = new Map<string, string>();
+    const childrenOf = new Map<string, string[]>();
+    const walk = (items: any[], parentKey: string) => {
+      const ids: string[] = [];
+      for (const it of items) {
+        ids.push(it.id);
+        parentOf.set(it.id, parentKey);
+        if (it.children?.length) walk(it.children, it.id);
+      }
+      childrenOf.set(parentKey, ids);
+    };
+    walk(moduleTree as any[], ROOT_KEY);
+    return { parentOf, childrenOf, ROOT_KEY };
+  }, [moduleTree]);
+
   // Real client-side search across the (already-filtered) tree.
   // A node matches if its name matches the query OR any descendant does;
   // matching nodes are auto-expanded so the user sees the hit.
@@ -1144,23 +1197,14 @@ export function CrmSidebar({ onViewChange, onMobileClose }: CrmSidebarProps) {
     }
   }, [moduleTree, pathname, isRebmOnlyAgent]);
 
-  // First-load: expand the top-level static MODULE folders (HR & Workforce,
-  // MLM, Inventory, …) so their group sub-folders are visible immediately
-  // rather than hidden behind a single collapsed row — otherwise a freshly
-  // loaded sidebar reads as "nothing here". One-shot and additive: it never
-  // collapses anything the user toggled, runs once per mount, and the
-  // URL-based auto-expand above still drills deeper into the active page.
-  const defaultExpandedRef = useRef(false);
-  useEffect(() => {
-    if (defaultExpandedRef.current) return;
-    if (moduleTree.length === 0) return;
-    const topFolderIds = (moduleTree as any[])
-      .filter((n) => n.module_type === "system-folder" && n.children?.length)
-      .map((n) => n.id as string);
-    if (topFolderIds.length === 0) return;
-    defaultExpandedRef.current = true;
-    setExpandedModules((prev) => new Set([...Array.from(prev), ...topFolderIds]));
-  }, [moduleTree]);
+  // First-load default is now FULLY COLLAPSED. We intentionally no longer
+  // auto-expand every top-level module folder on mount: opening all groups
+  // up-front turned the sidebar into a long wall of links that read as noisy
+  // and "not smart". The only automatic expansion that remains is
+  // context-aware — the URL-based effect above opens just the single branch
+  // that contains the page you're currently on, and search opens matches.
+  // Everything else stays closed until clicked, and `toggleModule` keeps it
+  // tidy by collapsing siblings accordion-style.
 
   const handleCreateModule = async () => {
     if (!moduleData.name.trim()) {
