@@ -223,7 +223,12 @@ export default function EmployeeMasterListPage() {
       page,
       pageSize: PAGE_SIZE,
       // Roll-up totals + group-by counts for the summary strip / Group By chips.
-      withAggregates: true,
+      // These are computed over the FULL filtered set, so they only change when
+      // the filter/search/sort changes — NOT when you page. Any filter change
+      // resets `page` to 0 (see updateFilter), so requesting aggregates only on
+      // page 0 refreshes them exactly when needed and saves 3 groupBy/aggregate
+      // queries on every Next/Prev click. Pages > 0 reuse the last-known set.
+      withAggregates: page === 0,
       search: filters.search || undefined,
       status: filters.status || undefined,
       gender: filters.gender || undefined,
@@ -242,11 +247,28 @@ export default function EmployeeMasterListPage() {
     [page, filters, tablePrefs.sort, conditions],
   );
 
-  const { data, isLoading, isFetching } = useGetEmployeeListQuery(queryArgs);
+  // `selectFromResult` exposes `currentData` (the live result for THIS query
+  // arg) alongside `data` (which RTK keeps pointed at the last successful
+  // result for the hook). While a new page/search is in flight, `data` still
+  // holds the previous page's rows — so we render those instead of blanking
+  // the table. This is what removes the perceived "freeze" on Next / search:
+  // the old rows stay put with a subtle loading hint until the new ones land.
+  const { data, currentData, isLoading, isFetching } =
+    useGetEmployeeListQuery(queryArgs);
+  // Prefer the freshly-loaded page; fall back to the last good result while a
+  // new query is fetching so the grid never flashes empty.
+  const shown = currentData ?? data;
   // The server already filtered + paginated, so the rows we got ARE the page.
-  const items = data?.employees ?? [];
-  const total = data?.total ?? 0;
-  const aggregates = data?.aggregates;
+  const items = shown?.employees ?? [];
+  const total = shown?.total ?? 0;
+  // Aggregates are only fetched on page 0 (they don't change while paging), so
+  // remember the last set and reuse it on pages > 0 to keep the summary strip
+  // and Group By chips populated without re-querying them every page.
+  const lastAggregatesRef = useRef<NonNullable<typeof shown>["aggregates"] | undefined>(
+    undefined,
+  );
+  if (shown?.aggregates) lastAggregatesRef.current = shown.aggregates;
+  const aggregates = shown?.aggregates ?? lastAggregatesRef.current;
 
   // If the current page falls past the end of the result set (e.g. the last
   // row on the last page was deleted, or a filter shrank the total), snap
