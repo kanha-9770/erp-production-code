@@ -129,34 +129,91 @@ export const UserManagementHandlers = {
     return handle(async () => {
       const authUser = await requireAuth(request);
 
-      const users = await prisma.user.findMany({
-        where: { organizationId: authUser.organizationId },
-        include: {
-          unitAssignments: { include: { unit: true, role: true } },
-          organization: true,
-          permissionOverrides: { include: { permission: true } },
-          employee: {
-            select: {
-              department: true,
-              designation: true,
-              companyName: true,
-              employeeEngagementTeamName: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
+      const sp = request.nextUrl.searchParams;
+      const rawPage = parseInt(sp.get("page") ?? "", 10);
+      const rawSize = parseInt(sp.get("pageSize") ?? "", 10);
+      const search = sp.get("search")?.trim() || "";
+
+      const paginate = Number.isFinite(rawSize) && rawSize > 0;
+      const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+      const pageSize = paginate ? rawSize : 10;
+
+      console.log('GET_USERS API PARAMS:', {
+        url: request.url,
+        rawPage: sp.get("page"),
+        rawSize: sp.get("pageSize"),
+        search,
+        paginate,
+        page,
+        pageSize,
       });
 
-      return NextResponse.json(
-        users.map((u) => ({
+      let whereClause: any = {
+        organizationId: authUser.organizationId,
+        // Exclude admin users from regular user directory listing
+        unitAssignments: {
+          none: {
+            role: {
+              OR: [
+                { isAdmin: true },
+                { name: { contains: "admin", mode: "insensitive" } }
+              ]
+            }
+          }
+        }
+      };
+
+      if (search) {
+        whereClause.AND = [
+          {
+            OR: [
+              { first_name: { contains: search, mode: "insensitive" } },
+              { last_name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+              { department: { contains: search, mode: "insensitive" } },
+              {
+                unitAssignments: {
+                  some: {
+                    OR: [
+                      { role: { name: { contains: search, mode: "insensitive" } } },
+                      { unit: { name: { contains: search, mode: "insensitive" } } }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ];
+      }
+
+      if (paginate) {
+        const total = await prisma.user.count({ where: whereClause });
+        const users = await prisma.user.findMany({
+          where: whereClause,
+          include: {
+            unitAssignments: { include: { unit: true, role: true } },
+            organization: true,
+            permissionOverrides: { include: { permission: true } },
+            employee: {
+              select: {
+                department: true,
+                designation: true,
+                companyName: true,
+                employeeEngagementTeamName: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        });
+
+        const data = users.map((u) => ({
           id: u.id, email: u.email,
           first_name: u.first_name || "", last_name: u.last_name || "",
           avatar: u.avatar, department: u.department || "",
           unitAssignments: u.unitAssignments,
           email_verified: u.email_verified,
-          // Employee data sourced for audit-log display (department + management
-          // team). `companyName` is the closest field to "management team" in
-          // the Employee model.
           employee: u.employee
             ? {
                 department: u.employee.department || "",
@@ -165,8 +222,55 @@ export const UserManagementHandlers = {
                 employeeEngagementTeamName: u.employee.employeeEngagementTeamName || "",
               }
             : null,
-        }))
-      );
+        }));
+
+        return NextResponse.json({
+          success: true,
+          data,
+          total,
+          page,
+          pageSize,
+        });
+      } else {
+        const users = await prisma.user.findMany({
+          where: whereClause,
+          include: {
+            unitAssignments: { include: { unit: true, role: true } },
+            organization: true,
+            permissionOverrides: { include: { permission: true } },
+            employee: {
+              select: {
+                department: true,
+                designation: true,
+                companyName: true,
+                employeeEngagementTeamName: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        return NextResponse.json(
+          users.map((u) => ({
+            id: u.id, email: u.email,
+            first_name: u.first_name || "", last_name: u.last_name || "",
+            avatar: u.avatar, department: u.department || "",
+            unitAssignments: u.unitAssignments,
+            email_verified: u.email_verified,
+            // Employee data sourced for audit-log display (department + management
+            // team). `companyName` is the closest field to "management team" in
+            // the Employee model.
+            employee: u.employee
+              ? {
+                  department: u.employee.department || "",
+                  designation: u.employee.designation || "",
+                  companyName: u.employee.companyName || "",
+                  employeeEngagementTeamName: u.employee.employeeEngagementTeamName || "",
+                }
+              : null,
+          }))
+        );
+      }
     }, "getUsers");
   },
 
@@ -567,7 +671,7 @@ export const UserManagementHandlers = {
             ? await prisma.userUnitAssignment.findMany({
                 where: {
                   roleId: { in: descendantRoleIds },
-                  role: { organizationId: authUser.organizationId },
+                  role: { organizationId: authUser.organizationId as string },
                 },
                 select: { userId: true },
                 distinct: ["userId"],
@@ -592,7 +696,7 @@ export const UserManagementHandlers = {
             ? await prisma.userUnitAssignment.findMany({
                 where: {
                   roleId: { in: callerCtx.roleIds },
-                  role: { organizationId: authUser.organizationId },
+                  role: { organizationId: authUser.organizationId as string },
                 },
                 select: { userId: true },
                 distinct: ["userId"],
@@ -733,6 +837,43 @@ export const UserManagementHandlers = {
       // assignment yet (and is therefore outside the role hierarchy).
       data.createdById = authUser.id;
 
+      // Guard against duplicate work emails. A real (non-blank) emailAddress1
+      // that already belongs to another employee in this org is almost always
+      // a data-entry mistake — and, combined with the user-reuse below + the
+      // User<->Employee identity sync, it's exactly how one person's details
+      // bleed onto another's record (two rows sharing one email, one backed by
+      // a placeholder login). Reject it with a clear message instead of
+      // silently creating the conflicting row. Blank emails are exempt —
+      // multiple not-yet-contacted rows may legitimately have none.
+      const incomingEmail =
+        typeof body.emailAddress1 === "string" ? body.emailAddress1.trim() : "";
+      if (incomingEmail) {
+        const emailClash = await prisma.employee.findFirst({
+          where: {
+            emailAddress1: { equals: incomingEmail, mode: "insensitive" },
+            // Same visibility scope the list uses: employees linked to a user
+            // in this org, plus org-less orphan rows (which show in every org's
+            // table). Without the orphan arm a duplicate against an unlinked
+            // row would slip through.
+            OR: [
+              { user: { organizationId: authUser.organizationId } },
+              { userId: null },
+            ],
+          },
+          select: { employeeName: true },
+        });
+        if (emailClash) {
+          return NextResponse.json(
+            {
+              error: `An employee with the email "${incomingEmail}" already exists${
+                emailClash.employeeName ? ` (${emailClash.employeeName})` : ""
+              }. Each employee needs a unique email address.`,
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       // The list query (`getEmployees`) filters by the linked user's
       // organizationId — Employee has no organization column of its own. If
       // we create an Employee with `userId: null`, it ends up orphaned and
@@ -759,46 +900,62 @@ export const UserManagementHandlers = {
         //   - no match → mint a fresh placeholder User
         const existing = await prisma.user.findUnique({
           where: { email: candidateEmail },
-          select: { id: true, organizationId: true },
+          select: { id: true, organizationId: true, first_name: true, last_name: true },
         });
 
+        // Reuse an existing account ONLY when it's safe to assume the same
+        // identity — the account has no real name yet (a placeholder waiting to
+        // be claimed) OR its name matches the new employee's. Reusing a *named,
+        // different* person's login would bind this employee to someone else
+        // and let the name sync overwrite one identity with the other (the
+        // root cause of the "edit shows another user's data" bug). When it's
+        // not clearly the same person, fall through to a fresh placeholder.
+        const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
+        const sameIdentity =
+          !!existing &&
+          ((!existing.first_name && !existing.last_name) ||
+            `${norm(existing.first_name)} ${norm(existing.last_name)}`.trim() ===
+              `${norm(firstName)} ${norm(lastName)}`.trim());
+
+        // The login account we attach is created WITH `candidateEmail`, so the
+        // employee's contact email and their login email are identical from the
+        // start — never a placeholder that silently diverges from what was
+        // typed. A blank contact email falls back to a random placeholder
+        // address (the employee simply has no login email yet).
+        const usingRealEmail = !candidateEmail.endsWith("@placeholder.local");
+
         let userId: string;
-        if (existing && existing.organizationId === authUser.organizationId) {
-          // Reuse only if the user doesn't already own an Employee row —
-          // Employee.userId has @unique, so reusing a taken slot would 500.
+        if (existing && existing.organizationId === authUser.organizationId && sameIdentity) {
+          // Same person who already has a login-only account in this org. Reuse
+          // it so the one account holds both the login and the employee record
+          // — but only if they don't already own an Employee row (Employee.userId
+          // is @unique, and a person can't have two employee records).
           const taken = await prisma.employee.findUnique({
             where: { userId: existing.id },
             select: { id: true },
           });
           if (taken) {
-            const placeholderEmail = `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`;
-            const newUser = await prisma.user.create({
-              data: {
-                email: placeholderEmail,
-                organizationId: authUser.organizationId,
-                // Admin-created users skip the email-verification flow —
-                // the login route rejects sign-in with "Please verify your
-                // email first" otherwise. ACTIVE + email_verified:true is
-                // the same combo used by /api/create-user-from-employee.
-                status: "ACTIVE",
-                email_verified: true,
-                first_name: firstName,
-                last_name: lastName,
-              },
-            });
-            userId = newUser.id;
-          } else {
-            userId = existing.id;
+            return NextResponse.json(
+              { error: `This person already has an employee record. Edit the existing one instead of creating a duplicate.` },
+              { status: 409 }
+            );
           }
+          userId = existing.id;
+        } else if (existing && usingRealEmail) {
+          // A real email that belongs to a DIFFERENT person (or another org).
+          // Minting a placeholder login here is what produced the "employee
+          // shows one email, user list shows another" bug. Reject so the
+          // operator uses a unique email instead.
+          return NextResponse.json(
+            { error: `The email "${candidateEmail}" is already used by another account. Each person needs a unique email address.` },
+            { status: 409 }
+          );
         } else {
-          // Either no user with that email, or the email belongs to another
-          // org — mint a fresh placeholder so we never cross tenants.
-          const email = existing
-            ? `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@placeholder.local`
-            : candidateEmail;
+          // No account owns this email → create one WITH this email so the login
+          // and the employee's contact email match from the start.
           const newUser = await prisma.user.create({
             data: {
-              email,
+              email: candidateEmail,
               organizationId: authUser.organizationId,
               // Admin-created users skip the email-verification flow —
               // the login route rejects sign-in with "Please verify your
@@ -851,14 +1008,68 @@ export const UserManagementHandlers = {
           ],
         },
         // Pull the previous resignation date so we can detect a null → set
-        // transition and trigger offboarding.
-        select: { id: true, resignationLetterDate: true, dateOfLeaving: true, reasonOfLeaving: true },
+        // transition and trigger offboarding. userId lets us keep the linked
+        // login email in lockstep with the contact email below.
+        select: { id: true, userId: true, resignationLetterDate: true, dateOfLeaving: true, reasonOfLeaving: true },
       });
       if (!existing) {
         return NextResponse.json({ error: "Employee not found" }, { status: 404 });
       }
 
       const data = sanitizeEmployeePayload(body, { partial: true });
+
+      // Keep the email unique AND consistent on edits. A person has two email
+      // columns — Employee.emailAddress1 (contact) and User.email (login) — and
+      // they must stay equal, never silently diverge into a placeholder. Before
+      // writing anything, if this edit sets a non-blank emailAddress1, reject it
+      // when that value is already used by (a) another employee, or (b) another
+      // user's login. Both checks run BEFORE the update so we never leave the
+      // contact email changed while the login stays behind.
+      if (typeof data.emailAddress1 === "string" && data.emailAddress1.trim()) {
+        const wantEmail = data.emailAddress1.trim();
+
+        const employeeClash = await prisma.employee.findFirst({
+          where: {
+            id: { not: id },
+            emailAddress1: { equals: wantEmail, mode: "insensitive" },
+            OR: [
+              { user: { organizationId: authUser.organizationId } },
+              { userId: null },
+            ],
+          },
+          select: { employeeName: true },
+        });
+        if (employeeClash) {
+          return NextResponse.json(
+            {
+              error: `Another employee already uses the email "${wantEmail}"${
+                employeeClash.employeeName ? ` (${employeeClash.employeeName})` : ""
+              }. Each employee needs a unique email address.`,
+            },
+            { status: 409 }
+          );
+        }
+
+        // Login-email collision (with any account other than this employee's
+        // own). Previously this was silently skipped, which is exactly what
+        // left the contact email and login email out of sync.
+        const loginClash = await prisma.user.findFirst({
+          where: {
+            email: { equals: wantEmail, mode: "insensitive" },
+            NOT: { id: existing.userId ?? "" },
+          },
+          select: { id: true },
+        });
+        if (loginClash) {
+          return NextResponse.json(
+            {
+              error: `The email "${wantEmail}" is already used as a login by another account. Use a unique email so the employee and their login stay in sync.`,
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       const employee = await prisma.employee.update({ where: { id }, data });
 
       // Offboarding trigger: HR sets `resignationLetterDate` on the Employee
@@ -912,16 +1123,13 @@ export const UserManagementHandlers = {
           // still leaves User.avatar untouched.
           if ("employeeImage" in data) userSync.avatar = data.employeeImage ?? null;
 
-          // Email maps to the login address — only sync a valid, changed
-          // value that no *other* account already owns (don't 500 the edit
-          // on the User.email unique constraint).
+          // Email maps to the login address. Any collision was already rejected
+          // before the employee write above, so here we sync it through
+          // unconditionally — the contact email and login email always end up
+          // equal (never a silent placeholder divergence).
           const newEmail = str(data.emailAddress1);
           if (newEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail) && linkedUser.email !== newEmail) {
-            const clash = await prisma.user.findFirst({
-              where: { email: newEmail, NOT: { id: linkedUser.id } },
-              select: { id: true },
-            });
-            if (!clash) userSync.email = newEmail;
+            userSync.email = newEmail;
           }
 
           if (Object.keys(userSync).length > 0) {

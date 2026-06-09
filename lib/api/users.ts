@@ -42,8 +42,16 @@ export const usersApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 60,
     }),
 
-    getUsers: builder.query<{ success: boolean; data: any[] }, void>({
-      query: () => "/users",
+    getUsers: builder.query<any, { page?: number; pageSize?: number; search?: string } | void>({
+      query: (params) => {
+        if (!params) return "/users";
+        const sp = new URLSearchParams();
+        if (params.page !== undefined) sp.append("page", String(params.page));
+        if (params.pageSize !== undefined) sp.append("pageSize", String(params.pageSize));
+        if (params.search !== undefined) sp.append("search", params.search);
+        const queryStr = sp.toString();
+        return queryStr ? `/users?${queryStr}` : "/users";
+      },
       providesTags: ["AdminUsers"],
     }),
 
@@ -55,7 +63,10 @@ export const usersApi = baseApi.injectEndpoints({
       // A user account, its linked employee record, and the logged-in user's
       // own profile are one identity. Refresh them together so a change made
       // from User Management reflects in Employee Master + the header/profile.
-      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
+      // The bare "Employee" tag (no id) also invalidates every cached employee
+      // DETAIL/preview query, so an open Employee Master preview pane refreshes
+      // too — not just the list.
+      invalidatesTags: ["AdminUsers", "Employee", { type: "Employees", id: "LIST" }, "User"],
     }),
 
     getUserPermissionsList: builder.query<{ success: boolean; data: any[] }, { userId: string }>({
@@ -83,8 +94,9 @@ export const usersApi = baseApi.injectEndpoints({
         body,
       }),
       // Links a user to an employee → the employee row's "has account" state
-      // changes, so refresh Employee Master too.
-      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
+      // changes, so refresh Employee Master too. The bare "Employee" tag also
+      // refreshes any open employee DETAIL/preview pane, not just the list.
+      invalidatesTags: ["AdminUsers", "Employee", { type: "Employees", id: "LIST" }, "User"],
     }),
 
     // Create user
@@ -105,8 +117,11 @@ export const usersApi = baseApi.injectEndpoints({
         body,
       }),
       // Edits sync to the linked employee (reverse of updateEmployee) and may
-      // be the logged-in user themselves — refresh all three faces.
-      invalidatesTags: ["AdminUsers", { type: "Employees", id: "LIST" }, "User"],
+      // be the logged-in user themselves — refresh all three faces. The bare
+      // "Employee" tag (no id) invalidates every cached employee DETAIL/preview
+      // query too, so an open Employee Master preview pane reflects the edit
+      // immediately — symmetric with updateEmployee's invalidation set.
+      invalidatesTags: ["AdminUsers", "Employee", { type: "Employees", id: "LIST" }, "User"],
     }),
   }),
 })

@@ -146,6 +146,38 @@ export async function POST(request: NextRequest) {
     if (!parsedData.employeeName) parsedData.employeeName = employeeName;
     if (!parsedData.email) parsedData.email = email;
 
+    // Block duplicate work emails at the EMPLOYEE level too. The User.email
+    // check above only stops a duplicate *login*; emailAddress1 has no unique
+    // constraint, so without this a record whose email matches another
+    // employee (whose login is a placeholder) would create a second row that
+    // looks like a duplicate account. Scope to this org + org-less orphans,
+    // and skip the row we're about to update (employee_id) so re-provisioning
+    // an existing employee isn't blocked by its own email.
+    const dupEmail = (parsedData.email || email || "").trim();
+    if (dupEmail) {
+      const emailClash = await prisma.employee.findFirst({
+        where: {
+          emailAddress1: { equals: dupEmail, mode: "insensitive" },
+          OR: [
+            { user: { organizationId: orgId } },
+            { userId: null },
+          ],
+          ...(employee_id ? { NOT: { id: employee_id } } : {}),
+        },
+        select: { employeeName: true },
+      });
+      if (emailClash) {
+        return NextResponse.json(
+          {
+            error: `An employee with the email "${dupEmail}" already exists${
+              emailClash.employeeName ? ` (${emailClash.employeeName})` : ""
+            }. Each employee needs a unique email address.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, 12);
 
