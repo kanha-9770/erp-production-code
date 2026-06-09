@@ -59,6 +59,19 @@ export type StaticPageGroup =
   | 'AI & Tools';
 
 export const STATIC_PAGES: StaticPage[] = [
+  // ── HR Master ──────────────────────────────────────────────────────────
+  // One management surface for every editable HR dropdown (Department,
+  // Designation, Shift Type, Employment Type, …) — the HR analogue of the
+  // Inventory Master page.
+  {
+    path: '/hr/master',
+    label: 'HR Master',
+    group: 'HR Core',
+    description: 'Manage Department, Designation, Shift & other HR dropdowns',
+    adminOnly: true,
+    icon: 'settings',
+  },
+
   // ── Attendance ─────────────────────────────────────────────────────────
   {
     path: '/attendance',

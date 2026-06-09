@@ -4667,6 +4667,21 @@ model InventoryMasterSnapshot {
   @@map("inventory_master_snapshots")
 }
 
+// HR Master registry — one JSON snapshot per org holding every editable HR
+// dropdown (Department, Designation, Shift Type, Employment Type, Blood Group,
+// Marital Status, Salary Mode, …) and its options. Mirrors
+// InventoryMasterSnapshot so the HR Master page works exactly like Inventory
+// Master. Seeded on first load from lib/hr-master/schema.ts (HR_SEED_MASTERS).
+model HrMasterSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String   @unique @map("organization_id")
+  masters        Json     @default("[]")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("hr_master_snapshots")
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Purchase & Procurement system (lib/purchase-system) — schema-driven open
 // records (supplier/pr/sourcing/po/grn/payment). Nested lineItems (GRN invoices)
