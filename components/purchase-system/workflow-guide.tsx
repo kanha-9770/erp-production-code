@@ -2,9 +2,9 @@
 
 /**
  * "How it works" — an always-visible, ungated workflow guide for the Purchase
- * module. Any employee can open it to learn the procure-to-pay process, who is
- * responsible at each stage, and how goods flow into inventory. Rendered in the
- * ModuleNav so it appears on every purchase page.
+ * module, rendered as a step-by-step vertical TIMELINE / flowchart so any
+ * employee can follow the procure-to-pay process at a glance. Floats in the
+ * bottom-right corner of every purchase page.
  */
 
 import { useState } from "react";
@@ -19,79 +19,97 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { HelpCircle, ArrowRight, PackageCheck, ShieldCheck } from "lucide-react";
+import {
+  HelpCircle,
+  ArrowRight,
+  ArrowDown,
+  PackageCheck,
+  ShieldCheck,
+  FileText,
+  CheckCircle2,
+  Search,
+  FileSignature,
+  Banknote,
+  type LucideIcon,
+} from "lucide-react";
 
-const FLOW = ["Requisition", "Sourcing", "Purchase Order", "Goods Receipt", "Payment"];
-
-const STEPS: Array<{
-  n: number;
+interface Step {
   title: string;
   who: string;
-  whoTone: string;
+  icon: LucideIcon;
+  /** node + accent colours */
+  ring: string;
   what: string;
   action: string;
   result: string;
-}> = [
+  /** optional nested sub-steps (the GRN internal flow) */
+  sub?: string[];
+}
+
+const STEPS: Step[] = [
   {
-    n: 1,
     title: "Raise a Requisition (PR)",
     who: "Any employee",
-    whoTone: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-    what: "You need something — a laptop, raw material, a service. Raise a requisition describing the item, quantity and priority. It auto-records your name and department.",
+    icon: FileText,
+    ring: "bg-slate-500",
+    what: "Describe what you need — item, quantity, priority. Your name & department are recorded automatically.",
     action: 'Click "New requisition".',
-    result: "Status → PR Raised",
+    result: "PR Raised",
   },
   {
-    n: 2,
     title: "Approve the Requisition",
     who: "Approver",
-    whoTone: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    what: "The department/approver reviews the request and approves or rejects it. Only an Approver can set this.",
-    action: "Open the PR → Edit → set Production Approval = Approved.",
-    result: "Status → Approved",
+    icon: CheckCircle2,
+    ring: "bg-amber-500",
+    what: "The approver reviews and approves (or rejects) the request. Only an Approver can set this.",
+    action: "Open PR → Edit → Production Approval = Approved.",
+    result: "Approved",
   },
   {
-    n: 3,
     title: "Source / get quotes (RFQ)",
     who: "Buyer",
-    whoTone: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    what: "For new items the buyer requests quotations from suppliers and selects the best one. Repeat items can skip straight to a PO.",
-    action: 'On the PR click "Raise RFQ" (or "Convert to PO" for repeat buys).',
-    result: "Status → Sourcing → Selected",
+    icon: Search,
+    ring: "bg-blue-500",
+    what: "Buyer requests quotations and selects the best supplier. Repeat buys can skip straight to a PO.",
+    action: 'On the PR click "Raise RFQ" (or "Convert to PO").',
+    result: "Sourcing → Selected",
   },
   {
-    n: 4,
     title: "Create & approve the Purchase Order",
     who: "Buyer / Purchase Manager",
-    whoTone: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    what: "The buyer raises the PO to the chosen supplier; the Purchase Manager approves the spend. The PO is the formal order.",
-    action: 'Click "Convert to PO", then the manager sets Approval = Approved.',
-    result: "Status → Approved → Sent",
+    icon: FileSignature,
+    ring: "bg-indigo-500",
+    what: "Buyer raises the PO to the supplier; the Purchase Manager approves the spend. The PO is the formal order.",
+    action: 'Click "Convert to PO", then manager sets Approval = Approved.',
+    result: "Approved → Sent",
   },
   {
-    n: 5,
     title: "Receive the goods (GRN)",
     who: "Store Keeper",
-    whoTone: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    what: "When goods arrive, the store records a Goods Receipt: gate entry, inspection, and the received quantity per invoice. Then posts it to inventory, which raises stock.",
+    icon: PackageCheck,
+    ring: "bg-emerald-500",
+    what: "When goods arrive, the store records the receipt and posts it to inventory, which raises stock.",
     action: 'On the PO click "Receive (GRN)", complete it, then "Post to inventory".',
-    result: "Status → Received → Stock Updated",
+    result: "Received → Stock Updated",
+    sub: ["Gate Entry", "Inspection", "Received", "Post to inventory (stock ↑)"],
   },
   {
-    n: 6,
     title: "Pay the supplier",
     who: "Accounts",
-    whoTone: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/40 dark:text-fuchsia-300",
-    what: "Accounts raises a payment request against the PO/GRN invoice. A payment can also be raised directly from the PO for an advance.",
-    action: 'Click "Raise Payment" on the GRN (or on the PO for an advance).',
-    result: "Status → Requested → Paid",
+    icon: Banknote,
+    ring: "bg-fuchsia-500",
+    what: "Accounts raises a payment against the PO/GRN invoice. A payment can also be raised directly from the PO for an advance.",
+    action: 'Click "Raise Payment" on the GRN (or on the PO).',
+    result: "Requested → Paid",
   },
 ];
+
+const FLOW = ["Requisition", "Sourcing", "Purchase Order", "Goods Receipt", "Payment"];
 
 const ROLES: Array<{ name: string; can: string }> = [
   { name: "Requester (any employee)", can: "Raise and track their own requisitions." },
   { name: "Approver", can: "Approve / reject purchase requisitions." },
-  { name: "Buyer (Process Purchase)", can: "Raise RFQs, create & convert POs, manage suppliers, edit/delete documents." },
+  { name: "Buyer (Process Purchase)", can: "Raise RFQs, create & convert POs, manage suppliers, edit/delete docs." },
   { name: "Purchase Manager", can: "Approve purchase orders (authorise the spend)." },
   { name: "Store Keeper", can: "Receive GRNs, post goods to inventory, manage stock movements." },
   { name: "Accounts", can: "Raise and process payment requests." },
@@ -102,24 +120,29 @@ export function WorkflowGuide() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground hover:text-foreground">
-          <HelpCircle className="h-4 w-4" />
+        {/* Floating help button, pinned to the bottom-right corner. */}
+        <Button
+          size="lg"
+          className="fixed bottom-6 right-6 z-50 h-12 rounded-full shadow-lg gap-2 px-5"
+          aria-label="How it works"
+        >
+          <HelpCircle className="h-5 w-5" />
           <span className="hidden sm:inline">How it works</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <PackageCheck className="h-5 w-5 text-primary" /> Purchase Workflow — how it works
+            <PackageCheck className="h-5 w-5 text-primary" /> Purchase Workflow — step by step
           </DialogTitle>
           <DialogDescription>
-            From raising a request to paying the supplier — and how received goods become stock. Everyone can read this;
-            what you can <em>do</em> depends on your role (see the bottom).
+            Follow the process from raising a request to paying the supplier. What you can <em>do</em> depends on your
+            role (legend at the bottom).
           </DialogDescription>
         </DialogHeader>
 
-        {/* Flow strip */}
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-3">
+        {/* Quick horizontal overview */}
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-2.5">
           {FLOW.map((f, i) => (
             <span key={f} className="flex items-center gap-1.5">
               <span className="text-xs font-medium rounded-md bg-background border px-2 py-1">{f}</span>
@@ -128,48 +151,52 @@ export function WorkflowGuide() {
           ))}
         </div>
 
-        {/* Steps */}
-        <ol className="space-y-4">
-          {STEPS.map((s) => (
-            <li key={s.n} className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-semibold">
-                {s.n}
-              </span>
-              <div className="min-w-0 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{s.title}</span>
-                  <Badge variant="outline" className={s.whoTone + " border-transparent"}>{s.who}</Badge>
+        {/* Vertical timeline / flowchart */}
+        <ol className="relative mt-2">
+          {STEPS.map((s, i) => {
+            const Icon = s.icon;
+            const last = i === STEPS.length - 1;
+            return (
+              <li key={s.title} className="relative flex gap-4 pb-7 last:pb-0">
+                {/* connector line to the next node */}
+                {!last && <span className="absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 bg-border" />}
+                {/* node */}
+                <span
+                  className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white shadow ${s.ring}`}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                {/* content */}
+                <div className="min-w-0 flex-1 -mt-0.5 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-muted-foreground">Step {i + 1}</span>
+                    <span className="font-medium">{s.title}</span>
+                    <Badge variant="secondary" className="text-[10px]">{s.who}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{s.what}</p>
+                  <p className="text-sm">
+                    <span className="text-muted-foreground">Action: </span>
+                    {s.action}
+                  </p>
+                  {s.sub && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {s.sub.map((g, j, arr) => (
+                        <span key={g} className="flex items-center gap-1.5">
+                          <span className="rounded bg-muted px-2 py-0.5 text-[11px]">{g}</span>
+                          {j < arr.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <ArrowDown className="h-3 w-3 text-muted-foreground" />
+                    <Badge variant="outline" className="text-[10px] font-normal">{s.result}</Badge>
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground">{s.what}</p>
-                <p className="text-sm">
-                  <span className="text-muted-foreground">Action: </span>{s.action}{" "}
-                  <span className="text-muted-foreground">· {s.result}</span>
-                </p>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
-
-        <Separator />
-
-        {/* GRN detail */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5">
-            <PackageCheck className="h-4 w-4" /> Inside a Goods Receipt (GRN)
-          </h3>
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            {["Gate Entry", "Inspection", "Received", "Post to Inventory (stock ↑)", "Ready for Payment"].map((g, i, arr) => (
-              <span key={g} className="flex items-center gap-1.5">
-                <span className="rounded bg-muted px-2 py-1">{g}</span>
-                {i < arr.length - 1 && <ArrowRight className="h-3 w-3" />}
-              </span>
-            ))}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Posting is idempotent (it can't double-count) and only the Store Keeper can do it. Matching items increase in
-            stock; brand-new items are auto-created in Store Inventory.
-          </p>
-        </div>
 
         <Separator />
 

@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouteAccess } from "@/hooks/use-route-access";
-import { WorkflowGuide } from "./workflow-guide";
 
 const TABS = [
   { href: "/purchase-management/suppliers", label: "Vendors", icon: Truck },
@@ -64,10 +63,6 @@ export function ModuleNav() {
             </Link>
           );
         })}
-        {/* Always-visible workflow help. */}
-        <div className="ml-auto shrink-0 pl-2">
-          <WorkflowGuide />
-        </div>
       </div>
     </div>
   );
