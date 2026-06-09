@@ -12,6 +12,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data });
   } catch (e: any) {
     console.error("[inventory-system/reset]", e);
-    return fail(e?.message || "Failed to reset inventory");
+    return fail(e?.message || "Failed to reset inventory", e?.forbidden ? 403 : 500);
   }
 }

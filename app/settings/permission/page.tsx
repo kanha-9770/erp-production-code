@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { ShieldCheck, Route, Globe } from "lucide-react"
+import { ShieldCheck, Route, Globe, ListChecks } from "lucide-react"
 import { useRouteAccess } from "@/hooks/use-route-access"
 import PageBackLink from "@/components/shared/page-back-link"
 
@@ -15,6 +15,7 @@ export default function PermissionPage() {
   const canAccessStaticPagePerms = isPermitted(
     "/settings/permission/static-page-permission",
   )
+  const canAccessApprovals = isPermitted("/settings/permission/approvals")
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
@@ -91,7 +92,28 @@ export default function PermissionPage() {
               </Card>
             )}
 
-            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPagePerms && (
+            {canAccessApprovals && (
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="w-12 h-12 rounded-lg bg-amber-100 flex items-center justify-center mb-4">
+                    <ListChecks className="w-6 h-6 text-amber-600" />
+                  </div>
+                  <CardTitle>Approvals &amp; Permissions</CardTitle>
+                  <CardDescription>
+                    Grant each module&apos;s functionalities (approve requisition/PO, post stock, raise payment&hellip;) to roles and users.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link href="/settings/permission/approvals">
+                    <Button variant="outline" className="w-full bg-transparent">
+                      Manage Approvals
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
+            {!canAccessRoles && !canAccessRoutes && !canAccessStaticPagePerms && !canAccessApprovals && (
               <div className="col-span-full text-center py-12">
                 <p className="text-muted-foreground">
                   You don't have permission to access any permission management features.

@@ -155,10 +155,21 @@ function grnPostSummary(grn: PurchaseRecord | null): {
 
 export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey }) {
   const schema = getSchema(submodule);
-  const { ready, records, createRecord, updateRecord, deleteRecord, postStock, getMasterOptions } =
+  const { ready, records, permissions, createRecord, updateRecord, deleteRecord, postStock, getMasterOptions } =
     usePurchase();
   const { toast } = useToast();
   const Icon = ICON[submodule];
+
+  // Who may create in this submodule: anyone may raise a Requisition; the rest
+  // need the matching capability (buyer/store/AP). Mirrors submoduleCreatePermission.
+  const canCreate =
+    submodule === "pr"
+      ? true
+      : submodule === "payment"
+        ? permissions.raisePayment
+        : submodule === "grn"
+          ? permissions.postStock
+          : permissions.process; // sourcing, po, supplier
 
   const rows = records[submodule];
   const statusField = useMemo(
@@ -341,10 +352,12 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
                 />
               </div>
               <ManageColumnsButton tableId={`purchase-${submodule}`} columns={columns} variant="dialog" />
-              <Button size="sm" className="h-8" onClick={openCreate}>
-                <Plus className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">New {schema.recordNoun}</span>
-              </Button>
+              {canCreate && (
+                <Button size="sm" className="h-8" onClick={openCreate}>
+                  <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">New {schema.recordNoun}</span>
+                </Button>
+              )}
             </WorkspaceHeader>
 
             <div className="px-4 sm:px-6 pb-1 flex flex-wrap items-center gap-2">
@@ -413,7 +426,7 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
                     </p>
                   )}
                 </div>
-                {ready && rows.length === 0 && (
+                {ready && rows.length === 0 && canCreate && (
                   <Button size="sm" onClick={openCreate}>
                     <Plus className="h-3.5 w-3.5 mr-1" /> New {schema.recordNoun}
                   </Button>
@@ -431,6 +444,7 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
               onDelete={() => setDeletingId(selected.id)}
               onPromote={(def) => setPromote({ def, source: selected })}
               onPostStock={submodule === "grn" ? () => setPostingGrn(selected) : undefined}
+              permissions={permissions}
             />
           ) : null
         }

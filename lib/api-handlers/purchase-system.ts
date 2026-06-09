@@ -14,6 +14,15 @@ import { prisma } from "@/lib/prisma";
 import { SEED_MASTERS, SUBMODULE_ORDER, getSchema } from "@/lib/purchase-system/schema";
 import { seedRecords } from "@/lib/purchase-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
+import {
+  POST_GRN_STOCK,
+  getPurchasePermissions,
+  guardedPermissionForCreate,
+  guardedPermissionForPatch,
+  requirePurchasePermission,
+  submoduleCreatePermission,
+  deletePermission,
+} from "@/lib/permissions/purchase-permissions";
 import type {
   PurchaseRecord as PurchaseRecordType,
   PurchaseSnapshot,
@@ -168,15 +177,26 @@ export const PurchaseHandlers = {
     }
     for (const k of SUBMODULE_ORDER) records[k] ??= [];
 
-    const currentUser = await resolveUserIdentity(ctx.userId);
+    const [currentUser, permissions] = await Promise.all([
+      resolveUserIdentity(ctx.userId),
+      getPurchasePermissions(ctx.userId),
+    ]);
 
-    return { version: SNAPSHOT_VERSION, masters, records, currentUser };
+    return { version: SNAPSHOT_VERSION, masters, records, currentUser, permissions };
   },
 
   async createRecord(ctx: PurCtx, submodule: unknown, data: Record<string, unknown>): Promise<PurchaseRecordType> {
     if (!isValidSubmodule(submodule)) throw new Error(`Invalid submodule: ${String(submodule)}`);
     const schema = getSchema(submodule);
     const clean = stripReserved(data || {}); // `docNo` already stripped (RESERVED)
+
+    // Some submodules are privileged to create at all (e.g. raising a payment).
+    const subNeeds = submoduleCreatePermission(submodule);
+    if (subNeeds) await requirePurchasePermission(ctx.userId, subNeeds);
+    // Block creating a record already pre-approved / pre-posted to skip the gate;
+    // benign defaults (PENDING/NO) pass through without a permission.
+    const createNeeds = guardedPermissionForCreate(submodule, clean);
+    if (createNeeds) await requirePurchasePermission(ctx.userId, createNeeds);
 
     // User-derived fields ("Requested By", Department) are authoritative: resolve
     // them from the authenticated user and overwrite any client-sent value, so
@@ -219,7 +239,16 @@ export const PurchaseHandlers = {
       where: { id, organizationId: ctx.organizationId },
     });
     if (!existing) throw new Error("Record not found");
-    const merged = { ...(existing.data as Record<string, unknown>), ...stripReserved(patch || {}) };
+    const existingData = (existing.data as Record<string, unknown>) ?? {};
+    const cleanPatch = stripReserved(patch || {});
+
+    // Approval / stock-posting transitions are privileged: only callers holding
+    // the matching named permission (or admins/owner) may flip them. An ordinary
+    // edit that doesn't touch a guarded field needs no special permission.
+    const needed = guardedPermissionForPatch(submodule, existingData, cleanPatch);
+    if (needed) await requirePurchasePermission(ctx.userId, needed);
+
+    const merged = { ...existingData, ...cleanPatch };
     const row = await prisma.purchaseRecord.update({
       where: { id },
       data: { data: merged as any, status: (merged.status as string) ?? null },
@@ -228,6 +257,8 @@ export const PurchaseHandlers = {
   },
 
   async deleteRecord(ctx: PurCtx, id: string): Promise<{ id: string }> {
+    // Deleting any purchase document is a buyer/admin action, not a requester's.
+    await requirePurchasePermission(ctx.userId, deletePermission());
     await prisma.purchaseRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
     return { id };
   },
@@ -249,6 +280,8 @@ export const PurchaseHandlers = {
    * a no-op — and atomic. Marks the GRN STOCK_UPDATED on success.
    */
   async postStock(ctx: PurCtx, grnId: string): Promise<PostStockResult> {
+    // Receiving goods into inventory is a store-keeper privilege.
+    await requirePurchasePermission(ctx.userId, POST_GRN_STOCK);
     const grn = await prisma.purchaseRecord.findFirst({
       where: { id: grnId, organizationId: ctx.organizationId, submodule: "grn" },
     });

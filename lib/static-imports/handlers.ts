@@ -32,6 +32,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getStaticFormsForModule } from '@/lib/static-page-fields';
 import { SUBMODULE_SCHEMAS as INV_SCHEMAS } from '@/lib/inventory-system/schema';
 import { SUBMODULE_SCHEMAS as PUR_SCHEMAS } from '@/lib/purchase-system/schema';
+import { getPurchasePermissions, sanitizePurchaseImport } from '@/lib/permissions/purchase-permissions';
+import type { PurchasePermissions } from '@/lib/purchase-system/types';
 
 export type RowOutcome =
   // `action` distinguishes a brand-new row from an idempotent update of an
@@ -1061,6 +1063,20 @@ function buildDataBag(fields: any[], row: Record<string, unknown>): Record<strin
   return data;
 }
 
+// Resolve the acting user's purchase permissions once per import run (memoised
+// on the ctx object) so bulk imports don't re-query per row. Used to strip
+// guarded fields (productionApproval/approvalStatus/stockUpdated) a non-
+// privileged importer isn't allowed to set — see sanitizePurchaseImport.
+const _purchasePermsByCtx = new WeakMap<ImportContext, Promise<PurchasePermissions>>();
+function ctxPurchasePerms(ctx: ImportContext): Promise<PurchasePermissions> {
+  let p = _purchasePermsByCtx.get(ctx);
+  if (!p) {
+    p = getPurchasePermissions(ctx.actingUserId);
+    _purchasePermsByCtx.set(ctx, p);
+  }
+  return p;
+}
+
 function makeInventoryHandler(submodule: string, fields: any[], dedupKey: string) {
   return async (row: Record<string, unknown>, ctx: ImportContext): Promise<RowOutcome> => {
     const data = buildDataBag(fields, row);
@@ -1090,6 +1106,9 @@ function makeInventoryHandler(submodule: string, fields: any[], dedupKey: string
 function makePurchaseHandler(submodule: string, fields: any[], dedupKey: string) {
   return async (row: Record<string, unknown>, ctx: ImportContext): Promise<RowOutcome> => {
     const data = buildDataBag(fields, row);
+    // Drop approval/stock fields the importer isn't allowed to set (same gate as
+    // the API: only Approver/Purchase Manager/Store Keeper or admin may flip them).
+    sanitizePurchaseImport(submodule, data, await ctxPurchasePerms(ctx));
     const code = asString(data[dedupKey]);
     if (!code) return { status: 'failed', error: `Missing ${dedupKey}` };
     try {
@@ -1201,10 +1220,16 @@ function makeRecordBatchHandler(
     let processed = 0;
     const tick = (delta: number) => { processed += delta; onProgress?.(processed); };
 
+    // Purchase imports: resolve the importer's approval permissions once, then
+    // strip guarded fields they can't set from every row (mirrors the API guard).
+    const purchasePerms =
+      table === 'purchase_records' ? await ctxPurchasePerms(ctx) : null;
+
     type Prep = { i: number; data: Record<string, unknown>; code: string };
     const prepared: Prep[] = [];
     for (let i = 0; i < n; i++) {
       const data = buildDataBag(fields, rows[i]);
+      if (purchasePerms) sanitizePurchaseImport(submodule, data, purchasePerms);
       const code = asString(data[dedupKey]);
       if (!code) { outcomes[i] = { status: 'failed', error: `Missing ${dedupKey}` }; continue; }
       prepared.push({ i, data, code });

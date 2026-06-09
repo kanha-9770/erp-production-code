@@ -15,7 +15,7 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
     return NextResponse.json({ success: true, data: result });
   } catch (e: any) {
     console.error("[inventory-system/movements PUT]", e);
-    const status = /not found/i.test(e?.message || "") ? 404 : /invalid/i.test(e?.message || "") ? 400 : 500;
+    const status = e?.forbidden ? 403 : /not found/i.test(e?.message || "") ? 404 : /invalid/i.test(e?.message || "") ? 400 : 500;
     return fail(e?.message || "Failed to update movement", status);
   }
 }
@@ -30,6 +30,6 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
     return NextResponse.json({ success: true, data: result });
   } catch (e: any) {
     console.error("[inventory-system/movements DELETE]", e);
-    return fail(e?.message || "Failed to delete movement");
+    return fail(e?.message || "Failed to delete movement", e?.forbidden ? 403 : 500);
   }
 }

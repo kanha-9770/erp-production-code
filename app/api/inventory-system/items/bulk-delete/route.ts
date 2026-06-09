@@ -15,6 +15,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: res });
   } catch (e: any) {
     console.error("[inventory-system/items bulk-delete]", e);
-    return fail(e?.message || "Failed to delete items");
+    return fail(e?.message || "Failed to delete items", e?.forbidden ? 403 : 500);
   }
 }

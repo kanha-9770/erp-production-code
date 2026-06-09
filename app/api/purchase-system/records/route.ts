@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: rec }, { status: 201 });
   } catch (e: any) {
     console.error("[purchase-system/records POST]", e);
-    return fail(e?.message || "Failed to create record", /not found|invalid/i.test(e?.message || "") ? 400 : 500);
+    const status = e?.forbidden ? 403 : /not found|invalid/i.test(e?.message || "") ? 400 : 500;
+    return fail(e?.message || "Failed to create record", status);
   }
 }

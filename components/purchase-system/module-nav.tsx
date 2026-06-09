@@ -16,10 +16,13 @@ import {
   Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRouteAccess } from "@/hooks/use-route-access";
+import { WorkflowGuide } from "./workflow-guide";
 
 const TABS = [
   { href: "/purchase-management/suppliers", label: "Vendors", icon: Truck },
-  { href: "/purchase-management/requisition", label: "Requisition", icon: FileText },
+  // Requisition is open to every employee — always shown.
+  { href: "/purchase-management/requisition", label: "Requisition", icon: FileText, open: true },
   { href: "/purchase-management/sourcing", label: "Sourcing", icon: Search },
   { href: "/purchase-management/purchase-order", label: "Purchase Order", icon: FileSignature },
   { href: "/purchase-management/grn", label: "GRN", icon: PackageCheck },
@@ -30,6 +33,11 @@ const TABS = [
 
 export function ModuleNav() {
   const pathname = usePathname();
+  const { canAccess } = useRouteAccess();
+  // Only show tabs the user may actually open. canAccess is open-by-default
+  // (no rule = allowed) and denies restricted pages the user isn't granted —
+  // the same check the main sidebar uses. Requisition is always open.
+  const tabs = TABS.filter((t) => t.open || canAccess(t.href));
   return (
     <div className="border-b bg-background shrink-0">
       <div className="flex items-center gap-1 px-2 sm:px-4 h-12 overflow-x-auto">
@@ -39,7 +47,7 @@ export function ModuleNav() {
           </span>
           <span className="text-sm font-semibold whitespace-nowrap hidden sm:inline">Purchase</span>
         </div>
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const active = pathname === t.href || pathname.startsWith(t.href + "/");
           const Icon = t.icon;
           return (
@@ -56,6 +64,10 @@ export function ModuleNav() {
             </Link>
           );
         })}
+        {/* Always-visible workflow help. */}
+        <div className="ml-auto shrink-0 pl-2">
+          <WorkflowGuide />
+        </div>
       </div>
     </div>
   );

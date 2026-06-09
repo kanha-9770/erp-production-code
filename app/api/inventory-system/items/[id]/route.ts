@@ -44,6 +44,6 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
     return NextResponse.json({ success: true, deleted: true });
   } catch (e: any) {
     console.error("[inventory-system/items DELETE]", e);
-    return fail(e?.message || "Failed to delete item");
+    return fail(e?.message || "Failed to delete item", e?.forbidden ? 403 : 500);
   }
 }

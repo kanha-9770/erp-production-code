@@ -194,6 +194,43 @@ export const permissionsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ["FieldUserPermissions"],
     }),
+
+    // ── Action / functionality permissions (Approvals & Permissions page) ──
+    // Catalog of per-module privileged actions + current role/user grants.
+    getActionPermissions: builder.query<
+      {
+        success: boolean
+        data: {
+          catalog: Array<{
+            module: string
+            label: string
+            description: string
+            functionalities: Array<{ name: string; label: string; description: string; enforced: boolean }>
+          }>
+          roleGrants: Record<string, string[]>
+          userGrants: Record<string, string[]>
+        }
+      },
+      void
+    >({
+      query: () => "/action-permissions",
+      providesTags: ["Permissions"],
+      keepUnusedDataFor: 60,
+    }),
+
+    // Batch grant/revoke named action permissions to roles and users.
+    updateActionPermissions: builder.mutation<
+      { success: boolean; updatedCount: number },
+      { changes: Array<{ kind: "role" | "user"; id: string; name: string; granted: boolean }> }
+    >({
+      query: (body) => ({
+        url: "/action-permissions",
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      invalidatesTags: ["Permissions"],
+    }),
   }),
 })
 
@@ -216,4 +253,6 @@ export const {
   useUpdateSectionUserPermissionsMutation,
   useGetFieldUserPermissionsQuery,
   useUpdateFieldUserPermissionsMutation,
+  useGetActionPermissionsQuery,
+  useUpdateActionPermissionsMutation,
 } = permissionsApi

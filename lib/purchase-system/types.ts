@@ -157,12 +157,36 @@ export interface CurrentUserIdentity {
   department: string;
 }
 
+/**
+ * What the logged-in user is allowed to do in the purchase module. Drives UI
+ * gating only — hide/lock privileged actions so users don't hit a 403. The
+ * server re-checks every write, so these flags are a convenience, not the
+ * security boundary. All false until the snapshot loads.
+ */
+export interface PurchasePermissions {
+  /** May set a PR's Production Approval. */
+  approveRequisition: boolean;
+  /** May set a PO's Approval status. */
+  approvePo: boolean;
+  /** May receive goods / post a GRN into store inventory. */
+  postStock: boolean;
+  /** May raise a payment request. */
+  raisePayment: boolean;
+  /**
+   * Buyer/processor capability: create & convert sourcing/POs, manage suppliers,
+   * edit and delete purchase documents (the promote chain + edit/delete buttons).
+   */
+  process: boolean;
+}
+
 export interface PurchaseSnapshot {
   version: number;
   masters: MasterType[];
   records: Record<PurchaseSubmoduleKey, PurchaseRecord[]>;
   /** The requesting user — drives read-only prefill of "Requested By" etc. */
   currentUser: CurrentUserIdentity;
+  /** The requesting user's privileged-action flags (UI gating). */
+  permissions: PurchasePermissions;
 }
 
 /** Result of posting a GRN's received quantities into Store Inventory. */

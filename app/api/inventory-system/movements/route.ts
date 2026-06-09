@@ -27,6 +27,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: result }, { status: 201 });
   } catch (e: any) {
     console.error("[inventory-system/movements POST]", e);
-    return fail(e?.message || "Failed to post movement", /not found|invalid/i.test(e?.message || "") ? 400 : 500);
+    return fail(e?.message || "Failed to post movement", e?.forbidden ? 403 : /not found|invalid/i.test(e?.message || "") ? 400 : 500);
   }
 }

@@ -24,6 +24,7 @@ import type {
   PurchaseRecord,
   PostStockResult,
   CurrentUserIdentity,
+  PurchasePermissions,
   MasterOption,
   MasterType,
   PurchaseSubmoduleKey,
@@ -35,6 +36,8 @@ interface PurchaseContextValue {
   masters: MasterType[];
   /** Logged-in user identity — drives read-only prefill of "Requested By" etc. */
   currentUser: CurrentUserIdentity;
+  /** Privileged-action flags for the logged-in user — UI gating only. */
+  permissions: PurchasePermissions;
 
   createRecord: (submodule: PurchaseSubmoduleKey, data: Record<string, unknown>) => Promise<void>;
   updateRecord: (
@@ -160,6 +163,13 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
   });
   const [masters, setMasters] = useState<MasterType[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUserIdentity>({ name: "", department: "" });
+  const [permissions, setPermissions] = useState<PurchasePermissions>({
+    approveRequisition: false,
+    approvePo: false,
+    postStock: false,
+    raisePayment: false,
+    process: false,
+  });
 
   const mastersRef = useRef(masters);
   mastersRef.current = masters;
@@ -176,6 +186,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       setRecords(snap.records);
       setMasters(snap.masters);
       if (snap.currentUser) setCurrentUser(snap.currentUser);
+      if (snap.permissions) setPermissions(snap.permissions);
       setReady(true);
     });
     return () => {
@@ -670,6 +681,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     setRecords(snap.records);
     setMasters(snap.masters);
     if (snap.currentUser) setCurrentUser(snap.currentUser);
+    if (snap.permissions) setPermissions(snap.permissions);
     toast({ title: "Purchase data reset", description: "Sample data has been restored." });
   }, [toast]);
 
@@ -679,6 +691,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       records,
       masters,
       currentUser,
+      permissions,
       createRecord,
       updateRecord,
       deleteRecord,
@@ -704,6 +717,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       records,
       masters,
       currentUser,
+      permissions,
       createRecord,
       updateRecord,
       deleteRecord,

@@ -5,12 +5,12 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Pencil, Trash2, Loader2, ArrowRight, PackageCheck, CheckCircle2 } from "lucide-react";
+import { Pencil, Trash2, Loader2, ArrowRight, PackageCheck, CheckCircle2, Lock } from "lucide-react";
 import { formatDate, formatMoney, formatNumber, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
 import { promotionsFor, type PromotionDef } from "@/lib/purchase-system/promote";
 import { MediaGallery } from "./media-field";
 import { LineItemsView } from "./line-items-field";
-import type { FieldDef, PurchaseRecord, SubmoduleSchema } from "@/lib/purchase-system/types";
+import type { FieldDef, PurchaseRecord, PurchasePermissions, SubmoduleSchema } from "@/lib/purchase-system/types";
 
 function displayValue(field: FieldDef, record: PurchaseRecord): React.ReactNode {
   const v = record[field.key];
@@ -33,6 +33,7 @@ export function RecordPreview({
   onDelete,
   onPromote,
   onPostStock,
+  permissions,
 }: {
   schema: SubmoduleSchema;
   record: PurchaseRecord;
@@ -42,8 +43,25 @@ export function RecordPreview({
   onPromote?: (def: PromotionDef) => void;
   /** GRN only: post received quantities into Store Inventory. */
   onPostStock?: () => void;
+  /** The logged-in user's purchase capabilities — drives which action buttons
+   *  show. A pure requester (no caps) sees only the read-only document. */
+  permissions: PurchasePermissions;
 }) {
-  const promotions = onPromote ? promotionsFor(schema.key) : [];
+  // Capability → button visibility. Edit shows for anyone who can act on the doc
+  // (buyer/approver/store/AP); delete is buyer/admin only; each promote needs the
+  // capability for the stage it creates. Mirrors the server-side gates.
+  const canEdit =
+    permissions.process ||
+    permissions.approveRequisition ||
+    permissions.approvePo ||
+    permissions.postStock ||
+    permissions.raisePayment;
+  const canDelete = permissions.process;
+  const canPostStock = permissions.postStock;
+  const canPromoteTo = (to: string) =>
+    to === "grn" ? permissions.postStock : to === "payment" ? permissions.raisePayment : permissions.process;
+
+  const promotions = (onPromote ? promotionsFor(schema.key) : []).filter((p) => canPromoteTo(p.to));
   const stockPosted = String(record.stockUpdated ?? "NO") === "YES";
   const sections: Array<{ name: string; fields: FieldDef[] }> = [];
   for (const f of schema.fields) {
@@ -90,19 +108,25 @@ export function RecordPreview({
         {status && <Badge variant={status.variant}>{status.label}</Badge>}
       </div>
 
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={onEdit}>
-          <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive hover:text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
-        </Button>
-      </div>
+      {(canEdit || canDelete) && (
+        <div className="flex gap-2">
+          {canEdit && (
+            <Button size="sm" variant="outline" onClick={onEdit}>
+              <Pencil className="h-3.5 w-3.5 mr-1.5" /> Edit
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
+            </Button>
+          )}
+        </div>
+      )}
 
       {(promotions.length > 0 || onPostStock) && record.docNo ? (
         <div className="space-y-2">
@@ -120,10 +144,14 @@ export function RecordPreview({
                 <span className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 className="h-4 w-4" /> Stock posted to inventory
                 </span>
-              ) : (
+              ) : canPostStock ? (
                 <Button size="sm" variant="secondary" onClick={onPostStock}>
                   <PackageCheck className="h-3.5 w-3.5 mr-1.5" /> Post to inventory
                 </Button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Lock className="h-3.5 w-3.5" /> Store-keeper permission required to post stock
+                </span>
               )
             ) : null}
           </div>

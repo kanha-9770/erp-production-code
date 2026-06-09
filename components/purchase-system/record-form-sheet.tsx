@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, History, Sparkles, CheckCircle2, Boxes } from "lucide-react";
+import { Plus, History, Sparkles, CheckCircle2, Boxes, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePurchase, type ItemPurchaseHistory } from "@/lib/purchase-system/store";
 import { formatMoney, formatDate, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
@@ -101,10 +101,21 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     addMasterOption,
     getItemHistory,
     currentUser,
+    permissions,
     getPaymentPoOptions,
     getGrnInvoiceOptions,
     getPoTrace,
   } = usePurchase();
+
+  // Approval fields are privileged: lock them read-only for users who lack the
+  // permission so they can't set a value the server would reject (403). Mirrors
+  // guardedPermissionForPatch in lib/permissions/purchase-permissions.ts.
+  const lockedByPermission = (f: FieldDef): boolean => {
+    if (schema.key === "pr" && f.key === "productionApproval") return !permissions.approveRequisition;
+    if (schema.key === "po" && f.key === "approvalStatus") return !permissions.approvePo;
+    if (schema.key === "grn" && f.key === "stockUpdated") return !permissions.postStock;
+    return false;
+  };
   const [form, setForm] = useState<Record<string, unknown>>(() =>
     buildInitial(schema, record, initial, currentUser),
   );
@@ -384,6 +395,7 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
                       getMasterOptions={getMasterOptions}
                       onAddMasterOption={addMasterOption}
                       dynamicOptions={dynamicOptionsFor(f)}
+                      locked={lockedByPermission(f)}
                     />
                   ))}
                 </div>
@@ -479,6 +491,7 @@ function FieldControl({
   getMasterOptions,
   onAddMasterOption,
   dynamicOptions,
+  locked = false,
 }: {
   field: FieldDef;
   value: unknown;
@@ -487,9 +500,17 @@ function FieldControl({
   getMasterOptions: (key: string) => Array<{ id: string; value: string }>;
   onAddMasterOption: (key: string, value: string, code?: string) => Promise<void>;
   dynamicOptions?: Array<{ value: string; label: string }>;
+  /** Render read-only because the user lacks permission to change this field. */
+  locked?: boolean;
 }) {
   const fullWidth =
     field.type === "textarea" || field.type === "media" || field.type === "lineItems";
+  // Human-readable current value for the locked, read-only display.
+  const lockedLabel =
+    field.type === "status"
+      ? resolveStatus(field, value).label
+      : field.options?.find((o) => o.value === value)?.label ??
+        (value ? String(value) : "—");
   return (
     <div className={cn("space-y-1.5", fullWidth && "sm:col-span-2")}>
       <Label className="text-sm">
@@ -497,7 +518,15 @@ function FieldControl({
         {field.required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
 
-      {field.type === "checkbox" ? (
+      {locked ? (
+        // Privileged field the user can't change — show the value read-only.
+        <div className="flex items-center gap-2 h-9">
+          <Badge variant="outline">{lockedLabel}</Badge>
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Lock className="h-3 w-3" /> permission required
+          </span>
+        </div>
+      ) : field.type === "checkbox" ? (
         <div className="flex items-center h-9">
           <Checkbox
             checked={!!value}

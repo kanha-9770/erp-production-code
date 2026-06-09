@@ -17,6 +17,12 @@ import { prisma } from "@/lib/prisma";
 import { SEED_MASTERS, SUBMODULE_ORDER, getSchema } from "@/lib/inventory-system/schema";
 import { seedItems } from "@/lib/inventory-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
+import {
+  POST_INVENTORY_MOVEMENT,
+  DELETE_INVENTORY_ITEM,
+  RESET_INVENTORY_DATA,
+  requireInventoryPermission,
+} from "@/lib/permissions/inventory-permissions";
 import type {
   InventoryItem,
   InventoryMovement,
@@ -479,6 +485,7 @@ export const InventoryHandlers = {
   },
 
   async deleteItem(ctx: InvCtx, id: string): Promise<{ id: string }> {
+    await requireInventoryPermission(ctx.userId, DELETE_INVENTORY_ITEM);
     await prisma.inventoryRecord.deleteMany({ where: { id, organizationId: ctx.organizationId } });
     return { id };
   },
@@ -487,6 +494,7 @@ export const InventoryHandlers = {
    *  were actually removed. */
   async bulkDelete(ctx: InvCtx, ids: string[]): Promise<{ count: number }> {
     if (!Array.isArray(ids) || ids.length === 0) return { count: 0 };
+    await requireInventoryPermission(ctx.userId, DELETE_INVENTORY_ITEM);
     const res = await prisma.inventoryRecord.deleteMany({
       where: { id: { in: ids }, organizationId: ctx.organizationId },
     });
@@ -506,6 +514,7 @@ export const InventoryHandlers = {
   /** Post a movement (server-generated IN-/OUT- code) and adjust the linked
    *  store item's stock — atomically. */
   async createMovement(ctx: InvCtx, data: Record<string, unknown>): Promise<{ movement: InventoryMovement }> {
+    await requireInventoryPermission(ctx.userId, POST_INVENTORY_MOVEMENT);
     const clean = stripMovement(data || {});
     const direction = clean.direction === "OUT" ? "OUT" : "IN";
     const itemId = String(clean.itemId ?? "");
@@ -533,6 +542,7 @@ export const InventoryHandlers = {
 
   /** Edit a movement: reverse the old stock effect, apply the new one, persist. */
   async updateMovement(ctx: InvCtx, id: string, patch: Record<string, unknown>): Promise<{ movement: InventoryMovement }> {
+    await requireInventoryPermission(ctx.userId, POST_INVENTORY_MOVEMENT);
     const row = await prisma.$transaction(async (tx) => {
       const existing = await tx.inventoryRecord.findFirst({
         where: { id, organizationId: ctx.organizationId, submodule: MOVEMENT_SUBMODULE },
@@ -561,6 +571,7 @@ export const InventoryHandlers = {
 
   /** Delete a movement and reverse its stock effect — atomically. */
   async deleteMovement(ctx: InvCtx, id: string): Promise<{ id: string }> {
+    await requireInventoryPermission(ctx.userId, POST_INVENTORY_MOVEMENT);
     await prisma.$transaction(async (tx) => {
       const existing = await tx.inventoryRecord.findFirst({
         where: { id, organizationId: ctx.organizationId, submodule: MOVEMENT_SUBMODULE },
@@ -588,6 +599,7 @@ export const InventoryHandlers = {
   },
 
   async reset(ctx: InvCtx): Promise<InventorySnapshot> {
+    await requireInventoryPermission(ctx.userId, RESET_INVENTORY_DATA);
     await prisma.$transaction([
       prisma.inventoryRecord.deleteMany({ where: { organizationId: ctx.organizationId } }),
       prisma.inventoryMasterSnapshot.deleteMany({ where: { organizationId: ctx.organizationId } }),

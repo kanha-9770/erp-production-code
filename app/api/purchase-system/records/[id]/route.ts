@@ -14,7 +14,7 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
     return NextResponse.json({ success: true, data: rec });
   } catch (e: any) {
     console.error("[purchase-system/records PUT]", e);
-    const status = /not found/i.test(e?.message || "") ? 404 : /invalid/i.test(e?.message || "") ? 400 : 500;
+    const status = e?.forbidden ? 403 : /not found/i.test(e?.message || "") ? 404 : /invalid/i.test(e?.message || "") ? 400 : 500;
     return fail(e?.message || "Failed to update record", status);
   }
 }
@@ -29,6 +29,6 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
     return NextResponse.json({ success: true, deleted: true });
   } catch (e: any) {
     console.error("[purchase-system/records DELETE]", e);
-    return fail(e?.message || "Failed to delete record");
+    return fail(e?.message || "Failed to delete record", e?.forbidden ? 403 : 500);
   }
 }

@@ -143,6 +143,19 @@ export const PROMOTIONS: Partial<Record<PurchaseSubmoduleKey, PromotionDef[]>> =
         };
       },
     },
+    {
+      // Raise a payment straight from the PO (e.g. an advance) without going
+      // through a GRN first. Goods-receipt payments still flow GRN → Payment.
+      to: "payment",
+      label: "Raise Payment",
+      build: (po) => ({
+        docDate: today(),
+        supplier: str(po.supplier),
+        poRef: str(po.docNo),
+        requestAmount: num(po.amount),
+        status: "REQUESTED",
+      }),
+    },
   ],
   grn: [
     {

@@ -115,6 +115,28 @@ export async function canManageUsers(authUserId: string): Promise<boolean> {
 }
 
 /**
+ * True when the user is an org admin or owner — the same bypass `hasPermission`
+ * grants at step 1. For gating destructive/admin-only actions that aren't tied
+ * to a specific named permission (e.g. wipe-and-reseed).
+ */
+export async function isOrgAdmin(authUserId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: authUserId },
+    select: {
+      ownedOrganization: { select: { id: true } },
+      unitAssignments: { select: { role: { select: { isAdmin: true, name: true } } } },
+    },
+  });
+  if (!user) return false;
+  return (
+    !!user.ownedOrganization ||
+    user.unitAssignments.some(
+      (ua) => ua.role?.isAdmin || (ua.role?.name ?? "").toLowerCase().includes("admin"),
+    )
+  );
+}
+
+/**
  * Canonical permission names used by this file. Adding a new capability is
  * one constant here plus call-site updates — the seed/grant script reads
  * these too, so they stay in lockstep.
