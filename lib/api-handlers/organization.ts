@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DatabaseRoles } from "@/lib/database/DatabaseRoles";
 import { getAuthenticatedUser } from "@/lib/api-helpers";
@@ -86,7 +87,7 @@ export const OrganizationHandlers = {
       const user = await requireAuth(request);
       const role = await prisma.role.findUnique({
         where: { id: roleId },
-        select: { id: true, name: true, organizationId: true, isAdmin: true },
+        select: { id: true, name: true, organizationId: true, isAdmin: true, parentId: true },
       });
 
       if (!role)
@@ -94,6 +95,84 @@ export const OrganizationHandlers = {
 
       if (role.isAdmin)
         return NextResponse.json({ success: false, error: "Admin roles are protected and cannot be deleted" }, { status: 403 });
+
+      // ── "Delete & promote children" mode (?promoteChildren=true) ───────────
+      // Remove ONLY this role and lift its direct children (with their whole
+      // subtrees) up to this role's parent, shifting their level up by one —
+      // the inverse of "insert between". The role itself still goes to the
+      // recycle bin; its descendants are preserved in place, just one level
+      // higher. The default (no flag) path below still deletes the whole
+      // subtree, so existing behaviour is unchanged.
+      const promoteChildren =
+        new URL(request.url).searchParams.get("promoteChildren") === "true";
+      if (promoteChildren) {
+        const orgId = role.organizationId;
+        const movedCount = await prisma.$transaction(async (tx) => {
+          // Snapshot the role's CURRENT direct children before re-parenting.
+          const children = await tx.role.findMany({
+            where: { parentId: roleId, organizationId: orgId },
+            select: { id: true },
+          });
+          const childIds = children.map((c) => c.id);
+
+          if (childIds.length > 0) {
+            // Re-parent the children onto this role's parent (null → top-level).
+            await tx.role.updateMany({
+              where: { id: { in: childIds }, organizationId: orgId },
+              data: { parentId: role.parentId },
+            });
+
+            // Shift level -1 across the promoted subtree (children + all of
+            // their descendants). Recursive CTE keeps a deep tree to one query;
+            // depth capped at 50 as a cycle safety net. GREATEST guards against
+            // ever producing a negative level. Mirrors insertRoleBetween's
+            // cascade, in reverse.
+            await tx.$executeRaw`
+              WITH RECURSIVE subtree AS (
+                SELECT id, 0 AS depth
+                FROM roles
+                WHERE id IN (${Prisma.join(childIds)})
+                  AND organization_id = ${orgId}
+                  AND is_active = true
+                UNION ALL
+                SELECT r.id, s.depth + 1
+                FROM roles r
+                JOIN subtree s ON r.parent_id = s.id
+                WHERE r.organization_id = ${orgId}
+                  AND r.is_active = true
+                  AND s.depth < 50
+              )
+              UPDATE roles
+              SET level = GREATEST(level - 1, 0), updated_at = NOW()
+              WHERE id IN (SELECT id FROM subtree)
+            `;
+          }
+
+          // Drop the role's own dependent rows so the single-row trash delete
+          // below can't hit an FK violation (same rows the subtree path clears).
+          await tx.rolePermission.deleteMany({ where: { roleId } });
+          await tx.unitRoleAssignment.deleteMany({ where: { roleId } });
+          await tx.userUnitAssignment.deleteMany({ where: { roleId } });
+
+          return childIds.length;
+        });
+
+        // Snapshot + delete just this one role (children are already detached).
+        await moveToTrash("Role", roleId, {
+          userId: user.id,
+          userName: user.email,
+          organizationId: user.organizationId,
+        });
+
+        return NextResponse.json({
+          success: true,
+          message:
+            movedCount > 0
+              ? "Role moved to recycle bin; its sub-roles were promoted one level up"
+              : "Role moved to recycle bin",
+          promotedCount: movedCount,
+        });
+      }
 
       // Walk descendants first, then snapshot each role into TrashBin (leaves
       // first so each snapshot's parentId still resolves) and hard-delete.

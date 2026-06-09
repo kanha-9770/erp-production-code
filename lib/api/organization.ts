@@ -91,6 +91,21 @@ export const organizationApi = baseApi.injectEndpoints({
       invalidatesTags: ["OrgRoles"],
     }),
 
+    // Insert a new role beneath a parent, adopting ALL of that parent's current
+    // children. Atomic on the server — the new role is created and every child
+    // (plus its subtree) is re-parented one level down in a single transaction.
+    insertRoleAboveChildren: builder.mutation<
+      { success: boolean; data: Role },
+      { organizationId: string; body: { parentRoleId: string; name: string; description?: string; shareDataWithPeers?: boolean; isAdmin?: boolean } }
+    >({
+      query: ({ organizationId, body }) => ({
+        url: `/organizations/${organizationId}/roles/insert-above-children`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
     // Update role
     updateRole: builder.mutation<{ success: boolean; data: any }, { roleId: string; body: Record<string, any> }>({
       query: ({ roleId, body }) => ({
@@ -107,10 +122,22 @@ export const organizationApi = baseApi.injectEndpoints({
       providesTags: ["OrgUnits"],
     }),
 
-    // Delete role
+    // Delete role (and its entire subtree → recycle bin)
     deleteRole: builder.mutation<{ success: boolean }, string>({
       query: (roleId) => ({
         url: `/roles/${roleId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: ["OrgRoles"],
+    }),
+
+    // Delete a role but PROMOTE its children — the role goes to the recycle
+    // bin and its direct sub-roles (with their subtrees) are lifted up to the
+    // deleted role's parent, one level higher. Same endpoint as deleteRole,
+    // distinguished by the ?promoteChildren=true flag.
+    deleteRolePromoteChildren: builder.mutation<{ success: boolean }, string>({
+      query: (roleId) => ({
+        url: `/roles/${roleId}?promoteChildren=true`,
         method: "DELETE",
       }),
       invalidatesTags: ["OrgRoles"],
@@ -147,10 +174,12 @@ export const {
   useDeleteOrgUnitMutation,
   useCreateOrgRoleMutation,
   useInsertRoleBetweenMutation,
+  useInsertRoleAboveChildrenMutation,
   useUpdateRoleMutation,
   useGetOrganizationUnitsQuery,
   useLazyGetOrganizationUnitsQuery,
   useDeleteRoleMutation,
+  useDeleteRolePromoteChildrenMutation,
   useAssignUserToUnitMutation,
   useRemoveUserAssignmentMutation,
 } = organizationApi

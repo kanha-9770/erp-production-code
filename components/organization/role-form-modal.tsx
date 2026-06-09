@@ -461,9 +461,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Shield, ShieldAlert, Building2, AlertCircle, CheckCircle2, GitBranch, ArrowUpFromLine } from "lucide-react"
+import { Shield, ShieldAlert, Building2, AlertCircle, CheckCircle2, GitBranch, ArrowUpFromLine, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useCreateOrgRoleMutation, useInsertRoleBetweenMutation, useUpdateRoleMutation } from "@/lib/api/organization"
+import { useCreateOrgRoleMutation, useInsertRoleBetweenMutation, useInsertRoleAboveChildrenMutation, useUpdateRoleMutation } from "@/lib/api/organization"
 
 const EMPTY_FORM: RoleFormData = { name: "", description: "", shareDataWithPeers: false, isAdmin: false, parentId: "" }
 
@@ -485,6 +485,7 @@ export function RoleFormModal() {
   
   const [createOrgRole] = useCreateOrgRoleMutation()
   const [insertRoleBetween] = useInsertRoleBetweenMutation()
+  const [insertRoleAboveChildren] = useInsertRoleAboveChildrenMutation()
   const [updateRole] = useUpdateRoleMutation()
 
   const isOpen = state.selectedRole !== null
@@ -500,6 +501,20 @@ export function RoleFormModal() {
   const insertBeforeId: string | undefined = (state.selectedRole as any)?._insertBeforeId
   const insertBeforeName: string | undefined = (state.selectedRole as any)?._insertBeforeName
   const isInsertBetween = creating && !!insertBeforeId
+
+  // "Insert layer" mode — set by the tree node's "Insert layer below" button.
+  // The selected role carries:
+  //   _insertParentId   — the node whose children all get pushed down a level
+  //   _insertParentName — that node's name (for the banner)
+  // In this mode the new role lands directly under that node and adopts ALL of
+  // its current children, so the parent-picker is hidden (parent is fixed).
+  const insertParentId: string | undefined = (state.selectedRole as any)?._insertParentId
+  const insertParentName: string | undefined = (state.selectedRole as any)?._insertParentName
+  const isInsertLayer = creating && !!insertParentId
+
+  // Either structural-insert mode hides the parent picker / admin toggle and
+  // uses the indigo "insert" styling instead of the default create styling.
+  const isStructuralInsert = isInsertBetween || isInsertLayer
 
   // Look up the parent name once for the banner.
   const insertBetweenParentName = useMemo(() => {
@@ -620,6 +635,24 @@ export function RoleFormModal() {
             title: "Role inserted",
             description: `"${payload.name}" was inserted above "${insertBeforeName ?? "the selected role"}".`,
           })
+        } else if (isInsertLayer && insertParentId) {
+          // Atomic "insert layer" — server creates the new role beneath the
+          // parent and re-parents ALL of the parent's current children (and
+          // their subtrees) under it in a single transaction.
+          await insertRoleAboveChildren({
+            organizationId: state.organizationId,
+            body: {
+              parentRoleId: insertParentId,
+              name: payload.name,
+              description: payload.description,
+              shareDataWithPeers: payload.shareDataWithPeers,
+              isAdmin: payload.isAdmin,
+            },
+          }).unwrap()
+          toast({
+            title: "Role layer inserted",
+            description: `"${payload.name}" was inserted below "${insertParentName ?? "the selected role"}"; its sub-roles moved down one level.`,
+          })
         } else {
           // Create new role at the chosen position in the tree.
           await createOrgRole({
@@ -678,22 +711,24 @@ export function RoleFormModal() {
           <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
             <div className={cn(
               "flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg",
-              isInsertBetween
+              isStructuralInsert
                 ? "bg-gradient-to-br from-indigo-600 to-blue-600 shadow-indigo-600/25"
                 : "bg-gradient-to-br from-purple-600 to-indigo-600 shadow-purple-600/25"
             )}>
-              {isInsertBetween ? <ArrowUpFromLine className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
+              {isInsertLayer ? <Layers className="h-5 w-5" /> : isInsertBetween ? <ArrowUpFromLine className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
             </div>
             <div className="flex flex-col">
               <span className="leading-tight">
-                {isInsertBetween ? "Insert Role Between" : creating ? "Create New Role" : "Edit Role"}
+                {isInsertLayer ? "Insert Role Layer" : isInsertBetween ? "Insert Role Between" : creating ? "Create New Role" : "Edit Role"}
               </span>
               <span className="text-xs font-normal text-slate-400">
-                {isInsertBetween
-                  ? "Slot a new role between an existing parent and child"
-                  : creating
-                    ? "Add a role to your organization hierarchy"
-                    : "Update this role's details"}
+                {isInsertLayer
+                  ? "Slot a new role beneath this one and move all its sub-roles down"
+                  : isInsertBetween
+                    ? "Slot a new role between an existing parent and child"
+                    : creating
+                      ? "Add a role to your organization hierarchy"
+                      : "Update this role's details"}
               </span>
             </div>
           </DialogTitle>
@@ -720,6 +755,32 @@ export function RoleFormModal() {
               </div>
               <p className="text-xs text-indigo-700/80">
                 <span className="font-semibold">&ldquo;{insertBeforeName}&rdquo;</span> and everything beneath it will move down one level.
+              </p>
+            </div>
+          )}
+
+          {/* Insert-layer context banner: the new role lands directly under the
+              target node and adopts ALL of its current children. */}
+          {isInsertLayer && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 space-y-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-700">
+                Tree change preview
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 font-medium text-slate-700">
+                  {insertParentName ?? "Selected role"}
+                </span>
+                <ArrowUpFromLine className="h-3.5 w-3.5 text-indigo-500 rotate-90" />
+                <span className="rounded-md bg-indigo-600 px-2.5 py-1 font-semibold text-white shadow-sm">
+                  {formData.name.trim() || "New role"}
+                </span>
+                <ArrowUpFromLine className="h-3.5 w-3.5 text-indigo-500 rotate-90" />
+                <span className="rounded-md bg-white border border-indigo-200 px-2.5 py-1 font-medium text-slate-700">
+                  All current sub-roles
+                </span>
+              </div>
+              <p className="text-xs text-indigo-700/80">
+                Every direct sub-role of <span className="font-semibold">&ldquo;{insertParentName}&rdquo;</span> (and everything beneath them) will move down one level under the new role.
               </p>
             </div>
           )}
@@ -779,7 +840,7 @@ export function RoleFormModal() {
           {/* Parent picker hidden when inserting between: the parent is fixed
               to the existing child's current parent, so letting the user
               change it here would silently break the "insert between" intent. */}
-          {!isInsertBetween && (
+          {!isStructuralInsert && (
             <div className="space-y-2">
               <Label htmlFor="role-parent" className="text-base font-medium">Reports To</Label>
               <Select
@@ -839,7 +900,7 @@ export function RoleFormModal() {
 
           {/* Admin promotion is disallowed when inserting between — a brand-new
               middle role gaining super-admin powers would be a footgun. */}
-          {!isInsertBetween && (
+          {!isStructuralInsert && (
             <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-xl border border-amber-200">
               <Checkbox
                 id="isAdmin"
@@ -885,7 +946,7 @@ export function RoleFormModal() {
                 disabled={loading || isDuplicate || !trimmedName}
                 className={cn(
                   "h-11 px-8 text-white font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all",
-                  isInsertBetween
+                  isStructuralInsert
                     ? "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 shadow-indigo-600/25"
                     : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 shadow-purple-600/25"
                 )}
@@ -893,12 +954,12 @@ export function RoleFormModal() {
                 {loading ? (
                    <div className="flex items-center gap-2">
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      {isInsertBetween ? "Inserting..." : "Saving..."}
+                      {isStructuralInsert ? "Inserting..." : "Saving..."}
                    </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    {isInsertBetween ? <ArrowUpFromLine className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
-                    {isInsertBetween ? "Insert Role" : creating ? "Create Role" : "Update Role"}
+                    {isInsertLayer ? <Layers className="h-4 w-4" /> : isInsertBetween ? <ArrowUpFromLine className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                    {isStructuralInsert ? "Insert Role" : creating ? "Create Role" : "Update Role"}
                   </div>
                 )}
               </Button>

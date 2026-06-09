@@ -330,6 +330,126 @@ export async function insertRoleBetween(params: {
 }
 
 /**
+ * Insert a new role directly BENEATH `parentRoleId`, adopting ALL of that
+ * parent's current direct children. The new role becomes the parent's child,
+ * and every existing child (plus its whole subtree) is re-parented under the
+ * new role and shifted down one level — a single layer slotted between a parent
+ * and all of its branches at once.
+ *
+ *         Parent                     Parent
+ *        /      \          →           |
+ *    ChildA   ChildB              New Role
+ *                                 /        \
+ *                            ChildA        ChildB     (each subtree level +1)
+ *
+ * - `parentRoleId` must belong to `organizationId`.
+ * - The new role's `parentId` is the parent itself; its level is parent.level+1.
+ * - Admin children are never moved (admin roles cannot be displaced) — they
+ *   stay directly under the parent. In a normal tree admin is always the root,
+ *   so this is just a safety net.
+ * - If the parent has no movable children this is equivalent to creating a
+ *   normal child role (nothing to re-parent).
+ */
+export async function insertRoleAboveChildren(params: {
+  organizationId: string;
+  parentRoleId: string;
+  newRole: RoleFormData;
+}): Promise<Role> {
+  const { organizationId, parentRoleId, newRole } = params;
+
+  try {
+    if (!organizationId) throw new Error("organizationId is required");
+    if (!parentRoleId) throw new Error("parentRoleId is required");
+    if (!newRole?.name?.trim()) throw new Error("Role name is required");
+
+    return await prisma.$transaction(async (tx) => {
+      // 1. Load the parent and verify it belongs to the org.
+      const parent = await tx.role.findUnique({
+        where: { id: parentRoleId },
+        select: { id: true, organizationId: true, level: true },
+      });
+
+      if (!parent) throw new Error("Parent role not found");
+      if (parent.organizationId !== organizationId) {
+        throw new Error("Parent role belongs to a different organization");
+      }
+
+      // 2. Snapshot the parent's CURRENT direct children BEFORE creating the
+      //    new role (so the new role can't accidentally adopt itself). Admin
+      //    children are excluded — they cannot be displaced.
+      const existingChildren = await tx.role.findMany({
+        where: { parentId: parentRoleId, organizationId },
+        select: { id: true, isAdmin: true },
+      });
+      const movableChildIds = existingChildren
+        .filter((c) => !c.isAdmin)
+        .map((c) => c.id);
+
+      // 3. Create the new role as a child of the parent.
+      const created = await tx.role.create({
+        data: {
+          name: newRole.name.trim(),
+          description: newRole.description || "",
+          shareDataWithPeers: !!newRole.shareDataWithPeers,
+          isAdmin: !!newRole.isAdmin,
+          level: parent.level + 1,
+          parentId: parent.id,
+          organizationId,
+        },
+      });
+
+      if (movableChildIds.length > 0) {
+        // 4. Re-parent every existing (movable) child onto the new role.
+        await tx.role.updateMany({
+          where: { id: { in: movableChildIds }, organizationId },
+          data: { parentId: created.id },
+        });
+
+        // 5. Cascade level +1 across the new role's entire subtree — i.e. the
+        //    moved children AND all of their descendants. We seed the recursive
+        //    CTE at the new role's direct children (which, after step 4, are
+        //    exactly the moved children) so a deep tree stays one query. Depth
+        //    is capped at 50 as a cycle safety net (real org charts are rarely
+        //    deeper than 10). Mirrors the cascade in insertRoleBetween.
+        await tx.$executeRaw`
+          WITH RECURSIVE subtree AS (
+            SELECT id, parent_id, 0 AS depth
+            FROM roles
+            WHERE parent_id = ${created.id}
+              AND organization_id = ${organizationId}
+              AND is_active = true
+            UNION ALL
+            SELECT r.id, r.parent_id, s.depth + 1
+            FROM roles r
+            JOIN subtree s ON r.parent_id = s.id
+            WHERE r.organization_id = ${organizationId}
+              AND r.is_active = true
+              AND s.depth < 50
+          )
+          UPDATE roles
+          SET level = level + 1, updated_at = NOW()
+          WHERE id IN (SELECT id FROM subtree)
+        `;
+      }
+
+      return {
+        id: created.id,
+        name: created.name,
+        description: created.description || "",
+        shareDataWithPeers: created.shareDataWithPeers,
+        isAdmin: created.isAdmin,
+        level: created.level,
+        parentId: created.parentId || undefined,
+        children: [],
+      };
+    });
+  } catch (error) {
+    console.error("[insertRoleAboveChildren] Error:", error);
+    throw toFriendlyRoleError(error, "Failed to insert role above children");
+  }
+}
+
+/**
  * Delete role — now safely scoped to organization
  */
 export async function deleteRole(roleId: string, currentOrganizationId?: string): Promise<void> {

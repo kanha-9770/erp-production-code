@@ -1,11 +1,13 @@
 "use client"
 
-import React from "react"
-import { Shield, Plus, Settings2, Trash2, ChevronDown, ChevronUp, ArrowUpFromLine } from "lucide-react"
+import React, { useState } from "react"
+import { Shield, Plus, Settings2, Trash2, ChevronDown, ChevronUp, ArrowUpFromLine, Layers, ArrowUpToLine } from "lucide-react"
 import { useRoles } from "@/context/role-context"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
-import { useDeleteRoleMutation } from "@/lib/api/organization"
+import { useDeleteRoleMutation, useDeleteRolePromoteChildrenMutation } from "@/lib/api/organization"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { TreeConnectors } from "./tree-connectors"
 
 type RoleChartNodeProps = {
@@ -19,6 +21,9 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
   const { state, dispatch, refreshData } = useRoles()
   const { toast } = useToast()
   const [deleteRoleMutation] = useDeleteRoleMutation()
+  const [deleteRolePromoteChildren] = useDeleteRolePromoteChildrenMutation()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const hasChildren = Boolean(role?.children?.length)
   // Node is visible (expanded) when its ID is NOT in the collapsed set
@@ -30,8 +35,9 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
   }
 
   const isAdminRole = !!role.isAdmin
+  const roleName = role.name?.trim() || "this role"
 
-  const handleDelete = async (e: React.MouseEvent) => {
+  const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
 
     if (isAdminRole) {
@@ -43,29 +49,105 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
       return
     }
 
-    const roleName = role.name?.trim() || "this role"
-    if (!confirm(`Delete "${roleName}" and all its sub-roles?\nThis cannot be undone.`)) return
+    // A role with sub-roles offers a choice (promote vs. delete the whole
+    // branch); a leaf role just deletes.
+    if (hasChildren) {
+      setConfirmOpen(true)
+      return
+    }
+    if (!confirm(`Delete "${roleName}"?`)) return
+    void runDelete("branch")
+  }
 
-    // Optimistic remove
-    dispatch({ type: "DELETE_ROLE", payload: { roleId: role.id } })
-
+  // mode "promote" → lift sub-roles up to this role's parent; "branch" →
+  // delete this role and its entire subtree (the original behaviour).
+  const runDelete = async (mode: "promote" | "branch") => {
+    setConfirmOpen(false)
+    setDeleting(true)
     try {
-      await deleteRoleMutation(role.id).unwrap()
-      toast({ title: "Role deleted", description: roleName })
+      if (mode === "promote") {
+        // No optimistic dispatch here — removing the node locally would also
+        // drop its children from view before the promoted tree arrives.
+        await deleteRolePromoteChildren(role.id).unwrap()
+        toast({
+          title: "Role deleted",
+          description: `"${roleName}" removed; its sub-roles moved up one level.`,
+        })
+      } else {
+        dispatch({ type: "DELETE_ROLE", payload: { roleId: role.id } }) // optimistic
+        await deleteRoleMutation(role.id).unwrap()
+        toast({ title: "Role deleted", description: roleName })
+      }
       await refreshData()
     } catch (err: any) {
       toast({
         variant: "destructive",
         title: "Couldn't delete role",
-        description: err.message || "Something went wrong. Please try again.",
+        description: err?.data?.error || err?.message || "Something went wrong. Please try again.",
       })
       await refreshData()
+    } finally {
+      setDeleting(false)
     }
   }
 
   return (
     <div className="flex flex-col items-center relative flex-1">
       <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
+
+      {/* Delete choice — only reached for roles that HAVE sub-roles. Lets the
+          user keep the sub-roles (promote them up a level) or remove the whole
+          branch. Leaf roles never open this; they delete via a plain confirm. */}
+      <Dialog open={confirmOpen} onOpenChange={(open) => { if (!open) setConfirmOpen(false) }}>
+        <DialogContent className="sm:max-w-[480px] z-[99999]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-red-600" />
+              Delete &ldquo;{roleName}&rdquo;
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              This role has sub-roles. Choose what happens to them.
+            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => runDelete("promote")}
+                className="w-full text-left rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 hover:bg-indigo-50 transition-colors disabled:opacity-50"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-indigo-800">
+                  <ArrowUpToLine className="h-4 w-4" />
+                  Promote sub-roles
+                </span>
+                <span className="mt-1 block text-xs text-indigo-700/80">
+                  Delete only &ldquo;{roleName}&rdquo;. Its sub-roles move up one level under its parent.
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => runDelete("branch")}
+                className="w-full text-left rounded-lg border border-red-200 bg-red-50/60 p-3 hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-red-700">
+                  <Trash2 className="h-4 w-4" />
+                  Delete entire branch
+                </span>
+                <span className="mt-1 block text-xs text-red-700/80">
+                  Delete &ldquo;{roleName}&rdquo; and all of its sub-roles.
+                </span>
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" disabled={deleting} onClick={() => setConfirmOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className={cn(
         "relative group rounded-lg p-3 w-52 text-center z-20 mx-4 hover:-translate-y-1 transition-all",
@@ -127,6 +209,41 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
               title={`Insert a role above "${role.name || "this role"}"`}
             >
               <ArrowUpFromLine className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {/* Insert a NEW role directly BELOW this node that adopts ALL of its
+              current children — every direct sub-role (and its subtree) shifts
+              one level down under the new role. Only shown when there are
+              children to adopt. */}
+          {hasChildren && (
+            <button
+              onClick={() =>
+                dispatch({
+                  type: "SELECT_ROLE",
+                  payload: {
+                    role: {
+                      id: "new",
+                      // The new role's parent is THIS node; it will adopt this
+                      // node's existing children on the server.
+                      parentId: role.id,
+                      name: "",
+                      description: "",
+                      isAdmin: false,
+                      shareDataWithPeers: false,
+                      level: (role.level ?? 0) + 1,
+                      children: [],
+                      // Marker consumed by the role-form modal to switch into
+                      // "insert layer" mode.
+                      _insertParentId: role.id,
+                      _insertParentName: role.name,
+                    } as any,
+                  },
+                })
+              }
+              className="bg-blue-600 text-white p-1 rounded-full shadow-lg hover:bg-blue-700"
+              title={`Insert a role below "${role.name || "this role"}" (all sub-roles move down)`}
+            >
+              <Layers className="h-3.5 w-3.5" />
             </button>
           )}
           <button
