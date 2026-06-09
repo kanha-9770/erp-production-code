@@ -32,7 +32,7 @@ import {
   Users, Plus, Search, Mail, Phone, Calendar, MapPin, Building2, User2,
   Briefcase, CreditCard, Pencil, ExternalLink, Trash2, ChevronLeft, ChevronRight,
   ImageOff, UserCircle, X as XIcon, Loader2,
-  Download, ChevronDown, Layers, IndianRupee, CircleDollarSign,
+  Download, ChevronDown, Layers, IndianRupee, CircleDollarSign, AlertTriangle,
 } from "lucide-react";
 import {
   WorkspaceShell, WorkspaceHeader,
@@ -51,6 +51,16 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
 } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 // EmployeeForm is large (2k+ lines) and transitively pulls in face-api.js
 // via FaceCaptureDialog. It only renders inside the Sheet that opens on
 // "New employee" / "Edit" — so we dynamic-import it: the initial page
@@ -138,6 +148,8 @@ export default function EmployeeMasterListPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [employeeToDelete, setEmployeeToDelete] = useState<EmployeeListItem | null>(null);
+  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
 
   const views = useSavedViews<Filters>("employees");
 
@@ -954,11 +966,17 @@ export default function EmployeeMasterListPage() {
   ];
   }, []);
 
-  const handleDelete = async (e: EmployeeListItem) => {
-    if (!confirm(`Delete employee "${e.employeeName}"? This cannot be undone.`)) return;
+  const handleDelete = (e: EmployeeListItem) => {
+    setEmployeeToDelete(e);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!employeeToDelete) return;
+    const targetId = employeeToDelete.id;
+    setEmployeeToDelete(null);
     try {
-      await deleteEmployee(e.id).unwrap();
-      if (selectedId === e.id) setSelectedId(null);
+      await deleteEmployee(targetId).unwrap();
+      if (selectedId === targetId) setSelectedId(null);
       toast({ title: "Employee deleted" });
     } catch (err: any) {
       toast({
@@ -1051,8 +1069,12 @@ export default function EmployeeMasterListPage() {
       toast({ variant: "destructive", title: "Bulk update failed", description: err?.data?.error || err?.message });
     }
   };
-  const handleBulkDelete = async () => {
-    if (!confirm(`Delete ${selectedArr.length} selected employee${selectedArr.length === 1 ? "" : "s"}? They will be moved to Trash.`)) return;
+  const handleBulkDelete = () => {
+    setIsBulkDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    setIsBulkDeleteConfirmOpen(false);
     try {
       const res = await bulkUpdate({ action: "delete", ids: selectedArr }).unwrap();
       if (selectedId && selectedIds.has(selectedId)) setSelectedId(null);
@@ -1499,6 +1521,55 @@ export default function EmployeeMasterListPage() {
           {editingId && <EditEmployeeSheet id={editingId} onClose={() => setEditingId(null)} />}
         </SheetContent>
       </Sheet>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!employeeToDelete} onOpenChange={(open) => !open && setEmployeeToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-center">Confirm Permanent Deletion</AlertDialogTitle>
+            <AlertDialogDescription className="text-center">
+              Are you sure you want to permanently delete employee{" "}
+              <span className="font-semibold text-foreground">{employeeToDelete?.employeeName}</span>? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Employee
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete confirmation */}
+      <AlertDialog open={isBulkDeleteConfirmOpen} onOpenChange={setIsBulkDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-center">Confirm Bulk Deletion</AlertDialogTitle>
+            <AlertDialogDescription className="text-center">
+              Are you sure you want to delete <span className="font-semibold text-foreground">{selectedArr.length}</span> selected employee{selectedArr.length === 1 ? "" : "s"}? They will be moved to Trash.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Selected
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

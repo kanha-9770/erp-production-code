@@ -24,6 +24,15 @@ import {
   Pencil,
   Trash2,
   Save,
+  Briefcase,
+  Clock,
+  IndianRupee,
+  Globe,
+  Lock,
+  Key,
+  ShieldAlert,
+  Activity,
+  Building,
 } from "lucide-react";
 import {
   useCreateUserFromEmployeeMutation,
@@ -645,71 +654,90 @@ const UserCreationPage: React.FC = () => {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 sm:p-6">
+    <div className="min-h-screen bg-slate-50/50 p-4 sm:p-6 md:p-8 text-slate-800">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 pb-6 border-b border-slate-200/80">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <UserPlus className="w-7 h-7 sm:w-8 sm:h-8 text-blue-600" />
-              Create Users from Employee Records
-            </h1>
-            <p className="text-gray-600 mt-1 text-sm sm:text-base">
-              Single or bulk account creation from employee data
-            </p>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 shadow-sm shadow-blue-100/50">
+                <UserPlus className="w-6 h-6 sm:w-7 sm:h-7" />
+              </div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-3">
+                  User Provisioning Center
+                </h1>
+                <p className="text-slate-500 mt-1 text-sm sm:text-base">
+                  Convert employee records into secure platform accounts, or manage existing credentials.
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 w-full md:w-auto">
             <button
               onClick={fetchEmployeeRecords}
               disabled={loadingRecords}
-              className="px-3 py-2 rounded-lg font-medium flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] disabled:opacity-50 transition-all shadow-sm"
               title="Refresh records"
             >
               <RefreshCw size={16} className={loadingRecords ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">Refresh</span>
+              <span>Refresh</span>
             </button>
             <button
               onClick={() => setShowUserListDrawer(true)}
-              className="px-4 py-2 rounded-lg font-medium flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 transition"
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all shadow-sm relative group"
               title="View existing users"
             >
-              <List size={18} />
-              <span className="hidden sm:inline">User List</span>
+              <List size={16} />
+              <span>Active Directory</span>
+              {adminUsers.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-250 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100 transition-colors">
+                  {adminUsers.length}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setBulkMode(!bulkMode)}
-              className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition flex-1 sm:flex-none justify-center ${
-                bulkMode ? "bg-purple-600 text-white hover:bg-purple-700" : "bg-gray-200 hover:bg-gray-300"
+              className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all shadow-sm flex-1 md:flex-none active:scale-[0.98] ${
+                bulkMode
+                  ? "bg-purple-600 text-white hover:bg-purple-700 hover:shadow-purple-100 shadow-md"
+                  : "bg-slate-900 text-white hover:bg-slate-800"
               }`}
             >
-              <Users size={18} />
+              <Users size={16} />
               {bulkMode ? "Exit Bulk Mode" : "Bulk Mode"}
             </button>
           </div>
         </div>
 
         {/* Main grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 xl:gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
           {/* Left – Employee Records List */}
-          <div className="bg-white rounded-xl shadow-lg p-5 sm:p-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Employee Records
-                {!loadingRecords && employeeRecords.length > 0 && (
-                  <span className="text-sm font-normal text-gray-500">
-                    ({employeeRecords.length} total, {employeeRecords.filter(r => r.processStatus !== "skipped").length} usable)
-                  </span>
-                )}
-              </h2>
+          <div className="lg:col-span-6 xl:col-span-7 bg-white rounded-2xl border border-slate-200/80 shadow-md shadow-slate-100/50 p-5 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <User className="w-5 h-5 text-slate-500" />
+                  Employee Records
+                  {!loadingRecords && employeeRecords.length > 0 && (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                      {employeeRecords.length} records
+                    </span>
+                  )}
+                </h2>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Select a record to configure and provision account permissions.
+                </p>
+              </div>
 
               {bulkMode && employeeRecords.length > 0 && (
-                <div className="flex gap-4 text-sm w-full sm:w-auto">
-                  <button onClick={selectAll} className="text-blue-600 hover:underline">
+                <div className="flex gap-3 text-xs w-full sm:w-auto self-end sm:self-auto border-t sm:border-0 pt-2 sm:pt-0">
+                  <button onClick={selectAll} className="font-semibold text-purple-600 hover:text-purple-700 transition">
                     Select All
                   </button>
-                  <button onClick={deselectAll} className="text-blue-600 hover:underline">
-                    Clear
+                  <span className="text-slate-200">|</span>
+                  <button onClick={deselectAll} className="font-semibold text-slate-500 hover:text-slate-700 transition">
+                    Deselect All
                   </button>
                 </div>
               )}
@@ -717,42 +745,50 @@ const UserCreationPage: React.FC = () => {
 
             {/* Search */}
             {employeeRecords.length > 0 && (
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <div className="relative mb-5">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
                 <input
                   placeholder="Search name, email, department, ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50/50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all placeholder-slate-400"
                 />
               </div>
             )}
 
             {/* Records list */}
-            <div className="space-y-3 max-h-[60vh] sm:max-h-[70vh] overflow-y-auto">
+            <div className="space-y-3.5 max-h-[62vh] lg:max-h-[72vh] overflow-y-auto pr-1 select-none">
               {loadingRecords ? (
-                <div className="flex flex-col items-center justify-center py-16 text-gray-500 gap-3">
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                  <span className="text-sm font-medium">Loading employee records...</span>
+                  <span className="text-sm font-semibold text-slate-500">Loading employee records...</span>
                 </div>
               ) : fetchError && employeeRecords.length === 0 ? (
-                <div className="text-center py-12">
-                  <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-                  <p className="text-gray-700 font-medium mb-2">Could not load records</p>
-                  <p className="text-sm text-gray-500 mb-4 max-w-sm mx-auto">{fetchError}</p>
+                <div className="text-center py-16 px-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-500 mx-auto mb-4">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <p className="text-slate-800 font-bold mb-1">Could not load records</p>
+                  <p className="text-xs text-slate-400 mb-5 max-w-sm mx-auto leading-relaxed">{fetchError}</p>
                   <button
                     onClick={fetchEmployeeRecords}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium inline-flex items-center gap-2"
+                    className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-xs font-semibold inline-flex items-center gap-2 active:scale-[0.98] transition shadow-sm"
                   >
                     <RefreshCw size={14} />
-                    Retry
+                    Retry Load
                   </button>
                 </div>
               ) : filteredRecords.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 text-sm">
-                  {searchTerm
-                    ? `No records match "${searchTerm}".`
-                    : "No employee records found for your organization."}
+                <div className="text-center py-20 text-slate-400">
+                  <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400 shadow-inner">
+                    <Search size={20} />
+                  </div>
+                  <h3 className="font-semibold text-slate-800 text-sm">No records found</h3>
+                  <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+                    {searchTerm
+                      ? `We couldn't find matches for "${searchTerm}". Try checking for spelling mistakes or use alternate keywords.`
+                      : "No employee records found for your organization."}
+                  </p>
                 </div>
               ) : (
                 filteredRecords.map((record) => {
@@ -762,125 +798,161 @@ const UserCreationPage: React.FC = () => {
                     <div
                       key={record.id}
                       onClick={() => (bulkMode ? toggleSelect(record.id) : selectSingle(record))}
-                      className={`p-4 border rounded-lg cursor-pointer transition-all flex items-start gap-3 ${
+                      className={`group/card relative p-4 border rounded-xl cursor-pointer transition-all duration-200 flex items-start gap-4 ${
                         isSelected
-                          ? "border-blue-500 bg-blue-50 shadow-sm"
+                          ? "border-blue-500 bg-gradient-to-r from-blue-50/70 to-indigo-50/30 shadow-md shadow-blue-100/50 ring-1 ring-blue-500/20"
                           : record.processStatus === "skipped"
-                            ? "border-red-200 bg-red-50/30 hover:border-red-300"
-                            : "border-gray-200 hover:border-gray-300 hover:bg-gray-50/50"
+                            ? "border-rose-100 bg-rose-50/10 hover:border-rose-200 hover:bg-rose-50/20"
+                            : record.processStatus === "warning"
+                              ? "border-amber-100 bg-amber-50/10 hover:border-amber-200 hover:bg-amber-50/20"
+                              : "border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-md hover:shadow-slate-100/80"
                       }`}
                     >
+                      {/* Left status vertical indicator line */}
+                      <div
+                        className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
+                          record.processStatus === "skipped"
+                            ? "bg-rose-500"
+                            : record.processStatus === "warning"
+                              ? "bg-amber-500"
+                              : isSelected
+                                ? "bg-blue-600"
+                                : "bg-emerald-500"
+                        }`}
+                      />
+
                       {bulkMode && (
-                        <input
-                          type="checkbox"
-                          checked={record.selected}
-                          onChange={() => toggleSelect(record.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="mt-1.5 flex-shrink-0 h-4 w-4"
-                        />
+                        <div className="mt-1 flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={record.selected}
+                            onChange={() => toggleSelect(record.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-4.5 w-4.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 transition cursor-pointer"
+                          />
+                        </div>
                       )}
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium truncate">
-                            {record.parsedData?.employeeName || "—"}
-                          </h3>
-                          {record.processStatus === "skipped" && (
-                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200">
-                              SKIPPED
-                            </span>
-                          )}
-                          {record.processStatus === "warning" && (
-                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200">
-                              WARNING
-                            </span>
-                          )}
-                          {record.processStatus === "valid" && (
-                            <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700 border border-green-200">
-                              READY
-                            </span>
-                          )}
-                        </div>
-                        {record.reason && (
-                          <p className="text-xs text-amber-600 mt-0.5">{record.reason}</p>
-                        )}
-                        <p className="text-sm text-gray-600 truncate">
-                          ID: {record.parsedData?.employeeId || record.employee_id || "—"}
-                        </p>
-                        <p className="text-sm text-gray-600 truncate">
-                          {record.parsedData?.email || "No email"}
-                        </p>
+                      <div className="flex-1 min-w-0 pl-1">
+                        {/* Top Row: Name and Badges */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            {/* Name initial circle */}
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shadow-sm flex-shrink-0 ${
+                              isSelected
+                                ? "bg-blue-600 text-white"
+                                : record.processStatus === "skipped"
+                                  ? "bg-rose-100 text-rose-700"
+                                  : record.processStatus === "warning"
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-700"
+                            }`}>
+                              {(record.parsedData?.employeeName || "?").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <h3 className="font-semibold text-slate-800 text-sm sm:text-base tracking-tight leading-snug group-hover/card:text-slate-900 transition-colors">
+                                {record.parsedData?.employeeName || "Unnamed Employee"}
+                              </h3>
+                              <p className="text-xs text-slate-400 font-medium">
+                                ID: {record.parsedData?.employeeId || record.employee_id || "—"}
+                              </p>
+                            </div>
+                          </div>
 
-                        {/* Additional parsed fields */}
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
-                          {record.parsedData?.department && (
-                            <span>Dept: <span className="text-gray-700 font-medium">{record.parsedData.department}</span></span>
-                          )}
-                          {record.parsedData?.employeeEngagementTeamName && (
-                            <span>Team: <span className="text-gray-700 font-medium">{record.parsedData.employeeEngagementTeamName}</span></span>
-                          )}
-                          {record.parsedData?.designation && (
-                            <span>Role: <span className="text-gray-700 font-medium">{record.parsedData.designation}</span></span>
-                          )}
-                          {record.parsedData?.gender && (
-                            <span>Gender: <span className="text-gray-700 font-medium">{record.parsedData.gender}</span></span>
-                          )}
-                          {record.parsedData?.phone && (
-                            <span>Phone: <span className="text-gray-700 font-medium">{record.parsedData.phone}</span></span>
-                          )}
-                          {record.parsedData?.totalSalary && record.parsedData.totalSalary !== "0.00" && (
-                            <span>Salary: <span className="text-gray-700 font-medium">₹{record.parsedData.totalSalary}</span></span>
-                          )}
-                          {record.parsedData?.givenSalary && record.parsedData.givenSalary !== "0.00" && (
-                            <span>Net: <span className="text-gray-700 font-medium">₹{record.parsedData.givenSalary}</span></span>
-                          )}
-                          {record.parsedData?.dateOfJoining && (
-                            <span>Joined: <span className="text-gray-700 font-medium">{record.parsedData.dateOfJoining}</span></span>
-                          )}
-                          {record.parsedData?.shiftType && (
-                            <span>Shift: <span className="text-gray-700 font-medium">{record.parsedData.shiftType}</span></span>
-                          )}
-                          {record.parsedData?.inTime && record.parsedData.inTime !== "false" && (
-                            <span>In: <span className="text-gray-700 font-medium">{record.parsedData.inTime}</span></span>
-                          )}
-                          {record.parsedData?.outTime && record.parsedData.outTime !== "false" && (
-                            <span>Out: <span className="text-gray-700 font-medium">{record.parsedData.outTime}</span></span>
-                          )}
-                          {record.parsedData?.companyName && (
-                            <span>Company: <span className="text-gray-700 font-medium">{record.parsedData.companyName}</span></span>
-                          )}
-                          {record.parsedData?.bankName && (
-                            <span>Bank: <span className="text-gray-700 font-medium">{record.parsedData.bankName}</span></span>
-                          )}
-                          {record.parsedData?.nativePlace && (
-                            <span>Native: <span className="text-gray-700 font-medium">{record.parsedData.nativePlace}</span></span>
-                          )}
-                          {record.parsedData?.country && (
-                            <span>Country: <span className="text-gray-700 font-medium">{record.parsedData.country}</span></span>
-                          )}
-                          {record.parsedData?.overTime && record.parsedData.overTime !== "0.00" && (
-                            <span>OT: <span className="text-gray-700 font-medium">₹{record.parsedData.overTime}</span></span>
-                          )}
-                          {record.parsedData?.status && (
-                            <span>Status: <span className="text-gray-700 font-medium">{record.parsedData.status}</span></span>
-                          )}
+                          <div className="flex gap-1 flex-shrink-0">
+                            {record.processStatus === "skipped" && (
+                              <span className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 border border-rose-200 uppercase">
+                                Skipped
+                              </span>
+                            )}
+                            {record.processStatus === "warning" && (
+                              <span className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 border border-amber-200 uppercase">
+                                Warning
+                              </span>
+                            )}
+                            {record.processStatus === "valid" && (
+                              <span className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase">
+                                Ready
+                              </span>
+                            )}
+                          </div>
                         </div>
+
+                        {/* Reason if skipped or warning */}
+                        {record.reason && (
+                          <div className={`mt-2.5 p-2.5 rounded-lg border text-xs flex items-start gap-1.5 ${
+                            record.processStatus === "skipped"
+                              ? "bg-rose-50/50 border-rose-100 text-rose-700"
+                              : "bg-amber-50/50 border-amber-100 text-amber-700"
+                          }`}>
+                            <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                            <span className="leading-normal font-medium">{record.reason}</span>
+                          </div>
+                        )}
+
+                        {/* Email info */}
+                        <div className="mt-2.5 text-xs text-slate-500 flex items-center gap-1.5 font-medium">
+                          <Mail size={13} className="text-slate-400" />
+                          <span>{record.parsedData?.email || "No email address listed"}</span>
+                        </div>
+
+                        {/* Structured Grid of Metadata Tag Badges */}
+                        {(() => {
+                          const detailBadges = [
+                            record.parsedData?.department && { icon: <Building2 size={11} />, label: "Dept", value: record.parsedData.department, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.designation && { icon: <Briefcase size={11} />, label: "Role", value: record.parsedData.designation, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.phone && { icon: <Phone size={11} />, label: "Phone", value: record.parsedData.phone, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.totalSalary && record.parsedData.totalSalary !== "0.00" && { icon: <IndianRupee size={11} />, label: "Gross", value: `₹${record.parsedData.totalSalary}`, color: "bg-emerald-50/60 border-emerald-100 text-emerald-700" },
+                            record.parsedData?.givenSalary && record.parsedData.givenSalary !== "0.00" && { icon: <IndianRupee size={11} />, label: "Net", value: `₹${record.parsedData.givenSalary}`, color: "bg-emerald-50/60 border-emerald-100 text-emerald-700" },
+                            record.parsedData?.dateOfJoining && { icon: <CalendarDays size={11} />, label: "Joined", value: record.parsedData.dateOfJoining, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.shiftType && { icon: <Clock size={11} />, label: "Shift", value: record.parsedData.shiftType, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.nativePlace && { icon: <MapPin size={11} />, label: "Native", value: record.parsedData.nativePlace, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.companyName && { icon: <Building size={11} />, label: "Company", value: record.parsedData.companyName, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.country && { icon: <Globe size={11} />, label: "Country", value: record.parsedData.country, color: "bg-slate-50 border-slate-200/60 text-slate-600" },
+                            record.parsedData?.overTime && record.parsedData.overTime !== "0.00" && { icon: <Clock size={11} />, label: "OT", value: `₹${record.parsedData.overTime}`, color: "bg-amber-50/60 border-amber-100 text-amber-700" },
+                          ].filter(Boolean);
+
+                          if (detailBadges.length === 0) return null;
+
+                          return (
+                            <div className="mt-3.5 flex flex-wrap gap-1.5">
+                              {detailBadges.map((badge: any, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${badge.color}`}
+                                >
+                                  <span className="opacity-75">{badge.icon}</span>
+                                  <span className="opacity-60 text-[9px] uppercase font-bold tracking-wider">{badge.label}:</span>
+                                  <span className="font-semibold text-slate-700">{badge.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
 
                         {/* Bulk creation status indicator */}
                         {record.uiStatus && record.uiStatus !== "idle" && (
-                          <div className="mt-2 text-xs flex items-center gap-1.5">
-                            {record.uiStatus === "pending" && <Loader2 className="animate-spin" size={14} />}
-                            {record.uiStatus === "success" && <Check size={14} className="text-green-600" />}
-                            {record.uiStatus === "error" && <X size={14} className="text-red-600" />}
-                            <span className={record.uiStatus === "error" ? "text-red-700" : "text-gray-600"}>
-                              {record.uiMessage}
-                            </span>
+                          <div className={`mt-3 p-2 rounded-lg border text-xs flex items-center gap-2 ${
+                            record.uiStatus === "success"
+                              ? "bg-emerald-50 border-emerald-100 text-emerald-800"
+                              : record.uiStatus === "error"
+                                ? "bg-rose-50 border-rose-100 text-rose-800"
+                                : "bg-blue-50 border-blue-100 text-blue-800"
+                          }`}>
+                            {record.uiStatus === "pending" && <Loader2 className="animate-spin flex-shrink-0 text-blue-600" size={14} />}
+                            {record.uiStatus === "success" && <Check size={14} className="text-emerald-600 flex-shrink-0" />}
+                            {record.uiStatus === "error" && <X size={14} className="text-rose-600 flex-shrink-0" />}
+                            <span className="font-semibold">{record.uiMessage}</span>
                           </div>
                         )}
                       </div>
 
-                      {isSelected && !bulkMode && (
-                        <Check className="text-blue-600 mt-1 flex-shrink-0" size={20} />
+                      {!bulkMode && isSelected && (
+                        <div className="flex-shrink-0 mt-1">
+                          <div className="p-1 bg-blue-100 text-blue-600 rounded-full shadow-sm">
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
@@ -890,586 +962,163 @@ const UserCreationPage: React.FC = () => {
           </div>
 
           {/* Right – Form area */}
-          <div className="bg-white rounded-xl shadow-lg p-5 sm:p-6">
+          <div className="lg:col-span-6 xl:col-span-5 bg-white rounded-2xl border border-slate-200/80 shadow-md shadow-slate-100/50 p-5 sm:p-6">
             {editingExistingUser ? (
               <>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
-                    <Pencil className="w-5 h-5" />
-                    Edit User
-                  </h2>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                      <Pencil size={18} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Modify Account Profile</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">Edit permissions and credentials for user</p>
+                    </div>
+                  </div>
                   <button
                     onClick={cancelEditUser}
-                    className="text-gray-500 hover:text-red-600 self-end sm:self-auto"
+                    className="p-1.5 rounded-lg text-slate-450 hover:text-slate-600 hover:bg-slate-50 transition"
                     title="Cancel edit"
                   >
-                    <X size={20} />
+                    <X size={18} />
                   </button>
                 </div>
 
-                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-xs text-blue-700">
-                    Editing: <span className="font-semibold">{editingExistingUser.fullName || editingExistingUser.email}</span>
-                    {editingExistingUser.username && (
-                      <span className="text-blue-500"> · @{editingExistingUser.username}</span>
-                    )}
-                  </p>
-                </div>
-
-                <form onSubmit={saveEditUser} className="space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        First Name
-                      </label>
-                      <input
-                        value={editUserForm.first_name}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, first_name: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Last Name
-                      </label>
-                      <input
-                        value={editUserForm.last_name}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, last_name: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
+                <div className="mb-5 p-3.5 bg-blue-50/50 border border-blue-100 rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-sm">
+                    {(editingExistingUser.fullName || "?").charAt(0).toUpperCase()}
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={editUserForm.email}
-                      onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Phone
-                      </label>
-                      <input
-                        value={editUserForm.phone}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, phone: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Department
-                      </label>
-                      <input
-                        value={editUserForm.department}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, department: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Employee Engagement Team Name
-                    </label>
-                    <input
-                      value={editUserForm.employeeEngagementTeamName}
-                      onChange={(e) => setEditUserForm({ ...editUserForm, employeeEngagementTeamName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      placeholder="Pulled from employee record — editable"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                        <Shield className="w-4 h-4" />
-                        Role
-                      </label>
-                      <select
-                        value={editUserForm.roleId}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, roleId: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">No role</option>
-                        {flatRoles.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {"—".repeat(r.level)} {r.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                        <Building2 className="w-4 h-4" />
-                        Unit
-                      </label>
-                      <select
-                        value={editUserForm.unitId}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, unitId: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">No unit</option>
-                        {flatUnits.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {"—".repeat(u.level)} {u.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {editUserForm.roleId && !editUserForm.unitId && (
-                    <p className="text-xs text-amber-600 -mt-3">
-                      Select a unit to apply this role assignment.
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-800 truncate">
+                      {editingExistingUser.fullName || editingExistingUser.email}
                     </p>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Location
-                      </label>
-                      <input
-                        value={editUserForm.location}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, location: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Status
-                      </label>
-                      <select
-                        value={editUserForm.status}
-                        onChange={(e) => setEditUserForm({ ...editUserForm, status: e.target.value })}
-                        className="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                        <option value="pending">Pending</option>
-                        <option value="suspended">Suspended</option>
-                      </select>
-                    </div>
+                    {editingExistingUser.username && (
+                      <p className="text-[10px] font-medium text-blue-600">@{editingExistingUser.username}</p>
+                    )}
                   </div>
-
-                  <div className="pt-2 border-t">
-                    <p className="text-xs text-gray-500 mb-2">Reset Password (optional — leave blank to keep current)</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          New Password
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showEditPassword ? "text" : "password"}
-                            value={editUserForm.password}
-                            onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })}
-                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                            minLength={8}
-                            placeholder="Min 8 characters"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowEditPassword(!showEditPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                          >
-                            {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Confirm Password
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showEditConfirmPassword ? "text" : "password"}
-                            value={editUserForm.confirmPassword}
-                            onChange={(e) => setEditUserForm({ ...editUserForm, confirmPassword: e.target.value })}
-                            className={`w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                              editUserForm.confirmPassword && !editPasswordsMatch ? "border-red-500" : ""
-                            }`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                          >
-                            {showEditConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                          </button>
-                        </div>
-                        {editUserForm.confirmPassword && !editPasswordsMatch && (
-                          <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="submit"
-                      disabled={savingUser}
-                      className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {savingUser ? (
-                        <>
-                          <Loader2 className="animate-spin" size={18} />
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Save size={18} />
-                          Save Changes
-                        </>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelEditUser}
-                      disabled={savingUser}
-                      className="px-6 bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </>
-            ) : bulkMode ? (
-              <>
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  Bulk Create Users ({selectedCount} selected)
-                </h2>
-
-                {selectedCount === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>Select employees on the left to create accounts in bulk</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* Quick-fill section */}
-                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-3">
-                      <label className="block text-xs font-semibold text-purple-800">
-                        Quick fill — apply to all selected
-                      </label>
-                      {/* Password quick-fill */}
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <input
-                            type={showBulkPassword ? "text" : "password"}
-                            value={bulkPassword}
-                            onChange={(e) => setBulkPassword(e.target.value)}
-                            placeholder="Password (min 8 chars)"
-                            className="w-full px-3 py-1.5 pr-9 border border-purple-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 bg-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowBulkPassword(!showBulkPassword)}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                          >
-                            {showBulkPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                          </button>
-                        </div>
-                        <button
-                          onClick={applyPasswordToAllSelected}
-                          disabled={!bulkPassword || bulkPassword.length < 8}
-                          className="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                      {/* Role & Unit quick-fill */}
-                      <div className="flex gap-2">
-                        <select
-                          value={defaultRoleId}
-                          onChange={(e) => setDefaultRoleId(e.target.value)}
-                          className="flex-1 px-2 py-1.5 border border-purple-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="">Role (optional)</option>
-                          {flatRoles.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {"—".repeat(r.level)} {r.name}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={defaultUnitId}
-                          onChange={(e) => setDefaultUnitId(e.target.value)}
-                          className="flex-1 px-2 py-1.5 border border-purple-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="">Unit (optional)</option>
-                          {flatUnits.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {"—".repeat(u.level)} {u.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={applyRoleUnitToAllSelected}
-                          disabled={!defaultRoleId && !defaultUnitId}
-                          className="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded-md hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Per-user config list */}
-                    <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-                      {employeeRecords
-                        .filter((r) => r.selected)
-                        .map((record) => {
-                          const name = record.parsedData?.employeeName || "—";
-                          const email = record.parsedData?.email || "No email";
-                          const pw = record.bulkPassword || "";
-                          const isValid = pw.length >= 8;
-                          const roleName = flatRoles.find((r) => r.id === record.bulkRoleId)?.name;
-                          const unitName = flatUnits.find((u) => u.id === record.bulkUnitId)?.name;
-
-                          return (
-                            <div
-                              key={record.id}
-                              className={`p-3 rounded-lg border ${
-                                isValid
-                                  ? "border-green-200 bg-green-50/40"
-                                  : "border-gray-200 bg-gray-50/40"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
-                                  <p className="text-xs text-gray-500 truncate">{email}</p>
-                                </div>
-                                {isValid && <Check size={16} className="text-green-600 flex-shrink-0 ml-2" />}
-                              </div>
-                              {/* Password */}
-                              <input
-                                type="text"
-                                value={pw}
-                                onChange={(e) => setBulkPasswordForRecord(record.id, e.target.value)}
-                                placeholder="Password (min 8 chars)"
-                                className={`w-full px-2.5 py-1.5 text-sm border rounded-md focus:ring-2 focus:ring-purple-500 mb-1.5 ${
-                                  pw && !isValid ? "border-red-300 bg-red-50" : isValid ? "border-green-300 bg-white" : "border-gray-300 bg-white"
-                                }`}
-                              />
-                              {/* Role & Unit */}
-                              <div className="flex gap-1.5">
-                                <select
-                                  value={record.bulkRoleId || ""}
-                                  onChange={(e) => setBulkRoleForRecord(record.id, e.target.value)}
-                                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-indigo-500"
-                                >
-                                  <option value="">No role</option>
-                                  {flatRoles.map((r) => (
-                                    <option key={r.id} value={r.id}>{"—".repeat(r.level)} {r.name}</option>
-                                  ))}
-                                </select>
-                                <select
-                                  value={record.bulkUnitId || ""}
-                                  onChange={(e) => setBulkUnitForRecord(record.id, e.target.value)}
-                                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white focus:ring-2 focus:ring-indigo-500"
-                                >
-                                  <option value="">No unit</option>
-                                  {flatUnits.map((u) => (
-                                    <option key={u.id} value={u.id}>{"—".repeat(u.level)} {u.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              {(roleName || unitName) && (
-                                <p className="text-[10px] text-indigo-600 mt-1">
-                                  {roleName && <span>Role: {roleName}</span>}
-                                  {roleName && unitName && <span> · </span>}
-                                  {unitName && <span>Unit: {unitName}</span>}
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                    </div>
-
-                    {/* Summary + Create button */}
-                    <div className="pt-2 border-t">
-                      <div className="flex justify-between text-xs text-gray-500 mb-3">
-                        <span>{employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length} / {selectedCount} ready</span>
-                        <span>{employeeRecords.filter((r) => r.selected && r.bulkRoleId).length} with roles</span>
-                      </div>
-                      <button
-                        onClick={createBulkUsers}
-                        disabled={
-                          creating ||
-                          employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length === 0
-                        }
-                        className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {creating ? (
-                          <>
-                            <Loader2 className="animate-spin" size={18} />
-                            Creating users...
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus size={18} />
-                            Create {selectedCount} Users
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
-                    <Plus className="w-5 h-5" />
-                    Create Single User
-                  </h2>
-                  {selectedRecord && (
-                    <button
-                      onClick={() => {
-                        setSelectedRecord(null);
-                        setFormData({ ...formData, password: "", confirmPassword: "" });
-                      }}
-                      className="text-gray-500 hover:text-red-600 self-end sm:self-auto"
-                    >
-                      <X size={20} />
-                    </button>
-                  )}
                 </div>
 
-                {!selectedRecord ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <User className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>Select an employee record to create account</p>
-                  </div>
-                ) : (
-                  <form onSubmit={createSingleUser} className="space-y-5">
+                <form onSubmit={saveEditUser} className="space-y-4">
+                  {/* Section: Profile info */}
+                  <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <User size={12} /> Profile Information
+                    </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Employee ID
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          First Name
                         </label>
                         <input
-                          name="employee_id"
-                          value={formData.employee_id}
-                          onChange={handleSingleChange}
-                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                          value={editUserForm.first_name}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, first_name: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
                           required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Record ID
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Last Name
                         </label>
                         <input
-                          value={formData.employeeRecordId}
-                          disabled
-                          className="w-full px-3 py-2 bg-gray-100 border rounded-lg text-gray-600"
+                          value={editUserForm.last_name}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, last_name: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Employee Name
-                      </label>
-                      <input
-                        name="employeeName"
-                        value={formData.employeeName}
-                        onChange={handleSingleChange}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Email
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Email Address
                       </label>
                       <input
                         type="email"
-                        name="email"
-                        value={formData.email}
-                        onChange={handleSingleChange}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                        value={editUserForm.email}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
                         required
                       />
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Password
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Contact Phone
                         </label>
-                        <div className="relative">
-                          <input
-                            type={showSinglePassword ? "text" : "password"}
-                            name="password"
-                            value={formData.password}
-                            onChange={handleSingleChange}
-                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                            required
-                            minLength={8}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowSinglePassword(!showSinglePassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                          >
-                            {showSinglePassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                          </button>
-                        </div>
+                        <input
+                          value={editUserForm.phone}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, phone: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        />
                       </div>
-
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Confirm Password
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Department
                         </label>
-                        <div className="relative">
-                          <input
-                            type={showConfirmPassword ? "text" : "password"}
-                            name="confirmPassword"
-                            value={formData.confirmPassword}
-                            onChange={handleSingleChange}
-                            className={`w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                              formData.confirmPassword && !passwordsMatch ? "border-red-500" : ""
-                            }`}
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
-                          >
-                            {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                          </button>
-                        </div>
-                        {formData.confirmPassword && !passwordsMatch && (
-                          <p className="text-red-500 text-xs mt-1">Passwords do not match</p>
-                        )}
+                        <input
+                          value={editUserForm.department}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, department: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        />
                       </div>
                     </div>
 
-                    {/* Role & Unit Assignment */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Employee Engagement Team Name
+                      </label>
+                      <input
+                        value={editUserForm.employeeEngagementTeamName}
+                        onChange={(e) => setEditUserForm({ ...editUserForm, employeeEngagementTeamName: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        placeholder="Engagement Team Assignment"
+                      />
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Role (optional)
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Location
+                        </label>
+                        <input
+                          value={editUserForm.location}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, location: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          User Status
                         </label>
                         <select
-                          value={formData.roleId}
-                          onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                          value={editUserForm.status}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, status: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                          <option value="pending">Pending</option>
+                          <option value="suspended">Suspended</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section: Organizational unit & roles */}
+                  <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Shield size={12} /> Organizational Hierarchy
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1">
+                          Role
+                        </label>
+                        <select
+                          value={editUserForm.roleId}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, roleId: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
                         >
                           <option value="">No role</option>
                           {flatRoles.map((r) => (
@@ -1480,13 +1129,13 @@ const UserCreationPage: React.FC = () => {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Unit (optional)
+                        <label className="block text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1">
+                          Unit
                         </label>
                         <select
-                          value={formData.unitId}
-                          onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                          value={editUserForm.unitId}
+                          onChange={(e) => setEditUserForm({ ...editUserForm, unitId: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
                         >
                           <option value="">No unit</option>
                           {flatUnits.map((u) => (
@@ -1497,21 +1146,562 @@ const UserCreationPage: React.FC = () => {
                         </select>
                       </div>
                     </div>
+                    {editUserForm.roleId && !editUserForm.unitId && (
+                      <p className="text-[11px] text-amber-600 flex items-center gap-1">
+                        <AlertTriangle size={12} />
+                        Select a unit to apply this role assignment.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Section: Password Reset */}
+                  <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Lock size={12} /> Reset Password
+                    </p>
+                    <p className="text-[11px] text-slate-400 -mt-2">Leave blank to keep the current user password</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          New Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showEditPassword ? "text" : "password"}
+                            value={editUserForm.password}
+                            onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })}
+                            className="w-full px-3 py-2 pr-9 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                            minLength={8}
+                            placeholder="Min 8 characters"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditPassword(!showEditPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-600"
+                          >
+                            {showEditPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Confirm Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showEditConfirmPassword ? "text" : "password"}
+                            value={editUserForm.confirmPassword}
+                            onChange={(e) => setEditUserForm({ ...editUserForm, confirmPassword: e.target.value })}
+                            className={`w-full px-3 py-2 pr-9 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all ${
+                              editUserForm.confirmPassword && !editPasswordsMatch ? "border-rose-300 focus:border-rose-500 focus:ring-rose-500/10" : "border-slate-200"
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-600"
+                          >
+                            {showEditConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {editUserForm.password && (
+                      <div className="p-3 bg-slate-100/60 border border-slate-200/80 rounded-lg space-y-1.5 text-xs text-slate-600">
+                        <p className="font-bold text-[9px] text-slate-400 uppercase tracking-wider mb-1">Password Strength Checklist</p>
+                        <div className="flex items-center gap-2">
+                          {editUserForm.password.length >= 8 ? (
+                            <Check size={13} className="text-emerald-600" strokeWidth={3} />
+                          ) : (
+                            <X size={13} className="text-rose-600" strokeWidth={3} />
+                          )}
+                          <span className={editUserForm.password.length >= 8 ? "text-emerald-700 font-medium" : "text-slate-500"}>At least 8 characters</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {editPasswordsMatch ? (
+                            <Check size={13} className="text-emerald-600" strokeWidth={3} />
+                          ) : (
+                            <X size={13} className="text-rose-600" strokeWidth={3} />
+                          )}
+                          <span className={editPasswordsMatch ? "text-emerald-700 font-medium" : "text-slate-500"}>Passwords match exactly</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3 pt-3">
+                    <button
+                      type="submit"
+                      disabled={savingUser}
+                      className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm transition-all"
+                    >
+                      {savingUser ? (
+                        <>
+                          <Loader2 className="animate-spin" size={16} />
+                          <span>Saving Changes...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save size={16} />
+                          <span>Save Changes</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditUser}
+                      disabled={savingUser}
+                      className="px-5 bg-slate-100 hover:bg-slate-200 text-slate-600 py-2.5 rounded-xl text-sm font-semibold active:scale-[0.98] transition-all"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : bulkMode ? (
+              <>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                      <Users size={18} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Bulk Provisioning Hub</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">{selectedCount} records selected</p>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedCount === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-center select-none">
+                    <div className="w-16 h-16 bg-purple-50 border border-purple-100 rounded-2xl flex items-center justify-center text-purple-400 mb-4 shadow-sm shadow-purple-50">
+                      <Users className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-bold text-slate-800 text-base">No records selected</h3>
+                    <p className="text-slate-400 text-xs mt-1.5 max-w-xs mx-auto leading-relaxed">
+                      Toggle checkboxes on the left and select one or more employee profiles to begin batch account creation.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {/* Quick-fill section */}
+                    <div className="p-4 bg-gradient-to-r from-purple-700 to-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100/30 space-y-3.5">
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-purple-100">
+                          Batch Settings
+                        </label>
+                        <p className="text-[11px] text-purple-200/90 mt-0.5">Apply credentials or security groups to all selected records at once</p>
+                      </div>
+
+                      {/* Password quick-fill */}
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={showBulkPassword ? "text" : "password"}
+                            value={bulkPassword}
+                            onChange={(e) => setBulkPassword(e.target.value)}
+                            placeholder="Password (min 8 chars)"
+                            className="w-full px-3 py-2 pr-9 border border-purple-500/30 rounded-lg text-sm bg-white/10 text-white placeholder-purple-200 focus:outline-none focus:ring-2 focus:ring-white/20 focus:bg-white/20 transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowBulkPassword(!showBulkPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-purple-200 hover:text-white"
+                          >
+                            {showBulkPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                          </button>
+                        </div>
+                        <button
+                          onClick={applyPasswordToAllSelected}
+                          disabled={!bulkPassword || bulkPassword.length < 8}
+                          className="px-3.5 py-2 bg-white text-purple-700 text-xs font-bold rounded-lg hover:bg-purple-50 active:scale-[0.97] transition-all disabled:opacity-40 disabled:scale-100 disabled:cursor-not-allowed flex-shrink-0"
+                        >
+                          Apply
+                        </button>
+                      </div>
+
+                      {/* Role & Unit quick-fill */}
+                      <div className="flex gap-2">
+                        <select
+                          value={defaultRoleId}
+                          onChange={(e) => setDefaultRoleId(e.target.value)}
+                          className="flex-1 px-2.5 py-2 border border-purple-500/30 rounded-lg text-xs bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:bg-white/20 transition-all"
+                          style={{ colorScheme: "dark" }}
+                        >
+                          <option value="" className="text-slate-800">Assign Role</option>
+                          {flatRoles.map((r) => (
+                            <option key={r.id} value={r.id} className="text-slate-800">
+                              {"—".repeat(r.level)} {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={defaultUnitId}
+                          onChange={(e) => setDefaultUnitId(e.target.value)}
+                          className="flex-1 px-2.5 py-2 border border-purple-500/30 rounded-lg text-xs bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:bg-white/20 transition-all"
+                          style={{ colorScheme: "dark" }}
+                        >
+                          <option value="" className="text-slate-800">Assign Unit</option>
+                          {flatUnits.map((u) => (
+                            <option key={u.id} value={u.id} className="text-slate-800">
+                              {"—".repeat(u.level)} {u.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={applyRoleUnitToAllSelected}
+                          disabled={!defaultRoleId && !defaultUnitId}
+                          className="px-3.5 py-2 bg-white text-purple-700 text-xs font-bold rounded-lg hover:bg-purple-50 active:scale-[0.97] transition-all disabled:opacity-40 disabled:scale-100 disabled:cursor-not-allowed flex-shrink-0"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Per-user config list */}
+                    <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
+                      {employeeRecords
+                        .filter((r) => r.selected)
+                        .map((record) => {
+                          const name = record.parsedData?.employeeName || "Unnamed";
+                          const email = record.parsedData?.email || "No email address";
+                          const pw = record.bulkPassword || "";
+                          const isValid = pw.length >= 8;
+                          const roleName = flatRoles.find((r) => r.id === record.bulkRoleId)?.name;
+                          const unitName = flatUnits.find((u) => u.id === record.bulkUnitId)?.name;
+
+                          return (
+                            <div
+                              key={record.id}
+                              className={`p-3.5 rounded-xl border transition-all ${
+                                isValid
+                                  ? "border-emerald-100 bg-emerald-50/10"
+                                  : "border-slate-200 bg-slate-50/40"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-800 truncate">{name}</p>
+                                  <p className="text-[10px] text-slate-400 truncate">{email}</p>
+                                </div>
+                                {isValid && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-md">
+                                    <Check size={11} strokeWidth={3} /> Ready
+                                  </span>
+                                )}
+                              </div>
+                              {/* Password */}
+                              <div className="relative mb-2">
+                                <input
+                                  type="text"
+                                  value={pw}
+                                  onChange={(e) => setBulkPasswordForRecord(record.id, e.target.value)}
+                                  placeholder="Configure Password (min 8 chars)"
+                                  className={`w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-purple-500/10 focus:border-purple-500 transition-all ${
+                                    pw && !isValid ? "border-rose-200 bg-rose-50/30 text-rose-800 focus:border-rose-400 focus:ring-rose-500/5" : isValid ? "border-emerald-250 bg-white" : "border-slate-200 bg-white"
+                                  }`}
+                                />
+                              </div>
+                              {/* Role & Unit */}
+                              <div className="flex gap-2">
+                                <select
+                                  value={record.bulkRoleId || ""}
+                                  onChange={(e) => setBulkRoleForRecord(record.id, e.target.value)}
+                                  className="flex-1 px-2 py-1.5 text-[11px] border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
+                                >
+                                  <option value="">Role assignment</option>
+                                  {flatRoles.map((r) => (
+                                    <option key={r.id} value={r.id}>{"—".repeat(r.level)} {r.name}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  value={record.bulkUnitId || ""}
+                                  onChange={(e) => setBulkUnitForRecord(record.id, e.target.value)}
+                                  className="flex-1 px-2 py-1.5 text-[11px] border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
+                                >
+                                  <option value="">Unit assignment</option>
+                                  {flatUnits.map((u) => (
+                                    <option key={u.id} value={u.id}>{"—".repeat(u.level)} {u.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {(roleName || unitName) && (
+                                <p className="text-[10px] font-semibold text-purple-600 mt-2 flex items-center gap-1.5">
+                                  <Shield size={10} />
+                                  <span>{roleName || "No Role"}</span>
+                                  <span className="text-slate-300">·</span>
+                                  <Building2 size={10} />
+                                  <span>{unitName || "No Unit"}</span>
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    {/* Summary + Create button */}
+                    <div className="pt-3.5 border-t border-slate-100">
+                      <div className="flex justify-between text-xs font-semibold text-slate-400 mb-4">
+                        <span>{employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length} / {selectedCount} configured</span>
+                        <span>{employeeRecords.filter((r) => r.selected && r.bulkRoleId).length} grouped</span>
+                      </div>
+                      <button
+                        onClick={createBulkUsers}
+                        disabled={
+                          creating ||
+                          employeeRecords.filter((r) => r.selected && r.bulkPassword && r.bulkPassword.length >= 8).length === 0
+                        }
+                        className="w-full bg-purple-650 text-white py-3 rounded-xl font-bold hover:bg-purple-750 active:scale-[0.98] disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md shadow-purple-100 transition-all"
+                      >
+                        {creating ? (
+                          <>
+                            <Loader2 className="animate-spin" size={18} />
+                            <span>Creating users...</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus size={18} />
+                            <span>Create {selectedCount} Users</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                      <Plus size={18} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Create Single User</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">Provision a single account from selected record</p>
+                    </div>
+                  </div>
+                  {selectedRecord && (
+                    <button
+                      onClick={() => {
+                        setSelectedRecord(null);
+                        setFormData({ ...formData, password: "", confirmPassword: "" });
+                      }}
+                      className="p-1.5 rounded-lg text-slate-450 hover:text-slate-600 hover:bg-slate-50 transition"
+                      title="Clear selection"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+
+                {!selectedRecord ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-center select-none">
+                    <div className="w-16 h-16 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-center text-blue-500 mb-4 shadow-sm shadow-blue-50">
+                      <User className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-bold text-slate-800 text-base">No record selected</h3>
+                    <p className="text-slate-400 text-xs mt-1.5 max-w-xs mx-auto leading-relaxed">
+                      Select an employee profile from the left column to configure and provision their user account.
+                    </p>
+                  </div>
+                ) : (
+                  <form onSubmit={createSingleUser} className="space-y-4">
+                    {/* Section 1: Employee Identifiers */}
+                    <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <User size={12} /> Employee Identity
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Employee ID
+                          </label>
+                          <input
+                            name="employee_id"
+                            value={formData.employee_id}
+                            onChange={handleSingleChange}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Record ID
+                          </label>
+                          <input
+                            value={formData.employeeRecordId}
+                            disabled
+                            className="w-full px-3 py-2 bg-slate-100/80 border border-slate-200 rounded-lg text-sm text-slate-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Employee Name
+                        </label>
+                        <input
+                          name="employeeName"
+                          value={formData.employeeName}
+                          onChange={handleSingleChange}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          name="email"
+                          value={formData.email}
+                          onChange={handleSingleChange}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {/* Section 2: Role Assignment */}
+                    <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Shield size={12} /> Access & Organization
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Role Assignment
+                          </label>
+                          <select
+                            value={formData.roleId}
+                            onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                          >
+                            <option value="">No role assigned</option>
+                            {flatRoles.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {"—".repeat(r.level)} {r.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Organizational Unit
+                          </label>
+                          <select
+                            value={formData.unitId}
+                            onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                          >
+                            <option value="">No unit assigned</option>
+                            {flatUnits.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {"—".repeat(u.level)} {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 3: Credentials */}
+                    <div className="p-4 bg-slate-50/50 border border-slate-200/60 rounded-xl space-y-4">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Lock size={12} /> Account Credentials
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Password
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showSinglePassword ? "text" : "password"}
+                              name="password"
+                              value={formData.password}
+                              onChange={handleSingleChange}
+                              className="w-full px-3 py-2 pr-9 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
+                              required
+                              minLength={8}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowSinglePassword(!showSinglePassword)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-600"
+                            >
+                              {showSinglePassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">
+                            Confirm Password
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showConfirmPassword ? "text" : "password"}
+                              name="confirmPassword"
+                              value={formData.confirmPassword}
+                              onChange={handleSingleChange}
+                              className={`w-full px-3 py-2 pr-9 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all ${
+                                formData.confirmPassword && !passwordsMatch ? "border-rose-350 focus:border-rose-500 focus:ring-rose-500/10" : "border-slate-200"
+                              }`}
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-600"
+                            >
+                              {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {formData.password && (
+                        <div className="p-3 bg-slate-100/60 border border-slate-200/80 rounded-lg space-y-1.5 text-xs text-slate-600">
+                          <p className="font-bold text-[9px] text-slate-400 uppercase tracking-wider mb-1">Password Strength Checklist</p>
+                          <div className="flex items-center gap-2">
+                            {formData.password.length >= 8 ? (
+                              <Check size={13} className="text-emerald-600" strokeWidth={3} />
+                            ) : (
+                              <X size={13} className="text-rose-600" strokeWidth={3} />
+                            )}
+                            <span className={formData.password.length >= 8 ? "text-emerald-700 font-medium" : "text-slate-500"}>At least 8 characters</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {passwordsMatch ? (
+                              <Check size={13} className="text-emerald-600" strokeWidth={3} />
+                            ) : (
+                              <X size={13} className="text-rose-600" strokeWidth={3} />
+                            )}
+                            <span className={passwordsMatch ? "text-emerald-700 font-medium" : "text-slate-500"}>Passwords match exactly</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     <button
                       type="submit"
                       disabled={creating || !passwordsMatch || formData.password.trim().length < 8}
-                      className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      className="w-full bg-blue-600 text-white py-3 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm transition-all"
                     >
                       {creating ? (
                         <>
-                          <Loader2 className="animate-spin" size={18} />
-                          Creating...
+                          <Loader2 className="animate-spin" size={16} />
+                          <span>Creating Account...</span>
                         </>
                       ) : (
                         <>
-                          <UserPlus size={18} />
-                          Create User
+                          <UserPlus size={16} />
+                          <span>Create User Account</span>
                         </>
                       )}
                     </button>
@@ -1531,64 +1721,70 @@ const UserCreationPage: React.FC = () => {
         aria-hidden={!showUserListDrawer}
       >
         <div
-          className="absolute inset-0 bg-black/40"
+          className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity duration-300"
           onClick={() => setShowUserListDrawer(false)}
         />
         <aside
-          className={`absolute top-0 right-0 h-full w-full sm:w-[420px] md:w-[480px] bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-out ${
+          className={`absolute top-0 right-0 h-full w-full sm:w-[420px] md:w-[480px] bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-out border-l border-slate-100 ${
             showUserListDrawer ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-950 text-white">
             <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                User List
+              <h2 className="text-base font-bold flex items-center gap-2">
+                <Users className="w-5 h-5 text-slate-350" />
+                Active Directory
               </h2>
-              <p className="text-xs text-blue-100 mt-0.5">
-                {loadingUsers ? "Loading..." : `${adminUsers.length} user${adminUsers.length === 1 ? "" : "s"} total`}
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {loadingUsers ? "Loading..." : `${adminUsers.length} platform users registered`}
               </p>
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => refetchUsers()}
                 disabled={loadingUsers}
-                className="p-2 rounded-md hover:bg-white/10 disabled:opacity-50"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition disabled:opacity-50"
                 title="Refresh user list"
               >
-                <RefreshCw size={16} className={loadingUsers ? "animate-spin" : ""} />
+                <RefreshCw size={15} className={loadingUsers ? "animate-spin" : ""} />
               </button>
               <button
                 onClick={() => setShowUserListDrawer(false)}
-                className="p-2 rounded-md hover:bg-white/10"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
                 title="Close"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
           </div>
 
-          <div className="px-5 py-3 border-b border-gray-200">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
-                placeholder="Search by name, email, department..."
+                placeholder="Search active users by name, email..."
                 value={userListSearch}
                 onChange={(e) => setUserListSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all placeholder-slate-400"
               />
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3">
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 bg-slate-50/20">
             {loadingUsers ? (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-500 gap-3">
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
                 <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
-                <span className="text-sm">Loading users...</span>
+                <span className="text-xs font-semibold text-slate-500">Querying directory...</span>
               </div>
             ) : filteredUsers.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-sm">
-                {userListSearch ? `No users match "${userListSearch}".` : "No users found."}
+              <div className="text-center py-20 text-slate-450">
+                <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto mb-3 text-slate-400">
+                  <Search size={16} />
+                </div>
+                <p className="text-xs font-bold text-slate-800">No users found</p>
+                <p className="text-[11px] text-slate-450 mt-1 max-w-xs mx-auto leading-relaxed">
+                  {userListSearch ? `No matches for "${userListSearch}". Check spelling or refine criteria.` : "No system user profiles currently exist."}
+                </p>
               </div>
             ) : (
               <ul className="space-y-3">
@@ -1614,10 +1810,10 @@ const UserCreationPage: React.FC = () => {
                   return (
                     <li
                       key={u.id}
-                      className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50/30 transition"
+                      className="p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-md hover:shadow-slate-100/60 transition-all duration-200 group/item"
                     >
                       <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-sm font-semibold flex items-center justify-center overflow-hidden">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-xs font-bold flex items-center justify-center overflow-hidden shadow-sm">
                           {u.avatar ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={u.avatar} alt={displayName} className="w-full h-full object-cover" />
@@ -1626,106 +1822,108 @@ const UserCreationPage: React.FC = () => {
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-semibold text-gray-900 truncate flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-1 flex-wrap">
+                            <p className="text-xs font-bold text-slate-800 truncate flex-1 min-w-0 leading-normal">
                               {displayName}
                             </p>
-                            {isAdmin && (
-                              <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-0.5">
-                                <Shield size={10} /> ADMIN
-                              </span>
-                            )}
-                            {u.status && (
-                              <span
-                                className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
-                                  u.status.toLowerCase() === "active"
-                                    ? "bg-green-100 text-green-700 border-green-200"
-                                    : "bg-gray-100 text-gray-600 border-gray-200"
-                                }`}
-                              >
-                                {u.status}
-                              </span>
-                            )}
-                            <div className="flex items-center gap-1 ml-auto">
-                              <button
-                                onClick={() => startEditUser(u)}
-                                className="p-1.5 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-100 transition"
-                                title="Edit user"
-                                disabled={isDeleting}
-                              >
-                                <Pencil size={14} />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(u)}
-                                className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-100 transition disabled:opacity-50"
-                                title="Delete user"
-                                disabled={isDeleting}
-                              >
-                                {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                              </button>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {isAdmin && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-0.5 uppercase tracking-wide">
+                                  <Shield size={9} /> ADMIN
+                                </span>
+                              )}
+                              {u.status && (
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${
+                                    u.status.toLowerCase() === "active"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-250"
+                                      : "bg-slate-100 text-slate-500 border-slate-200"
+                                  }`}
+                                >
+                                  {u.status}
+                                </span>
+                              )}
                             </div>
                           </div>
 
-                          <div className="mt-1 space-y-0.5 text-xs">
+                          <div className="mt-2 space-y-1 text-slate-500 text-[11px] font-medium border-t border-slate-50 pt-2">
                             {u.username && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <AtSign size={11} className="text-gray-400 flex-shrink-0" />
-                                {u.username}
+                              <p className="truncate flex items-center gap-1.5">
+                                <AtSign size={12} className="text-slate-400 flex-shrink-0" />
+                                <span className="font-semibold text-slate-650">@{u.username}</span>
                               </p>
                             )}
-                            <p className="text-gray-600 truncate flex items-center gap-1.5">
-                              <Mail size={11} className="text-gray-400 flex-shrink-0" />
-                              {u.email}
+                            <p className="truncate flex items-center gap-1.5">
+                              <Mail size={12} className="text-slate-400 flex-shrink-0" />
+                              <span>{u.email}</span>
                             </p>
                             {phoneNumber && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <Phone size={11} className="text-gray-400 flex-shrink-0" />
-                                {phoneNumber}
+                              <p className="truncate flex items-center gap-1.5">
+                                <Phone size={12} className="text-slate-400 flex-shrink-0" />
+                                <span>{phoneNumber}</span>
                               </p>
                             )}
                             {u.department && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <Building2 size={11} className="text-gray-400 flex-shrink-0" />
-                                {u.department}
+                              <p className="truncate flex items-center gap-1.5">
+                                <Building2 size={12} className="text-slate-400 flex-shrink-0" />
+                                <span>{u.department}</span>
                               </p>
                             )}
                             {u.employeeEngagementTeamName && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <Users size={11} className="text-gray-400 flex-shrink-0" />
-                                {u.employeeEngagementTeamName}
+                              <p className="truncate flex items-center gap-1.5">
+                                <Users size={12} className="text-slate-400 flex-shrink-0" />
+                                <span>{u.employeeEngagementTeamName}</span>
                               </p>
                             )}
                             {u.location && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <MapPin size={11} className="text-gray-400 flex-shrink-0" />
-                                {u.location}
+                              <p className="truncate flex items-center gap-1.5">
+                                <MapPin size={12} className="text-slate-400 flex-shrink-0" />
+                                <span>{u.location}</span>
                               </p>
                             )}
                             {joinDateStr && (
-                              <p className="text-gray-600 truncate flex items-center gap-1.5">
-                                <CalendarDays size={11} className="text-gray-400 flex-shrink-0" />
-                                Joined {joinDateStr}
+                              <p className="truncate flex items-center gap-1.5 text-slate-400">
+                                <CalendarDays size={12} className="text-slate-400 flex-shrink-0" />
+                                <span>Joined {joinDateStr}</span>
                               </p>
                             )}
                           </div>
 
                           {u.unitsAndRoles && u.unitsAndRoles.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
+                            <div className="mt-2.5 flex flex-wrap gap-1 border-t border-slate-50 pt-2">
                               {u.unitsAndRoles.map((ur, idx) => (
                                 <span
                                   key={idx}
-                                  className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                  className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50/50 text-indigo-700 border border-indigo-100"
                                   title={`${ur.unit?.name || ""} → ${ur.role?.name || ""}`}
                                 >
                                   <Shield size={9} />
                                   {ur.role?.name}
                                   {ur.unit?.name && (
-                                    <span className="text-indigo-400">· {ur.unit.name}</span>
+                                    <span className="text-indigo-400 font-semibold">· {ur.unit.name}</span>
                                   )}
                                 </span>
                               ))}
                             </div>
                           )}
+
+                          <div className="mt-3.5 flex justify-end gap-1.5 border-t border-slate-50 pt-2 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => startEditUser(u)}
+                              className="px-2 py-1 rounded-md text-[10px] font-bold text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 flex items-center gap-1 transition"
+                              disabled={isDeleting}
+                            >
+                              <Pencil size={11} /> Edit Profile
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUser(u)}
+                              className="px-2 py-1 rounded-md text-[10px] font-bold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 flex items-center gap-1 transition disabled:opacity-50"
+                              disabled={isDeleting}
+                            >
+                              {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                              <span>Delete</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </li>

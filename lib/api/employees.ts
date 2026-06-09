@@ -264,7 +264,10 @@ export const employeesApi = baseApi.injectEndpoints({
 
     // Bulk delete / bulk status-change for the Employee Master list. Refreshes
     // the whole identity set (same as single mutations) so every screen stays
-    // in sync after the batch.
+    // in sync after the batch. The bare "Employee" tag (no id) invalidates
+    // every cached employee DETAIL/preview query too, so an open preview pane
+    // for one of the affected rows reflects the new status/removal immediately
+    // — matching updateEmployee/deleteEmployee.
     bulkUpdateEmployees: builder.mutation<
       { success: boolean; action: string; affected: number },
       BulkEmployeeArgs
@@ -275,6 +278,7 @@ export const employeesApi = baseApi.injectEndpoints({
         body,
       }),
       invalidatesTags: [
+        "Employee",
         { type: "Employees", id: "LIST" },
         "User",
         "AdminUsers",
