@@ -17,6 +17,8 @@ import { getAuthenticatedUser, isUserAdmin } from "@/lib/api-helpers";
 import { canApproveLeave } from "@/lib/hr/leave-service";
 import { canApproveAttendance } from "@/lib/hr/attendance-permissions";
 import { getVisibleUserIdsForHierarchy } from "@/lib/database/roles";
+import { computeRouteMeta } from "@/lib/auth/route-meta";
+import { resolveRouteAccess } from "@/lib/route-permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,31 @@ export async function GET(request: NextRequest) {
   if (!isAdmin) {
     const visible = await getVisibleUserIdsForHierarchy(userId, orgId).catch(() => null);
     approverUserIds = (visible ?? [userId]).filter((id) => id !== userId);
+  }
+
+  // A few badges point at pages the sidebar gates as whitelist-only — admin OR
+  // an explicit Settings → Permission grant (Onboarding, Compliance), plus the
+  // recruitment Job-Application queue. Mirror that same `isPermitted` rule on
+  // the server (see lib/auth/route-meta.ts) so a non-admin who has been granted
+  // one of those pages also gets its badge, without leaking org-wide counts to
+  // every employee. Admins keep seeing all of them. Route-meta is resolved once
+  // here and reused across the per-badge checks below.
+  let canViewRoute: (path: string) => boolean = () => true;
+  if (!isAdmin) {
+    const roleRows = await prisma.userUnitAssignment
+      .findMany({
+        where: { userId, user: { organizationId: orgId } },
+        select: { roleId: true },
+      })
+      .catch(() => [] as Array<{ roleId: string }>);
+    const roleIds = Array.from(new Set(roleRows.map((r) => r.roleId)));
+    const meta = await computeRouteMeta(userId, orgId, roleIds).catch(() => ({
+      deniedRoutes: [] as string[],
+      allowedRoutes: [] as string[],
+      allowedModuleIds: [] as string[],
+    }));
+    canViewRoute = (path: string) =>
+      resolveRouteAccess(path, meta.allowedRoutes, meta.deniedRoutes) === true;
   }
 
   const [canLeave, canReg] = await Promise.all([
@@ -93,7 +120,7 @@ export async function GET(request: NextRequest) {
 
     // Real-estate compliance docs awaiting verification (admin queue).
     safeCount(async () => {
-      if (!isAdmin) return 0;
+      if (!canViewRoute("/real-estate/admin/compliance")) return 0;
       return db.complianceDocument.count({
         where: { organizationId: orgId, status: "PENDING" },
       });
@@ -101,7 +128,7 @@ export async function GET(request: NextRequest) {
 
     // New job applications to review (admin/recruiter queue).
     safeCount(async () => {
-      if (!isAdmin) return 0;
+      if (!canViewRoute("/hr/recruitment/job-application")) return 0;
       return db.jobApplication.count({
         where: { organizationId: orgId, status: "NEW" },
       });
@@ -109,7 +136,7 @@ export async function GET(request: NextRequest) {
 
     // Onboarding checklists not yet started (admin queue).
     safeCount(async () => {
-      if (!isAdmin) return 0;
+      if (!canViewRoute("/hr/onboarding")) return 0;
       return db.onboardingChecklist.count({
         where: { organizationId: orgId, status: "PENDING" },
       });
