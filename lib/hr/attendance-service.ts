@@ -1543,9 +1543,6 @@ export async function recordPunch(
       checkInPhoto: input.photoUrl ?? null,
       checkInFaceMatch: input.faceMatch ?? null,
       checkInLivenessPassed: input.livenessPassed ?? null,
-      // Store the out-of-radius reason only when this punch was actually
-      // outside the fence (and the org requires it); else null.
-      checkInOutOfRangeReason: outOfRange ? trimmedReason : null,
       lateMinutes,
       organizationId: input.organizationId ?? null,
       idempotencyKey: input.idempotencyKey ?? null,
@@ -1686,7 +1683,6 @@ export async function recordPunch(
         checkOutPhoto: input.photoUrl ?? null,
         checkOutFaceMatch: input.faceMatch ?? null,
         checkOutLivenessPassed: input.livenessPassed ?? null,
-        checkOutOutOfRangeReason: outOfRange ? trimmedReason : null,
         earlyOutMinutes,
         overtimeMinutes,
         idempotencyKey: input.idempotencyKey ?? null,
@@ -1700,6 +1696,31 @@ export async function recordPunch(
       };
     }
     outcome = await buildOutcome(input, existing.id, true);
+  }
+
+  // Persist the out-of-radius reason via raw SQL (not the typed write above)
+  // so it works even when the running Prisma client predates these columns —
+  // the typed create/update would otherwise reject the unknown field and 500
+  // the whole punch. Only runs when the punch was actually outside the fence
+  // and a reason was given. Best-effort: a failure here must not fail the
+  // punch that already succeeded.
+  if (outOfRange && trimmedReason && outcome.attendanceId) {
+    const col =
+      input.type === 'IN'
+        ? 'check_in_out_of_range_reason'
+        : 'check_out_out_of_range_reason';
+    try {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "attendance_records" SET "${col}" = $1 WHERE "id" = $2`,
+        trimmedReason,
+        outcome.attendanceId,
+      );
+    } catch (err: any) {
+      console.warn(
+        '[attendance] failed to persist out-of-range reason:',
+        err?.message || err,
+      );
+    }
   }
 
   // Commit the rate-limit slot only after we've actually written to the DB —
