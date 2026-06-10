@@ -25,6 +25,12 @@ interface PunchBody {
   // detected (real face), false = static (rejected), null = check not
   // run. Persisted on the Attendance row for audit / reporting.
   livenessPassed?: boolean | null;
+  // Reason for punching outside the geofence radius. Required (and stored)
+  // only when the org has requireReasonOutsideRadius on and the location is
+  // outside the fence; the service returns OUT_OF_RANGE_REASON_REQUIRED to
+  // prompt for it, then the client retries with this filled in.
+  outOfRangeReason?: string | null;
+  endLeaveEarly?: boolean;
 }
 
 function parseGeo(raw: PunchBody['geo']): { lat: number; lng: number } | null {
@@ -165,6 +171,8 @@ export async function POST(request: NextRequest) {
       faceMatch,
       livenessPassed,
       endLeaveEarly: body.endLeaveEarly === true,
+      outOfRangeReason:
+        typeof body.outOfRangeReason === 'string' ? body.outOfRangeReason : null,
     });
 
     // The punch changed the day's attendance row, which means the cached

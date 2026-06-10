@@ -65,6 +65,7 @@ interface AttendanceConfig {
   geofenceLat: number | null;
   geofenceLng: number | null;
   geofenceRadiusM: number | null;
+  requireReasonOutsideRadius: boolean;
   ipWhitelist: string[];
   payableBasis: PayableBasis;
   workflowModuleName: string | null;
@@ -121,6 +122,7 @@ export function AttendanceConfigForm() {
     geofenceLat: string;
     geofenceLng: string;
     geofenceRadiusM: string;
+    requireReasonOutsideRadius: boolean;
     ipWhitelistRaw: string;
     payableBasis: PayableBasis;
     workflowModuleName: string;
@@ -202,6 +204,7 @@ export function AttendanceConfigForm() {
         geofenceLng: c.geofenceLng == null ? "" : String(c.geofenceLng),
         geofenceRadiusM:
           c.geofenceRadiusM == null ? "" : String(c.geofenceRadiusM),
+        requireReasonOutsideRadius: !!c.requireReasonOutsideRadius,
         ipWhitelistRaw: (c.ipWhitelist ?? []).join("\n"),
         payableBasis: c.payableBasis,
         workflowModuleName: c.workflowModuleName ?? "",
@@ -375,6 +378,7 @@ export function AttendanceConfigForm() {
       form.geofenceLng !== (config.geofenceLng == null ? "" : String(config.geofenceLng)) ||
       form.geofenceRadiusM !==
         (config.geofenceRadiusM == null ? "" : String(config.geofenceRadiusM)) ||
+      form.requireReasonOutsideRadius !== !!config.requireReasonOutsideRadius ||
       form.ipWhitelistRaw !== (config.ipWhitelist ?? []).join("\n") ||
       form.payableBasis !== config.payableBasis ||
       form.workflowModuleName !== (config.workflowModuleName ?? "") ||
@@ -645,6 +649,7 @@ export function AttendanceConfigForm() {
         geofenceRadiusM: form.geofenceRadiusM
           ? Math.round(Number(form.geofenceRadiusM))
           : null,
+        requireReasonOutsideRadius: form.requireReasonOutsideRadius,
         ipWhitelist,
         payableBasis: form.payableBasis,
         workflowModuleName: trimmedWorkflowModule.length > 0 ? trimmedWorkflowModule : null,
@@ -1587,6 +1592,28 @@ export function AttendanceConfigForm() {
                       }
                     />
                   </Field>
+                </div>
+              )}
+              {form.geofenceMode !== "OFF" && (
+                <div className="flex items-start gap-2 pt-1">
+                  <Switch
+                    id="requireReasonOutsideRadius"
+                    checked={form.requireReasonOutsideRadius}
+                    onCheckedChange={(v: boolean) =>
+                      updateForm("requireReasonOutsideRadius", v)
+                    }
+                  />
+                  <Label
+                    htmlFor="requireReasonOutsideRadius"
+                    className="cursor-pointer text-xs leading-relaxed"
+                  >
+                    Require a reason when outside the radius
+                    <span className="block text-[11px] text-muted-foreground font-normal">
+                      Employees punching (check-in or check-out) beyond the
+                      radius must type a reason; it's stored on the attendance
+                      record for HR. Pairs best with “Capture only” mode.
+                    </span>
+                  </Label>
                 </div>
               )}
             </div>

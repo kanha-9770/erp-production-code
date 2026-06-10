@@ -30,6 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -100,6 +101,7 @@ interface AttendanceStatusPayload {
     lat: number | null;
     lng: number | null;
     radiusM: number | null;
+    requireReasonOutsideRadius?: boolean;
   };
   shift: { start: string; end: string; isCustom: boolean };
   overtime: {
@@ -350,6 +352,7 @@ interface UseAttendanceState {
     geo?: { lat: number; lng: number } | null,
     faceMatch?: number | null,
     livenessPassed?: boolean | null,
+    outOfRangeReason?: string | null,
   ) => Promise<void>;
   refresh: () => Promise<void>;
   // Shared with the component so handleClick can flag the next IN punch as a
@@ -513,6 +516,7 @@ function useAttendance(enabled: boolean): UseAttendanceState {
       preCapturedGeo: { lat: number; lng: number } | null = null,
       faceMatch: number | null = null,
       livenessPassed: boolean | null = null,
+      outOfRangeReason: string | null = null,
     ) => {
       if (busy) return;
       setBusy(true);
@@ -565,6 +569,7 @@ function useAttendance(enabled: boolean): UseAttendanceState {
             faceMatch,
             livenessPassed,
             endLeaveEarly: endLeaveEarlyRef.current,
+            outOfRangeReason,
           }),
         });
         const json = await res.json();
@@ -666,7 +671,13 @@ export function AttendanceWidget({
     faceMatch: number | null;
     livenessPassed: boolean | null;
     message: string;
+    // When true the org requires a written reason to punch from outside the
+    // radius — the dialog shows a mandatory textarea instead of a plain
+    // yes/no confirm.
+    requireReason: boolean;
   } | null>(null);
+  // Bound to the reason textarea in the out-of-radius dialog.
+  const [geoReason, setGeoReason] = useState("");
 
   // Live location check shown in the popover. Lets the user verify in real
   // time whether their current GPS reading is inside the configured radius
@@ -756,13 +767,18 @@ export function AttendanceWidget({
       if (inFenceMode) {
         const dist = distanceMeters(geo.lat, geo.lng, fence!.lat!, fence!.lng!);
         if (dist > fence!.radiusM!) {
+          const requireReason = !!fence!.requireReasonOutsideRadius;
+          setGeoReason("");
           setGeoConfirm({
             type,
             photoUrl,
             geo,
             faceMatch,
             livenessPassed,
-            message: `You are ${Math.round(dist)}m away from the office (allowed radius: ${fence!.radiusM}m). Do you want to continue?`,
+            requireReason,
+            message: requireReason
+              ? `You are ${Math.round(dist)}m away from the office (allowed radius: ${fence!.radiusM}m). Please tell us why you are ${type === "IN" ? "checking in" : "checking out"} from here.`
+              : `You are ${Math.round(dist)}m away from the office (allowed radius: ${fence!.radiusM}m). Do you want to continue?`,
           });
           return;
         }
@@ -1302,12 +1318,30 @@ export function AttendanceWidget({
               {geoConfirm?.message}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {geoConfirm?.requireReason && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">
+                Reason <span className="text-destructive">*</span>
+              </label>
+              <Textarea
+                autoFocus
+                rows={3}
+                placeholder="e.g. Client visit, work from home approved, field duty…"
+                value={geoReason}
+                onChange={(e) => setGeoReason(e.target.value)}
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!!geoConfirm?.requireReason && !geoReason.trim()}
               onClick={async () => {
                 const c = geoConfirm;
                 if (!c) return;
+                // Enforce a non-empty reason when the org requires it.
+                const reason = geoReason.trim();
+                if (c.requireReason && !reason) return;
                 setGeoConfirm(null);
                 try {
                   await punch(
@@ -1316,6 +1350,7 @@ export function AttendanceWidget({
                     c.geo,
                     c.faceMatch,
                     c.livenessPassed,
+                    c.requireReason ? reason : null,
                   );
                   toast({
                     title:
@@ -1330,10 +1365,12 @@ export function AttendanceWidget({
                     description: e?.message ?? "Try again",
                     variant: "destructive",
                   });
+                } finally {
+                  setGeoReason("");
                 }
               }}
             >
-              Continue
+              {geoConfirm?.requireReason ? "Submit & continue" : "Continue"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

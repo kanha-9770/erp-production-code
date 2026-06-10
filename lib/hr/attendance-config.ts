@@ -68,6 +68,9 @@ export interface AttendanceConfig {
   geofenceLat: number | null;
   geofenceLng: number | null;
   geofenceRadiusM: number | null;
+  /** When true, a punch (in OR out) outside the geofence radius is allowed
+   *  only with a reason, which is stored on the attendance row. */
+  requireReasonOutsideRadius: boolean;
   ipWhitelist: string[];
   payableBasis: PayableBasis;
   workflowModuleName: string | null;
@@ -125,6 +128,7 @@ export const DEFAULT_ATTENDANCE_CONFIG: AttendanceConfig = {
   geofenceLat: null,
   geofenceLng: null,
   geofenceRadiusM: null,
+  requireReasonOutsideRadius: false,
   ipWhitelist: [],
   payableBasis: 'monthDays',
   workflowModuleName: 'Attendance',
@@ -307,6 +311,7 @@ async function loadAttendanceConfigFromDb(
       geofenceLat: row.geofenceLat ?? null,
       geofenceLng: row.geofenceLng ?? null,
       geofenceRadiusM: row.geofenceRadiusM ?? null,
+      requireReasonOutsideRadius: !!row.requireReasonOutsideRadius,
       ipWhitelist: coerceIpList(row.ipWhitelist),
       payableBasis: coercePayableBasis(row.payableBasis),
       workflowModuleName:
@@ -378,6 +383,7 @@ export interface AttendanceConfigUpdate {
   geofenceLat?: number | null;
   geofenceLng?: number | null;
   geofenceRadiusM?: number | null;
+  requireReasonOutsideRadius?: boolean;
   ipWhitelist?: string[];
   payableBasis?: PayableBasis;
   workflowModuleName?: string | null;

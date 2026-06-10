@@ -207,6 +207,9 @@ export async function PUT(request: NextRequest) {
   if (gLng !== undefined) patch.geofenceLng = gLng;
   const gRad = pickOptionalNullableNumber(body.geofenceRadiusM);
   if (gRad !== undefined) patch.geofenceRadiusM = gRad;
+  if (typeof body.requireReasonOutsideRadius === "boolean") {
+    patch.requireReasonOutsideRadius = body.requireReasonOutsideRadius;
+  }
   const ips = pickIpList(body.ipWhitelist);
   if (ips !== undefined) patch.ipWhitelist = ips;
   const pb = pickPayableBasis(body.payableBasis);

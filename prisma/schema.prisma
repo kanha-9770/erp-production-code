@@ -2315,6 +2315,12 @@ model Attendance {
   checkOutDevice    String?   @map("check_out_device")
   checkInSource     String?   @map("check_in_source") // WEB | MOBILE | BIOMETRIC | ADMIN
   checkOutSource    String?   @map("check_out_source")
+  // Reason the employee gave for punching outside the office geofence. Captured
+  // when AttendanceConfiguration.requireReasonOutsideRadius is on and the punch
+  // location is beyond geofenceRadiusM. Null = punch was inside the fence (or
+  // the requirement is off).
+  checkInOutOfRangeReason  String? @map("check_in_out_of_range_reason")
+  checkOutOutOfRangeReason String? @map("check_out_out_of_range_reason")
   breakMinutes      Int       @default(0) @map("break_minutes")
   lateMinutes       Int       @default(0) @map("late_minutes")
   earlyOutMinutes   Int       @default(0) @map("early_out_minutes")
@@ -2441,6 +2447,13 @@ model AttendanceConfiguration {
   geofenceLat     Float? @map("geofence_lat")
   geofenceLng     Float? @map("geofence_lng")
   geofenceRadiusM Int?   @map("geofence_radius_m")
+
+  // When true, a check-in OR check-out whose location is OUTSIDE the geofence
+  // radius is allowed only if the employee supplies a reason; the punch is
+  // stored with that reason (check_in/out_out_of_range_reason). Independent of
+  // geofenceMode: typically paired with CAPTURE (allow + record) rather than
+  // ENFORCE (hard block). No effect when geofence has no center/radius set.
+  requireReasonOutsideRadius Boolean @default(false) @map("require_reason_outside_radius")
 
   // IP whitelist. Empty array = no restriction. Any non-empty list means
   // punches from outside these CIDRs are rejected.
