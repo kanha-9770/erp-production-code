@@ -51,40 +51,152 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  /**
+   * When true (and `side` is "left"/"right"), the sheet can be widened/narrowed by
+   * dragging a handle on its inner edge with the mouse. Desktop only — on mobile
+   * (`< sm`) the sheet stays full-width and the handle is hidden.
+   */
+  resizable?: boolean
+  /** Initial desktop width in px (used when `resizable`). Defaults to 768. */
+  defaultWidth?: number
+  /** Minimum desktop width in px while resizing. Defaults to 400. */
+  minWidth?: number
+  /** Hide the built-in top-right close button (e.g. when the header renders its own). */
+  hideClose?: boolean
+}
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <SheetPrimitive.Content
-      ref={ref}
-      className={cn(sheetVariants({ side }), className)}
-      {...props}
-    >
-      {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </SheetPrimitive.Close>
-    </SheetPrimitive.Content>
-  </SheetPortal>
-))
+>(
+  (
+    {
+      side = "right",
+      className,
+      children,
+      resizable = false,
+      defaultWidth = 768,
+      minWidth = 400,
+      hideClose = false,
+      style,
+      ...props
+    },
+    ref
+  ) => {
+    const [width, setWidth] = React.useState(defaultWidth)
+    const isHorizontal = side === "left" || side === "right"
+    const canResize = resizable && isHorizontal
+
+    const handlePointerDown = React.useCallback(
+      (e: React.PointerEvent<HTMLDivElement>) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const startX = e.clientX
+        const startWidth = width
+        const maxWidth =
+          typeof window !== "undefined" ? window.innerWidth * 0.95 : startWidth
+
+        const onMove = (ev: PointerEvent) => {
+          // Dragging toward the screen centre widens the sheet.
+          const delta = side === "left" ? ev.clientX - startX : startX - ev.clientX
+          setWidth(Math.min(Math.max(startWidth + delta, minWidth), maxWidth))
+        }
+        const onUp = () => {
+          document.body.style.removeProperty("user-select")
+          document.body.style.removeProperty("cursor")
+          window.removeEventListener("pointermove", onMove)
+          window.removeEventListener("pointerup", onUp)
+        }
+
+        document.body.style.userSelect = "none"
+        document.body.style.cursor = "col-resize"
+        window.addEventListener("pointermove", onMove)
+        window.addEventListener("pointerup", onUp)
+      },
+      [side, width, minWidth]
+    )
+
+    const mergedStyle = canResize
+      ? ({ ...style, ["--sheet-width" as any]: `${width}px` } as React.CSSProperties)
+      : style
+
+    return (
+      <SheetPortal>
+        <SheetOverlay />
+        <SheetPrimitive.Content
+          ref={ref}
+          className={cn(
+            sheetVariants({ side }),
+            canResize && "w-full sm:w-[var(--sheet-width)] sm:max-w-[95vw]",
+            className
+          )}
+          style={mergedStyle}
+          {...props}
+        >
+          {canResize && (
+            // Sticky, zero-height wrapper keeps the full-height grab bar pinned to the
+            // viewport even when the sheet body (overflow-y-auto) is scrolled.
+            <div className="pointer-events-none sticky top-0 z-50 hidden h-0 sm:block">
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize panel"
+                onPointerDown={handlePointerDown}
+                className={cn(
+                  "group pointer-events-auto absolute top-0 h-screen w-2 cursor-col-resize touch-none select-none",
+                  side === "right" ? "left-0" : "right-0"
+                )}
+              >
+                <div className="h-full w-px bg-border transition-colors group-hover:w-[3px] group-hover:bg-primary" />
+              </div>
+            </div>
+          )}
+          {children}
+          {!hideClose && (
+            <SheetPrimitive.Close className="absolute right-4 top-4 z-50 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </SheetPrimitive.Close>
+          )}
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    )
+  }
+)
 SheetContent.displayName = SheetPrimitive.Content.displayName
+
+interface SheetHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+  /**
+   * Render a close (X) button as the last child of the header. Because the header
+   * is typically sticky, this stays pinned and tappable on mobile — unlike the
+   * absolutely-positioned built-in close, which can scroll out of view or sit
+   * behind an opaque sticky header. Pair with `hideClose` on `SheetContent`.
+   */
+  showClose?: boolean
+}
 
 const SheetHeader = ({
   className,
+  children,
+  showClose = false,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
+}: SheetHeaderProps) => (
   <div
     className={cn(
       "flex flex-col space-y-2 text-center sm:text-left",
       className
     )}
     {...props}
-  />
+  >
+    {children}
+    {showClose && (
+      <SheetPrimitive.Close className="-mr-1 shrink-0 rounded-md p-1 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+        <X className="h-5 w-5" />
+        <span className="sr-only">Close</span>
+      </SheetPrimitive.Close>
+    )}
+  </div>
 )
 SheetHeader.displayName = "SheetHeader"
 

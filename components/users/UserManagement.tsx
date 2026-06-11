@@ -49,6 +49,16 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import {
   User,
   Plus,
@@ -68,6 +78,8 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 
 // --- Types ---
@@ -137,6 +149,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [roleOpen, setRoleOpen] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
 
   const [units, setUnits] = useState<Unit[]>([]);
@@ -656,7 +669,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
 
       {/* Slide-over form */}
       <Sheet open={showForm} onOpenChange={(open) => { if (!open && !isSaving) closeForm(); }}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        <SheetContent side="right" resizable defaultWidth={448} minWidth={360} className="flex w-full flex-col gap-0 p-0">
           {/* Header */}
           <div className="flex items-center gap-3 border-b bg-muted/30 px-5 py-4">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
@@ -762,22 +775,68 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
 
                 <div className="space-y-1.5">
                   <Label className="text-xs">System Role *</Label>
-                  <Select
-                    value={formData.roleId || ''}
-                    onValueChange={(v) => setFormData((prev) => ({ ...prev, roleId: v }))}
-                    disabled={isSaving}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.map((role) => (
-                        <SelectItem key={role.id} value={role.id}>
+                  {/* Searchable role picker (Popover + Command). The Radix Select
+                      viewport can't host a sticky search box, so we use the
+                      combobox pattern used elsewhere in the app. cmdk matches on
+                      an item's `value` (the role id), so a custom `filter` matches
+                      the typed query against the role name instead. */}
+                  <Popover open={roleOpen} onOpenChange={setRoleOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={roleOpen}
+                        disabled={isSaving}
+                        className="h-10 w-full justify-between bg-background px-3 font-normal"
+                      >
+                        <span className={cn("truncate", !formData.roleId && "text-muted-foreground")}>
+                          {(() => {
+                            const sr = roles.find((r) => r.id === formData.roleId);
+                            return sr ? `${sr.name}${sr.isAdmin ? ' (admin)' : ''}` : "Select role";
+                          })()}
+                        </span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+                      <Command
+                        filter={(value, search) => {
+                          // cmdk may normalise (lowercase) the item value, so compare loosely.
+                          const role = roles.find((r) => r.id.toLowerCase() === value.toLowerCase());
+                          if (!role) return 0;
+                          return role.name.toLowerCase().includes(search.toLowerCase().trim()) ? 1 : 0;
+                        }}
+                      >
+                        <CommandInput placeholder="Search roles…" className="h-9" />
+                        <CommandList>
+                          <CommandEmpty>No roles found</CommandEmpty>
+                          <CommandGroup>
+                            {roles.map((role) => (
+                              <CommandItem
+                                key={role.id}
+                                value={role.id}
+                                onSelect={() => {
+                                  setFormData((prev) => ({ ...prev, roleId: role.id }));
+                                  setRoleOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4 shrink-0",
+                                    formData.roleId === role.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate">
                           {'  '.repeat(role.level ?? 0)}{role.name}{role.isAdmin ? ' (admin)' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                                </span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
 
