@@ -6,6 +6,7 @@ import { useGetUsersQuery, useDeleteUserMutation, useCreateUserMutation, useUpda
 import { useGetRolesQuery } from "@/lib/api/permissions";
 import { useGetOrganizationUnitsQuery } from "@/lib/api/organization";
 import { useToast } from "@/hooks/use-toast";
+import { useRouteAccess } from "@/hooks/use-route-access";
 import PageBackLink from "@/components/shared/page-back-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,6 +151,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
 
   // RTK Query hooks for initial data
   const { data: sessionData } = useGetUserQuery();
+
+  // Route-permission grant for this page. `isPermitted` is whitelist mode:
+  // true only when an admin has explicitly granted "/settings/users" to this
+  // user's role (or to the user directly) — admins always pass. This lets the
+  // page be opened by a non-admin (e.g. HR) who was given the route grant in
+  // Settings → Permission → Route, instead of being hard-locked to admins.
+  const { isPermitted } = useRouteAccess();
+  const canManageUsers = isPermitted("/settings/users");
   const { data: rolesData } = useGetRolesQuery();
   const { data: usersData, refetch: refetchUsers, isFetching, isLoading } = useGetUsersQuery({
     page,
@@ -316,7 +325,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ showBackLink = false })
 
   const totalPages = Math.max(1, Math.ceil(totalUsers / pageSize));
 
-  if (isAdmin === false) {
+  if (isAdmin === false && !canManageUsers) {
     return (
       <div className="p-4 sm:p-6">
         <div className="mx-auto flex max-w-md flex-col items-center justify-center rounded-lg border bg-card p-8 text-center shadow-sm">
