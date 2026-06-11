@@ -30,10 +30,16 @@ export async function GET(request: NextRequest) {
     // refresh through /api/auth/refresh-meta and mint a valid cookie.
     let allowedRoutes: string[] = []
     let deniedRoutes: string[] = []
+    // Mint timestamp of the signed auth-meta cookie. The client guard compares
+    // this against the org's perm-version: if a permission change is newer than
+    // the cookie, the cookie is stale and must be refreshed. 0 when the cookie
+    // is missing/invalid (forces a refresh on the next poll).
+    let permMetaTs = 0
     const authMeta = await verifyAuthMeta(request.cookies.get("auth-meta")?.value)
     if (authMeta) {
       allowedRoutes = Array.isArray(authMeta.allowedRoutes) ? authMeta.allowedRoutes : []
       deniedRoutes = Array.isArray(authMeta.deniedRoutes) ? authMeta.deniedRoutes : []
+      permMetaTs = typeof authMeta.ts === "number" ? authMeta.ts : 0
     }
 
     return NextResponse.json({
@@ -69,6 +75,7 @@ export async function GET(request: NextRequest) {
           : null,
         allowedRoutes,
         deniedRoutes,
+        permMetaTs,
         unitAssignments: session.user.unitAssignments.map((ua) => ({
           unit: {
             id: ua.unit.id,

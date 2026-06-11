@@ -34,14 +34,14 @@ export async function GET(request: NextRequest) {
     // each org's `version` is cached in Redis. cachedSWR serves the cached
     // value for `fresh` seconds and refreshes in the background (de-duped per
     // key) — collapsing N tabs × M users into ~1 DB read per org per window,
-    // instead of 2 ordered queries per poll per tab. Permission changes are
-    // rare and the client polls at 60s, so a 10s cache adds no meaningful
-    // detection delay.
+    // instead of 2 ordered queries per poll per tab. The client polls at 15s;
+    // a 5s fresh window means a saved grant/revocation is visible to the cache
+    // within ~5s, so the next poll picks it up — total propagation ≤ ~15-20s.
     const version = await cachedSWR(
       "auth",
       buildKey("auth", "perm-version", orgId),
-      10, // fresh seconds
-      60, // retained (stale) seconds
+      5, // fresh seconds
+      30, // retained (stale) seconds
       async () => {
         const [roleAccessLatest, userAccessLatest] = await Promise.all([
           prisma.routeRoleAccess.findFirst({
