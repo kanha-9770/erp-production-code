@@ -27,6 +27,16 @@ import { useDeleteOrgUnitMutation } from "@/lib/api/organization";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { OrganizationUnit } from "@/types/role";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export function OrgUnitList() {
   const { state } = useRoles();
@@ -75,6 +85,8 @@ function ListRow({
   const { state, dispatch, refreshData } = useRoles();
   const { toast } = useToast();
   const [deleteOrgUnit] = useDeleteOrgUnitMutation();
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
 
   const children = unit.children ?? [];
   const hasChildren = children.length > 0;
@@ -102,9 +114,13 @@ function ListRow({
     });
   };
 
-  const remove = async (e: React.MouseEvent) => {
+  const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Delete "${unit.name}" and all descendants?`)) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const runDelete = async () => {
+    setDeleting(true);
     try {
       await deleteOrgUnit({
         organizationId: state.organizationId ?? "",
@@ -112,12 +128,15 @@ function ListRow({
       }).unwrap();
       await refreshData();
       toast({ title: "Deleted", description: "Removed successfully" });
+      setConfirmDeleteOpen(false);
     } catch (err) {
       toast({
         title: "Error",
         description: (err as Error).message || "Failed to delete",
         variant: "destructive",
       });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -128,6 +147,35 @@ function ListRow({
 
   return (
     <li>
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent className="z-[99999] bg-white border border-slate-200 shadow-xl max-w-[400px] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-bold">
+              <Trash2 className="h-5 w-5 text-red-600 shrink-0" />
+              Delete &ldquo;{unit.name}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 text-sm text-left">
+              Are you sure you want to delete &ldquo;{unit.name}&rdquo; and all of its descendants? They will be moved to the recycle bin and can be restored later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={deleting} className="border border-slate-200 hover:bg-slate-100 font-medium">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void runDelete();
+              }}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-colors"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div
         role="button"
         tabIndex={0}
@@ -225,7 +273,7 @@ function ListRow({
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-destructive hover:text-destructive"
-              onClick={remove}
+              onClick={handleDeleteClick}
               aria-label="Delete"
               title="Delete"
             >

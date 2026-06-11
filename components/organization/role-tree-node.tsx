@@ -9,6 +9,16 @@ import { useDeleteRoleMutation, useDeleteRolePromoteChildrenMutation } from "@/l
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { TreeConnectors } from "./tree-connectors"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 type RoleChartNodeProps = {
   role: any
@@ -23,6 +33,7 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
   const [deleteRoleMutation] = useDeleteRoleMutation()
   const [deleteRolePromoteChildren] = useDeleteRolePromoteChildrenMutation()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmLeafOpen, setConfirmLeafOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const hasChildren = Boolean(role?.children?.length)
@@ -55,14 +66,14 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
       setConfirmOpen(true)
       return
     }
-    if (!confirm(`Delete "${roleName}"?`)) return
-    void runDelete("branch")
+    setConfirmLeafOpen(true)
   }
 
   // mode "promote" → lift sub-roles up to this role's parent; "branch" →
   // delete this role and its entire subtree (the original behaviour).
   const runDelete = async (mode: "promote" | "branch") => {
     setConfirmOpen(false)
+    setConfirmLeafOpen(false)
     setDeleting(true)
     try {
       if (mode === "promote") {
@@ -94,6 +105,35 @@ export function RoleChartNode({ role, isFirst, isLast, isRoot }: RoleChartNodePr
   return (
     <div className="flex flex-col items-center relative flex-1">
       <TreeConnectors isRoot={isRoot} isFirst={isFirst} isLast={isLast} />
+
+      <AlertDialog open={confirmLeafOpen} onOpenChange={setConfirmLeafOpen}>
+        <AlertDialogContent className="z-[99999] bg-white border border-slate-200 shadow-xl max-w-[400px] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-bold">
+              <Trash2 className="h-5 w-5 text-red-600 shrink-0" />
+              Delete &ldquo;{roleName}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 text-sm">
+              Are you sure you want to delete this role? It will be moved to the recycle bin and can be restored later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={deleting} className="border border-slate-200 hover:bg-slate-100 font-medium">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                void runDelete("branch")
+              }}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-colors"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete choice — only reached for roles that HAVE sub-roles. Lets the
           user keep the sub-roles (promote them up a level) or remove the whole

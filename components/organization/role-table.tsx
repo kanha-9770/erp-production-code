@@ -17,6 +17,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/types/role";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Row {
   role: Role;
@@ -27,6 +37,8 @@ export function RoleTable() {
   const { state, dispatch, refreshData } = useRoles();
   const { toast } = useToast();
   const [deleteRoleMutation] = useDeleteRoleMutation();
+  const [roleToDelete, setRoleToDelete] = React.useState<Role | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
 
   const roles = state.roles ?? [];
 
@@ -71,7 +83,7 @@ export function RoleTable() {
     dispatch({ type: "TOGGLE_EXPAND", payload: { roleId: role.id } });
   };
 
-  const remove = async (e: React.MouseEvent, role: Role) => {
+  const handleDeleteClick = (e: React.MouseEvent, role: Role) => {
     e.stopPropagation();
     if (role.isAdmin) {
       toast({
@@ -81,14 +93,19 @@ export function RoleTable() {
       });
       return;
     }
-    const name = role.name?.trim() || "this role";
-    if (!confirm(`Delete "${name}" and all its sub-roles?\nThis cannot be undone.`))
-      return;
-    dispatch({ type: "DELETE_ROLE", payload: { roleId: role.id } });
+    setRoleToDelete(role);
+  };
+
+  const runDelete = async () => {
+    if (!roleToDelete) return;
+    const name = roleToDelete.name?.trim() || "this role";
+    setDeleting(true);
+    dispatch({ type: "DELETE_ROLE", payload: { roleId: roleToDelete.id } });
     try {
-      await deleteRoleMutation(role.id).unwrap();
+      await deleteRoleMutation(roleToDelete.id).unwrap();
       toast({ title: "Role deleted", description: name });
       await refreshData();
+      setRoleToDelete(null);
     } catch (err) {
       toast({
         variant: "destructive",
@@ -96,6 +113,8 @@ export function RoleTable() {
         description: (err as Error).message || "Please try again.",
       });
       await refreshData();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -119,6 +138,35 @@ export function RoleTable() {
 
   return (
     <div className="p-2 sm:p-3 max-h-[72vh] overflow-auto">
+      <AlertDialog open={roleToDelete !== null} onOpenChange={(open) => { if (!open) setRoleToDelete(null); }}>
+        <AlertDialogContent className="z-[99999] bg-white border border-slate-200 shadow-xl max-w-[400px] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-bold">
+              <Trash2 className="h-5 w-5 text-red-600 shrink-0" />
+              Delete &ldquo;{roleToDelete?.name || "this role"}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 text-sm text-left">
+              Are you sure you want to delete &ldquo;{roleToDelete?.name || "this role"}&rdquo; and all of its sub-roles? They will be moved to the recycle bin and can be restored later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2">
+            <AlertDialogCancel disabled={deleting} className="border border-slate-200 hover:bg-slate-100 font-medium">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void runDelete();
+              }}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-colors"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -233,7 +281,7 @@ export function RoleTable() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={(e) => remove(e, role)}
+                          onClick={(e) => handleDeleteClick(e, role)}
                           aria-label="Delete"
                           title="Delete"
                         >
