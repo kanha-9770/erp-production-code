@@ -974,6 +974,41 @@ export const UserManagementHandlers = {
       }
 
       const employee = await prisma.employee.create({ data });
+
+      // Sync the employee's department (and phone) onto the linked User so the
+      // User Management list at /settings/users shows the same department that
+      // was set on the Employee Master form. The user was just created/reused
+      // above with only name + email; without this the department column there
+      // stays blank until the employee is edited. Mirrors the Employee→User
+      // sync the update path already does. Best-effort — never fail the create.
+      if (employee.userId) {
+        const userSync: Record<string, any> = {};
+        const dept =
+          typeof data.department === "string" && data.department.trim()
+            ? data.department.trim()
+            : null;
+        if (dept) userSync.department = dept;
+        const phone =
+          typeof data.personalContact === "string" && data.personalContact.trim()
+            ? data.personalContact.trim()
+            : null;
+        if (phone) userSync.phone = phone;
+        if (Object.keys(userSync).length > 0) {
+          try {
+            await prisma.user.update({
+              where: { id: employee.userId },
+              data: userSync,
+            });
+            await invalidateAllSessionsForUser(employee.userId);
+          } catch (err: any) {
+            console.warn(
+              "[createEmployee] department→user sync failed:",
+              err?.message || err,
+            );
+          }
+        }
+      }
+
       // New employee → drop the live payroll cache so they appear in the
       // dashboard on the next fetch instead of waiting for the 5s TTL.
       if (authUser.organizationId) invalidatePayrollCache(authUser.organizationId);

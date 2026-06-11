@@ -283,7 +283,9 @@ function tryGetPosition(opts: PositionOptions): Promise<GeoResult> {
   });
 }
 
-async function captureGeo(): Promise<GeoResult> {
+async function captureGeo(
+  devFallback?: { lat: number; lng: number } | null,
+): Promise<GeoResult> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return {
       ok: false,
@@ -297,6 +299,22 @@ async function captureGeo(): Promise<GeoResult> {
   // never saw a prompt. Detect this up front so the popup tells the admin
   // "you're on HTTP" instead of accusing the user of denying the prompt.
   if (isInsecureOrigin()) {
+    // Local development convenience: when testing the dev server from another
+    // device over the LAN IP (http://192.168.x.x:5001), the origin is insecure
+    // so the browser blocks geolocation and "Check location" / punching would
+    // break. In DEV ONLY, fall back to the office geofence centre (when known)
+    // so the flow works end-to-end for testing. Never active in production —
+    // there the HTTPS message below is what shows.
+    if (process.env.NODE_ENV !== "production" && devFallback) {
+      return {
+        ok: true,
+        lat: devFallback.lat,
+        lng: devFallback.lng,
+        // Flag the synthetic reading with a sentinel accuracy so the UI can
+        // show it's a dev fallback rather than a real GPS fix.
+        accuracy: -1,
+      };
+    }
     return {
       ok: false,
       reason: "insecure",
@@ -700,7 +718,11 @@ export function AttendanceWidget({
 
   const refreshLiveLocation = useCallback(async () => {
     setLiveGeo({ state: "checking" });
-    const r = await captureGeo();
+    const fenceCenter =
+      status?.geofence?.lat != null && status?.geofence?.lng != null
+        ? { lat: status.geofence.lat, lng: status.geofence.lng }
+        : null;
+    const r = await captureGeo(fenceCenter);
     if (!r.ok) {
       setLiveGeo({ state: "error", message: r.message, at: Date.now() });
       return;
@@ -747,7 +769,11 @@ export function AttendanceWidget({
       // Caller can hand us a geo reading that was captured in parallel with
       // the photo upload (face-capture flow). Avoids running geolocation
       // twice and serially when we already have a fresh fix.
-      const geoResult = preCapturedGeoResult ?? (await captureGeo());
+      const fenceCenter =
+        fence?.lat != null && fence?.lng != null
+          ? { lat: fence.lat, lng: fence.lng }
+          : null;
+      const geoResult = preCapturedGeoResult ?? (await captureGeo(fenceCenter));
 
       // Location is mandatory for every punch — in-office or off-site —
       // regardless of geofenceMode. Without a successful fix we refuse the
@@ -894,7 +920,11 @@ export function AttendanceWidget({
         // upload to Hostinger and the geolocation lookup are independent —
         // serializing them was the main reason check-in felt slow on
         // indoor (weak GPS) punches.
-        const geoPromise = captureGeo();
+        const fenceCenter =
+          status?.geofence?.lat != null && status?.geofence?.lng != null
+            ? { lat: status.geofence.lat, lng: status.geofence.lng }
+            : null;
+        const geoPromise = captureGeo(fenceCenter);
         const result = await uploadFacePhoto(
           blob,
           type,
@@ -1204,7 +1234,10 @@ export function AttendanceWidget({
                     </div>
                   )}
                   <div className="mt-0.5 text-[10px] opacity-80">
-                    Accuracy ±{Math.round(liveGeo.accuracy)}m · updated{" "}
+                    {liveGeo.accuracy < 0
+                      ? "Dev fallback (office centre) · "
+                      : `Accuracy ±${Math.round(liveGeo.accuracy)}m · `}
+                    updated{" "}
                     {formatTimeShort(new Date(liveGeo.at).toISOString())}
                   </div>
                   {liveGeo.accuracy > GEO_LOW_ACCURACY_WARN_M && (
