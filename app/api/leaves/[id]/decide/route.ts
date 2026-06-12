@@ -15,6 +15,11 @@ import {
 import { buildLeaveRecordData } from '@/lib/hr/leave-workflow';
 import { fireWorkflow } from '@/lib/workflow/static-triggers';
 import { invalidatePayrollCache } from '@/lib/utils/payroll-live';
+import {
+  notifyUserAppreciation,
+  leaveApprovedMessage,
+  leaveRejectedMessage,
+} from '@/lib/hr/appreciation';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +109,32 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         userId: authUser.id,
         recordId: updated.id,
         recordData,
+      });
+
+      // Appreciation notification straight to the applicant (bell + phone),
+      // independent of any admin-built workflow rule. Approved = celebratory,
+      // rejected = kind. recordData carries the denormalised applicant name +
+      // leave type from buildLeaveRecordData.
+      const applicantName =
+        (recordData as any)?.applicantName as string | null | undefined;
+      const leaveTypeName =
+        (recordData as any)?.leaveTypeName as string | null | undefined;
+      const msg =
+        decision === 'APPROVED'
+          ? leaveApprovedMessage({
+              name: applicantName,
+              leaveType: leaveTypeName,
+              seedKey: updated.id,
+            })
+          : leaveRejectedMessage({
+              name: applicantName,
+              note: typeof body.note === 'string' ? body.note : null,
+              seedKey: updated.id,
+            });
+      void notifyUserAppreciation(updated.userId, authUser.organizationId, msg, {
+        url: '/leave',
+        moduleName: 'Leave',
+        tag: `leave-decision:${updated.id}`,
       });
     });
     return NextResponse.json(
