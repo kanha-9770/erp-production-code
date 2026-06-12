@@ -18,7 +18,9 @@ import {
   Banknote,
 } from "lucide-react";
 import { formatDate, formatMoney, formatNumber, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
-import { promotionsFor, type PromotionDef } from "@/lib/purchase-system/promote";
+import { promotionsFor, promotionApprovalBlock, type PromotionDef } from "@/lib/purchase-system/promote";
+import { gateEntryIsCleared } from "@/lib/purchase-system/gate-entry-workflow";
+import { GateEntryWorkflowTimeline } from "./gate-entry-workflow-timeline";
 import { MediaGallery } from "./media-field";
 import { LineItemsView } from "./line-items-field";
 import type { FieldDef, PurchaseRecord, PurchasePermissions, SubmoduleSchema } from "@/lib/purchase-system/types";
@@ -70,19 +72,41 @@ export function RecordPreview({
     permissions.approvePo ||
     permissions.postStock ||
     permissions.raisePayment ||
-    permissions.approvePayment;
+    permissions.approvePayment ||
+    permissions.gateEntry ||
+    permissions.qcInspection ||
+    permissions.storeInspection;
   const canDelete = permissions.process;
   const canPostStock = permissions.postStock;
   const canPromoteTo = (to: string) =>
-    to === "grn" ? permissions.postStock : to === "payment" ? permissions.raisePayment : permissions.process;
+    to === "gateEntry"
+      ? permissions.gateEntry // PO → Receive (Gate Entry): gate/security
+      : to === "grn"
+        ? permissions.postStock // cleared Gate Entry → Create GRN: store incharge
+        : to === "payment"
+          ? permissions.raisePayment
+          : permissions.process;
 
-  // A PO must be APPROVED before goods can be received against it (GRN). An
-  // unapproved PO hides its "Receive (GRN)" step; the server enforces this too.
+  // A PO must be APPROVED before goods can be received against it. An unapproved
+  // PO hides its "Receive (Gate Entry)" step; the server enforces this too.
   const poApproved = String(record.approvalStatus ?? "").toUpperCase() === "APPROVED";
   const receiveBlocked = schema.key === "po" && !poApproved;
-  const promotions = (onPromote ? promotionsFor(schema.key) : []).filter(
-    (p) => canPromoteTo(p.to) && !(p.to === "grn" && receiveBlocked),
+  // "Create GRN" only applies once the gate entry has CLEARED its inspections.
+  const geCleared = schema.key === "gateEntry" && gateEntryIsCleared(record.status as string);
+  // This document can't be converted while its OWN approval is unsettled — a
+  // PENDING / REJECTED / RECALLED approval must complete first (the server
+  // enforces the same gate in createRecord). No `_approval` ⇒ free to convert.
+  const approvalBlock = promotionApprovalBlock(record as Record<string, unknown>);
+  const eligiblePromotions = (onPromote ? promotionsFor(schema.key) : []).filter(
+    (p) =>
+      canPromoteTo(p.to) &&
+      !(p.to === "gateEntry" && receiveBlocked) &&
+      !(schema.key === "gateEntry" && p.to === "grn" && !geCleared),
   );
+  const promotions = approvalBlock ? [] : eligiblePromotions;
+  // Show a lock note (instead of a silent disappearance) when an otherwise-
+  // available conversion is held back purely by the pending approval.
+  const showApprovalConvertLock = !!approvalBlock && eligiblePromotions.length > 0;
   const stockPosted = String(record.stockUpdated ?? "NO") === "YES";
   const sections: Array<{ name: string; fields: FieldDef[] }> = [];
   for (const f of schema.fields) {
@@ -220,7 +244,9 @@ export function RecordPreview({
           </span>
         ) : null)}
 
-      {(promotions.length > 0 || onPostStock || (receiveBlocked && permissions.postStock)) && record.docNo ? (
+      {schema.key === "gateEntry" && record.docNo ? <GateEntryWorkflowTimeline record={record} /> : null}
+
+      {(promotions.length > 0 || showApprovalConvertLock || onPostStock || (receiveBlocked && permissions.gateEntry)) && record.docNo ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Next step
@@ -231,7 +257,12 @@ export function RecordPreview({
                 {p.label} <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
               </Button>
             ))}
-            {receiveBlocked && permissions.postStock ? (
+            {showApprovalConvertLock ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Lock className="h-3.5 w-3.5" /> {approvalBlock!.message}
+              </span>
+            ) : null}
+            {receiveBlocked && permissions.gateEntry ? (
               <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Lock className="h-3.5 w-3.5" /> Approve this PO (Approval = Approved) before it can be received
               </span>

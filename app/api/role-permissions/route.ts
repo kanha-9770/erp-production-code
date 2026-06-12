@@ -275,7 +275,9 @@ async function handleUpdate(request: NextRequest) {
           });
         }
       },
-      { timeout: 15000 },
+      // `timeout` alone leaves maxWait at Prisma's 2s default, so under the
+      // Supabase pooler the connection-acquire step times out (P2028). Set both.
+      { maxWait: 15_000, timeout: 30_000 },
     );
 
     return NextResponse.json({

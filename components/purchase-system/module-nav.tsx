@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   ClipboardList,
   Truck,
+  DoorOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouteAccess } from "@/hooks/use-route-access";
@@ -24,6 +25,7 @@ const TABS = [
   { href: "/purchase-management/requisition", label: "Requisition", icon: FileText, open: true },
   { href: "/purchase-management/sourcing", label: "Sourcing", icon: Search },
   { href: "/purchase-management/purchase-order", label: "Purchase Order", icon: FileSignature },
+  { href: "/purchase-management/gate-entry", label: "Gate Entry", icon: DoorOpen },
   { href: "/purchase-management/grn", label: "GRN", icon: PackageCheck },
   { href: "/purchase-management/open-po", label: "Open POs", icon: ClipboardList },
   { href: "/purchase-management/payment-request", label: "Payment", icon: Banknote },

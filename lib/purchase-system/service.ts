@@ -15,6 +15,7 @@ import type {
   MasterType,
   PurchaseSubmoduleKey,
 } from "./types";
+import type { GateEntryAdvanceAction } from "./gate-entry-workflow";
 
 const BASE = "/api/purchase-system";
 
@@ -71,6 +72,19 @@ export const purchaseService = {
   postStock(grnId: string): Promise<PostStockResult> {
     return api<PostStockResult>(`${BASE}/grn/${encodeURIComponent(grnId)}/post-stock`, {
       method: "POST",
+    });
+  },
+
+  /** Move a gate entry through its receiving workflow (Complete & forward /
+   *  Reject / Send back). Returns the updated gate-entry record. */
+  advanceStage(
+    gateEntryId: string,
+    action: GateEntryAdvanceAction,
+    opts?: { toStage?: string; note?: string },
+  ): Promise<PurchaseRecord> {
+    return api<PurchaseRecord>(`${BASE}/gate-entry/${encodeURIComponent(gateEntryId)}/advance-stage`, {
+      method: "POST",
+      body: JSON.stringify({ action, ...opts }),
     });
   },
 

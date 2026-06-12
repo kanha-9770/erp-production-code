@@ -337,7 +337,9 @@ export async function POST(request: NextRequest) {
       if (userCreate.length) await tx.routeUserAccess.createMany({ data: userCreate, skipDuplicates: true });
       if (userSetTrue.length) await tx.routeUserAccess.updateMany({ where: { id: { in: userSetTrue } }, data: { granted: true } });
       if (userSetFalse.length) await tx.routeUserAccess.updateMany({ where: { id: { in: userSetFalse } }, data: { granted: false } });
-    });
+      // Widen past Prisma's 2s/5s defaults — the Supabase pooler times out the
+      // connection-acquire step otherwise (P2028).
+    }, { maxWait: 15_000, timeout: 30_000 });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

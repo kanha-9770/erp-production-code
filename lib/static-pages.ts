@@ -416,10 +416,17 @@ export const STATIC_PAGES: StaticPage[] = [
     icon: 'file-signature',
   },
   {
+    path: '/purchase-management/gate-entry',
+    label: 'Gate Entry',
+    group: 'Purchase',
+    description: 'Gate inward + inspection workflow (Gate → QC → Store)',
+    icon: 'door-open',
+  },
+  {
     path: '/purchase-management/grn',
     label: 'Goods Receipt (GRN)',
     group: 'Purchase',
-    description: 'Inspection, GRN & stock update',
+    description: 'Create GRN from a cleared gate entry & post stock',
     icon: 'package',
   },
   {

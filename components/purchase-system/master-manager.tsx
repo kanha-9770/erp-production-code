@@ -69,6 +69,7 @@ const SUBMODULE_LABEL: Record<PurchaseSubmoduleKey, string> = {
   pr: "PR",
   sourcing: "RFQ",
   po: "PO",
+  gateEntry: "Gate Entry",
   grn: "GRN",
   payment: "Payment",
 };

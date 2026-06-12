@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return NextResponse.json({ success: true, data: result });
   } catch (e: any) {
     console.error("[purchase-system/grn post-stock]", e);
-    const status = e?.forbidden ? 403 : /not found/i.test(e?.message || "") ? 404 : /no received|invalid/i.test(e?.message || "") ? 400 : 500;
+    const status = e?.status ?? (e?.forbidden ? 403 : /not found/i.test(e?.message || "") ? 404 : /no received|invalid/i.test(e?.message || "") ? 400 : 500);
     return fail(e?.message || "Failed to post stock", status);
   }
 }

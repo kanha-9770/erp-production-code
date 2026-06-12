@@ -43,6 +43,7 @@ import {
   RotateCcw,
   Paperclip,
   Check,
+  DoorOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -62,6 +63,7 @@ const ICON: Record<PurchaseSubmoduleKey, React.ComponentType<{ className?: strin
   pr: FileText,
   sourcing: SearchIcon,
   po: FileSignature,
+  gateEntry: DoorOpen,
   grn: PackageCheck,
   payment: Banknote,
 };
@@ -173,9 +175,11 @@ export function RecordTableView({ submodule }: { submodule: PurchaseSubmoduleKey
       ? true
       : submodule === "payment"
         ? permissions.raisePayment
-        : submodule === "grn"
-          ? permissions.postStock
-          : permissions.process; // sourcing, po, supplier
+        : submodule === "gateEntry"
+          ? permissions.gateEntry // gate/security logs the gate inward (stage 1)
+          : submodule === "grn"
+            ? permissions.postStock // store incharge creates the GRN from a cleared gate entry
+            : permissions.process; // sourcing, po, supplier
 
   const rows = records[submodule];
   const statusField = useMemo(

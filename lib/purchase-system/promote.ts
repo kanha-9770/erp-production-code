@@ -119,18 +119,19 @@ export const PROMOTIONS: Partial<Record<PurchaseSubmoduleKey, PromotionDef[]>> =
   ],
   po: [
     {
-      to: "grn",
-      label: "Receive (GRN)",
+      // Goods arriving against a PO are first logged at the gate as a Gate Entry,
+      // which then runs the Gate → QC → Store inspection workflow before a GRN.
+      to: "gateEntry",
+      label: "Receive (Gate Entry)",
       advanceSource: "SENT",
       build: (po) => {
         const quantity = num(po.quantity);
         return {
           docDate: today(),
           supplier: str(po.supplier),
-          status: "GATE_ENTRY",
           receivedAgainst: "INVOICE",
           // Seed one invoice with one PO line defaulted to a full receipt; the
-          // receiver adjusts received qty / adds the invoice no. (Switching
+          // gate/store adjusts received qty / adds the invoice no. (Switching
           // "Received Against" in the form carries these lines across.)
           lines: [
             {
@@ -165,6 +166,26 @@ export const PROMOTIONS: Partial<Record<PurchaseSubmoduleKey, PromotionDef[]>> =
       }),
     },
   ],
+  gateEntry: [
+    {
+      // Once the gate entry is CLEARED (all inspections passed), the store
+      // incharge raises the GRN from it — pulling supplier / warehouse / items.
+      // Creating the GRN consumes the gate entry server-side (→ GRN_CREATED), so
+      // no `advanceSource` (its status is workflow-driven and can't be hand-set).
+      to: "grn",
+      label: "Create GRN",
+      build: (ge) => ({
+        docDate: today(),
+        gateEntryRef: str(ge.docNo),
+        supplier: str(ge.supplier),
+        warehouse: str(ge.warehouse),
+        receivedAgainst: str(ge.receivedAgainst) || "INVOICE",
+        lines: Array.isArray(ge.lines) ? ge.lines : [],
+        receiptLines: Array.isArray(ge.receiptLines) ? ge.receiptLines : [],
+        status: "READY_TO_POST",
+      }),
+    },
+  ],
   grn: [
     {
       to: "payment",
@@ -187,4 +208,51 @@ export const PROMOTIONS: Partial<Record<PurchaseSubmoduleKey, PromotionDef[]>> =
 /** Promotions available from a given submodule (empty for supplier/payment). */
 export function promotionsFor(submodule: PurchaseSubmoduleKey): PromotionDef[] {
   return PROMOTIONS[submodule] ?? [];
+}
+
+// ── Conversion / approval gate ──────────────────────────────────────────────
+
+export interface PromotionApprovalBlock {
+  /** The unsettled approval state that blocks conversion. */
+  reason: "PENDING" | "REJECTED" | "RECALLED" | "OTHER";
+  /** Human-readable reason, shown in the UI and the server error. */
+  message: string;
+}
+
+/**
+ * A document may only be promoted/converted to the next stage once its OWN
+ * approval has settled as APPROVED. The generic approval engine stamps its state
+ * in `data._approval`; while a request is PENDING, was REJECTED, or was RECALLED
+ * (withdrawn, never approved), the next document must NOT be raised. No
+ * `_approval` ⇒ no approval process matched ⇒ free to convert.
+ *
+ * Pure + client-safe (no prisma): used by the UI to hide the convert buttons and
+ * mirrored server-side in `createRecord` so the gate can't be bypassed.
+ */
+export function promotionApprovalBlock(
+  record: Record<string, unknown> | null | undefined,
+): PromotionApprovalBlock | null {
+  const a = record?._approval as { status?: string } | undefined;
+  if (!a || typeof a !== "object" || !a.status) return null; // no approval needed
+  const status = String(a.status).toUpperCase();
+  if (status === "APPROVED") return null; // approval completed — free to convert
+  if (status === "PENDING")
+    return {
+      reason: "PENDING",
+      message: "Awaiting approval — this document can't be converted until its approval is completed.",
+    };
+  if (status === "REJECTED")
+    return {
+      reason: "REJECTED",
+      message: "Approval was rejected — resubmit and get it approved before converting.",
+    };
+  if (status === "RECALLED")
+    return {
+      reason: "RECALLED",
+      message: "Approval was recalled — resubmit and get it approved before converting.",
+    };
+  return {
+    reason: "OTHER",
+    message: "Approval is not complete — finish the approval before converting.",
+  };
 }

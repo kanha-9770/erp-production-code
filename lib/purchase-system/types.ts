@@ -10,8 +10,10 @@
  * live.
  */
 
-/** The supplier master entity + the five procurement documents. */
-export type PurchaseSubmoduleKey = "supplier" | "pr" | "sourcing" | "po" | "grn" | "payment";
+/** The supplier master entity + the procurement documents. `gateEntry` is the
+ *  gate-inward register that runs the staged receiving workflow (Gate → QC →
+ *  Store inspection); once CLEARED, the store incharge creates a `grn` from it. */
+export type PurchaseSubmoduleKey = "supplier" | "pr" | "sourcing" | "po" | "gateEntry" | "grn" | "payment";
 
 // ── Master (dropdown) registry ──────────────────────────────────────────────
 
@@ -69,8 +71,10 @@ export interface FieldDef {
    *   - "openPo"/"openPr": documents not yet fully received (partial included).
    *   - "paymentPo": every PO (payment request's compulsory PO dropdown).
    *   - "grnInvoice": invoice numbers booked against the chosen PO via GRN;
-   *     depends on the `dependsOn` field's value and is hidden when empty. */
-  optionsSource?: "openPo" | "openPr" | "paymentPo" | "grnInvoice";
+   *     depends on the `dependsOn` field's value and is hidden when empty.
+   *   - "clearedGateEntry": gate-entry documents whose receiving workflow is
+   *     CLEARED and not yet consumed by a GRN (the store incharge picks one). */
+  optionsSource?: "openPo" | "openPr" | "paymentPo" | "grnInvoice" | "clearedGateEntry";
   /** For optionsSource === "grnInvoice": the field key whose value (a PO No.)
    *  scopes the invoice list. */
   dependsOn?: string;
@@ -179,6 +183,12 @@ export interface PurchasePermissions {
    * edit and delete purchase documents (the promote chain + edit/delete buttons).
    */
   process: boolean;
+  /** GRN workflow stage 1 — record gate entry / start a goods receipt. */
+  gateEntry: boolean;
+  /** GRN workflow stage 2 — perform the purchase/quality (QC) inspection. */
+  qcInspection: boolean;
+  /** GRN workflow stage 3 — perform the store/inventory inspection. */
+  storeInspection: boolean;
 }
 
 /**

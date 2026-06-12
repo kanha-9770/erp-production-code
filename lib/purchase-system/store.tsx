@@ -20,6 +20,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { purchaseService } from "./service";
 import { deriveGrnReceiptStatus, grnItemRows } from "./receipt";
+import type { GateEntryAdvanceAction } from "./gate-entry-workflow";
+import { gateEntryIsCleared } from "./gate-entry-workflow";
 import type {
   PurchaseRecord,
   PostStockResult,
@@ -53,6 +55,16 @@ interface PurchaseContextValue {
 
   /** Post a received GRN's quantities into Store Inventory (increment-or-create). */
   postStock: (grnId: string) => Promise<PostStockResult>;
+  /** Move a gate entry through its receiving workflow (Complete & forward /
+   *  Reject / Send back). Resolves with the updated gate-entry record. */
+  advanceStage: (
+    gateEntryId: string,
+    action: GateEntryAdvanceAction,
+    opts?: { toStage?: string; note?: string },
+  ) => Promise<PurchaseRecord>;
+  /** Gate entries whose workflow is CLEARED and not yet consumed by a GRN — the
+   *  store incharge picks one when creating a GRN. */
+  getClearedGateEntryOptions: (includeValue?: string) => OpenDocOption[];
 
   /** Look up prior purchase history for an item (from PO records). */
   getItemHistory: (itemName: string) => ItemPurchaseHistory;
@@ -166,6 +178,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     pr: [],
     sourcing: [],
     po: [],
+    gateEntry: [],
     grn: [],
     payment: [],
   });
@@ -178,6 +191,9 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     raisePayment: false,
     approvePayment: false,
     process: false,
+    gateEntry: false,
+    qcInspection: false,
+    storeInspection: false,
   });
   // Empty until the snapshot loads — consumers treat a missing entry as open.
   const [sectionAccess, setSectionAccess] = useState<SectionAccess>({} as SectionAccess);
@@ -408,6 +424,53 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       grn: prev.grn.map((r) => (r.id === grnId ? result.grn : r)),
     }));
     return result;
+  }, []);
+
+  const advanceStage = useCallback(
+    async (
+      gateEntryId: string,
+      action: GateEntryAdvanceAction,
+      opts?: { toStage?: string; note?: string },
+    ): Promise<PurchaseRecord> => {
+      // Not optimistic — the server resolves the next status + records who acted;
+      // we reflect the returned gate-entry row so the timeline + locks update.
+      const updated = await purchaseService.advanceStage(gateEntryId, action, opts);
+      setRecords((prev) => ({
+        ...prev,
+        gateEntry: prev.gateEntry.map((r) => (r.id === gateEntryId ? updated : r)),
+      }));
+      return updated;
+    },
+    [],
+  );
+
+  // Gate entries the store incharge can raise a GRN from: CLEARED and not yet
+  // consumed (status GRN_CREATED). `includeValue` keeps an already-selected one
+  // visible while editing a GRN.
+  const getClearedGateEntryOptions = useCallback((includeValue?: string): OpenDocOption[] => {
+    // Gate entries already referenced by a GRN are consumed — exclude them even
+    // before the server's GRN_CREATED status flip reaches the local copy.
+    const consumed = new Set<string>();
+    for (const grn of recordsRef.current.grn) {
+      const ref = String(grn.gateEntryRef ?? "").trim();
+      if (ref) consumed.add(ref);
+    }
+    const out: OpenDocOption[] = [];
+    for (const ge of recordsRef.current.gateEntry) {
+      if (ge._deleting) continue;
+      const docNo = String(ge.docNo ?? "").trim();
+      if (!docNo) continue;
+      if (docNo !== includeValue) {
+        if (!gateEntryIsCleared(String(ge.status ?? ""))) continue;
+        if (consumed.has(docNo)) continue;
+      }
+      const supplier = ge.supplier ? ` · ${String(ge.supplier)}` : "";
+      out.push({ value: docNo, label: `${docNo}${supplier}`, balance: 0 });
+    }
+    if (includeValue && !out.some((o) => o.value === includeValue)) {
+      out.unshift({ value: includeValue, label: includeValue, balance: 0 });
+    }
+    return out;
   }, []);
 
   // ── Purchase history (repeat-purchase detection) ────────────────────────────
@@ -776,6 +839,8 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       updateRecord,
       deleteRecord,
       postStock,
+      advanceStage,
+      getClearedGateEntryOptions,
       getItemHistory,
       getPoTrace,
       getOpenPoOptions,
@@ -804,6 +869,8 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       updateRecord,
       deleteRecord,
       postStock,
+      advanceStage,
+      getClearedGateEntryOptions,
       getItemHistory,
       getPoTrace,
       getOpenPoOptions,

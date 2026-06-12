@@ -11,7 +11,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { SEED_MASTERS, SUBMODULE_ORDER, getSchema } from "@/lib/purchase-system/schema";
+import { SEED_MASTERS, SUBMODULE_ORDER, getSchema, GATE_ENTRY_SCHEMA } from "@/lib/purchase-system/schema";
 import { seedRecords } from "@/lib/purchase-system/seed";
 import { nextCode, maxCodeSuffix } from "@/lib/sequence/next-code";
 import {
@@ -30,7 +30,7 @@ import {
   assertSectionEditsAllowed,
   getSectionAccess,
 } from "@/lib/permissions/section-permissions";
-import { isOrgAdmin } from "@/lib/permissions/has-permission";
+import { isOrgAdmin, hasPermission } from "@/lib/permissions/has-permission";
 import {
   findMatchingProcess,
   submitForApproval,
@@ -45,6 +45,19 @@ import {
   PURCHASE_MODULE,
 } from "@/lib/purchase-system/approval-adapter";
 import { grnItemRows } from "@/lib/purchase-system/receipt";
+import { promotionApprovalBlock } from "@/lib/purchase-system/promote";
+import {
+  GATE_ENTRY_INITIAL_STATUS,
+  GATE_ENTRY_WORKFLOW_SECTIONS,
+  GE_S_GRN_CREATED,
+  gateEntryCurrentStage,
+  gateEntryStagesOwningSection,
+  gateEntrySectionEditableAt,
+  gateEntryResolveAdvance,
+  readGateEntryWorkflow,
+  type GateEntryAdvanceAction,
+  type GateEntryWorkflowEvent,
+} from "@/lib/purchase-system/gate-entry-workflow";
 import type {
   PurchaseRecord as PurchaseRecordType,
   PurchaseSnapshot,
@@ -52,6 +65,7 @@ import type {
   MasterType,
   PurchaseSubmoduleKey,
   SectionAccess,
+  FieldDef,
 } from "@/lib/purchase-system/types";
 
 export interface PurCtx {
@@ -72,8 +86,10 @@ export interface PostStockResult {
 const SNAPSHOT_VERSION = 1;
 // `docNo` is system-generated and locked — never let a client set or change it.
 // `_approval` is the server-only approval marker (written exclusively by the
-// approval engine) — a client must never forge or clear it.
-const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "docNo", "_approval"];
+// approval engine) and `_workflow` is the server-only GRN stage timeline
+// (written exclusively by createRecord / advanceStage / postStock) — a client
+// must never forge or clear either.
+const RESERVED = ["id", "submodule", "createdAt", "updatedAt", "_optimistic", "_deleting", "docNo", "_approval", "_workflow"];
 
 function isValidSubmodule(s: unknown): s is PurchaseSubmoduleKey {
   return typeof s === "string" && (SUBMODULE_ORDER as string[]).includes(s);
@@ -255,6 +271,193 @@ async function assertGrnPosApproved(organizationId: string, refs: string[]): Pro
   if (blocked.length > 0) throw new UnapprovedPoReceiveError(blocked);
 }
 
+/** Thrown when a document is converted from a source whose generic approval
+ *  (`data._approval`) hasn't settled as APPROVED. 409 = unmet precondition. */
+class UnapprovedSourceConvertError extends Error {
+  readonly status = 409;
+  constructor(ref: string, message: string) {
+    super(`${ref}: ${message}`);
+    this.name = "UnapprovedSourceConvertError";
+  }
+}
+
+// A converted document carries its source's docNo in a back-reference field.
+// Map each target submodule to that field + the submodule(s) the ref can name,
+// so the source's approval state can be looked up and enforced on create.
+const CONVERSION_SOURCE_REF: Partial<
+  Record<PurchaseSubmoduleKey, { field: string; from: PurchaseSubmoduleKey[] }>
+> = {
+  sourcing: { field: "prRef", from: ["pr"] }, // PR → Raise RFQ
+  po: { field: "rfqRef", from: ["pr", "sourcing"] }, // PR / RFQ → Convert to PO
+  payment: { field: "poRef", from: ["po"] }, // PO → Raise Payment
+};
+
+/**
+ * Conversion gate (server backstop): block raising the next document while its
+ * source's generic approval is unsettled (PENDING / REJECTED / RECALLED). The
+ * target carries the source docNo in a ref field (prRef / rfqRef / poRef); if
+ * that source still has a blocking `_approval`, the conversion is refused.
+ * Refs matching no known record are left alone (manual / external references).
+ * Mirrors promotionApprovalBlock in the UI so the button and the API agree.
+ */
+async function assertConversionSourceApproved(
+  organizationId: string,
+  submodule: PurchaseSubmoduleKey,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const map = CONVERSION_SOURCE_REF[submodule];
+  if (!map) return;
+  const ref = String(data[map.field] ?? "").trim();
+  if (!ref) return;
+  const rows = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: { in: map.from } },
+    select: { data: true },
+  });
+  for (const r of rows) {
+    const d = (r.data as Record<string, unknown>) ?? {};
+    if (String(d.docNo ?? "").trim() !== ref) continue;
+    const block = promotionApprovalBlock(d);
+    if (block) throw new UnapprovedSourceConvertError(ref, block.message);
+    return; // source found and approval settled — allow
+  }
+}
+
+// ── Gate-entry sequential receiving workflow ────────────────────────────────
+
+/** Thrown when a gate-entry stage rule is violated. `status` maps to the HTTP
+ *  code (403 for permission/stage-edit, 409 for an invalid transition). */
+export class GateEntryWorkflowError extends Error {
+  readonly status: number;
+  readonly forbidden: boolean;
+  constructor(message: string, status = 403) {
+    super(message);
+    this.name = "GateEntryWorkflowError";
+    this.status = status;
+    this.forbidden = status === 403;
+  }
+}
+
+/** Schema default for a gate-entry field (mirrors buildInitial in the form) —
+ *  used to tell, on create, whether a field was filled vs left at its default. */
+function gateEntryFieldDefault(f: FieldDef): unknown {
+  if (f.type === "lineItems") return [];
+  if (f.type === "checkbox") return false;
+  if (f.defaultValue != null) return f.defaultValue;
+  if (f.type === "status" && f.statusOptions?.length) return f.statusOptions[0].value;
+  return f.type === "number" || f.type === "currency" ? 0 : "";
+}
+
+/** Loose value equality: JSON for objects/arrays (line items, media), string
+ *  for primitives — enough to decide whether a patch actually changed a field. */
+function gateEntryValueEq(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a === "object" || typeof b === "object") {
+    try {
+      return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    } catch {
+      return false;
+    }
+  }
+  return String(a ?? "") === String(b ?? "");
+}
+
+/**
+ * Enforce the gate-entry stage gate on a create/update. A non-admin may only
+ * change a workflow-section field when that section is editable at the gate
+ * entry's CURRENT stage AND they hold that stage's permission. `status` is
+ * workflow-driven and may never be hand-edited; receiptStatus / remarks stay
+ * open. On create the baseline is each field's schema default, so leaving
+ * later-stage sections untouched passes.
+ */
+async function assertGateEntryWorkflowEdit(args: {
+  userId: string;
+  currentStatus: string;
+  existing: Record<string, unknown> | null;
+  patch: Record<string, unknown>;
+}): Promise<void> {
+  const onCreate = args.existing == null;
+  const existing = args.existing ?? {};
+  const stage = gateEntryCurrentStage(args.currentStatus);
+  let isAdmin: boolean | null = null; // resolved lazily, only if a gate is hit
+
+  for (const [key, val] of Object.entries(args.patch)) {
+    const f = GATE_ENTRY_SCHEMA.fields.find((x) => x.key === key);
+    if (!f) continue;
+    const baseline = onCreate ? gateEntryFieldDefault(f) : existing[key];
+    if (gateEntryValueEq(val, baseline)) continue; // unchanged → no gate
+
+    if (key === "status") {
+      throw new GateEntryWorkflowError(
+        "The gate-entry stage changes via “Complete & forward”, Reject or Send back — not by editing Status directly.",
+        409,
+      );
+    }
+    // receiptStatus is system-derived; remarks stay open at any stage.
+    if (key === "receiptStatus" || key === "remarks") continue;
+    if (!GATE_ENTRY_WORKFLOW_SECTIONS.includes(f.section)) continue; // non-workflow section
+
+    if (isAdmin === null) isAdmin = await isOrgAdmin(args.userId);
+    if (isAdmin) continue; // admins bypass the stage gate
+
+    if (!gateEntrySectionEditableAt(f.section, args.currentStatus)) {
+      const owner = gateEntryStagesOwningSection(f.section)[0];
+      throw new GateEntryWorkflowError(
+        `The “${f.section}” section can only be edited during the ${owner?.label ?? "owning"} stage.`,
+      );
+    }
+    if (stage && !(await hasPermission(args.userId, stage.permission))) {
+      throw new GateEntryWorkflowError(
+        `You need the “${stage.label}” permission to edit this gate entry at its current stage.`,
+      );
+    }
+  }
+}
+
+/**
+ * Mark a gate entry CONSUMED once a GRN is raised from it: flip its status to
+ * GRN_CREATED so it drops out of the "cleared gate entries" picker and append a
+ * timeline event. No-op if the docNo doesn't resolve to a cleared gate entry.
+ */
+async function consumeGateEntry(
+  organizationId: string,
+  gateEntryDocNo: string,
+  byUserId: string,
+  byName: string,
+  grnDocNo: string,
+): Promise<void> {
+  const ref = gateEntryDocNo.trim();
+  if (!ref) return;
+  // Resolve the gate entry by its docNo (it lives in the JSON bag, no column).
+  const candidates = await prisma.purchaseRecord.findMany({
+    where: { organizationId, submodule: "gateEntry" },
+    select: { id: true, data: true, status: true },
+  });
+  const target = candidates.find(
+    (c) => String((c.data as Record<string, unknown>)?.docNo ?? "").trim() === ref,
+  );
+  if (!target) return;
+  const data = (target.data as Record<string, unknown>) ?? {};
+  if (String(target.status ?? data.status ?? "") === GE_S_GRN_CREATED) return; // already consumed
+  const wf = readGateEntryWorkflow(data);
+  const event: GateEntryWorkflowEvent = {
+    action: "GRN_CREATED",
+    fromStatus: String(target.status ?? data.status ?? ""),
+    toStatus: GE_S_GRN_CREATED,
+    label: "GRN Created",
+    byUserId,
+    byName,
+    at: new Date().toISOString(),
+    note: grnDocNo ? `GRN ${grnDocNo}` : undefined,
+  };
+  await prisma.purchaseRecord.update({
+    where: { id: target.id },
+    data: {
+      data: { ...data, status: GE_S_GRN_CREATED, _workflow: { history: [...wf.history, event] } } as any,
+      status: GE_S_GRN_CREATED,
+    },
+  });
+}
+
 export const PurchaseHandlers = {
   async load(ctx: PurCtx): Promise<PurchaseSnapshot> {
     await seedIfFirstLoad(ctx);
@@ -284,7 +487,7 @@ export const PurchaseHandlers = {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     const records = {
-      supplier: [], pr: [], sourcing: [], po: [], grn: [], payment: [],
+      supplier: [], pr: [], sourcing: [], po: [], gateEntry: [], grn: [], payment: [],
     } as Record<PurchaseSubmoduleKey, PurchaseRecordType[]>;
     for (const r of rows) {
       (records[r.submodule as PurchaseSubmoduleKey] ??= []).push(toRecord(r));
@@ -353,8 +556,27 @@ export const PurchaseHandlers = {
       existing: null,
       patch: clean,
     });
-    // A GRN may only receive against an APPROVED purchase order.
-    if (submodule === "grn") await assertGrnPosApproved(ctx.organizationId, grnPoRefs(clean));
+    // Goods may only be received against an APPROVED purchase order — checked on
+    // the gate entry (where items are first logged) and the GRN (copied refs).
+    if (submodule === "gateEntry" || submodule === "grn") {
+      await assertGrnPosApproved(ctx.organizationId, grnPoRefs(clean));
+    }
+    // A document may only be converted from a source whose own approval has
+    // completed: raising a PO from a still-pending PR/RFQ (or a payment from a
+    // pending PO) is refused until that source is APPROVED. (UI hides the button;
+    // this is the authoritative backstop.)
+    await assertConversionSourceApproved(ctx.organizationId, submodule, clean);
+    // Gate-entry stage gate: the creator (gate / security, GRN_GATE_ENTRY) starts
+    // at the Gate-Entry stage and may only fill that stage's sections — later
+    // inspection sections stay at their defaults until their stage is reached.
+    if (submodule === "gateEntry") {
+      await assertGateEntryWorkflowEdit({
+        userId: ctx.userId,
+        currentStatus: GATE_ENTRY_INITIAL_STATUS,
+        existing: null,
+        patch: clean,
+      });
+    }
 
     // User-derived fields ("Requested By", Department) are authoritative: resolve
     // them from the authenticated user and overwrite any client-sent value, so
@@ -369,7 +591,13 @@ export const PurchaseHandlers = {
       }
     }
 
-    const userStatus = (clean.status as string) ?? null;
+    // A gate entry always starts at the Gate-Entry stage with a stamped workflow
+    // timeline; its status is workflow-driven, never taken from the client. Other
+    // documents (incl. the store-created GRN) keep their client-supplied status.
+    const gateCreatorName =
+      submodule === "gateEntry" ? (await resolveUserIdentity(ctx.userId)).name || "—" : "";
+    const userStatus =
+      submodule === "gateEntry" ? GATE_ENTRY_INITIAL_STATUS : (clean.status as string) ?? null;
 
     // Mint the document number and persist it atomically with the record, so an
     // aborted create never burns a number. If an approval process intercepts the
@@ -382,7 +610,20 @@ export const PurchaseHandlers = {
         computeSeed: () =>
           maxCodeSuffix(tx, "purchase_records", ctx.organizationId, submodule, "docNo", schema.codePrefix),
       });
-      const recordData = { ...clean, ...userOverrides, docNo };
+      const recordData: Record<string, unknown> = { ...clean, ...userOverrides, docNo };
+      if (submodule === "gateEntry") {
+        recordData.status = GATE_ENTRY_INITIAL_STATUS;
+        const seed: GateEntryWorkflowEvent = {
+          action: "CREATED",
+          fromStatus: GATE_ENTRY_INITIAL_STATUS,
+          toStatus: GATE_ENTRY_INITIAL_STATUS,
+          label: "Gate Entry",
+          byUserId: ctx.userId,
+          byName: gateCreatorName,
+          at: new Date().toISOString(),
+        };
+        recordData._workflow = { history: [seed] };
+      }
       const created = await tx.purchaseRecord.create({
         data: {
           organizationId: ctx.organizationId,
@@ -422,7 +663,17 @@ export const PurchaseHandlers = {
         data: { data: { ...recordData, _approval: approvalMeta } as any },
       });
     }, APPROVAL_TX_OPTS);
-    if (submodule === "grn") await reconcilePoClosure(ctx.organizationId, grnPoRefs(row.data as Record<string, unknown>));
+    if (submodule === "grn") {
+      const grnData = row.data as Record<string, unknown>;
+      await reconcilePoClosure(ctx.organizationId, grnPoRefs(grnData));
+      // Creating the GRN consumes its source gate entry (→ GRN_CREATED), so it
+      // drops out of the "cleared gate entries" picker and can't be reused.
+      const geRef = String(grnData.gateEntryRef ?? "").trim();
+      if (geRef) {
+        const actorName = (await resolveUserIdentity(ctx.userId)).name || "—";
+        await consumeGateEntry(ctx.organizationId, geRef, ctx.userId, actorName, String(grnData.docNo ?? ""));
+      }
+    }
     return toRecord(row);
   },
 
@@ -474,12 +725,24 @@ export const PurchaseHandlers = {
       existing: existingData,
       patch: cleanPatch,
     });
+    // Gate-entry stage gate: a field whose section belongs to the workflow may
+    // only be changed during its owning stage, by a holder of that stage's
+    // permission. The status moves only via advanceStage, never here.
+    // (Admins bypass inside the helper — incl. the pending force-edit path above.)
+    if (submodule === "gateEntry") {
+      await assertGateEntryWorkflowEdit({
+        userId: ctx.userId,
+        currentStatus: String(existing.status ?? existingData.status ?? GATE_ENTRY_INITIAL_STATUS),
+        existing: existingData,
+        patch: cleanPatch,
+      });
+    }
 
     const merged = { ...existingData, ...cleanPatch };
 
-    // A GRN may only receive against an APPROVED PO — check only the newly-added
-    // PO refs so re-saving a GRN with already-booked lines never re-validates them.
-    if (submodule === "grn") {
+    // Goods may only be received against an APPROVED PO — check only the newly-
+    // added PO refs so re-saving with already-booked lines never re-validates them.
+    if (submodule === "gateEntry" || submodule === "grn") {
       const before = new Set(grnPoRefs(existingData));
       await assertGrnPosApproved(ctx.organizationId, grnPoRefs(merged).filter((r) => !before.has(r)));
     }
@@ -591,6 +854,8 @@ export const PurchaseHandlers = {
     if (String(data.stockUpdated ?? "NO") === "YES") {
       return { grn: toRecord(grn), increased: [], created: [], alreadyPosted: true };
     }
+    // A GRN is created by the store incharge from an already-cleared gate entry,
+    // so it is postable as soon as it exists — no extra stage gate here.
 
     // Aggregate received qty (+ amount, for a unit rate) per item name across
     // every receipt line on this GRN — invoice lines and flat challan /
@@ -671,6 +936,62 @@ export const PurchaseHandlers = {
     });
 
     return { grn: toRecord(updatedGrn), increased, created, alreadyPosted: false };
+  },
+
+  /**
+   * Move a gate entry through its sequential receiving workflow. The caller must
+   * hold the CURRENT stage's named permission (admins bypass). COMPLETE forwards
+   * to the next stage — or CLEARS the gate entry once the final inspection stage
+   * passes; REJECT settles it terminally; SEND_BACK returns it to an earlier
+   * stage for correction. Every transition is appended to `data._workflow`.
+   */
+  async advanceStage(
+    ctx: PurCtx,
+    gateEntryId: string,
+    action: GateEntryAdvanceAction,
+    opts?: { toStage?: string; note?: string },
+  ): Promise<PurchaseRecordType> {
+    const ge = await prisma.purchaseRecord.findFirst({
+      where: { id: gateEntryId, organizationId: ctx.organizationId, submodule: "gateEntry" },
+    });
+    if (!ge) throw new Error("Gate entry not found");
+    const data = (ge.data as Record<string, unknown>) ?? {};
+
+    // A gate entry parked for a separate approval process is read-only until it settles.
+    if (purchaseApprovalMeta(data)?.status === "PENDING") throw new ApprovalLockedError();
+
+    const currentStatus = String(ge.status ?? data.status ?? GATE_ENTRY_INITIAL_STATUS);
+    const stage = gateEntryCurrentStage(currentStatus);
+    if (!stage) throw new GateEntryWorkflowError("This gate entry is not in an active workflow stage.", 409);
+
+    // Only the current stage's owner (or an admin) may act on it.
+    await requirePurchasePermission(ctx.userId, stage.permission);
+
+    const resolution = gateEntryResolveAdvance(currentStatus, action, data, opts?.toStage);
+    if (!resolution.ok || !resolution.toStatus || !resolution.event) {
+      throw new GateEntryWorkflowError(resolution.error ?? "Invalid stage transition.", 409);
+    }
+
+    const actorName = (await resolveUserIdentity(ctx.userId)).name || "—";
+    const wf = readGateEntryWorkflow(data);
+    const event: GateEntryWorkflowEvent = {
+      action: resolution.event,
+      fromStatus: currentStatus,
+      toStatus: resolution.toStatus,
+      label: stage.label,
+      byUserId: ctx.userId,
+      byName: actorName,
+      at: new Date().toISOString(),
+      note: opts?.note?.trim() || undefined,
+    };
+    const row = await prisma.purchaseRecord.update({
+      where: { id: gateEntryId },
+      data: {
+        data: { ...data, status: resolution.toStatus, _workflow: { history: [...wf.history, event] } } as any,
+        status: resolution.toStatus,
+      },
+    });
+    return toRecord(row);
   },
 
   async reset(ctx: PurCtx): Promise<PurchaseSnapshot> {

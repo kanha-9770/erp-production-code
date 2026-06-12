@@ -232,7 +232,9 @@ export async function PUT(request: NextRequest) {
           updated++;
         }
       }
-    });
+    }, { maxWait: 15_000, timeout: 30_000 });
+    // ^ Supabase pooler adds ~1.3s/query, so the default 2s connection-acquire /
+    //   5s execution window times out (P2028). Widen it (mirrors APPROVAL_TX_OPTS).
 
     return NextResponse.json({
       success: true,

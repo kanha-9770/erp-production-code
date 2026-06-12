@@ -33,7 +33,7 @@ export const SEED_MASTERS: MasterType[] = [
     label: "Vendor",
     description: "Approved vendors.",
     icon: "truck",
-    usedBy: ["pr", "sourcing", "po", "grn", "payment"],
+    usedBy: ["pr", "sourcing", "po", "gateEntry", "grn", "payment"],
     system: true,
     options: opts([
       "Sharma Steels",
@@ -126,7 +126,7 @@ export const SEED_MASTERS: MasterType[] = [
     label: "Unit of Measure",
     description: "Order / receipt unit.",
     icon: "ruler",
-    usedBy: ["pr", "sourcing", "po", "grn"],
+    usedBy: ["pr", "sourcing", "po", "gateEntry", "grn"],
     system: true,
     options: opts([
       "BAG",
@@ -154,7 +154,7 @@ export const SEED_MASTERS: MasterType[] = [
     label: "Warehouse",
     description: "Receiving store / godown.",
     icon: "warehouse",
-    usedBy: ["grn"],
+    usedBy: ["gateEntry", "grn"],
     options: opts(["JAIPUR WAREHOUSE", "MUMBAI WAREHOUSE"]),
   },
   {
@@ -162,7 +162,7 @@ export const SEED_MASTERS: MasterType[] = [
     label: "Inspection Result",
     description: "QC / inspection outcome.",
     icon: "clipboard-check",
-    usedBy: ["grn"],
+    usedBy: ["gateEntry"],
     options: opts(["Pending", "Passed", "Failed", "Partial"]),
   },
 ];
@@ -202,15 +202,33 @@ const RECEIPT_STATUS: StatusOption[] = [
   { value: "FULL", label: "Fully Received", variant: "default" },
 ];
 
-const GRN_STATUS: StatusOption[] = [
+// The gate-entry register runs the staged receiving workflow
+// (lib/purchase-system/gate-entry-workflow.ts):
+//   Gate Entry → QC Inspection → Store Inspection → Cleared → (GRN Created).
+// Status is driven by the per-stage "Complete & forward" action, not edited by hand.
+const GATE_ENTRY_STATUS: StatusOption[] = [
   { value: "GATE_ENTRY", label: "Gate Entry", variant: "secondary" },
+  { value: "PURCHASE_INSPECTION", label: "QC Inspection", variant: "outline" },
+  { value: "INVENTORY_INSPECTION", label: "Store Inspection", variant: "outline" },
+  { value: "CLEARED", label: "Cleared", variant: "default" },
+  { value: "GRN_CREATED", label: "GRN Created", variant: "default" },
+  { value: "REJECTED", label: "Rejected", variant: "destructive" },
+];
+
+// A GRN is created by the store incharge from a CLEARED gate entry — it is born
+// ready to post and only carries posting state (the inspections live on the gate
+// entry). Legacy stage values are kept so older GRNs still resolve to a label.
+const GRN_STATUS: StatusOption[] = [
+  { value: "READY_TO_POST", label: "Ready to Post", variant: "outline" },
+  { value: "STOCK_UPDATED", label: "Stock Posted", variant: "default" },
+  { value: "REJECTED", label: "Rejected", variant: "destructive" },
+  // Legacy statuses — kept so GRNs saved before the gate-entry split still resolve.
+  { value: "GATE_ENTRY", label: "Gate Entry", variant: "secondary" },
+  { value: "PURCHASE_INSPECTION", label: "QC Inspection", variant: "outline" },
+  { value: "INVENTORY_INSPECTION", label: "Store Inspection", variant: "outline" },
+  { value: "GRN_POSTED", label: "Ready to Post", variant: "outline" },
   { value: "GATE_INSPECTION", label: "Gate Inspection", variant: "outline" },
   { value: "RECEIVED", label: "Received", variant: "outline" },
-  { value: "PURCHASE_INSPECTION", label: "Purchase Inspection", variant: "outline" },
-  { value: "INVENTORY_INSPECTION", label: "Inventory Inspection", variant: "outline" },
-  { value: "GRN_POSTED", label: "GRN Posted", variant: "default" },
-  { value: "STOCK_UPDATED", label: "Stock Updated", variant: "default" },
-  { value: "REJECTED", label: "Rejected", variant: "destructive" },
 ];
 
 const PAYMENT_STATUS: StatusOption[] = [
@@ -462,6 +480,63 @@ const BROUGHT_BY_OPTS = [
   { value: "OTHERS", label: "Others" },
 ];
 
+// ── Gate Entry (gate-inward register) ───────────────────────────────────────
+// The staged receiving document. A gate/security user logs arrival + items, then
+// it moves Gate Entry → QC Inspection → Store Inspection via "Complete & forward"
+// (lib/purchase-system/gate-entry-workflow.ts). Once CLEARED, the store incharge
+// creates a GRN from it. Sections map 1:1 to the workflow stages so each stage
+// owner edits only their part while it is the current stage.
+export const GATE_ENTRY_SCHEMA: SubmoduleSchema = {
+  key: "gateEntry",
+  label: "Gate Entry",
+  shortLabel: "Gate Entry",
+  icon: "door-open",
+  recordNoun: "gate entry",
+  route: "gate-entry",
+  codePrefix: "GE",
+  statusKey: "status",
+  fields: [
+    { key: "docNo", label: "Gate Entry No.", type: "text", section: "Receipt", auto: true, inTable: true, pinned: true, width: 130 },
+    { key: "docDate", label: "Gate Entry Date", type: "date", section: "Receipt", inTable: true, width: 130, required: true },
+    { key: "supplier", label: "Vendor", type: "master", master: "supplier", section: "Receipt", inTable: true, width: 170, required: true },
+    { key: "warehouse", label: "Warehouse", type: "master", master: "warehouse", section: "Receipt", inTable: true, width: 170 },
+    { key: "receivedAgainst", label: "Received Against", type: "select", options: GRN_DOC_OPTS, defaultValue: "INVOICE", section: "Receipt", inTable: true, width: 140 },
+
+    // Gate-entry stage — who/what arrived + the gate inspection.
+    { key: "broughtBy", label: "Material Brought By", type: "select", options: BROUGHT_BY_OPTS, defaultValue: "OTHERS", section: "Gate Entry", inTable: true, width: 150 },
+    { key: "employeeId", label: "Employee ID", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "broughtBy", equals: "COMPANY_PERSON" } },
+    { key: "vehicleNo", label: "Vehicle No.", type: "text", section: "Gate Entry", inTable: true, width: 120, showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "driverName", label: "Driver Name", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "driverMobile", label: "Driver Mobile No.", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, placeholder: "Driver contact number", showIf: { field: "broughtBy", equals: "OTHERS" } },
+    { key: "challanNo", label: "Challan / DC No.", type: "text", section: "Gate Entry", inTable: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
+    { key: "challanDate", label: "Challan Date", type: "date", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
+    { key: "boxCount", label: "Box Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
+    { key: "partCount", label: "Part Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
+    { key: "gateInspection", label: "Gate Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Gate Entry", inTable: true, width: 160 },
+    { key: "gateInspectionMedia", label: "Gate Inspection — Photos / Video", type: "media", section: "Gate Entry", inTable: true, width: 130 },
+
+    // What arrived (PO / PR lines + received quantities). The gate records the
+    // documents; the store confirms received quantities at its inspection stage.
+    { key: "lines", label: "Invoices", type: "lineItems", columns: GRN_INVOICE_COLUMNS, rowNoun: "Invoice", addLabel: "Add invoice", section: "Items", inTable: true, width: 160, showIf: { field: "receivedAgainst", equals: "INVOICE" } },
+    { key: "receiptLines", label: "Received Items", type: "lineItems", columns: GRN_RECEIPT_ITEM_COLUMNS, rowNoun: "Item line", addLabel: "Add PO / PR line", section: "Items", inTable: true, defaultHidden: true, width: 160, showIf: { field: "receivedAgainst", in: ["CHALLAN", "NO_INVOICE"] } },
+
+    // QC inspection stage.
+    { key: "purchaseInspection", label: "Purchase Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Purchase Inspection", inTable: true, width: 160 },
+    { key: "purchaseInspectionMedia", label: "Purchase Inspection — Photos / Video", type: "media", section: "Purchase Inspection", inTable: true, width: 130 },
+    // Store inspection stage.
+    { key: "inventoryInspection", label: "Inventory Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Inventory Inspection", inTable: true, width: 160 },
+    { key: "inventoryInspectionMedia", label: "Inventory Inspection — Photos / Video", type: "media", section: "Inventory Inspection", inTable: true, width: 130 },
+
+    { key: "receiptStatus", label: "Receipt Status", type: "status", statusOptions: RECEIPT_STATUS, defaultValue: "PENDING", computed: true, section: "Notes", inTable: true, width: 170 },
+    { key: "status", label: "Status", type: "status", statusOptions: GATE_ENTRY_STATUS, defaultValue: "GATE_ENTRY", section: "Notes", inTable: true, width: 160 },
+    { key: "remarks", label: "Remarks", type: "textarea", section: "Notes" },
+  ],
+};
+
+// ── Goods Receipt (GRN) — store-created from a CLEARED gate entry ────────────
+// Thin posting document: the store incharge picks a cleared gate entry (which
+// fills supplier / warehouse / items), reviews received quantities, and posts to
+// store. The gate / QC / store inspections live on the gate entry, not here.
 export const GRN_SCHEMA: SubmoduleSchema = {
   key: "grn",
   label: "Goods Receipt (GRN)",
@@ -474,47 +549,19 @@ export const GRN_SCHEMA: SubmoduleSchema = {
   fields: [
     { key: "docNo", label: "GRN No.", type: "text", section: "Receipt", auto: true, inTable: true, pinned: true, width: 130 },
     { key: "docDate", label: "GRN Date", type: "date", section: "Receipt", inTable: true, width: 130 },
+    // The cleared gate entry this GRN is raised from (fills the rest of the form).
+    { key: "gateEntryRef", label: "Gate Entry", type: "select", optionsSource: "clearedGateEntry", required: true, section: "Receipt", inTable: true, width: 140 },
     { key: "supplier", label: "Vendor", type: "master", master: "supplier", section: "Receipt", inTable: true, width: 170 },
     { key: "warehouse", label: "Warehouse", type: "master", master: "warehouse", section: "Receipt", inTable: true, width: 170 },
-    // What the goods arrived against — Invoice opens the invoice grid, Challan
-    // opens challan no./date + plain item lines, No Invoice just the item lines.
     { key: "receivedAgainst", label: "Received Against", type: "select", options: GRN_DOC_OPTS, defaultValue: "INVOICE", section: "Receipt", inTable: true, width: 140 },
 
-    // Gate entry — security/gate inward record + first-level inspection at the
-    // factory gate, before QC (purchase) and store (inventory) inspection.
-    { key: "gateEntryNo", label: "Gate Entry No.", type: "text", section: "Gate Entry", inTable: true, width: 130 },
-    { key: "gateEntryDate", label: "Gate Entry Date", type: "date", section: "Gate Entry", inTable: true, width: 140 },
-    // Who delivered: a company person (employee ID) or an outside party
-    // (vehicle / driver details).
-    { key: "broughtBy", label: "Material Brought By", type: "select", options: BROUGHT_BY_OPTS, defaultValue: "OTHERS", section: "Gate Entry", inTable: true, width: 150 },
-    { key: "employeeId", label: "Employee ID", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "broughtBy", equals: "COMPANY_PERSON" } },
-    { key: "vehicleNo", label: "Vehicle No.", type: "text", section: "Gate Entry", inTable: true, width: 120, showIf: { field: "broughtBy", equals: "OTHERS" } },
-    { key: "driverName", label: "Driver Name", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, showIf: { field: "broughtBy", equals: "OTHERS" } },
-    { key: "driverMobile", label: "Driver Mobile No.", type: "text", section: "Gate Entry", inTable: true, defaultHidden: true, width: 140, placeholder: "Driver contact number", showIf: { field: "broughtBy", equals: "OTHERS" } },
-    { key: "challanNo", label: "Challan / DC No.", type: "text", section: "Gate Entry", inTable: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
-    { key: "challanDate", label: "Challan Date", type: "date", section: "Gate Entry", inTable: true, defaultHidden: true, width: 130, showIf: { field: "receivedAgainst", equals: "CHALLAN" } },
-    // Guard's physical count at the gate.
-    { key: "boxCount", label: "Box Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
-    { key: "partCount", label: "Part Count", type: "number", section: "Gate Entry", defaultValue: 0, inTable: true, width: 100, align: "right" },
-    { key: "gateInspection", label: "Gate Entry Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Gate Entry", inTable: true, width: 170 },
-    { key: "gateInspectionMedia", label: "Gate Entry Inspection — Photos / Video", type: "media", section: "Gate Entry", inTable: true, width: 130 },
-
-    { key: "purchaseInspection", label: "Purchase Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Inspection", inTable: true, width: 160 },
-    { key: "purchaseInspectionMedia", label: "Purchase Inspection — Photos / Video", type: "media", section: "Inspection", inTable: true, width: 130 },
-    { key: "inventoryInspection", label: "Inventory Inspection", type: "select", options: INSPECTION_OPTS, defaultValue: "PENDING", section: "Inspection", inTable: true, width: 160 },
-    { key: "inventoryInspectionMedia", label: "Inventory Inspection — Photos / Video", type: "media", section: "Inspection", inTable: true, width: 130 },
-
-    // Multiple invoices on one GRN; each invoice covers multiple PO / PR item
-    // lines with Full / Partial receipt and a balance for the remainder.
-    // Placed under the inspections so quantities are booked after QC.
+    // Pulled from the gate entry; the store can adjust received quantities before posting.
     { key: "lines", label: "Invoices", type: "lineItems", columns: GRN_INVOICE_COLUMNS, rowNoun: "Invoice", addLabel: "Add invoice", section: "Receipt Lines", inTable: true, width: 160, showIf: { field: "receivedAgainst", equals: "INVOICE" } },
-    // Challan / no-invoice receipts book their quantities as flat item lines.
     { key: "receiptLines", label: "Received Items", type: "lineItems", columns: GRN_RECEIPT_ITEM_COLUMNS, rowNoun: "Item line", addLabel: "Add PO / PR line", section: "Receipt Lines", inTable: true, defaultHidden: true, width: 160, showIf: { field: "receivedAgainst", in: ["CHALLAN", "NO_INVOICE"] } },
 
-    // Auto-derived from the invoice/received quantities above — read-only.
     { key: "receiptStatus", label: "Receipt Status", type: "status", statusOptions: RECEIPT_STATUS, defaultValue: "PENDING", computed: true, section: "Posting", inTable: true, width: 170 },
     { key: "stockUpdated", label: "Stock Updated", type: "select", options: YES_NO, defaultValue: "NO", section: "Posting", inTable: true, width: 120 },
-    { key: "status", label: "Status", type: "status", statusOptions: GRN_STATUS, defaultValue: "GATE_ENTRY", section: "Posting", inTable: true, width: 180 },
+    { key: "status", label: "Status", type: "status", statusOptions: GRN_STATUS, defaultValue: "READY_TO_POST", section: "Posting", inTable: true, width: 180 },
     { key: "remarks", label: "Remarks", type: "textarea", section: "Posting" },
   ],
 };
@@ -610,11 +657,12 @@ export const SUBMODULE_SCHEMAS: Record<PurchaseSubmoduleKey, SubmoduleSchema> = 
   pr: PR_SCHEMA,
   sourcing: SOURCING_SCHEMA,
   po: PO_SCHEMA,
+  gateEntry: GATE_ENTRY_SCHEMA,
   grn: GRN_SCHEMA,
   payment: PAYMENT_SCHEMA,
 };
 
-export const SUBMODULE_ORDER: PurchaseSubmoduleKey[] = ["supplier", "pr", "sourcing", "po", "grn", "payment"];
+export const SUBMODULE_ORDER: PurchaseSubmoduleKey[] = ["supplier", "pr", "sourcing", "po", "gateEntry", "grn", "payment"];
 
 export function getSchema(key: PurchaseSubmoduleKey): SubmoduleSchema {
   return SUBMODULE_SCHEMAS[key];

@@ -18,6 +18,9 @@
  * -----
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Approver"     --perm requisition
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Purchase Mgr" --perm po
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Gate Security" --perm gate-entry
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "QC Inspector"  --perm qc-inspection
+ *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Store Keeper"  --perm store-inspection
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Store Keeper" --perm grn
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Accounts"     --perm payment
  *   npx tsx scripts/grant-purchase-permissions.ts --org "Acme" --role "Finance Head" --perm approve-payment
@@ -47,10 +50,25 @@ const PERMS: Record<string, { name: string; description: string }> = {
     description:
       "Approve or reject purchase orders (set PO Approval). Grant to purchase-manager roles.",
   },
+  "gate-entry": {
+    name: "GRN_GATE_ENTRY",
+    description:
+      "GRN stage 1 — record gate entry (arrival, vehicle/challan, gate inspection) and start a goods receipt. Grant to gate/security roles.",
+  },
+  "qc-inspection": {
+    name: "GRN_QC_INSPECTION",
+    description:
+      "GRN stage 2 — perform the purchase/quality (QC) inspection and forward the GRN. Grant to QC / purchase-inspection roles.",
+  },
+  "store-inspection": {
+    name: "GRN_STORE_INSPECTION",
+    description:
+      "GRN stage 3 — perform the store/inventory inspection, confirm quantities and make the GRN postable. Grant to store/warehouse roles.",
+  },
   grn: {
     name: "POST_GRN_STOCK",
     description:
-      "Receive goods and post a GRN's quantities into store inventory. Grant to store-keeper / warehouse roles.",
+      "Receive goods and post a GRN's quantities into store inventory (final step, after all inspections clear). Grant to store-keeper / warehouse roles.",
   },
   payment: {
     name: "RAISE_PAYMENT_REQUEST",
@@ -76,8 +94,18 @@ const ALIASES: Record<string, string> = {
   po: "po",
   order: "po",
   approve_purchase_order: "po",
+  "gate-entry": "gate-entry",
+  gate: "gate-entry",
+  grn_gate_entry: "gate-entry",
+  "qc-inspection": "qc-inspection",
+  qc: "qc-inspection",
+  grn_qc_inspection: "qc-inspection",
+  "store-inspection": "store-inspection",
+  store: "store-inspection",
+  grn_store_inspection: "store-inspection",
   grn: "grn",
   stock: "grn",
+  post: "grn",
   post_grn_stock: "grn",
   payment: "payment",
   raise_payment_request: "payment",
@@ -109,12 +137,14 @@ function parseArgs(argv: string[]) {
 function resolvePerms(arg: unknown): Array<{ name: string; description: string }> {
   const raw = typeof arg === "string" ? arg.trim().toLowerCase() : "";
   if (!raw)
-    throw new Error("Provide --perm <requisition|po|grn|payment|approve-payment|process|all|FULL_NAME>");
+    throw new Error(
+      "Provide --perm <requisition|po|gate-entry|qc-inspection|store-inspection|grn|payment|approve-payment|process|all|FULL_NAME>",
+    );
   if (raw === "all") return Object.values(PERMS);
   const key = ALIASES[raw];
   if (!key)
     throw new Error(
-      `Unknown --perm "${arg}". Use requisition | po | grn | payment | approve-payment | process | all.`,
+      `Unknown --perm "${arg}". Use requisition | po | gate-entry | qc-inspection | store-inspection | grn | payment | approve-payment | process | all.`,
     );
   return [PERMS[key]];
 }

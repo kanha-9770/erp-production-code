@@ -22,6 +22,11 @@ import {
   MANAGE_PURCHASE_APPROVAL_PROCESS,
 } from "@/lib/permissions/purchase-permissions";
 import {
+  GRN_GATE_ENTRY,
+  GRN_QC_INSPECTION,
+  GRN_STORE_INSPECTION,
+} from "@/lib/purchase-system/gate-entry-workflow";
+import {
   POST_INVENTORY_MOVEMENT,
   DELETE_INVENTORY_ITEM,
   RESET_INVENTORY_DATA,
@@ -68,9 +73,27 @@ export const ACTION_CATALOG: ActionModuleGroup[] = [
         enforced: true,
       },
       {
+        name: GRN_GATE_ENTRY,
+        label: "Gate Entry · Stage 1",
+        description: "Log the gate inward (arrival, items, gate inspection) and forward it.",
+        enforced: true,
+      },
+      {
+        name: GRN_QC_INSPECTION,
+        label: "Gate Entry · QC Inspection",
+        description: "Stage 2 — perform the purchase/quality inspection and forward the gate entry.",
+        enforced: true,
+      },
+      {
+        name: GRN_STORE_INSPECTION,
+        label: "Gate Entry · Store Inspection",
+        description: "Stage 3 — store inspection + confirm quantities; clears the gate entry for GRN.",
+        enforced: true,
+      },
+      {
         name: POST_GRN_STOCK,
-        label: "Post GRN → Inventory",
-        description: "Receive goods and post a GRN's quantities into store inventory.",
+        label: "Create GRN + Post → Inventory",
+        description: "Store incharge: create a GRN from a cleared gate entry and post its quantities to store.",
         enforced: true,
       },
       {

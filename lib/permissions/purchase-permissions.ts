@@ -21,11 +21,15 @@
 import { prisma } from "@/lib/prisma";
 import { hasPermission, isOrgAdmin } from "@/lib/permissions/has-permission";
 import { buildRoleParentMap, isDescendantRole } from "@/lib/approvals/engine";
+import { GRN_GATE_ENTRY, GRN_QC_INSPECTION, GRN_STORE_INSPECTION } from "@/lib/purchase-system/gate-entry-workflow";
 import type { PurchasePermissions } from "@/lib/purchase-system/types";
 
 export const APPROVE_PURCHASE_REQUISITION = "APPROVE_PURCHASE_REQUISITION";
 export const APPROVE_PURCHASE_ORDER = "APPROVE_PURCHASE_ORDER";
 export const POST_GRN_STOCK = "POST_GRN_STOCK";
+// Gate-entry receiving-workflow stage permissions (re-exported from the workflow
+// module, which is the prisma-free source of truth for the stage chain).
+export { GRN_GATE_ENTRY, GRN_QC_INSPECTION, GRN_STORE_INSPECTION };
 export const RAISE_PAYMENT_REQUEST = "RAISE_PAYMENT_REQUEST";
 export const APPROVE_PAYMENT_REQUEST = "APPROVE_PAYMENT_REQUEST";
 export const PROCESS_PURCHASE = "PROCESS_PURCHASE";
@@ -191,9 +195,27 @@ export const PURCHASE_PERMISSIONS: ReadonlyArray<{
     resource: "purchase",
   },
   {
+    name: GRN_GATE_ENTRY,
+    description:
+      "Gate Entry stage 1 — log the gate inward (arrival, vehicle/challan, items, gate inspection) and forward it. Grant to gate/security roles.",
+    resource: "purchase",
+  },
+  {
+    name: GRN_QC_INSPECTION,
+    description:
+      "Gate Entry stage 2 — perform the purchase/quality (QC) inspection on a forwarded gate entry and forward it. Grant to QC / purchase-inspection roles.",
+    resource: "purchase",
+  },
+  {
+    name: GRN_STORE_INSPECTION,
+    description:
+      "Gate Entry stage 3 — store/inventory inspection, confirm quantities and clear the gate entry for GRN. Grant to store/warehouse roles.",
+    resource: "purchase",
+  },
+  {
     name: POST_GRN_STOCK,
     description:
-      "Receive goods and post a GRN's quantities into store inventory. Grant to store-keeper / warehouse roles.",
+      "Store incharge: create a GRN from a cleared gate entry and post its quantities into store inventory. Grant to store-keeper / warehouse roles.",
     resource: "purchase",
   },
   {
@@ -234,8 +256,10 @@ export function submoduleCreatePermission(submodule: string): string | null {
       return null; // any employee may raise a requisition
     case "payment":
       return RAISE_PAYMENT_REQUEST;
+    case "gateEntry":
+      return GRN_GATE_ENTRY; // gate/security logs the gate inward (stage 1)
     case "grn":
-      return POST_GRN_STOCK; // store-keeper receives goods
+      return POST_GRN_STOCK; // store incharge creates the GRN from a cleared gate entry
     case "sourcing":
     case "po":
     case "supplier":
@@ -282,16 +306,38 @@ export async function requirePurchasePermission(
 export async function getPurchasePermissions(
   userId: string,
 ): Promise<PurchasePermissions> {
-  const [approveRequisition, approvePo, postStock, raisePayment, approvePayment, process] =
-    await Promise.all([
-      hasPermission(userId, APPROVE_PURCHASE_REQUISITION),
-      hasPermission(userId, APPROVE_PURCHASE_ORDER),
-      hasPermission(userId, POST_GRN_STOCK),
-      hasPermission(userId, RAISE_PAYMENT_REQUEST),
-      hasPermission(userId, APPROVE_PAYMENT_REQUEST),
-      hasPermission(userId, PROCESS_PURCHASE),
-    ]);
-  return { approveRequisition, approvePo, postStock, raisePayment, approvePayment, process };
+  const [
+    approveRequisition,
+    approvePo,
+    postStock,
+    raisePayment,
+    approvePayment,
+    process,
+    gateEntry,
+    qcInspection,
+    storeInspection,
+  ] = await Promise.all([
+    hasPermission(userId, APPROVE_PURCHASE_REQUISITION),
+    hasPermission(userId, APPROVE_PURCHASE_ORDER),
+    hasPermission(userId, POST_GRN_STOCK),
+    hasPermission(userId, RAISE_PAYMENT_REQUEST),
+    hasPermission(userId, APPROVE_PAYMENT_REQUEST),
+    hasPermission(userId, PROCESS_PURCHASE),
+    hasPermission(userId, GRN_GATE_ENTRY),
+    hasPermission(userId, GRN_QC_INSPECTION),
+    hasPermission(userId, GRN_STORE_INSPECTION),
+  ]);
+  return {
+    approveRequisition,
+    approvePo,
+    postStock,
+    raisePayment,
+    approvePayment,
+    process,
+    gateEntry,
+    qcInspection,
+    storeInspection,
+  };
 }
 
 /** A guarded field set to a "decided"/privileged value (not the benign default). */

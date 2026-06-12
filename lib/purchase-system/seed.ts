@@ -33,10 +33,13 @@ const PO_SEED: Array<Record<string, unknown>> = [
   { docNo: "PO-0005", docDate: "2026-05-14", supplier: "Metro Electricals", rfqRef: "PR-0003", itemName: "Cable Gland 20mm", quantity: 300, uom: "PC", rate: 18, amount: 5400, paymentTerms: "Credit", deliveryDate: "2026-05-24", approvalStatus: "PENDING", status: "PENDING_APPROVAL" },
 ];
 
-const GRN_SEED: Array<Record<string, unknown>> = [
+// Gate entries (gate-inward register) run the staged Gate → QC → Store workflow.
+// GE-0001 has been consumed by GRN-0001 (status GRN_CREATED); GE-0002 is mid-
+// workflow; GE-0003 is CLEARED and ready for the store incharge to raise a GRN.
+const GATE_ENTRY_SEED: Array<Record<string, unknown>> = [
   {
-    docNo: "GRN-0001", docDate: "2026-05-19", supplier: "Nessco Fasteners", warehouse: "JAIPUR WAREHOUSE", receivedAgainst: "INVOICE",
-    gateEntryNo: "GE-0451", gateEntryDate: "2026-05-19", broughtBy: "OTHERS", vehicleNo: "RJ14 GC 2231", driverName: "Ramesh", challanNo: "DC-8841", challanDate: "2026-05-18", boxCount: 4, partCount: 120, gateInspection: "PASSED",
+    docNo: "GE-0001", docDate: "2026-05-19", supplier: "Nessco Fasteners", warehouse: "JAIPUR WAREHOUSE", receivedAgainst: "INVOICE",
+    broughtBy: "OTHERS", vehicleNo: "RJ14 GC 2231", driverName: "Ramesh", challanNo: "DC-8841", challanDate: "2026-05-18", boxCount: 4, partCount: 120, gateInspection: "PASSED",
     lines: [
       {
         _id: "inv_s1a", invoiceNo: "INV-NF-3321", invoiceDate: "2026-05-18",
@@ -45,18 +48,12 @@ const GRN_SEED: Array<Record<string, unknown>> = [
           { _id: "it_s1a2", poRef: "PO-0003", prRef: "PR-0001", itemName: "M10 Flat Washer", invoiceQty: 500, receivedQty: 300, amount: 1500 },
         ],
       },
-      {
-        _id: "inv_s1b", invoiceNo: "INV-NF-3322", invoiceDate: "2026-05-18",
-        items: [
-          { _id: "it_s1b1", poRef: "PO-0004", prRef: "PR-0001", itemName: "Spring Washer", invoiceQty: 1000, receivedQty: 1000, amount: 1200 },
-        ],
-      },
     ],
-    receiptStatus: "PARTIAL", purchaseInspection: "PASSED", inventoryInspection: "PASSED", stockUpdated: "YES", status: "STOCK_UPDATED",
+    receiptStatus: "PARTIAL", purchaseInspection: "PASSED", inventoryInspection: "PASSED", status: "GRN_CREATED",
   },
   {
-    docNo: "GRN-0002", docDate: "2026-05-16", supplier: "Apex Pneumatics", warehouse: "MUMBAI WAREHOUSE", receivedAgainst: "INVOICE",
-    gateEntryNo: "GE-0452", gateEntryDate: "2026-05-16", broughtBy: "OTHERS", vehicleNo: "MH12 AB 9087", driverName: "Suresh", challanNo: "DC-2210", challanDate: "2026-05-15", boxCount: 2, partCount: 36, gateInspection: "PASSED",
+    docNo: "GE-0002", docDate: "2026-05-16", supplier: "Apex Pneumatics", warehouse: "MUMBAI WAREHOUSE", receivedAgainst: "INVOICE",
+    broughtBy: "OTHERS", vehicleNo: "MH12 AB 9087", driverName: "Suresh", challanNo: "DC-2210", challanDate: "2026-05-15", boxCount: 2, partCount: 36, gateInspection: "PASSED",
     lines: [
       {
         _id: "inv_s2a", invoiceNo: "INV-AP-1180", invoiceDate: "2026-05-15",
@@ -65,7 +62,33 @@ const GRN_SEED: Array<Record<string, unknown>> = [
         ],
       },
     ],
-    receiptStatus: "PARTIAL", purchaseInspection: "PASSED", inventoryInspection: "PENDING", stockUpdated: "NO", status: "INVENTORY_INSPECTION",
+    receiptStatus: "PARTIAL", purchaseInspection: "PASSED", inventoryInspection: "PENDING", status: "INVENTORY_INSPECTION",
+  },
+  {
+    docNo: "GE-0003", docDate: "2026-05-22", supplier: "Gupta Hardware Co.", warehouse: "JAIPUR WAREHOUSE", receivedAgainst: "CHALLAN",
+    broughtBy: "OTHERS", vehicleNo: "DL01 AA 1234", challanNo: "DC-7720", challanDate: "2026-05-22", boxCount: 1, partCount: 1000, gateInspection: "PASSED",
+    receiptLines: [
+      { _id: "rl_s3a", poRef: "PO-0004", prRef: "PR-0001", itemName: "Spring Washer", invoiceQty: 1000, receivedQty: 1000, amount: 1200 },
+    ],
+    receiptStatus: "FULL", purchaseInspection: "PASSED", inventoryInspection: "PASSED", status: "CLEARED",
+  },
+];
+
+// GRNs are created by the store incharge from a CLEARED gate entry; they carry
+// only the receipt + posting state (inspections live on the gate entry).
+const GRN_SEED: Array<Record<string, unknown>> = [
+  {
+    docNo: "GRN-0001", docDate: "2026-05-19", gateEntryRef: "GE-0001", supplier: "Nessco Fasteners", warehouse: "JAIPUR WAREHOUSE", receivedAgainst: "INVOICE",
+    lines: [
+      {
+        _id: "inv_g1a", invoiceNo: "INV-NF-3321", invoiceDate: "2026-05-18",
+        items: [
+          { _id: "it_g1a1", poRef: "PO-0001", prRef: "PR-0001", itemName: "M8 x 25 Hex Bolt", invoiceQty: 2000, receivedQty: 2000, amount: 8400 },
+          { _id: "it_g1a2", poRef: "PO-0003", prRef: "PR-0001", itemName: "M10 Flat Washer", invoiceQty: 500, receivedQty: 300, amount: 1500 },
+        ],
+      },
+    ],
+    receiptStatus: "PARTIAL", stockUpdated: "YES", status: "STOCK_UPDATED",
   },
 ];
 
@@ -89,6 +112,7 @@ const SEED_BY_SUBMODULE: Record<PurchaseSubmoduleKey, Array<Record<string, unkno
   pr: PR_SEED,
   sourcing: SOURCING_SEED,
   po: PO_SEED,
+  gateEntry: GATE_ENTRY_SEED,
   grn: GRN_SEED,
   payment: PAYMENT_SEED,
 };

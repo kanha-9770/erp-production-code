@@ -84,19 +84,27 @@ const STEPS: Step[] = [
     result: "Approved → Sent",
   },
   {
-    title: "Receive the goods (GRN)",
-    who: "Store Keeper",
+    title: "Gate Entry & inspection",
+    who: "Gate → QC → Store",
     icon: PackageCheck,
     ring: "bg-emerald-500",
-    what: "When goods arrive, the store records the receipt and posts it to inventory, which raises stock.",
-    action: 'On the PO click "Receive (GRN)", complete it, then "Post to inventory".',
-    result: "Received → Stock Updated",
+    what: "When goods arrive they are logged at the gate as a separate Gate Entry document, which runs a sequential, permission-gated timeline: each stage owner fills their part and clicks “Complete & forward”. After Store inspection passes, the gate entry is CLEARED.",
+    action: 'On the PO click "Receive (Gate Entry)"; then each stage owner completes & forwards (Gate → QC → Store).',
+    result: "Gate Entry → QC → Store → Cleared",
     sub: [
-      "Gate entry (company person / others, box & part count)",
-      "Receive against Invoice / Challan / No Invoice",
-      "Inspection",
-      "Post to inventory (stock ↑)",
+      "Gate Entry — security records arrival, vehicle/challan, items, gate inspection (Gate Entry · Stage 1)",
+      "QC Inspection — purchase/quality signs off (Gate Entry · QC Inspection)",
+      "Store Inspection — store verifies + confirms quantities, then clears (Gate Entry · Store Inspection)",
     ],
+  },
+  {
+    title: "Create the GRN & post stock",
+    who: "Store Incharge",
+    icon: PackageCheck,
+    ring: "bg-teal-500",
+    what: "Once a gate entry is CLEARED, the store incharge creates the GRN from it — pulling supplier / warehouse / items — and posts the received quantities into store inventory. Creating the GRN consumes the gate entry.",
+    action: 'On the cleared Gate Entry click "Create GRN", review, save, then "Post to inventory".',
+    result: "Create GRN → Stock Posted",
   },
   {
     title: "Pay the supplier",
@@ -109,14 +117,16 @@ const STEPS: Step[] = [
   },
 ];
 
-const FLOW = ["Requisition", "Sourcing", "Purchase Order", "Goods Receipt", "Payment"];
+const FLOW = ["Requisition", "Sourcing", "Purchase Order", "Gate Entry", "Goods Receipt", "Payment"];
 
 const ROLES: Array<{ name: string; can: string }> = [
   { name: "Requester (any employee)", can: "Raise and track their own requisitions." },
   { name: "Approver", can: "Approve / reject purchase requisitions." },
   { name: "Buyer (Process Purchase)", can: "Raise RFQs, create & convert POs, manage suppliers, edit/delete docs." },
   { name: "Purchase Manager", can: "Approve purchase orders (authorise the spend)." },
-  { name: "Store Keeper", can: "Receive GRNs, post goods to inventory, manage stock movements." },
+  { name: "Gate / Security (Gate Entry · Stage 1)", can: "Log the gate inward: arrival, vehicle/challan, items, gate inspection, then forward." },
+  { name: "QC Inspector (Gate Entry · QC)", can: "Run the purchase/quality inspection on a forwarded gate entry, then forward." },
+  { name: "Store Incharge (Store Inspection + Create GRN + Post)", can: "Store inspection + clear; then create the GRN from the cleared gate entry and post to inventory." },
   { name: "Accounts", can: "Raise payment requests; approving / paying needs Approve Payment Request." },
 ];
 

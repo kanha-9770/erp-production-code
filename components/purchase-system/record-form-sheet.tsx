@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, History, Sparkles, CheckCircle2, Boxes, Lock, Info, Undo2, RotateCcw, Loader2 } from "lucide-react";
+import { Plus, History, Sparkles, CheckCircle2, Boxes, Lock, Info, Undo2, RotateCcw, Loader2, ArrowRight, Ban, CornerUpLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePurchase, type ItemPurchaseHistory } from "@/lib/purchase-system/store";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +39,25 @@ import {
 } from "@/lib/api/approvals";
 import { formatMoney, formatDate, resolveStatus, showIfSatisfied } from "@/lib/purchase-system/format";
 import { asRows, deriveGrnReceiptStatus, grnItemRows } from "@/lib/purchase-system/receipt";
+import {
+  GATE_ENTRY_STAGES,
+  GATE_ENTRY_INITIAL_STATUS,
+  GATE_ENTRY_WORKFLOW_SECTIONS,
+  gateEntryCurrentStage,
+  gateEntryStageIndex,
+  gateEntrySectionEditableAt,
+  gateEntryStageReadiness,
+  gateEntryIsCleared,
+  gateEntryIsConsumed,
+  gateEntryIsRejected,
+} from "@/lib/purchase-system/gate-entry-workflow";
+import { GateEntryWorkflowTimeline } from "./gate-entry-workflow-timeline";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { MediaField, MediaGallery } from "./media-field";
 import { LineItemsField, LineItemsView } from "./line-items-field";
@@ -102,6 +121,7 @@ function buildInitial(
 
 export function RecordFormSheet({ schema, open, record, initial, onOpenChange, onSubmit }: RecordFormSheetProps) {
   const {
+    records,
     getMasterOptions,
     addMasterOption,
     getItemHistory,
@@ -110,8 +130,11 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     sectionAccess,
     getPaymentPoOptions,
     getGrnInvoiceOptions,
+    getClearedGateEntryOptions,
     getPoTrace,
     reload,
+    updateRecord,
+    advanceStage,
   } = usePurchase();
   const { toast } = useToast();
   const [recall, { isLoading: recalling }] = useRecallApprovalRequestMutation();
@@ -160,21 +183,52 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     return false;
   };
 
-  // Section-level edit access: a section an admin restricted (granted to
-  // specific roles/users) renders read-only for everyone else. Mirrors
-  // assertSectionEditsAllowed in lib/permissions/section-permissions.ts.
-  const sectionLocked = (section: string): boolean =>
-    pendingApproval || sectionAccess?.[schema.key]?.[section] === false;
+  // ── Gate-entry sequential receiving workflow state ──────────────────────────
+  // A gate entry's editable sections, status and footer actions are driven by
+  // which stage it's in and whether the user owns that stage. See
+  // gate-entry-workflow.ts. (The GRN is a thin store-created doc — no staging.)
+  const isGateEntry = schema.key === "gateEntry";
+  const geStatus = isGateEntry ? String((record as PurchaseRecord | null)?.status ?? GATE_ENTRY_INITIAL_STATUS) : "";
+  const geStage = isGateEntry ? gateEntryCurrentStage(geStatus) : null; // active stage, or null
+  const geCleared = isGateEntry && gateEntryIsCleared(geStatus);
+  const geConsumed = isGateEntry && gateEntryIsConsumed(geStatus);
+  const geRejected = isGateEntry && gateEntryIsRejected(geStatus);
+  // Does the user hold the permission for the gate entry's current stage?
+  const ownsGeStage = !!geStage && !!permissions[geStage.permFlag];
+  // A workflow section is editable only during its owning stage, by that owner.
+  const geSectionEditable = (section: string): boolean => {
+    if (!GATE_ENTRY_WORKFLOW_SECTIONS.includes(section)) return true;
+    if (!gateEntrySectionEditableAt(section, geStatus)) return false;
+    return ownsGeStage;
+  };
+
+  // Section-level edit access: a section an admin restricted (granted to specific
+  // roles/users) renders read-only for everyone else. For a gate entry, workflow
+  // sections additionally lock unless it's their stage + owner.
+  const sectionLocked = (section: string): boolean => {
+    if (pendingApproval) return true;
+    if (sectionAccess?.[schema.key]?.[section] === false) return true;
+    if (isGateEntry && GATE_ENTRY_WORKFLOW_SECTIONS.includes(section)) return !geSectionEditable(section);
+    return false;
+  };
 
   // The Vendor field is managed in Vendor Master and must be selectable by every
   // user in every form — so it is EXEMPT from section-permission locking (it still
-  // locks while the whole document is pending approval). Mirrors the same exemption
-  // in assertSectionEditsAllowed. Vendors are ADDED only in Vendor Master; here you
-  // just pick one.
+  // locks while pending approval). For a gate entry the Vendor sits in the
+  // workflow-gated Receipt section, so it follows the stage lock instead.
   const isVendorField = (f: FieldDef): boolean => f.type === "master" && f.master === "supplier";
   const fieldLocked = (f: FieldDef, section: string): boolean => {
     if (lockedByPermission(f)) return true;
     if (pendingApproval) return true; // whole document is read-only while pending
+    if (isGateEntry) {
+      if (f.key === "status") return true; // workflow-driven, never hand-edited
+      // Workflow sections lock unless it's their stage and the user owns it.
+      if (GATE_ENTRY_WORKFLOW_SECTIONS.includes(section)) return !geSectionEditable(section);
+      return sectionAccess?.[schema.key]?.[section] === false;
+    }
+    // GRN: status (READY_TO_POST → Stock Posted) and Stock Updated are system-
+    // driven by Post to Store, not hand-edited.
+    if (schema.key === "grn" && (f.key === "status" || f.key === "stockUpdated")) return true;
     if (isVendorField(f)) return false; // Vendor always selectable
     return sectionAccess?.[schema.key]?.[section] === false;
   };
@@ -244,11 +298,11 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     }
   }, [open, record, schema, initial, currentUser]);
 
-  // Live-derive the GRN receipt status from the invoice/received quantities so
-  // the read-only badge updates as the user edits the lines (either shape:
-  // invoice grid or flat challan / no-invoice lines).
+  // Live-derive the receipt status from the invoice/received quantities so the
+  // read-only badge updates as the user edits the lines (gate entry and GRN both
+  // carry receipt lines, in either shape: invoice grid or flat challan lines).
   useEffect(() => {
-    if (schema.key !== "grn") return;
+    if (schema.key !== "grn" && schema.key !== "gateEntry") return;
     setForm((prev) => {
       const next = deriveGrnReceiptStatus(prev);
       return prev.receiptStatus === next ? prev : { ...prev, receiptStatus: next };
@@ -300,6 +354,19 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
         );
         next.invoiceAmount = match ? match.balance : 0;
         if (match) next.requestAmount = match.balance;
+      }
+      // GRN: picking a cleared gate entry pulls its supplier / warehouse / items
+      // (the inspections live on the gate entry; the store just reviews + posts).
+      if (schema.key === "grn" && key === "gateEntryRef") {
+        const geNo = String(value ?? "").trim();
+        const ge = records.gateEntry.find((r) => String(r.docNo ?? "").trim() === geNo);
+        if (ge) {
+          next.supplier = ge.supplier ?? "";
+          next.warehouse = ge.warehouse ?? "";
+          next.receivedAgainst = ge.receivedAgainst ?? "INVOICE";
+          next.lines = Array.isArray(ge.lines) ? ge.lines : [];
+          next.receiptLines = Array.isArray(ge.receiptLines) ? ge.receiptLines : [];
+        }
       }
       // Clear any dependent fields that this change hides, so stale values
       // aren't saved (e.g. unchecking Recommend Vendor clears name + phone;
@@ -355,6 +422,8 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
       const poNo = f.dependsOn ? String(form[f.dependsOn] ?? "") : "";
       return getGrnInvoiceOptions(poNo).map((o) => ({ value: o.value, label: o.label }));
     }
+    if (f.optionsSource === "clearedGateEntry")
+      return getClearedGateEntryOptions(String(form[f.key] ?? "") || undefined).map((o) => ({ value: o.value, label: o.label }));
     return undefined;
   };
 
@@ -423,8 +492,7 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (!validate()) return;
+  const buildPayload = (): Record<string, unknown> => {
     const data: Record<string, unknown> = { ...form };
     for (const f of schema.fields) {
       if (f.type === "number" || f.type === "currency") data[f.key] = Number(data[f.key] ?? 0) || 0;
@@ -442,8 +510,50 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
         data.quantity = Number(head.quantity ?? 0) || 0;
       }
     }
-    onSubmit(data);
+    return data;
+  };
+
+  const handleSubmit = () => {
+    if (!validate()) return;
+    onSubmit(buildPayload());
     onOpenChange(false);
+  };
+
+  // ── Gate-entry workflow actions (save current edits, then advance the stage) ─
+  const [geBusy, setGeBusy] = useState<null | "complete" | "reject" | "sendback">(null);
+  const geReadiness = isGateEntry && geStage ? gateEntryStageReadiness(geStage, form) : null;
+  const geLastStage = isGateEntry && geStage ? gateEntryStageIndex(geStatus) === GATE_ENTRY_STAGES.length - 1 : false;
+
+  const runGeAction = async (
+    kind: "complete" | "reject" | "sendback",
+    action: "COMPLETE" | "REJECT" | "SEND_BACK",
+    opts?: { toStage?: string },
+  ) => {
+    if (!record) return;
+    if (kind === "complete" && !validate()) return; // required stage fields must be filled
+    setGeBusy(kind);
+    try {
+      // Persist the stage's edits first, then move the workflow. Re-sending the
+      // full form is safe — the server ignores unchanged fields.
+      await updateRecord(schema.key, record.id, buildPayload());
+      await advanceStage(record.id, action, opts);
+      toast({
+        title:
+          action === "COMPLETE"
+            ? geLastStage
+              ? "Gate entry cleared — ready for GRN"
+              : `${geStage?.label ?? "Stage"} completed — forwarded`
+            : action === "REJECT"
+              ? "Gate entry rejected"
+              : "Gate entry sent back",
+      });
+      await reload();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Could not update the gate entry", description: e?.message });
+    } finally {
+      setGeBusy(null);
+    }
   };
 
   return (
@@ -461,6 +571,24 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-7">
+          {isGateEntry && <GateEntryWorkflowTimeline record={record} />}
+          {isGateEntry && geStage && !ownsGeStage && !pendingApproval && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm flex items-start gap-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              <Lock className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                Waiting on <span className="font-medium">{geStage.label}</span>. You don't have permission for
+                this stage, so its section is read-only.
+              </div>
+            </div>
+          )}
+          {isGateEntry && geCleared && (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-sm flex items-start gap-2 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                Cleared. The store incharge can now create the GRN from this gate entry (use “Create GRN”).
+              </div>
+            </div>
+          )}
           {approval && (pendingApproval || rejectedApproval) && (
             <div
               className={cn(
@@ -554,7 +682,7 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
           })}
         </div>
 
-        <SheetFooter className="px-6 py-4 border-t flex-row justify-end gap-2">
+        <SheetFooter className="px-6 py-4 border-t flex-row flex-wrap justify-end gap-2">
           {pendingApproval ? (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -564,6 +692,84 @@ export function RecordFormSheet({ schema, open, record, initial, onOpenChange, o
                 {recalling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
                 Recall request
               </Button>
+            </>
+          ) : isGateEntry && record ? (
+            // ── Gate-entry receiving workflow footer ───────────────────────
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={!!geBusy}>
+                Cancel
+              </Button>
+              {/* Save section edits without moving the workflow. */}
+              {geStage && (
+                <Button variant="outline" onClick={handleSubmit} disabled={!!geBusy}>
+                  Save changes
+                </Button>
+              )}
+              {/* Reject / send back — available to the current stage owner. */}
+              {geStage && ownsGeStage && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="gap-1.5 text-destructive hover:text-destructive"
+                    onClick={() => runGeAction("reject", "REJECT")}
+                    disabled={!!geBusy}
+                  >
+                    {geBusy === "reject" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                    Reject
+                  </Button>
+                  {gateEntryStageIndex(geStatus) > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="gap-1.5" disabled={!!geBusy}>
+                          {geBusy === "sendback" ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <CornerUpLeft className="h-4 w-4" />
+                          )}
+                          Send back
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {GATE_ENTRY_STAGES.slice(0, gateEntryStageIndex(geStatus)).map((s) => (
+                          <DropdownMenuItem
+                            key={s.key}
+                            onClick={() => runGeAction("sendback", "SEND_BACK", { toStage: s.key })}
+                          >
+                            To {s.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {/* Complete & forward (or clear the gate entry on the last stage). */}
+                  <Button
+                    className="gap-1.5"
+                    onClick={() => runGeAction("complete", "COMPLETE")}
+                    disabled={!!geBusy || !geReadiness?.ok}
+                    title={
+                      geReadiness?.ok
+                        ? undefined
+                        : geReadiness?.failed
+                          ? "Inspection FAILED — reject or send back instead."
+                          : `Complete first: ${geReadiness?.missing.join(", ") ?? ""}`
+                    }
+                  >
+                    {geBusy === "complete" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4" />
+                    )}
+                    {geLastStage ? "Complete & clear" : "Complete & forward"}
+                  </Button>
+                </>
+              )}
+              {/* Cleared / consumed / rejected — terminal for the gate entry; let
+                  an admin still save (e.g. correct remarks). */}
+              {!geStage && (geCleared || geConsumed || geRejected) && (
+                <Button onClick={handleSubmit} disabled={!!geBusy}>
+                  Save changes
+                </Button>
+              )}
             </>
           ) : (
             <>
